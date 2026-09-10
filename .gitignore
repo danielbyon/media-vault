@@ -36,5 +36,3 @@ timeline.xctimeline
 playground.xcworkspace
 
 .build/
-
-.serena/project.local.yml
