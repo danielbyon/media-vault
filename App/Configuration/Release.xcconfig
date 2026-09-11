@@ -1,0 +1,4 @@
+#include "Base.xcconfig"
+
+APP_DISPLAY_NAME = Folaro
+PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.folaro
