@@ -15,7 +15,8 @@ for developer_directory in /Applications/Xcode*.app/Contents/Developer; do
   case "$version" in
     "Xcode 27."*)
       sdk_output=$(DEVELOPER_DIR="$developer_directory" xcodebuild -showsdks)
-      if rg -q 'iphoneos27\.[0-9]+|iphonesimulator27\.[0-9]+' <<<"$sdk_output"; then
+      if rg -q 'iphoneos27\.[0-9]+' <<<"$sdk_output" \
+        && rg -q 'iphonesimulator27\.[0-9]+' <<<"$sdk_output"; then
         printf '%s\n' "$developer_directory"
         exit 0
       fi

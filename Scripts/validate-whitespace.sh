@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-if matches=$(rg -n '[[:blank:]]$' \
+if matches=$(rg -n --hidden '[[:blank:]]+\r?$' \
   App \
   AppTests \
   Packages \

@@ -53,7 +53,7 @@ assert_identity_isolated() {
   local matches
   local scan_status
 
-  if matches=$(rg -n -i --hidden --fixed-strings "$value" . \
+  if matches=$(rg -n -i --hidden --fixed-strings -e "$value" . \
     --glob '!.git/**' \
     --glob '!.chatgpt/**' \
     --glob '!.codegraph/**' \

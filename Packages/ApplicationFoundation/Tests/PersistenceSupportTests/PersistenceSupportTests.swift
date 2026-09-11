@@ -14,6 +14,21 @@ struct PersistenceSupportTests {
 
     #expect(firstQueue.path == ":memory:")
     #expect(secondQueue.path == ":memory:")
+
+    let markerTable = "issue_2_isolation_marker"
+    try firstQueue.write { database in
+      try database.execute(
+        sql: "CREATE TABLE \(markerTable) (value TEXT NOT NULL)"
+      )
+      try database.execute(
+        sql: "INSERT INTO \(markerTable) (value) VALUES ('first')"
+      )
+    }
+
+    let secondQueueObservesFirstRow = try secondQueue.read { database in
+      try database.tableExists(markerTable)
+    }
+    #expect(secondQueueObservesFirstRow == false)
   }
 
   @Test("The in-memory database can be injected through SQLiteData")

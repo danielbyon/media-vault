@@ -3,7 +3,7 @@ set -euo pipefail
 
 runtime_is_available() {
   xcrun simctl list runtimes \
-    | awk '/iOS 27\.[0-9]+/ && /com\.apple\.CoreSimulator\.SimRuntime\.iOS-27-/ && $0 !~ /unavailable/ { found = 1 } END { exit !found }'
+    | awk '/iOS 27\.0[[:space:]]/ && /com\.apple\.CoreSimulator\.SimRuntime\.iOS-27-0/ && $0 !~ /unavailable/ { found = 1 } END { exit !found }'
 }
 
 if runtime_is_available; then
