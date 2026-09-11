@@ -1,0 +1,117 @@
+Packages/ApplicationFoundation/Tests/AppIdentityTests/AppIdentityClientTests.swift
+  s_cf9d731b1828d6::t_b2e7cefa9eb982 10-14
+  s_cf9d731b1828d6::t_90bd9dd360af00 1
+  s_cf9d731b1828d6::t_5f90a6a13279ee 15-17,19-20
+  s_cf9d731b1828d6::t_7df650efb090db 2-9,18,21-23
+Packages/ApplicationFoundation/Tests/FoundationTestSupportTests/FoundationTestSupportTests.swift
+  s_cf9d731b1828d6::t_90bd9dd360af00 3
+  s_cf9d731b1828d6::t_4e3df1049b1508 28-34
+  s_cf9d731b1828d6::t_6c96949ea8121d 59-63,67-68
+  s_cf9d731b1828d6::t_ccdd44ef70d29d 39
+  s_cf9d731b1828d6::t_2537f9580f9e26 1
+  s_cf9d731b1828d6::t_7df650efb090db 2,4-7,16-27,35-38,41-42,69-71
+  s_cf9d731b1828d6::t_5488d74cd7bef4 40,43-44
+  s_cf9d731b1828d6::t_7dbc107fd88c8d 8-15,45-58,64-66
+Packages/ApplicationFoundation/Sources/FoundationTestSupport/DeterministicTestSupport.swift
+  s_cf9d731b1828d6::t_e1a5f5f38e884b 2,31-33,73-93
+  s_cf9d731b1828d6::t_31bf55baf70a99 1,3-6,26-30,34-38,45-52,57-64,66-69,95,101-111
+  s_cf9d731b1828d6::t_6d7d5b69c074c8 65
+  s_cf9d731b1828d6::t_465804340d0310 100
+  s_cf9d731b1828d6::t_4e3df1049b1508 7-25,39-44
+  s_cf9d731b1828d6::t_83c2ea60d6290b 53,55-56,70,72,94
+  s_cf9d731b1828d6::t_180d5c5855637e 54,71,96-99
+App.xcodeproj/project.pbxproj
+  s_cf9d731b1828d6::t_5488d74cd7bef4 306,323
+  s_cf9d731b1828d6::t_b91ff62fe591ca 280,293,308,325
+  s_cf9d731b1828d6::t_ce347f06e057e5 46-48
+  s_cf9d731b1828d6::t_5286d1ff13867a 1-45,49-279,281-292,294-305,307,309-322,324,326-421,423-426
+  s_cf9d731b1828d6::t_c986ef608e517b 422
+App.xcworkspace/contents.xcworkspacedata
+  s_cf9d731b1828d6::t_5286d1ff13867a 1-10
+App/Configuration/Debug.xcconfig
+  s_cf9d731b1828d6::t_52ec039b308c49 1-4
+Packages/ApplicationFoundation/Package.swift
+  s_cf9d731b1828d6::t_7df650efb090db 1-10,15-29,34-51,53-66,68-81,83-88,92-97,100-104
+  s_cf9d731b1828d6::t_0b370a257e814e 90
+  s_cf9d731b1828d6::t_1fd1cf676cd8b1 98
+  s_cf9d731b1828d6::t_e1a5f5f38e884b 30-33,67
+  s_cf9d731b1828d6::t_5f90a6a13279ee 82,91,99
+  s_cf9d731b1828d6::t_e861d829829425 89
+  s_cf9d731b1828d6::t_6255fd97c8f74b 11-14
+  s_cf9d731b1828d6::t_29571a1608a1aa 52
+App/Configuration/Release.xcconfig
+  s_cf9d731b1828d6::t_52ec039b308c49 1-4
+.gitignore
+  s_cf9d731b1828d6::t_7dde3a0bedf7b4 39-41
+Scripts/validate-release-identity.sh
+  s_cf9d731b1828d6::t_01aa29c559ee81 43-48
+  s_cf9d731b1828d6::t_180d5c5855637e 49-51,57-63,66-67,74-75,77-80
+  s_cf9d731b1828d6::t_acacb900235ee7 1-42,52,76,81-82
+  s_cf9d731b1828d6::t_145ef493399e59 53-56,64-65,68-73
+App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
+  s_cf9d731b1828d6::t_5286d1ff13867a 1-93
+Packages/ApplicationFoundation/Tests/PersistenceSupportTests/PersistenceSupportTests.swift
+  s_cf9d731b1828d6::t_90bd9dd360af00 1
+  s_cf9d731b1828d6::t_7df650efb090db 2-7,17-18,30-31
+  s_cf9d731b1828d6::t_74ba6249030e0f 10-11,14
+  s_cf9d731b1828d6::t_145ef493399e59 8-9
+  s_cf9d731b1828d6::t_67d373053b18c3 12-13,15-16
+  s_cf9d731b1828d6::t_5f90a6a13279ee 19,21-29
+  s_cf9d731b1828d6::t_4d2f1f4bf1a106 20
+App/Configuration/Base.xcconfig
+  s_cf9d731b1828d6::t_52ec039b308c49 1-9
+App/Resources/Info.plist
+  s_cf9d731b1828d6::t_52ec039b308c49 1-31
+Scripts/with-xcode-27-rc.sh
+  s_cf9d731b1828d6::t_acacb900235ee7 1-8,11,13
+  s_cf9d731b1828d6::t_145ef493399e59 9-10,12
+Scripts/validate-whitespace.sh
+  s_cf9d731b1828d6::t_180d5c5855637e 1-14,21-23
+  s_cf9d731b1828d6::t_145ef493399e59 15-20
+Packages/ApplicationFoundation/Sources/AppFeature/RootFeature.swift
+  s_cf9d731b1828d6::t_31bf55baf70a99 1-6,10-19,21-22,24-49
+  s_cf9d731b1828d6::t_5488d74cd7bef4 7-9
+  s_cf9d731b1828d6::t_33b080bdd01a5d 20,23
+Packages/ApplicationFoundation/Sources/PersistenceSupport/PersistenceStore.swift
+  s_cf9d731b1828d6::t_31bf55baf70a99 1-4,6,8-15
+  s_cf9d731b1828d6::t_5488d74cd7bef4 5,7
+Makefile
+  s_cf9d731b1828d6::t_acacb900235ee7 1-3,7,11-16,20-21,24-26,28
+  s_cf9d731b1828d6::t_180d5c5855637e 27
+  s_cf9d731b1828d6::t_9bd818832617f5 6
+  s_cf9d731b1828d6::t_883a10e329621a 8-10,23
+  s_cf9d731b1828d6::t_300e3073de38cf 4-5,17-19,22
+Scripts/ensure-ios-27-runtime.sh
+  s_cf9d731b1828d6::t_4e3df1049b1508 1-22
+App/Application.swift
+  s_cf9d731b1828d6::t_31bf55baf70a99 1-4,6,8-10,12-17,19-24
+  s_cf9d731b1828d6::t_180d5c5855637e 5,11,18
+  s_cf9d731b1828d6::t_33b080bdd01a5d 7
+Scripts/select-xcode-27-rc.sh
+  s_cf9d731b1828d6::t_b752e237e2ecea 13-14,17-18
+  s_cf9d731b1828d6::t_4e3df1049b1508 19-21
+  s_cf9d731b1828d6::t_acacb900235ee7 1-12,15-16,22-27
+AppTests/RootSurfaceSnapshotTests.swift
+  s_cf9d731b1828d6::t_f732ec33a3dd50 17-20,25-28,33-36
+  s_cf9d731b1828d6::t_598227a20eb1b2 41
+  s_cf9d731b1828d6::t_52ec039b308c49 1-16,21-24,29-32,37-40,42-47
+Packages/ApplicationFoundation/Sources/AppIdentity/AppIdentityClient.swift
+  s_cf9d731b1828d6::t_31bf55baf70a99 1-10,12-43
+  s_cf9d731b1828d6::t_33b080bdd01a5d 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2dae959eae031de1e52c3db8a6cfc6c9471d1143",
+  "prompts": {},
+  "sessions": {
+    "s_cf9d731b1828d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a08db4-efee-7c11-b89d-b55ea71c365c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
