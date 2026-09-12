@@ -15,9 +15,12 @@ release_display_name=$(read_setting APP_DISPLAY_NAME "$release_configuration")
 debug_display_name=$(read_setting APP_DISPLAY_NAME "$debug_configuration")
 release_identifier=$(read_setting PRODUCT_BUNDLE_IDENTIFIER "$release_configuration")
 debug_identifier=$(read_setting PRODUCT_BUNDLE_IDENTIFIER "$debug_configuration")
+release_product_identifier=$(read_setting PRO_PRODUCT_IDENTIFIER "$release_configuration")
+debug_product_identifier=$(read_setting PRO_PRODUCT_IDENTIFIER "$debug_configuration")
 
 if [ -z "$release_display_name" ] || [ -z "$debug_display_name" ] \
-  || [ -z "$release_identifier" ] || [ -z "$debug_identifier" ]; then
+  || [ -z "$release_identifier" ] || [ -z "$debug_identifier" ] \
+  || [ -z "$release_product_identifier" ] || [ -z "$debug_product_identifier" ]; then
   printf '%s\n' "Release and Debug identity settings must be present." >&2
   exit 1
 fi
@@ -32,6 +35,16 @@ if [ "$debug_identifier" != "$release_identifier.dev" ]; then
   exit 1
 fi
 
+if [ "$release_product_identifier" != "$release_identifier.pro" ]; then
+  printf '%s\n' "Release Pro product identity must append the Pro suffix." >&2
+  exit 1
+fi
+
+if [ "$debug_product_identifier" != "$debug_identifier.pro" ]; then
+  printf '%s\n' "Debug Pro product identity must append the Pro suffix." >&2
+  exit 1
+fi
+
 case "$release_identifier" in
   com.danielbyon.*) ;;
   *)
@@ -41,7 +54,8 @@ case "$release_identifier" in
 esac
 
 if ! rg -q '<string>\$\(APP_DISPLAY_NAME\)</string>' App/Resources/Info.plist \
-  || ! rg -q '<string>\$\(PRODUCT_BUNDLE_IDENTIFIER\)</string>' App/Resources/Info.plist; then
+  || ! rg -q '<string>\$\(PRODUCT_BUNDLE_IDENTIFIER\)</string>' App/Resources/Info.plist \
+  || ! rg -q -U '<key>PRO_PRODUCT_IDENTIFIER</key>\r?\n[[:space:]]*<string>\$\(PRO_PRODUCT_IDENTIFIER\)</string>' App/Resources/Info.plist; then
   printf '%s\n' "The application resource must consume identity through build settings." >&2
   exit 1
 fi
@@ -78,5 +92,7 @@ assert_identity_isolated "$release_display_name" "Release display identity"
 assert_identity_isolated "$debug_display_name" "Debug display identity"
 assert_identity_isolated "$release_identifier" "Release bundle identity"
 assert_identity_isolated "$debug_identifier" "Debug bundle identity"
+assert_identity_isolated "$release_product_identifier" "Release Pro product identity"
+assert_identity_isolated "$debug_product_identifier" "Debug Pro product identity"
 
 printf '%s\n' "Release and Debug identity isolation passed."
