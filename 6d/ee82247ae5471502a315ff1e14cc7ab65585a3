@@ -1,0 +1,38 @@
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorReducerTests+Persistence.swift
+  s_b68ca5d926cdbc::t_68dfde64d3b6be 81,86,182
+  s_b68ca5d926cdbc::t_a15766de742332 143-181,183-187
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature+Reducer.swift
+  s_b68ca5d926cdbc::t_7f866893f688cc 25,33
+  s_b68ca5d926cdbc::t_5e1118c1991e8b 21-24,26,29-32,34,46-50,54,56-59,77,89
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature+Editing.swift
+  s_b68ca5d926cdbc::t_7f866893f688cc 326
+  s_b68ca5d926cdbc::t_e56e408386cda0 63,67-69,80,307-309,322-325,327-329
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorReducerTests+Restoration.swift
+  s_b68ca5d926cdbc::t_9a15d7ad7855eb 23-24
+  s_b68ca5d926cdbc::t_a15766de742332 82-126
+Scripts/bootstrap-swift-tools.sh
+  s_b68ca5d926cdbc::t_9a15d7ad7855eb 48
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorReducerTests+Editing.swift
+  s_b68ca5d926cdbc::t_18bea2143af46e 188-257
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorPersistenceCoordinator.swift
+  s_b68ca5d926cdbc::t_5e1118c1991e8b 23-27,40-52,56,60-63,66,84-107
+  s_b68ca5d926cdbc::t_7f866893f688cc 64
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature.swift
+  s_b68ca5d926cdbc::t_5e1118c1991e8b 85-86,88-89,127,129,132,135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6dee82247ae5471502a315ff1e14cc7ab65585a3",
+  "prompts": {},
+  "sessions": {
+    "s_b68ca5d926cdbc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a094ab-5b04-7312-8a4d-035d63b57d2b",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
