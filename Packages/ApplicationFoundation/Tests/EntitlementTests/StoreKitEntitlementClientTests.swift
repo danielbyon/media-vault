@@ -80,12 +80,15 @@ struct StoreKitEntitlementClientTests {
     #expect((await store.snapshot()).finishCalls.isEmpty)
   }
 
-  @Test("An unverified transaction for another product is ignored")
-  func unverifiedOtherProductIsIgnored() async throws {
+  @Test("The fake store filters unverified current transactions by product")
+  func fakeStoreFiltersUnverifiedCurrentTransactionByProduct() async throws {
+    let otherProductIdentifier = "fixture.other"
     let store = FakeEntitlementStore(
       product: .nonConsumable(identifier: productIdentifier),
-      currentEntitlements: [.unverified(productIdentifier: "fixture.other")]
+      currentEntitlements: [.unverified(productIdentifier: otherProductIdentifier)]
     )
+
+    #expect(try await store.currentEntitlements(for: productIdentifier).isEmpty)
     let client = makeClient(store: store)
 
     #expect(try await client.currentState() == .notEntitled)
@@ -102,12 +105,15 @@ struct StoreKitEntitlementClientTests {
     await expectStateError(.verificationFailed, from: client)
   }
 
-  @Test("An unverified latest transaction for another product is ignored")
-  func unverifiedLatestOtherProductIsIgnored() async throws {
+  @Test("The fake store filters unverified latest transactions by product")
+  func fakeStoreFiltersUnverifiedLatestTransactionByProduct() async throws {
+    let otherProductIdentifier = "fixture.other"
     let store = FakeEntitlementStore(
       product: .nonConsumable(identifier: productIdentifier),
-      latestTransaction: .unverified(productIdentifier: "fixture.other")
+      latestTransaction: .unverified(productIdentifier: otherProductIdentifier)
     )
+
+    #expect(try await store.latestTransaction(for: productIdentifier) == nil)
     let client = makeClient(store: store)
 
     #expect(try await client.currentState() == .notEntitled)
