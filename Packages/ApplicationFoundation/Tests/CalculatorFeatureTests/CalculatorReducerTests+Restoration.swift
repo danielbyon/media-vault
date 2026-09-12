@@ -20,8 +20,8 @@ extension CalculatorReducerTests {
         let entries = (0 ..< 20).map { index in
             CalculatorHistoryEntry(
                 id: UUID(),
-                expression: "(index)",
-                result: "(index)",
+                expression: "\(index)",
+                result: "\(index)",
                 date: Date(timeIntervalSince1970: TimeInterval(index)),
             )
         }
@@ -77,6 +77,51 @@ extension CalculatorReducerTests {
             $0.memory = "5"
             $0.isLoading = false
         }
+    }
+
+    @Test("Retrying a failed initial load retries loading instead of saving")
+    @MainActor
+    func retriesFailedInitialLoad() async {
+        let snapshot = CalculatorSnapshot(display: "14", expression: "14", memory: "5")
+        let loadAttempts = LockIsolated(0)
+        let store = TestStore(initialState: CalculatorFeature.State()) {
+            CalculatorFeature()
+        } withDependencies: {
+            $0.calculatorPersistence.load = {
+                let attempt = loadAttempts.withValue { count in
+                    let attempt = count
+                    count += 1
+                    return attempt
+                }
+                if attempt == 0 {
+                    throw CalculatorPersistenceError.unavailable
+                }
+                return snapshot
+            }
+            $0.calculatorPersistence.save = { _ in
+                Issue.record("A failed load retry must not save the current state")
+            }
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.loaded(.failure(.unavailable))) {
+            $0.isLoading = false
+            $0.persistenceError = .unavailable
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.loaded(.success(snapshot))) {
+            $0.display = "14"
+            $0.expression = "14"
+            $0.memory = "5"
+            $0.isLoading = false
+            $0.persistenceError = nil
+        }
+        #expect(loadAttempts.value == 2)
     }
 
     @Test("A persisted result starts a new calculation after restoration")

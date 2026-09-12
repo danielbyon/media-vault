@@ -10,7 +10,6 @@ repository_root=$(cd -- "$script_directory/.." && pwd)
 tool_directory="$repository_root/.build/tools/mint/$mint_version"
 mint_archive="$tool_directory/mint.zip"
 mint_binary="$tool_directory/mint"
-mint_binary_checksum="$tool_directory/mint.binary.sha256"
 
 sha256_file() {
   shasum -a 256 "$1" | awk '{print $1}'
@@ -46,7 +45,7 @@ trap 'rm -rf "$extraction_directory"' EXIT
 
 # The verified archive is the trust anchor. Re-extract it on every invocation
 # so a cache hit is checked against the pinned release instead of trusting a
-# sidecar checksum that could have been rewritten with a tampered binary.
+# previously extracted binary.
 ditto -x -k "$mint_archive" "$extraction_directory"
 extracted_mint=$(find "$extraction_directory" -type f -name mint -print -quit)
 if [ -z "$extracted_mint" ]; then
@@ -58,7 +57,6 @@ expected_mint_binary_sha256=$(sha256_file "$extracted_mint")
 if [ ! -x "$mint_binary" ] || [ "$(sha256_file "$mint_binary")" != "$expected_mint_binary_sha256" ]; then
   install -m 0755 "$extracted_mint" "$mint_binary"
 fi
-printf '%s\n' "$expected_mint_binary_sha256" > "$mint_binary_checksum"
 
 export DEVELOPER_DIR="$("$script_directory/select-xcode-27-rc.sh")"
 export MINT_PATH="$repository_root/.build/mint"

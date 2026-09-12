@@ -78,12 +78,12 @@ extension CalculatorReducerTests {
             $0.display = "1"
             $0.expression = "1"
         }
-        await store.receive(.persistenceFailed) {
+        await store.receive(.persistenceFailed(revision: 1)) {
             $0.persistenceError = .unavailable
         }
 
         await store.send(.task)
-        await store.receive(.persistenceSucceeded) {
+        await store.receive(.persistenceSucceeded(revision: 2)) {
             $0.persistenceError = nil
         }
 
@@ -138,6 +138,51 @@ extension CalculatorReducerTests {
         let newest = await completedSaveIterator.next()
         #expect(newest?.display == "12")
         #expect(newest?.expression == "12")
+        await store.finish()
+    }
+
+    @Test("A stale persistence failure cannot overwrite a newer save")
+    @MainActor
+    func stalePersistenceFailureCannotOverwriteNewerSave() async {
+        let saveStarted = AsyncStream<Int>.makeStream()
+        let releaseSecondSave = AsyncStream<Void>.makeStream()
+        let saveCount = LockIsolated(0)
+        var saveStartedIterator = saveStarted.stream.makeAsyncIterator()
+
+        let store = TestStore(initialState: CalculatorFeature.State()) {
+            CalculatorFeature()
+        } withDependencies: {
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in
+                let call = saveCount.withValue { count in
+                    let call = count
+                    count += 1
+                    return call
+                }
+                saveStarted.continuation.yield(call)
+                if call == 1 {
+                    var releaseIterator = releaseSecondSave.stream.makeAsyncIterator()
+                    _ = await releaseIterator.next()
+                }
+            }
+        }
+
+        await store.send(.button(.digit(1))) {
+            $0.display = "1"
+            $0.expression = "1"
+        }
+        _ = await saveStartedIterator.next()
+
+        await store.send(.button(.digit(2))) {
+            $0.display = "12"
+            $0.expression = "12"
+        }
+        _ = await saveStartedIterator.next()
+
+        await store.send(.persistenceFailed(revision: 1))
+        #expect(store.state.persistenceError == nil)
+
+        releaseSecondSave.continuation.yield(())
         await store.finish()
     }
 }

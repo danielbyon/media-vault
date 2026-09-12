@@ -20,6 +20,11 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
         case failed
     }
 
+    private enum RetryOperation: Equatable, Sendable {
+        case load
+        case save
+    }
+
     private struct PendingRequest {
         let revision: Int
         let snapshot: CalculatorSnapshot
@@ -32,17 +37,33 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
     private var latestRevision = 0
     private var pendingRequest: PendingRequest?
     private var worker: Task<Void, Never>?
+    private var retryOperation: RetryOperation?
+
+    /// Reserves a revision before an asynchronous persistence effect starts.
+    ///
+    /// Reserving synchronously lets the reducer invalidate an older outcome as soon as a newer
+    /// edit or load retry is reduced, even if the new effect has not started executing yet.
+    func reserveRevision() -> Int {
+        lock.withLock {
+            nextRevision += 1
+            latestRevision = nextRevision
+            return nextRevision
+        }
+    }
 
     func enqueue(
         _ snapshot: CalculatorSnapshot,
+        revision: Int,
         save: @escaping @Sendable (CalculatorSnapshot) async throws -> Void,
     ) async -> SaveOutcome {
         await withCheckedContinuation { continuation in
-            let supersededContinuation = lock.withLock {
-                nextRevision += 1
-                latestRevision = nextRevision
+            let supersededContinuation: CheckedContinuation<SaveOutcome, Never>? = lock.withLock {
+                guard revision == latestRevision else {
+                    return continuation
+                }
+
                 let request = PendingRequest(
-                    revision: nextRevision,
+                    revision: revision,
                     snapshot: snapshot,
                     save: save,
                     continuation: continuation,
@@ -58,6 +79,32 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
             }
             supersededContinuation?.resume(returning: .superseded)
         }
+    }
+
+    func isCurrent(_ revision: Int) -> Bool {
+        lock.withLock { revision == latestRevision }
+    }
+
+    func markLoadFailure() {
+        lock.withLock {
+            retryOperation = .load
+        }
+    }
+
+    func markSaveFailure() {
+        lock.withLock {
+            retryOperation = .save
+        }
+    }
+
+    func clearRetryOperation() {
+        lock.withLock {
+            retryOperation = nil
+        }
+    }
+
+    var shouldRetryLoad: Bool {
+        lock.withLock { retryOperation == .load }
     }
 
     private func run() async {

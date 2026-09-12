@@ -185,4 +185,74 @@ extension CalculatorReducerTests {
             $0.memory = "0"
         }
     }
+
+    @Test("A percentage completes the operand before digit and decimal input")
+    @MainActor
+    func percentageCompletesOperandBeforeNewInput() async {
+        let store = TestStore(initialState: CalculatorFeature.State()) {
+            CalculatorFeature()
+        } withDependencies: {
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in }
+        }
+
+        await store.send(.button(.digit(5))) {
+            $0.display = "5"
+            $0.expression = "5"
+        }
+        await store.send(.button(.percent)) {
+            $0.display = "0.05"
+            $0.expression = "5%"
+        }
+        await store.send(.button(.digit(3)))
+        await store.send(.button(.decimal))
+    }
+
+    @Test("A digit after negative zero replaces zero without a malformed token")
+    @MainActor
+    func digitAfterNegativeZeroReplacesZero() async {
+        let store = TestStore(initialState: CalculatorFeature.State()) {
+            CalculatorFeature()
+        } withDependencies: {
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in }
+        }
+
+        await store.send(.button(.sign)) {
+            $0.display = "-"
+            $0.expression = "-"
+        }
+        await store.send(.button(.digit(0))) {
+            $0.display = "-0"
+            $0.expression = "-0"
+        }
+        await store.send(.button(.digit(5))) {
+            $0.display = "-5"
+            $0.expression = "-5"
+        }
+    }
+
+    @Test("A trailing unary minus is preserved when another operator is tapped")
+    @MainActor
+    func trailingUnaryMinusIsPreserved() async {
+        let store = TestStore(initialState: CalculatorFeature.State()) {
+            CalculatorFeature()
+        } withDependencies: {
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in }
+        }
+
+        await store.send(.button(.digit(5))) {
+            $0.display = "5"
+            $0.expression = "5"
+        }
+        await store.send(.button(.add)) {
+            $0.expression = "5+"
+        }
+        await store.send(.button(.sign)) {
+            $0.display = "-"
+            $0.expression = "5+-"
+        }
+        await store.send(.button(.multiply))
+    }
 }

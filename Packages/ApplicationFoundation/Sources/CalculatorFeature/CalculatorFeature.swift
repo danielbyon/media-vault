@@ -82,11 +82,11 @@ public struct CalculatorFeature {
         /// Delivers a value read from the clipboard.
         case pasted(String?)
 
-        /// Reports that the latest persistence save succeeded.
-        case persistenceSucceeded
+        /// Reports that a persistence save succeeded.
+        case persistenceSucceeded(revision: Int)
 
-        /// Reports that the latest persistence save failed.
-        case persistenceFailed
+        /// Reports that a persistence save failed.
+        case persistenceFailed(revision: Int)
     }
 
     static let maximumHistoryCount = 20
@@ -124,14 +124,15 @@ public struct CalculatorFeature {
         let save = persistence.save
         let shouldClearPersistenceError = state.persistenceError != nil
         let coordinator = persistenceCoordinator
+        let revision = coordinator.reserveRevision()
         return .run { send in
-            switch await coordinator.enqueue(snapshot, save: save) {
+            switch await coordinator.enqueue(snapshot, revision: revision, save: save) {
             case .succeeded:
                 if shouldClearPersistenceError {
-                    await send(.persistenceSucceeded)
+                    await send(.persistenceSucceeded(revision: revision))
                 }
             case .failed:
-                await send(.persistenceFailed)
+                await send(.persistenceFailed(revision: revision))
             case .superseded:
                 break
             }

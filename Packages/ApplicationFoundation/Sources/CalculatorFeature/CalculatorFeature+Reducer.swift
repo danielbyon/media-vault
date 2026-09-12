@@ -18,10 +18,20 @@ extension CalculatorFeature {
             return handleButton(button, state: &state)
         case let .pasted(value):
             return handlePasted(value, state: &state)
-        case .persistenceFailed:
+        case let .persistenceFailed(revision):
+            guard persistenceCoordinator.isCurrent(revision) else {
+                return .none
+            }
+
+            persistenceCoordinator.markSaveFailure()
             state.persistenceError = .unavailable
             return .none
-        case .persistenceSucceeded:
+        case let .persistenceSucceeded(revision):
+            guard persistenceCoordinator.isCurrent(revision) else {
+                return .none
+            }
+
+            persistenceCoordinator.clearRetryOperation()
             state.persistenceError = nil
             return .none
         }
@@ -33,10 +43,20 @@ extension CalculatorFeature {
         }
 
         if state.persistenceError != nil {
+            if persistenceCoordinator.shouldRetryLoad {
+                persistenceCoordinator.reserveRevision()
+                state.isLoading = true
+                return loadEffect()
+            }
             return persistenceEffect(for: state)
         }
         state.persistenceError = nil
+        persistenceCoordinator.reserveRevision()
         state.isLoading = true
+        return loadEffect()
+    }
+
+    private func loadEffect() -> Effect<Action> {
         let load = persistence.load
         return .run { send in
             do {
@@ -54,6 +74,7 @@ extension CalculatorFeature {
         state.isLoading = false
         switch result {
         case let .success(snapshot):
+            persistenceCoordinator.clearRetryOperation()
             state.persistenceError = nil
             guard let snapshot else {
                 return .none
@@ -65,6 +86,7 @@ extension CalculatorFeature {
             state.history = snapshot.history
             state.isShowingResult = snapshot.isShowingResult
         case let .failure(error):
+            persistenceCoordinator.markLoadFailure()
             state.persistenceError = error
         }
         return .none

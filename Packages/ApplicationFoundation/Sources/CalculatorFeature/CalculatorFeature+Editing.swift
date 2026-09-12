@@ -60,12 +60,13 @@ extension CalculatorFeature {
 
         prepareForNewInput(&state)
         let token = currentToken(in: state.expression)
-        guard token != ")" else {
+        guard token != ")", state.expression.last != "%" else {
             return false
         }
 
-        if token == "0" {
-            state.expression = replaceCurrentToken(in: state.expression, with: "\(digit)")
+        if token == "0" || token == "-0" {
+            let replacement = token == "-0" ? "-\(digit)" : "\(digit)"
+            state.expression = replaceCurrentToken(in: state.expression, with: replacement)
         } else {
             state.expression.append("\(digit)")
         }
@@ -76,7 +77,7 @@ extension CalculatorFeature {
     private func applyDecimal(to state: inout State) -> Bool {
         prepareForNewInput(&state)
         let token = currentToken(in: state.expression)
-        guard token != ")", !token.contains(".") else {
+        guard token != ")", state.expression.last != "%", !token.contains(".") else {
             return false
         }
 
@@ -303,6 +304,9 @@ extension CalculatorFeature {
         }
 
         if let last = state.expression.last, operatorCharacters.contains(last) {
+            if last == "-", isTrailingUnaryMinus(in: state.expression) {
+                return false
+            }
             if symbol == "-" {
                 state.expression.append(symbol)
             } else {
@@ -313,6 +317,16 @@ extension CalculatorFeature {
             state.expression.append(symbol)
         }
         return true
+    }
+
+    private func isTrailingUnaryMinus(in expression: String) -> Bool {
+        guard expression.last == "-" else {
+            return false
+        }
+
+        let index = expression.index(before: expression.endIndex)
+        return index == expression.startIndex
+            || operatorCharacters.contains(expression[expression.index(before: index)])
     }
 
     private func canCloseParenthesis(in expression: String) -> Bool {
