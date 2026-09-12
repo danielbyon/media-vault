@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "product": {
+    "name": "Private Media Vault",
+    "purpose": "Provide an on-device iOS and iPadOS private media library that protects against casual snooping and deliberate entry attempts on an unlocked device, preserves original media fidelity, supports useful organization/search/viewing/acquisition workflows, and keeps vault-derived data local except for explicit user-directed outbound or explicitly enabled backup capabilities."
+  },
+  "primary_users": [
+    {
+      "id": "private-media-owner",
+      "role": "Privacy-conscious iPhone or iPad owner managing personal media",
+      "technical_level": "General consumer; must not need security or file-management expertise",
+      "work_context": "Uses the app as a real private photo/video library, discreet utility surface, local browser/acquisition tool, and explicit export/recovery boundary on a personal Apple device."
+    }
+  ],
+  "jobs_to_be_done": [
+    {
+      "id": "use-credible-decoy",
+      "statement": "Open the app into a genuinely useful calculator decoy that does not reveal or depend on vault state."
+    },
+    {
+      "id": "unlock-vault-discreetly",
+      "statement": "Enter and leave the private vault discreetly while preserving a real credential boundary and predictable lock behavior."
+    },
+    {
+      "id": "manage-private-media-library",
+      "statement": "Import, preserve, browse, view, organize, favorite, and delete private photos and videos without losing original fidelity or creating hidden duplicate semantics."
+    },
+    {
+      "id": "acquire-media-safely",
+      "statement": "Bring media in from Files, Photos, sharing, browser downloads, and drag-and-drop through one durable recoverable ingestion model."
+    },
+    {
+      "id": "organize-and-find-media",
+      "statement": "Use albums, folders, metadata search, filters, and local-only search intelligence to find private media without exposing it to external services."
+    },
+    {
+      "id": "view-and-present-media",
+      "statement": "View stills, videos, Live Photos, RAW, animated media, and slideshows with native-feeling controls and predictable lifecycle/privacy behavior."
+    },
+    {
+      "id": "browse-and-save-media",
+      "statement": "Use an isolated in-app browser for normal web navigation and explicitly save supported media into the vault without scraping or restriction circumvention."
+    },
+    {
+      "id": "export-delete-and-recover",
+      "statement": "Explicitly share, save, export originals, permanently delete media, reset an inaccessible vault, and restore supported canonical state without ambiguous data-loss semantics."
+    },
+    {
+      "id": "control-privacy-and-lifecycle",
+      "statement": "Understand and control locking, storage, diagnostics, generated data, browser data, backup participation, accessibility, and system exposure without hidden telemetry or network leakage."
+    },
+    {
+      "id": "upgrade-without-data-lockin",
+      "statement": "Purchase or restore the permanent Pro entitlement for expanded capabilities without subscriptions, launch paywalls, data loss, or loss of access when entitlement later changes."
+    }
+  ],
+  "must_reduce": [
+    "Risk that private media or vault-derived metadata is exposed outside the authenticated app without explicit user action",
+    "Risk of losing accepted media during import, interruption, low storage, migration, entitlement change, or process lifecycle events",
+    "Friction in using the product as a real photo and video library rather than merely a hidden folder",
+    "Need for users to understand internal storage, security, persistence, or media-resource implementation details",
+    "Behavioral inconsistency between acquisition, viewing, organization, export, and lifecycle paths"
+  ],
+  "must_not_become": [
+    "A cloud account or backend service for vault-derived data",
+    "A fake calculator whose only purpose is to hide an unlock gesture",
+    "A subscription product or paywall that traps existing user data",
+    "A hidden general-purpose file manager or DRM/restriction circumvention tool",
+    "A product that claims forensic secure deletion or replaces platform security with custom cryptography",
+    "An analytics, advertising, remote-crash, developer-telemetry, or cloud-ML collection surface",
+    "A codebase whose domain vocabulary or architecture is coupled to the consumer marketing brand"
+  ],
+  "experience_principles": [
+    "Authentication is the real security boundary; camouflage and decoy behavior are secondary and must remain credible",
+    "Preserve canonical originals and make generated derivatives disposable and rebuildable",
+    "Prefer Apple-native platform behavior and UI where it satisfies the product contract",
+    "Keep vault-derived data on device except for explicit user-directed outbound actions or explicitly enabled backup behavior",
+    "Never silently lose accepted work; interruption and partial failure should remain inspectable and recoverable",
+    "Free-tier or entitlement changes must never hide, delete, or block access to existing user media",
+    "Keep calculator, vault, browser, generated search data, and other persistence domains isolated according to their lifecycle contracts",
+    "Use deterministic tests and snapshots at public behavior/transformation seams rather than coupling tests to private implementation details",
+    "Accessibility, iPad adaptability, and system preferences are release requirements rather than optional polish",
+    "Keep consumer identity at release/configuration boundaries and use brand-neutral domain terminology"
+  ],
+  "canonical_docs": [
+    "AGENTS.md",
+    "docs/agents/domain.md",
+    "docs/agents/issue-tracker.md"
+  ],
+  "governance": {
+    "mode": "advisory",
+    "product_review_required_for": [
+      "product_slice",
+      "product_correction"
+    ],
+    "checkpoint_every_root_runs": 5
+  }
+}

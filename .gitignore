@@ -39,3 +39,6 @@ playground.xcworkspace
 
 # Local linked worktrees
 .worktrees/
+
+# Local ChatGPT orchestration state
+.chatgpt/
