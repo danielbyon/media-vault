@@ -124,6 +124,7 @@ public struct CalculatorFeature {
         let save = persistence.save
         let shouldClearPersistenceError = state.persistenceError != nil
         let coordinator = persistenceCoordinator
+        coordinator.clearRetryOperation()
         let revision = coordinator.reserveRevision()
         return .run { send in
             switch await coordinator.enqueue(snapshot, revision: revision, save: save) {

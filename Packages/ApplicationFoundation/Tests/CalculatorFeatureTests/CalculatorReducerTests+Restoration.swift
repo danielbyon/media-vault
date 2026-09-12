@@ -124,6 +124,68 @@ extension CalculatorReducerTests {
         #expect(loadAttempts.value == 2)
     }
 
+    @Test("Editing after a failed load changes the retry operation to save")
+    @MainActor
+    func editingAfterFailedLoadChangesRetryToSave() async {
+        let loadAttempts = LockIsolated(0)
+        let saveCount = LockIsolated(0)
+        let firstSaveStarted = AsyncStream<Void>.makeStream()
+        let releaseFirstSave = AsyncStream<Void>.makeStream()
+
+        let store = TestStore(initialState: CalculatorFeature.State()) {
+            CalculatorFeature()
+        } withDependencies: {
+            $0.calculatorPersistence.load = {
+                let attempt = loadAttempts.withValue { count in
+                    let attempt = count
+                    count += 1
+                    return attempt
+                }
+                if attempt == 0 {
+                    throw CalculatorPersistenceError.unavailable
+                }
+                return nil
+            }
+            $0.calculatorPersistence.save = { _ in
+                let call = saveCount.withValue { count in
+                    let call = count
+                    count += 1
+                    return call
+                }
+                if call == 0 {
+                    firstSaveStarted.continuation.yield(())
+                    var releaseIterator = releaseFirstSave.stream.makeAsyncIterator()
+                    _ = await releaseIterator.next()
+                }
+            }
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.loaded(.failure(.unavailable))) {
+            $0.isLoading = false
+            $0.persistenceError = .unavailable
+        }
+
+        var firstSaveIterator = firstSaveStarted.stream.makeAsyncIterator()
+
+        await store.send(.button(.digit(1))) {
+            $0.display = "1"
+            $0.expression = "1"
+        }
+        _ = await firstSaveIterator.next()
+
+        await store.send(.task)
+        #expect(loadAttempts.value == 1)
+
+        releaseFirstSave.continuation.yield(())
+        await store.receive(.persistenceSucceeded(revision: 3)) {
+            $0.persistenceError = nil
+        }
+        await store.finish()
+    }
+
     @Test("A persisted result starts a new calculation after restoration")
     @MainActor
     func persistedResultStartsNewCalculationAfterRestoration() async throws {

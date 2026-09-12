@@ -325,6 +325,14 @@ extension CalculatorFeature {
         }
 
         let index = expression.index(before: expression.endIndex)
+        return isUnaryMinus(at: index, in: expression)
+    }
+
+    private func isUnaryMinus(at index: String.Index, in expression: String) -> Bool {
+        guard expression[index] == "-" else {
+            return false
+        }
+
         return index == expression.startIndex
             || operatorCharacters.contains(expression[expression.index(before: index)])
     }
@@ -360,12 +368,8 @@ extension CalculatorFeature {
             return expression
         }
 
-        if expression[index] == "-" {
-            let isUnary = index == expression.startIndex
-                || operatorCharacters.contains(expression[expression.index(before: index)])
-            if isUnary {
-                return String(expression[index...])
-            }
+        if isUnaryMinus(at: index, in: expression) {
+            return String(expression[index...])
         }
         return String(expression[expression.index(after: index)...])
     }
@@ -380,12 +384,8 @@ extension CalculatorFeature {
             return token
         }
 
-        if expression[index] == "-" {
-            let isUnary = index == expression.startIndex
-                || operatorCharacters.contains(expression[expression.index(before: index)])
-            if isUnary {
-                return String(expression[..<index]) + token
-            }
+        if isUnaryMinus(at: index, in: expression) {
+            return String(expression[..<index]) + token
         }
         let end = expression.index(after: index)
         return String(expression[..<end]) + token
