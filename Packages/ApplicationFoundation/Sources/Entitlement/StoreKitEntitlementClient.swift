@@ -31,22 +31,22 @@ struct StoreKitEntitlementClient: Sendable {
 
   func purchase() async -> EntitlementOperationResult {
     do {
-      let product = try await validatedProduct()
-
       if try await establishedState() == .entitled {
         return .alreadyEntitled
       }
 
+      let product = try await validatedProduct()
+
       switch try await store.purchase(product: product) {
       case let .success(.verified(transaction)):
-        guard transaction.productIdentifier == productIdentifier, !transaction.isRevoked else {
+        guard transaction.productIdentifier == productIdentifier else {
           return .failed(.verificationFailed)
         }
 
         await store.finish(transaction)
-        return .purchased
+        return transaction.isRevoked ? .failed(.verificationFailed) : .purchased
 
-      case .success(.unverified):
+      case .success(.unverified(productIdentifier: _)):
         return .failed(.verificationFailed)
 
       case .pending:
@@ -112,7 +112,7 @@ struct StoreKitEntitlementClient: Sendable {
           continue
         }
         return transaction.isRevoked ? .revoked : .entitled
-      case .unverified:
+      case .unverified(productIdentifier: _):
         throw EntitlementError.verificationFailed
       }
     }
@@ -124,7 +124,7 @@ struct StoreKitEntitlementClient: Sendable {
     switch latestTransaction {
     case let .verified(transaction):
       return transaction.isRevoked ? .revoked : .notEntitled
-    case .unverified:
+    case .unverified(productIdentifier: _):
       throw EntitlementError.verificationFailed
     }
   }
@@ -161,8 +161,8 @@ struct StoreKitEntitlementStore: EntitlementStore {
       )
       return .success(.verified(appTransaction))
 
-    case .success(.unverified):
-      return .success(.unverified)
+    case let .success(.unverified(transaction, _)):
+      return .success(.unverified(productIdentifier: transaction.productID))
 
     case .pending:
       return .pending
@@ -219,7 +219,7 @@ struct StoreKitEntitlementStore: EntitlementStore {
       guard identifier == nil || transaction.productID == identifier else {
         return nil
       }
-      return .some(.unverified)
+      return .some(.unverified(productIdentifier: transaction.productID))
     }
   }
 }

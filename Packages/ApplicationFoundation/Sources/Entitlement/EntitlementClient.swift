@@ -150,7 +150,16 @@ struct EntitlementStoreTransaction: Equatable, Sendable {
 
 enum EntitlementStoreVerification: Equatable, Sendable {
   case verified(EntitlementStoreTransaction)
-  case unverified
+  case unverified(productIdentifier: String)
+
+  var productIdentifier: String {
+    switch self {
+    case let .verified(transaction):
+      transaction.productIdentifier
+    case let .unverified(productIdentifier):
+      productIdentifier
+    }
+  }
 }
 
 enum EntitlementStorePurchaseResult: Equatable, Sendable {

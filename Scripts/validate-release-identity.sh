@@ -55,8 +55,7 @@ esac
 
 if ! rg -q '<string>\$\(APP_DISPLAY_NAME\)</string>' App/Resources/Info.plist \
   || ! rg -q '<string>\$\(PRODUCT_BUNDLE_IDENTIFIER\)</string>' App/Resources/Info.plist \
-  || ! rg -q '<key>PRO_PRODUCT_IDENTIFIER</key>' App/Resources/Info.plist \
-  || ! rg -q '<string>\$\(PRO_PRODUCT_IDENTIFIER\)</string>' App/Resources/Info.plist; then
+  || ! rg -q -U '<key>PRO_PRODUCT_IDENTIFIER</key>\n[[:space:]]*<string>\$\(PRO_PRODUCT_IDENTIFIER\)</string>' App/Resources/Info.plist; then
   printf '%s\n' "The application resource must consume identity through build settings." >&2
   exit 1
 fi

@@ -72,7 +72,7 @@ struct StoreKitEntitlementClientTests {
   func unverifiedCurrentTransactionFailsClosed() async {
     let store = FakeEntitlementStore(
       product: .nonConsumable(identifier: productIdentifier),
-      currentEntitlements: [.unverified]
+      currentEntitlements: [.unverified(productIdentifier: productIdentifier)]
     )
     let client = makeClient(store: store)
 
@@ -80,15 +80,37 @@ struct StoreKitEntitlementClientTests {
     #expect((await store.snapshot()).finishCalls.isEmpty)
   }
 
+  @Test("An unverified transaction for another product is ignored")
+  func unverifiedOtherProductIsIgnored() async throws {
+    let store = FakeEntitlementStore(
+      product: .nonConsumable(identifier: productIdentifier),
+      currentEntitlements: [.unverified(productIdentifier: "fixture.other")]
+    )
+    let client = makeClient(store: store)
+
+    #expect(try await client.currentState() == .notEntitled)
+  }
+
   @Test("An unverified latest transaction fails closed")
   func unverifiedLatestTransactionFailsClosed() async {
     let store = FakeEntitlementStore(
       product: .nonConsumable(identifier: productIdentifier),
-      latestTransaction: .unverified
+      latestTransaction: .unverified(productIdentifier: productIdentifier)
     )
     let client = makeClient(store: store)
 
     await expectStateError(.verificationFailed, from: client)
+  }
+
+  @Test("An unverified latest transaction for another product is ignored")
+  func unverifiedLatestOtherProductIsIgnored() async throws {
+    let store = FakeEntitlementStore(
+      product: .nonConsumable(identifier: productIdentifier),
+      latestTransaction: .unverified(productIdentifier: "fixture.other")
+    )
+    let client = makeClient(store: store)
+
+    #expect(try await client.currentState() == .notEntitled)
   }
 
   @Test("A StoreKit lookup failure is not reported as absence")
@@ -135,11 +157,27 @@ struct StoreKitEntitlementClientTests {
     #expect(snapshot.finishCalls == [transaction])
   }
 
+  @Test("A verified revoked purchase is finished before it fails")
+  func verifiedRevokedPurchaseIsFinished() async {
+    let transaction = EntitlementStoreTransaction(
+      productIdentifier: productIdentifier,
+      revocationDate: Date(timeIntervalSince1970: 1_725_000_002)
+    )
+    let store = FakeEntitlementStore(
+      product: .nonConsumable(identifier: productIdentifier),
+      purchaseResult: .success(.verified(transaction))
+    )
+    let client = makeClient(store: store)
+
+    #expect(await client.purchase() == .failed(.verificationFailed))
+    #expect((await store.snapshot()).finishCalls == [transaction])
+  }
+
   @Test("An active entitlement avoids a duplicate purchase")
   func activeEntitlementAvoidsDuplicatePurchase() async {
     let transaction = EntitlementStoreTransaction.active(productIdentifier: productIdentifier)
     let store = FakeEntitlementStore(
-      product: .nonConsumable(identifier: productIdentifier),
+      product: nil,
       currentEntitlements: [.verified(transaction)]
     )
     let client = makeClient(store: store)
@@ -147,6 +185,7 @@ struct StoreKitEntitlementClientTests {
     #expect(await client.purchase() == .alreadyEntitled)
     let snapshot = await store.snapshot()
     #expect(snapshot.purchaseCalls == 0)
+    #expect(snapshot.loadedProductIdentifiers.isEmpty)
     #expect(snapshot.finishCalls.isEmpty)
   }
 
@@ -154,7 +193,7 @@ struct StoreKitEntitlementClientTests {
   func unverifiedPurchaseFailsWithoutFinishing() async {
     let store = FakeEntitlementStore(
       product: .nonConsumable(identifier: productIdentifier),
-      purchaseResult: .success(.unverified)
+      purchaseResult: .success(.unverified(productIdentifier: productIdentifier))
     )
     let client = makeClient(store: store)
 
@@ -392,13 +431,16 @@ private actor FakeEntitlementStore: EntitlementStore {
     if let currentEntitlementsError {
       throw currentEntitlementsError
     }
-    return currentEntitlements
+    return currentEntitlements.filter { $0.productIdentifier == identifier }
   }
 
   func latestTransaction(for identifier: String) async throws -> EntitlementStoreVerification? {
     latestTransactionCallCount += 1
     if let latestTransactionError {
       throw latestTransactionError
+    }
+    guard let latestTransaction, latestTransaction.productIdentifier == identifier else {
+      return nil
     }
     return latestTransaction
   }
