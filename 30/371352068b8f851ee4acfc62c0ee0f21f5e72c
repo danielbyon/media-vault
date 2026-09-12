@@ -1,0 +1,148 @@
+Packages/ApplicationFoundation/Sources/AppIdentity/AppIdentityClient.swift
+  s_b68ca5d926cdbc::t_ad0d4cb68fa3e0 23,40
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,18-19,24-29,31-38,41-43,46-51
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorReducerTests+Persistence.swift
+  s_b68ca5d926cdbc::t_e96fa1e9727f33 1,4,6-16,36,42-43,55,75-76,84,89,94-95,124,128,134,136,142-143
+  s_b68ca5d926cdbc::t_86a9722b83cfe8 17-35,37-41,44-54,56-74,77-83,85-88,90-93,96-123,125-127,129-133,135,137-141
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Scripts/run-swiftlint-analysis.sh
+  s_b68ca5d926cdbc::t_c92d44d42b2e93 47-52,57-77
+  s_b68ca5d926cdbc::t_5d59ec5674ac1a 53-56
+Packages/ApplicationFoundation/Sources/AppFeature/RootFeature.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,19-21,23,26-28,31-32,34-35,37-38,41-44,52-60,62-64
+  s_b68ca5d926cdbc::t_7f3f2d2795ae9e 22,25,33,40,50,61
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorPersistenceClient.swift
+  s_b68ca5d926cdbc::t_da36e92de31d8f 1,4,6-7,21-25,29-40,43-48,58-74,78-90,93-98,103-104,109-113,115-135,137-157,159-175,177-188
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Tests/PersistenceSupportTests/PersistenceSupportTests.swift
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,15-20,22-23,25-33,35-38,41-49,51-52
+Packages/ApplicationFoundation/Package.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 6-144
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature.swift
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,19-21,23,26,29,32,35,38,41,44-46,49-57,61-67,71-72,74,77,80,83,86,89,95,97,99,101,105-106,110-111,116-121,123-137,139,142-144,146-147
+  s_b68ca5d926cdbc::t_ebad1cdd80e859 112
+  s_b68ca5d926cdbc::t_a283397d11d5d8 60,92,94,96,98,100,102,122,141
+  s_b68ca5d926cdbc::t_b5031c71547e8b 22,24-25,27-28,30-31,33-34,36-37,39-40,42-43,47-48,73,76,79,82,85,88,104,109
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_b68ca5d926cdbc::t_ca7907ebadce6f 37,224,226-227,229-230
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,14-21,24-27,30-35,40-43,45-47,50-54,56-60,62-63,65-78,80-93,95-101,103-105,107-127,129-156,158-171,173-218,225,228,231
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Sources/PersistenceSupport/PersistenceStore.swift
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,17-22,24-30
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorReducerTests+Editing.swift
+  s_b68ca5d926cdbc::t_86a9722b83cfe8 17-29,31-39,41-55,58-66,68-75,78-90,92-99,102-120,122-129,132-140,142-149,152-160,162-186
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_e96fa1e9727f33 1,4,6-16,30,40,56-57,67,76-77,91,100-101,121,130-131,141,150-151,161,187-188
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorPersistenceTests.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,15-31,34,36-39
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Scripts/bootstrap-swift-tools.sh
+  s_b68ca5d926cdbc::t_cde6463a0ccf00 44-61
+Packages/ApplicationFoundation/Tests/EntitlementTests/StoreKitEntitlementClientTests.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,14-360,364-474,478,481-484,486-488,491-494
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature+Editing.swift
+  s_b68ca5d926cdbc::t_bbe6dc293ece90 1,4,6-44,47,50-383
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_da36e92de31d8f 45-46,48-49
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorPersistenceCoordinator.swift
+  s_b68ca5d926cdbc::t_efba192cdb49d7 1,4,6-98
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorSnapshot.swift
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_da36e92de31d8f 1,4,6-7,15-78,83-107,112-170
+.swiftformat
+  s_b68ca5d926cdbc::t_b07be511b115da 72,91
+  s_b68ca5d926cdbc::t_42a2d256b6d1e8 89,130-131
+  s_b68ca5d926cdbc::t_a792516ac3a269 28
+  s_b68ca5d926cdbc::t_66c4725a76fd21 22,58-59
+  s_b68ca5d926cdbc::t_18cc9848c2a04d 45-48,65,76-82,95-124,133-142
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorReducerTests.swift
+  s_b68ca5d926cdbc::t_c640bdfe8e6529 20-21,28,55,70-71,78,121
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_e96fa1e9727f33 1,4,6-7
+  s_b68ca5d926cdbc::t_fa01bb1aec370b 18
+  s_b68ca5d926cdbc::t_376d0a9587bfc4 19,22-27,29,31-54,56-61,63-65,68-69,72-77,79,81-120,122-127,130-138,140-150,153-161,163-198
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorView.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,20,25-27,30-47,51-58,60-70,73-80,83-98,101-118,120,123-133,135-151,153-155,160-163,165-192,196-202,204,208-229,231
+  s_b68ca5d926cdbc::t_bc6dad5cab5a8c 18,22-24,29
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,13-16,18-21,23-27,29-32,34-42
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Tests/EntitlementTests/EntitlementClientTests.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,14-15,17-19,22-33,35-37,40-56
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+App/Application.swift
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,16,18-22,25-29
+Packages/ApplicationFoundation/Tests/FoundationTestSupportTests/FoundationTestSupportTests.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,16,18-20,25-42,44-54,57-63,66-67,69-73,75-79
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_393157a108b564 64-65
+Packages/ApplicationFoundation/Sources/Entitlement/EntitlementClient.swift
+  s_b68ca5d926cdbc::t_b93cd91d3bd221 86,95
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,14-15,17-18,20-21,26-27,29-30,32-33,35-36,38-39,44-45,47-48,50-51,53-54,56-57,59-60,69-82,87-94,96-102,105-110,114,116-118,122-125,127-128,132-157,161-170,175-177,181-186
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Sources/FoundationTestSupport/DeterministicTestSupport.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,9,16-30,38-44,46-50,52-63,65-71,73-81,85-90,92-108,117,119-120,122-123,125-126
+  s_b68ca5d926cdbc::t_e67a18e336e1c5 45,72,91,109-114,116
+  s_b68ca5d926cdbc::t_e11ac4ac238465 115
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorClipboardTests.swift
+  s_b68ca5d926cdbc::t_31f2ccd4f22af7 18,20,29,46
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,16-17,19,21-28,30,32-37,39-45,47-52,55-68,70-73
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorReducerTests+Restoration.swift
+  s_b68ca5d926cdbc::t_e96fa1e9727f33 1,4,6-16,44,58-59,70,80-81,96,98,102,108,112
+  s_b68ca5d926cdbc::t_5372bd5995ea55 97,138-164
+  s_b68ca5d926cdbc::t_19b38ca3645c2c 99,111,127-137,165-166,168-173
+  s_b68ca5d926cdbc::t_df7fb82ce2b981 167
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_c640bdfe8e6529 85,94
+  s_b68ca5d926cdbc::t_86a9722b83cfe8 17-43,45-57,60-69,71-79,82-84,86-93,95,100-101,103-107,109-110,113-126,174-176
+.swiftlint.yml
+  s_b68ca5d926cdbc::t_214340d5bd03c9 231-233
+  s_b68ca5d926cdbc::t_b666178039cb44 50
+  s_b68ca5d926cdbc::t_18dc2ea041d40a 24,117-184,236-268
+AppTests/RootSurfaceSnapshotTests.swift
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,20-30,33-61,66-68,71,82
+  s_b68ca5d926cdbc::t_017707bd7a34f4 65,70,72-81
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature+Reducer.swift
+  s_b68ca5d926cdbc::t_ebad1cdd80e859 11
+  s_b68ca5d926cdbc::t_96e6c3344be3a0 1,4,6-10,12-117
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Sources/Entitlement/StoreKitEntitlementClient.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,12-21,24-32,34-38,40,42-46,48-49,51-52,54-55,57-64,67-86,89-101,103,106-113,115-119,121-130,135-144,147-163,165-166,168-169,171-172,174-177,179-181,183-190,192-198,201-202,204-227
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Tests/AppIdentityTests/AppIdentityClientTests.swift
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,14-15,17-20,22-28
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorViewSnapshotTests.swift
+  s_b68ca5d926cdbc::t_c9405210600369 29,46
+  s_b68ca5d926cdbc::t_9ead80541c27e3 2-3,5
+  s_b68ca5d926cdbc::t_4775cb50254f9b 1,4,6-7,20-26,28,32-34,36-44,48-53,55-59,61-68,70-80
+  s_b68ca5d926cdbc::t_e11ac4ac238465 30-31,47,54,60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "30371352068b8f851ee4acfc62c0ee0f21f5e72c",
+  "prompts": {},
+  "sessions": {
+    "s_b68ca5d926cdbc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a094ab-5b04-7312-8a4d-035d63b57d2b",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
