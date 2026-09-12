@@ -56,6 +56,10 @@ public struct CalculatorFeature {
 
   private static let maximumHistoryCount = 20
 
+  private enum CancelID: Hashable {
+    case save
+  }
+
   @Dependency(\.calculatorClipboard) private var clipboard
   @Dependency(\.calculatorPersistence) private var persistence
   @Dependency(\.date.now) private var now
@@ -141,20 +145,31 @@ public struct CalculatorFeature {
     }
   }
 
+  /// Persists the latest snapshot, superseding any save still in flight for a prior edit.
+  ///
+  /// Every edit starts its own asynchronous save, so a slow, older save could otherwise finish
+  /// after a newer one and overwrite it with stale state. Cancelling the previous save under a
+  /// shared ID before it reaches the store keeps only the most recent snapshot's write in effect.
   private func persistenceEffect(for state: State) -> Effect<Action> {
     let snapshot = state.snapshot
     let save = persistence.save
     let shouldClearPersistenceError = state.persistenceError != nil
     return .run { send in
+      try Task.checkCancellation()
       do {
         try await save(snapshot)
-        if shouldClearPersistenceError {
-          await send(.persistenceSucceeded)
-        }
+      } catch is CancellationError {
+        return
       } catch {
         await send(.persistenceFailed)
+        return
+      }
+      try Task.checkCancellation()
+      if shouldClearPersistenceError {
+        await send(.persistenceSucceeded)
       }
     }
+    .cancellable(id: CancelID.save, cancelInFlight: true)
   }
 
   @discardableResult
