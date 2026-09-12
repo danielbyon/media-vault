@@ -1,1 +1,6 @@
-- State
+▿ CalculatorSnapshot
+  - display: "0"
+  - expression: ""
+  - history: 0 elements
+  - isShowingResult: false
+  - memory: Optional<String>.none
