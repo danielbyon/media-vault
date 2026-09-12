@@ -1,35 +1,40 @@
+import CalculatorFeature
 import ComposableArchitecture
 import SwiftUI
 import UIKit
 
 /// The application composition root.
 ///
-/// This feature is intentionally behaviorless until application behavior is introduced. Child
-/// features compose beneath this root rather than adding executable-specific state or lifecycle
-/// work to the app target.
+/// The application composition root. Feature-specific state and behavior compose beneath this
+/// root rather than being placed in the executable target.
 @Reducer
 public struct RootFeature {
-  /// The empty state held by the composition root.
+  /// The state owned by the application composition root.
+  @ObservableState
   public struct State: Equatable, Sendable {
-    public init() {}
+    public var calculator: CalculatorFeature.State
+
+    public init(calculator: CalculatorFeature.State = .init()) {
+      self.calculator = calculator
+    }
   }
 
-  /// The root currently has no user or system actions.
-  public enum Action: Sendable {}
+  /// Actions forwarded to the root's child features.
+  public enum Action: Equatable, Sendable {
+    case calculator(CalculatorFeature.Action)
+  }
 
-  /// Creates an empty composition root.
+  /// Creates the application composition root.
   public init() {}
 
-  /// Keeps the root reducer behaviorless until a child feature is introduced.
   public var body: some ReducerOf<Self> {
-    EmptyReducer()
+    Scope(state: \.calculator, action: \.calculator) {
+      CalculatorFeature()
+    }
   }
 }
 
-/// The neutral surface displayed while the application has no product behavior.
-///
-/// The store is retained at this boundary so future application features can be composed beneath
-/// ``RootFeature`` without changing the executable's scene wiring.
+/// The calculator surface hosted by the application's single root store.
 @MainActor
 public struct RootView: View {
   private let store: StoreOf<RootFeature>
@@ -42,8 +47,6 @@ public struct RootView: View {
   }
 
   public var body: some View {
-    Color(uiColor: .systemBackground)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .ignoresSafeArea()
+    CalculatorView(store: store.scope(state: \.calculator, action: \.calculator))
   }
 }

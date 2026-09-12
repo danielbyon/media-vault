@@ -9,6 +9,7 @@ let package = Package(
   ],
   products: [
     .library(name: "AppFeature", type: .static, targets: ["AppFeature"]),
+    .library(name: "CalculatorFeature", type: .static, targets: ["CalculatorFeature"]),
     .library(name: "AppIdentity", type: .static, targets: ["AppIdentity"]),
     .library(name: "Entitlement", type: .static, targets: ["Entitlement"]),
     .library(name: "FoundationTestSupport", type: .static, targets: ["FoundationTestSupport"]),
@@ -46,12 +47,26 @@ let package = Package(
   ],
   targets: [
     .target(
+      name: "CalculatorFeature",
+      dependencies: [
+        .product(
+          name: "ComposableArchitecture",
+          package: "swift-composable-architecture"
+        ),
+        .product(name: "Dependencies", package: "swift-dependencies"),
+        .product(name: "DependenciesMacros", package: "swift-dependencies"),
+        .product(name: "SQLiteData", package: "sqlite-data"),
+        "PersistenceSupport"
+      ]
+    ),
+    .target(
       name: "AppFeature",
       dependencies: [
         .product(
           name: "ComposableArchitecture",
           package: "swift-composable-architecture"
-        )
+        ),
+        "CalculatorFeature"
       ]
     ),
     .target(
@@ -81,6 +96,17 @@ let package = Package(
       name: "PersistenceSupport",
       dependencies: [
         .product(name: "SQLiteData", package: "sqlite-data")
+      ]
+    ),
+    .testTarget(
+      name: "CalculatorFeatureTests",
+      dependencies: [
+        "CalculatorFeature",
+        "FoundationTestSupport",
+        "PersistenceSupport",
+        .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
+        .product(name: "Dependencies", package: "swift-dependencies"),
+        .product(name: "SnapshotTesting", package: "swift-snapshot-testing")
       ]
     ),
     .testTarget(

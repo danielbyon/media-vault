@@ -1,1 +1,1 @@
-- State
+- RootFeature.State(calculator: (display: "0", expression: "", memory: nil, historyCount: 0, error: nil, persistenceError: nil, isLoading: false, isShowingResult: false))
