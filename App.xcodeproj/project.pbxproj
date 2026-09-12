@@ -1,0 +1,406 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000002 /* Application.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* Application.swift */; };
+		A10000000000000000000003 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
+		A10000000000000000000004 /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000002 /* ComposableArchitecture */; };
+		A10000000000000000000005 /* RootSurfaceSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* RootSurfaceSnapshotTests.swift */; };
+		A10000000000000000000008 /* FoundationTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000003 /* FoundationTestSupport */; };
+		A10000000000000000000009 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000004 /* SnapshotTesting */; };
+		A10000000000000000000025 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10000000000000000000001 /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000000000000000000002 /* AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000000000000000000003 /* Application.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Application.swift; sourceTree = "<group>"; };
+		B10000000000000000000004 /* RootSurfaceSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootSurfaceSnapshotTests.swift; sourceTree = "<group>"; };
+		B10000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10000000000000000000006 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		B10000000000000000000007 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		B10000000000000000000008 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		B10000000000000000000009 /* ApplicationFoundation */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Packages/ApplicationFoundation; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000003 /* AppFeature in Frameworks */,
+				A10000000000000000000004 /* ComposableArchitecture in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000025 /* AppFeature in Frameworks */,
+				A10000000000000000000008 /* FoundationTestSupport in Frameworks */,
+				A10000000000000000000009 /* SnapshotTesting in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		E10000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				E10000000000000000000003 /* App */,
+				E10000000000000000000004 /* AppTests */,
+				E10000000000000000000007 /* Packages */,
+				E10000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E10000000000000000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000001 /* App.app */,
+				B10000000000000000000002 /* AppTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000003 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000003 /* Application.swift */,
+				E10000000000000000000005 /* Configuration */,
+				E10000000000000000000006 /* Resources */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000004 /* AppTests */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000004 /* RootSurfaceSnapshotTests.swift */,
+			);
+			path = AppTests;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000005 /* Configuration */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000006 /* Base.xcconfig */,
+				B10000000000000000000007 /* Debug.xcconfig */,
+				B10000000000000000000008 /* Release.xcconfig */,
+			);
+			path = Configuration;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000006 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000005 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000007 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000009 /* ApplicationFoundation */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D10000000000000000000001 /* App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000000000000000000008 /* Build configuration list for PBXNativeTarget "App" */;
+			buildPhases = (
+				C10000000000000000000001 /* Sources */,
+				C10000000000000000000002 /* Resources */,
+				C10000000000000000000003 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = App;
+			packageProductDependencies = (
+				120000000000000000000001 /* AppFeature */,
+				120000000000000000000002 /* ComposableArchitecture */,
+			);
+			productName = App;
+			productReference = B10000000000000000000001 /* App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D10000000000000000000002 /* AppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000000000000000000009 /* Build configuration list for PBXNativeTarget "AppTests" */;
+			buildPhases = (
+				C10000000000000000000004 /* Sources */,
+				C10000000000000000000005 /* Resources */,
+				C10000000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AppTests;
+			packageProductDependencies = (
+				120000000000000000000001 /* AppFeature */,
+				120000000000000000000003 /* FoundationTestSupport */,
+				120000000000000000000004 /* SnapshotTesting */,
+			);
+			productName = AppTests;
+			productReference = B10000000000000000000002 /* AppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					D10000000000000000000001 = {
+						CreatedOnToolsVersion = 2700;
+					};
+					D10000000000000000000002 = {
+						CreatedOnToolsVersion = 2700;
+					};
+				};
+			};
+			buildConfigurationList = F10000000000000000000007 /* Build configuration list for PBXProject "App" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = E10000000000000000000001;
+			packageReferences = (
+				110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */,
+				110000000000000000000002 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */,
+				110000000000000000000006 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+			);
+			productRefGroup = E10000000000000000000002 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D10000000000000000000001 /* App */,
+				D10000000000000000000002 /* AppTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C10000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C10000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000002 /* Application.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000005 /* RootSurfaceSnapshotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		F10000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000007 /* Debug.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+			};
+			name = Debug;
+		};
+		F10000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000008 /* Release.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+			};
+			name = Release;
+		};
+		F10000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_PREVIEWS = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		F10000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_PREVIEWS = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		F10000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.applicationfoundation.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		F10000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.applicationfoundation.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F10000000000000000000007 /* Build configuration list for PBXProject "App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000000000000000000001 /* Debug */,
+				F10000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000000000000000000008 /* Build configuration list for PBXNativeTarget "App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000000000000000000003 /* Debug */,
+				F10000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000000000000000000009 /* Build configuration list for PBXNativeTarget "AppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000000000000000000005 /* Debug */,
+				F10000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		110000000000000000000002 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-composable-architecture";
+			requirement = {
+				kind = exactVersion;
+				version = 1.26.2;
+			};
+		};
+		110000000000000000000006 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing";
+			requirement = {
+				kind = exactVersion;
+				version = 1.19.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ApplicationFoundation;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		120000000000000000000001 /* AppFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */;
+			productName = AppFeature;
+		};
+		120000000000000000000002 /* ComposableArchitecture */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 110000000000000000000002 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */;
+			productName = ComposableArchitecture;
+		};
+		120000000000000000000003 /* FoundationTestSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */;
+			productName = FoundationTestSupport;
+		};
+		120000000000000000000004 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 110000000000000000000006 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+	};
+	rootObject = A10000000000000000000001 /* Project object */;
+}
