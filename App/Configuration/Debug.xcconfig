@@ -2,3 +2,4 @@
 
 APP_DISPLAY_NAME = Folaro Dev
 PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.folaro.dev
+PRO_PRODUCT_IDENTIFIER = com.danielbyon.folaro.dev.pro

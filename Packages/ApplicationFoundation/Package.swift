@@ -11,6 +11,7 @@ let package = Package(
     .library(name: "AppFeature", type: .static, targets: ["AppFeature"]),
     .library(name: "CalculatorFeature", type: .static, targets: ["CalculatorFeature"]),
     .library(name: "AppIdentity", type: .static, targets: ["AppIdentity"]),
+    .library(name: "Entitlement", type: .static, targets: ["Entitlement"]),
     .library(name: "FoundationTestSupport", type: .static, targets: ["FoundationTestSupport"]),
     .library(name: "PersistenceSupport", type: .static, targets: ["PersistenceSupport"])
   ],
@@ -76,6 +77,13 @@ let package = Package(
       ]
     ),
     .target(
+      name: "Entitlement",
+      dependencies: [
+        .product(name: "Dependencies", package: "swift-dependencies"),
+        .product(name: "DependenciesMacros", package: "swift-dependencies")
+      ]
+    ),
+    .target(
       name: "FoundationTestSupport",
       dependencies: [
         .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
@@ -106,6 +114,13 @@ let package = Package(
       name: "AppIdentityTests",
       dependencies: [
         "AppIdentity",
+        .product(name: "Dependencies", package: "swift-dependencies")
+      ]
+    ),
+    .testTarget(
+      name: "EntitlementTests",
+      dependencies: [
+        "Entitlement",
         .product(name: "Dependencies", package: "swift-dependencies")
       ]
     ),
