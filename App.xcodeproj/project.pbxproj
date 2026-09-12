@@ -13,6 +13,7 @@
 		A10000000000000000000005 /* RootSurfaceSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* RootSurfaceSnapshotTests.swift */; };
 		A10000000000000000000008 /* FoundationTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000003 /* FoundationTestSupport */; };
 		A10000000000000000000009 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000004 /* SnapshotTesting */; };
+		A10000000000000000000025 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +42,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000025 /* AppFeature in Frameworks */,
 				A10000000000000000000008 /* FoundationTestSupport in Frameworks */,
 				A10000000000000000000009 /* SnapshotTesting in Frameworks */,
 			);
@@ -147,10 +149,10 @@
 			buildRules = (
 			);
 			dependencies = (
-				130000000000000000000002 /* PBXTargetDependency */,
 			);
 			name = AppTests;
 			packageProductDependencies = (
+				120000000000000000000001 /* AppFeature */,
 				120000000000000000000003 /* FoundationTestSupport */,
 				120000000000000000000004 /* SnapshotTesting */,
 			);
@@ -239,14 +241,6 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
-/* Begin PBXTargetDependency section */
-		130000000000000000000002 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = D10000000000000000000001 /* App */;
-			targetProxy = 130000000000000000000001 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin PBXVariantGroup section */
 /* End PBXVariantGroup section */
 
@@ -300,7 +294,6 @@
 		F10000000000000000000005 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
@@ -310,14 +303,12 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/App.app/App";
 			};
 			name = Debug;
 		};
 		F10000000000000000000006 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
@@ -327,7 +318,6 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/App.app/App";
 			};
 			name = Release;
 		};
@@ -412,15 +402,6 @@
 		};
 /* End XCSwiftPackageProductDependency section */
 
-/* Begin PBXContainerItemProxy section */
-		130000000000000000000001 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A10000000000000000000001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = D10000000000000000000001;
-			remoteInfo = App;
-		};
-/* End PBXContainerItemProxy section */
 	};
 	rootObject = A10000000000000000000001 /* Project object */;
 }

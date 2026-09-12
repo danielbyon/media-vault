@@ -39,15 +39,6 @@
 				</BuildableReference>
 			</TestableReference>
 		</Testables>
-		<MacroExpansion>
-			<BuildableReference
-				BuildableIdentifier = "primary"
-				BlueprintIdentifier = "D10000000000000000000001"
-				BuildableName = "App.app"
-				BlueprintName = "App"
-				ReferencedContainer = "container:App.xcodeproj">
-			</BuildableReference>
-		</MacroExpansion>
 	</TestAction>
 	<LaunchAction
 		buildConfiguration = "Debug"
