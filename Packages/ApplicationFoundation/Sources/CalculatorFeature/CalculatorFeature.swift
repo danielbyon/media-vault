@@ -148,6 +148,11 @@ public struct CalculatorFeature {
     }
   }
 
+  /// Persists the latest snapshot, superseding any save still in flight for a prior edit.
+  ///
+  /// Every edit starts its own asynchronous save, so a slow, older save could otherwise finish
+  /// after a newer one and overwrite it with stale state. The coordinator serializes writes and
+  /// keeps only the newest pending snapshot.
   private func persistenceEffect(for state: State) -> Effect<Action> {
     let snapshot = state.snapshot
     let save = persistence.save
