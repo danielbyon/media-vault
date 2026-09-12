@@ -56,18 +56,24 @@ public struct CalculatorFeature {
 
   private static let maximumHistoryCount = 20
 
+  private let persistenceCoordinator: CalculatorPersistenceCoordinator
   @Dependency(\.calculatorClipboard) private var clipboard
   @Dependency(\.calculatorPersistence) private var persistence
   @Dependency(\.date.now) private var now
   @Dependency(\.uuid) private var uuid
 
-  public init() {}
+  public init() {
+    self.persistenceCoordinator = CalculatorPersistenceCoordinator()
+  }
 
   public var body: some ReducerOf<Self> {
     Reduce { state, action in
       switch action {
       case .task:
         guard !state.isLoading else { return .none }
+        if state.persistenceError != nil {
+          return persistenceEffect(for: state)
+        }
         state.persistenceError = nil
         state.isLoading = true
         let load = persistence.load
@@ -121,6 +127,7 @@ public struct CalculatorFeature {
           state.display = result
           state.expression = value
           state.isShowingResult = true
+          recordHistory(source: value, result: result, in: &state)
           return persistenceEffect(for: state)
         } catch let error as CalculatorError {
           state.error = error
@@ -145,15 +152,28 @@ public struct CalculatorFeature {
     let snapshot = state.snapshot
     let save = persistence.save
     let shouldClearPersistenceError = state.persistenceError != nil
+    let coordinator = persistenceCoordinator
     return .run { send in
-      do {
-        try await save(snapshot)
+      switch await coordinator.enqueue(snapshot, save: save) {
+      case .succeeded:
         if shouldClearPersistenceError {
           await send(.persistenceSucceeded)
         }
-      } catch {
+      case .failed:
         await send(.persistenceFailed)
+      case .superseded:
+        break
       }
+    }
+  }
+
+  private func recordHistory(source: String, result: String, in state: inout State) {
+    state.history.insert(
+      CalculatorHistoryEntry(id: uuid(), expression: source, result: result, date: now),
+      at: 0
+    )
+    if state.history.count > Self.maximumHistoryCount {
+      state.history.removeLast(state.history.count - Self.maximumHistoryCount)
     }
   }
 
@@ -258,20 +278,18 @@ public struct CalculatorFeature {
         state.expression = replaceCurrentToken(in: state.expression, with: "-" + token)
       }
       state.display = currentToken(in: state.expression)
+      if state.display.isEmpty {
+        state.display = "0"
+      }
       return true
 
     case .equals:
+      guard !state.isShowingResult else { return false }
       let source = state.expression.isEmpty ? state.display : state.expression
       guard !source.isEmpty else { return false }
       do {
         let result = try CalculatorEngine().evaluate(source)
-        state.history.insert(
-          CalculatorHistoryEntry(id: uuid(), expression: source, result: result, date: now),
-          at: 0
-        )
-        if state.history.count > Self.maximumHistoryCount {
-          state.history.removeLast(state.history.count - Self.maximumHistoryCount)
-        }
+        recordHistory(source: source, result: result, in: &state)
         state.display = result
         state.expression = result
         state.isShowingResult = true
@@ -322,7 +340,10 @@ public struct CalculatorFeature {
       let memory = state.memory ?? "0"
       let operation = button == .memoryAdd ? "+" : "-"
       do {
-        state.memory = try CalculatorEngine().evaluate("\(memory)\(operation)\(state.display)")
+        let operand = state.display == ")"
+          ? try CalculatorEngine().evaluate(state.expression)
+          : state.display
+        state.memory = try CalculatorEngine().evaluate("\(memory)\(operation)\(operand)")
         return true
       } catch let error as CalculatorError {
         state.error = error
@@ -436,5 +457,93 @@ public struct CalculatorFeature {
 
   private var operatorCharacters: Set<Character> {
     ["+", "−", "-", "×", "÷", "*", "/", "("]
+  }
+}
+
+/// Serializes calculator saves and keeps only the newest pending snapshot.
+///
+/// Reducer effects are allowed to run concurrently, while the calculator store represents a
+/// single logical document. This coordinator prevents an older asynchronous save from completing
+/// after a newer save and overwriting the latest state. A pending request that has not started is
+/// superseded without touching the persistence boundary.
+private final class CalculatorPersistenceCoordinator: @unchecked Sendable {
+  fileprivate enum SaveOutcome: Sendable {
+    case superseded
+    case succeeded
+    case failed
+  }
+
+  private struct PendingRequest {
+    let revision: Int
+    let snapshot: CalculatorSnapshot
+    let save: @Sendable (CalculatorSnapshot) async throws -> Void
+    let continuation: CheckedContinuation<SaveOutcome, Never>
+  }
+
+  private let lock = NSLock()
+  private var nextRevision = 0
+  private var latestRevision = 0
+  private var pendingRequest: PendingRequest?
+  private var worker: Task<Void, Never>?
+
+  func enqueue(
+    _ snapshot: CalculatorSnapshot,
+    save: @escaping @Sendable (CalculatorSnapshot) async throws -> Void
+  ) async -> SaveOutcome {
+    await withCheckedContinuation { continuation in
+      let supersededContinuation = lock.withLock {
+        nextRevision += 1
+        latestRevision = nextRevision
+        let request = PendingRequest(
+          revision: nextRevision,
+          snapshot: snapshot,
+          save: save,
+          continuation: continuation
+        )
+        let supersededContinuation = pendingRequest?.continuation
+        pendingRequest = request
+        if worker == nil {
+          worker = Task { [self] in
+            await run()
+          }
+        }
+        return supersededContinuation
+      }
+      supersededContinuation?.resume(returning: .superseded)
+    }
+  }
+
+  private func run() async {
+    while true {
+      let request: PendingRequest? = lock.withLock {
+        guard let request = pendingRequest else {
+          worker = nil
+          return nil
+        }
+        pendingRequest = nil
+        return request
+      }
+      guard let request else { return }
+
+      guard isLatest(request.revision) else {
+        request.continuation.resume(returning: .superseded)
+        continue
+      }
+
+      do {
+        try await request.save(request.snapshot)
+        request.continuation.resume(
+          returning: isLatest(request.revision) ? .succeeded : .superseded
+        )
+      } catch {
+        request.continuation.resume(
+          returning: isLatest(request.revision) ? .failed : .superseded
+        )
+      }
+    }
+  }
+
+  private func isLatest(_ revision: Int) -> Bool {
+    lock.withLock { revision == latestRevision }
   }
 }

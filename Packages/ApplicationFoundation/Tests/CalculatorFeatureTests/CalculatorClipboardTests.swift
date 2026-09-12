@@ -1,6 +1,7 @@
 import CalculatorFeature
 import ComposableArchitecture
 import ConcurrencyExtras
+import Foundation
 import Testing
 
 @Suite("Calculator clipboard behavior")
@@ -16,6 +17,8 @@ struct CalculatorClipboardTests {
       $0.calculatorPersistence.save = { _ in }
       $0.calculatorClipboard.copy = { copied.setValue($0) }
       $0.calculatorClipboard.paste = { "9×2" }
+      $0.date.now = Date(timeIntervalSince1970: 1_725_000_005)
+      $0.uuid = .constant(UUID(uuidString: "00000000-0000-0000-0000-000000000008")!)
     }
 
     await store.send(.button(.digit(7))) {
@@ -30,6 +33,14 @@ struct CalculatorClipboardTests {
       $0.display = "18"
       $0.expression = "9×2"
       $0.isShowingResult = true
+      $0.history = [
+        CalculatorHistoryEntry(
+          id: UUID(uuidString: "00000000-0000-0000-0000-000000000008")!,
+          expression: "9×2",
+          result: "18",
+          date: Date(timeIntervalSince1970: 1_725_000_005)
+        )
+      ]
     }
   }
 
@@ -54,4 +65,3 @@ struct CalculatorClipboardTests {
     }
   }
 }
-
