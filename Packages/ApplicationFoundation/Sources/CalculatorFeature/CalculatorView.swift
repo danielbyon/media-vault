@@ -1,4 +1,5 @@
 import ComposableArchitecture
+import Dependencies
 import SwiftUI
 
 /// A width-agnostic calculator surface for compact phones, large phones, and regular-width iPads.
@@ -18,6 +19,9 @@ public struct CalculatorView: View {
     ScrollView {
       VStack(spacing: 16) {
         displayPanel
+        if store.persistenceError != nil {
+          persistenceFailurePanel
+        }
         clipboardControls
         keypad
         historyPanel
@@ -62,6 +66,25 @@ public struct CalculatorView: View {
     }
     .buttonStyle(.bordered)
     .frame(maxWidth: .infinity, alignment: .trailing)
+    .disabled(store.isLoading)
+  }
+
+  private var persistenceFailurePanel: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("History unavailable")
+        .font(.headline)
+        .foregroundStyle(.red)
+      Text("Calculations can continue, but history cannot be saved or restored.")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+      Button("Retry") {
+        store.send(.task)
+      }
+      .buttonStyle(.bordered)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(12)
+    .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
   }
 
   private var keypad: some View {
@@ -83,6 +106,7 @@ public struct CalculatorView: View {
         .accessibilityLabel(key.accessibilityLabel)
       }
     }
+    .disabled(store.isLoading)
   }
 
   @ViewBuilder
@@ -159,16 +183,23 @@ private struct Key {
 }
 
 #Preview("Calculator initial") {
-  CalculatorView(
-    store: .init(initialState: CalculatorFeature.State()) {
+  let store = withDependencies {
+    $0.calculatorPersistence.load = { nil }
+    $0.calculatorPersistence.save = { _ in }
+  } operation: {
+    Store(initialState: CalculatorFeature.State()) {
       CalculatorFeature()
     }
-  )
+  }
+  CalculatorView(store: store)
 }
 
 #Preview("Calculator history") {
-  CalculatorView(
-    store: .init(
+  let store = withDependencies {
+    $0.calculatorPersistence.load = { nil }
+    $0.calculatorPersistence.save = { _ in }
+  } operation: {
+    Store(
       initialState: CalculatorFeature.State(
         snapshot: CalculatorSnapshot(
           display: "14",
@@ -186,5 +217,6 @@ private struct Key {
     ) {
       CalculatorFeature()
     }
-  )
+  }
+  CalculatorView(store: store)
 }

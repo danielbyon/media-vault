@@ -105,7 +105,6 @@ let package = Package(
         "FoundationTestSupport",
         "PersistenceSupport",
         .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
-        .product(name: "CustomDump", package: "swift-custom-dump"),
         .product(name: "Dependencies", package: "swift-dependencies"),
         .product(name: "SnapshotTesting", package: "swift-snapshot-testing")
       ]

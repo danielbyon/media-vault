@@ -12,7 +12,7 @@ import Testing
 struct RootSurfaceSnapshotTests {
   @Test("The empty calculator state has a stable structural snapshot")
   func rootStateSnapshot() {
-    assertSnapshot(of: CalculatorSnapshot(), as: .dump)
+    assertSnapshot(of: RootFeature.State(), as: .dump)
   }
 
   @Test("The root surface is stable on a compact iPhone")
@@ -51,5 +51,13 @@ struct RootSurfaceSnapshotTests {
 
     return RootView(store: store)
       .environment(\.colorScheme, .light)
+  }
+}
+
+extension RootFeature.State: @retroactive AnySnapshotStringConvertible {
+  public static var renderChildren: Bool { false }
+
+  public var snapshotDescription: String {
+    "RootFeature.State(calculator: (display: \(calculator.display.debugDescription), expression: \(calculator.expression.debugDescription), memory: \(String(describing: calculator.memory)), historyCount: \(calculator.history.count), error: \(String(describing: calculator.error)), persistenceError: \(String(describing: calculator.persistenceError)), isLoading: \(calculator.isLoading), isShowingResult: \(calculator.isShowingResult)))"
   }
 }

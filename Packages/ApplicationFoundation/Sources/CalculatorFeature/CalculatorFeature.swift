@@ -50,8 +50,11 @@ public struct CalculatorFeature {
     case loaded(Result<CalculatorSnapshot?, CalculatorPersistenceError>)
     case button(CalculatorButton)
     case pasted(String?)
+    case persistenceSucceeded
     case persistenceFailed
   }
+
+  private static let maximumHistoryCount = 20
 
   @Dependency(\.calculatorClipboard) private var clipboard
   @Dependency(\.calculatorPersistence) private var persistence
@@ -64,7 +67,8 @@ public struct CalculatorFeature {
     Reduce { state, action in
       switch action {
       case .task:
-        guard !state.isLoading, state.persistenceError == nil else { return .none }
+        guard !state.isLoading else { return .none }
+        state.persistenceError = nil
         state.isLoading = true
         let load = persistence.load
         return .run { send in
@@ -79,6 +83,7 @@ public struct CalculatorFeature {
         state.isLoading = false
         switch result {
         case let .success(snapshot):
+          state.persistenceError = nil
           guard let snapshot else { return .none }
           state.display = snapshot.display
           state.expression = snapshot.expression
@@ -91,6 +96,7 @@ public struct CalculatorFeature {
         return .none
 
       case let .button(button):
+        guard !state.isLoading else { return .none }
         switch button {
         case .copy:
           clipboard.copy(state.display)
@@ -127,6 +133,10 @@ public struct CalculatorFeature {
       case .persistenceFailed:
         state.persistenceError = .unavailable
         return .none
+
+      case .persistenceSucceeded:
+        state.persistenceError = nil
+        return .none
       }
     }
   }
@@ -134,9 +144,13 @@ public struct CalculatorFeature {
   private func persistenceEffect(for state: State) -> Effect<Action> {
     let snapshot = state.snapshot
     let save = persistence.save
+    let shouldClearPersistenceError = state.persistenceError != nil
     return .run { send in
       do {
         try await save(snapshot)
+        if shouldClearPersistenceError {
+          await send(.persistenceSucceeded)
+        }
       } catch {
         await send(.persistenceFailed)
       }
@@ -225,7 +239,10 @@ public struct CalculatorFeature {
       }
 
     case .sign:
-      prepareForNewInputIfResultIsBeingShown(&state)
+      if state.isShowingResult {
+        state.expression = state.display
+        state.isShowingResult = false
+      }
       if state.expression.isEmpty {
         state.expression = "-"
         state.display = "-"
@@ -252,6 +269,9 @@ public struct CalculatorFeature {
           CalculatorHistoryEntry(id: uuid(), expression: source, result: result, date: now),
           at: 0
         )
+        if state.history.count > Self.maximumHistoryCount {
+          state.history.removeLast(state.history.count - Self.maximumHistoryCount)
+        }
         state.display = result
         state.expression = result
         state.isShowingResult = true
@@ -337,11 +357,16 @@ public struct CalculatorFeature {
   }
 
   private func appendOperator(_ symbol: Character, to state: inout State) -> Bool {
-    prepareForNewInputIfResultIsBeingShown(&state)
     if state.expression.isEmpty {
       state.expression = state.display
     }
     guard !state.expression.isEmpty else { return false }
+    if state.isShowingResult {
+      state.isShowingResult = false
+    }
+    if state.expression.last == "(" {
+      guard symbol == "-" else { return false }
+    }
 
     if let last = state.expression.last, operatorCharacters.contains(last) {
       if symbol == "-" {
@@ -397,6 +422,13 @@ public struct CalculatorFeature {
   private func replaceCurrentToken(in expression: String, with token: String) -> String {
     guard let index = expression.lastIndex(where: { operatorCharacters.contains($0) }) else {
       return token
+    }
+    if expression[index] == "-" {
+      let isUnary = index == expression.startIndex
+        || operatorCharacters.contains(expression[expression.index(before: index)])
+      if isUnary {
+        return String(expression[..<index]) + token
+      }
     }
     let end = expression.index(after: index)
     return String(expression[..<end]) + token
