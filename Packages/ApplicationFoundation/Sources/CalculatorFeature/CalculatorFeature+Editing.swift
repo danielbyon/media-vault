@@ -8,6 +8,31 @@
 import Foundation
 
 extension CalculatorFeature {
+    /// Projects digit input through the calculator's ordinary synchronous editing semantics.
+    ///
+    /// The supplied state is copied before any input is applied. This helper therefore produces a
+    /// presentation-only result: it sends no reducer actions, records no history, and schedules no
+    /// persistence. The root feature uses it while a hidden credential candidate remains transient.
+    public static func projectedPresentation(
+        afterDigits digits: String,
+        from state: State,
+    ) -> CalculatorPresentation {
+        var projectedState = state
+        let calculator = CalculatorFeature()
+
+        for character in digits {
+            guard let asciiValue = character.asciiValue,
+                  (48 ... 57).contains(asciiValue)
+            else {
+                continue
+            }
+
+            _ = calculator.apply(.digit(Int(asciiValue - 48)), to: &projectedState)
+        }
+
+        return projectedState.presentation
+    }
+
     @discardableResult
     func apply(_ button: CalculatorButton, to state: inout State) -> Bool {
         state.error = nil

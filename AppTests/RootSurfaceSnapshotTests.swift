@@ -50,6 +50,7 @@ struct RootSurfaceSnapshotTests {
         let store = withDependencies {
             $0.calculatorPersistence.load = { nil }
             $0.calculatorPersistence.save = { _ in }
+            $0.vaultCredential.loadConfiguration = { nil }
         } operation: {
             Store(initialState: RootFeature.State()) {
                 RootFeature()
