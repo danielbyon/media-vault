@@ -1,0 +1,34 @@
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorView.swift
+  s_ac70d99782e2da::t_a64ee3c8ab6b0d 22,42-43,57-61
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultFeature.swift
+  s_ac70d99782e2da::t_37c7a79206794d 302,312,322-326,329,418-420,448-452
+  s_ac70d99782e2da::t_504e1e6579a3c5 421
+Packages/ApplicationFoundation/Sources/AppFeature/RootFeature.swift
+  s_ac70d99782e2da::t_c68c5c1673b754 202-204
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureTests.swift
+  s_ac70d99782e2da::t_a035f6b869dd0c 337,404
+  s_ac70d99782e2da::t_212d0c8060c3cc 240-296,298-311,317-336,338-350,400,403
+  s_ac70d99782e2da::t_1a88ae76026b8d 410-413
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultCredentialClient.swift
+  s_ac70d99782e2da::t_2047e08b56e8d4 112,119,124,128,134-138,153,181,218-235,243-247,253-273
+  s_ac70d99782e2da::t_3d7f6536266e2c 321-341,365,373,382,396-406,426-427
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootFeatureTests.swift
+  s_ac70d99782e2da::t_d80f27b105c4aa 34,38
+  s_ac70d99782e2da::t_27ecc38a4214b4 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3acf481f9f55e4975f3af3571d6e0d84b2825861",
+  "prompts": {},
+  "sessions": {
+    "s_ac70d99782e2da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a097a1-d6a0-7933-a53a-244097d902e8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
