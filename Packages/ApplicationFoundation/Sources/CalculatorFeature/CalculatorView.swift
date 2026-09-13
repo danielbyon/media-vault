@@ -19,6 +19,7 @@ import SwiftUI
 public struct CalculatorView: View {
     private let store: StoreOf<CalculatorFeature>
     private let presentationOverride: CalculatorPresentation?
+    private let displayOverride: String?
     private let inputHandler: (CalculatorInput) -> Void
 
     /// Creates a calculator surface backed by the supplied store.
@@ -38,9 +39,8 @@ public struct CalculatorView: View {
         inputHandler: ((CalculatorInput) -> Void)? = nil,
     ) {
         self.store = store
-        self.presentationOverride = presentationOverride ?? displayOverride.map {
-            CalculatorPresentation(display: $0, expression: store.expression, error: store.error)
-        }
+        self.presentationOverride = presentationOverride
+        self.displayOverride = displayOverride
         self.inputHandler = inputHandler ?? { input in
             switch input {
             case .retryPersistence:
@@ -54,7 +54,11 @@ public struct CalculatorView: View {
     }
 
     private var renderedPresentation: CalculatorPresentation {
-        presentationOverride ?? store.presentation
+        presentationOverride
+            ?? displayOverride.map {
+                CalculatorPresentation(display: $0, expression: store.expression, error: store.error)
+            }
+            ?? store.presentation
     }
 
     /// Renders the display, controls, keypad, and calculation history.

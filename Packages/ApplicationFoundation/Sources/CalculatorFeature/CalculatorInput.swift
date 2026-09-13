@@ -5,8 +5,6 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import Foundation
-
 /// A calculator surface input before it is dispatched to the calculator reducer.
 ///
 /// The input seam lets a composition root add an interaction policy around the calculator without

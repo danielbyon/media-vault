@@ -299,7 +299,7 @@ extension VaultFeature {
         case .submitSetup:
             return submitSetup(state: &state)
         case let .setupCompleted(result):
-            completeSetup(result, state: &state)
+            return completeSetup(result, state: &state)
         default:
             return .none
         }
@@ -309,7 +309,7 @@ extension VaultFeature {
     private func completeSetup(
         _ result: Result<VaultCredentialConfiguration, VaultCredentialError>,
         state: inout State,
-    ) {
+    ) -> Effect<Action> {
         state.isWorking = false
         switch result {
         case let .success(configuration):
@@ -319,8 +319,14 @@ extension VaultFeature {
             state.confirmationInput = ""
             state.error = nil
         case let .failure(error):
+            if error == .alreadyConfigured {
+                state.phase = .loading
+                state.error = nil
+                return .send(.task)
+            }
             state.error = map(error)
         }
+        return .none
     }
 
     private func handleAuthentication(into state: inout State, action: Action) -> Effect<Action> {
@@ -409,6 +415,10 @@ extension VaultFeature {
             }
             .cancellable(id: VaultEffectID.hiddenVerification)
         case let .hiddenVerificationCompleted(result):
+            guard state.phase == .locked, state.isWorking else {
+                return .none
+            }
+
             completeHiddenVerification(result, state: &state)
         default:
             return .none
@@ -435,7 +445,11 @@ extension VaultFeature {
         guard state.phase == .setup, !state.isWorking else {
             return .none
         }
-        guard isValidSetupCredential(state), state.credentialInput == state.confirmationInput else {
+        guard VaultCredentialValidation.isValid(
+            kind: state.setupKind,
+            credential: state.credentialInput,
+            usesHiddenEntry: state.usesHiddenEntry,
+        ), state.credentialInput == state.confirmationInput else {
             state.error = state.credentialInput == state.confirmationInput
                 ? .invalidCredential
                 : .mismatchedCredentials
@@ -459,17 +473,6 @@ extension VaultFeature {
             } catch {
                 await send(.setupCompleted(.failure(.unavailable)))
             }
-        }
-    }
-
-    private func isValidSetupCredential(_ state: State) -> Bool {
-        switch state.setupKind {
-        case .pin:
-            let bytes = Array(state.credentialInput.utf8)
-            return (4 ... 12).contains(bytes.count)
-                && bytes.allSatisfy { (0x30 ... 0x39).contains($0) }
-        case .password:
-            return !state.credentialInput.isEmpty
         }
     }
 

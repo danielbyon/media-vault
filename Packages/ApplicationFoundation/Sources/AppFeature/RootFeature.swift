@@ -199,6 +199,9 @@ public struct RootFeature {
             return .none
         case .incorrect,
              .unavailable:
+            // Both non-success outcomes intentionally replay the complete candidate and equals
+            // action. The calculator is the decoy surface, so this preserves the ordinary-input
+            // contract even when credential storage cannot distinguish a wrong candidate.
             return replay(
                 candidate: hiddenEntry.candidate,
                 followedBy: .calculator(.button(.equals)),

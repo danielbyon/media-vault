@@ -237,19 +237,117 @@ struct VaultFeatureTests {
         await store.finish()
     }
 
+    @Test("A setup race reloads the existing configuration and locks the vault")
+    @MainActor
+    func setupRaceReloadsExistingConfiguration() async {
+        let configuration = VaultCredentialConfiguration(kind: .pin, usesHiddenEntry: true)
+        let store = TestStore(initialState: VaultFeature.State(phase: .setup)) {
+            VaultFeature()
+        } withDependencies: {
+            $0.vaultCredential.configure = { _, _, _ in
+                throw VaultCredentialError.alreadyConfigured
+            }
+            $0.vaultCredential.loadConfiguration = {
+                configuration
+            }
+        }
+
+        await store.send(.setupCredentialChanged("1234")) {
+            $0.credentialInput = "1234"
+        }
+        await store.send(.setupConfirmationChanged("1234")) {
+            $0.confirmationInput = "1234"
+        }
+        await store.send(.submitSetup) {
+            $0.isWorking = true
+        }
+        await store.receive(.setupCompleted(.failure(.alreadyConfigured))) {
+            $0.phase = .loading
+            $0.error = nil
+            $0.isWorking = false
+        }
+        await store.receive(.task) {
+            $0.isWorking = true
+        }
+        await store.receive(.configurationLoaded(.success(configuration))) {
+            $0.phase = .locked
+            $0.configuredKind = .pin
+            $0.usesHiddenEntry = true
+            $0.isWorking = false
+        }
+    }
+
+    @Test("A stale hidden completion cannot unlock normal authentication")
+    @MainActor
+    func staleHiddenCompletionCannotUnlockNormalAuthentication() async {
+        let store = TestStore(
+            initialState: VaultFeature.State(
+                phase: .authentication,
+                configuredKind: .pin,
+                usesHiddenEntry: true,
+            ),
+        ) {
+            VaultFeature()
+        }
+
+        await store.send(.hiddenVerificationCompleted(.succeeded))
+        #expect(store.state.phase == .authentication)
+    }
+
     @Test("A password configuration cannot enable PIN-equals entry")
-    func passwordConfigurationCannotUseHiddenEntry() {
-        let state = VaultFeature.State(
-            phase: .locked,
-            configuredKind: .password,
-            usesHiddenEntry: true,
-        )
-        #expect(!state.canUseHiddenEntry)
+    @MainActor
+    func passwordConfigurationCannotUseHiddenEntry() async {
+        let store = TestStore(initialState: VaultFeature.State(phase: .loading)) {
+            VaultFeature()
+        }
+
+        await store.send(
+            .configurationLoaded(.success(.init(kind: .password, usesHiddenEntry: true))),
+        ) {
+            $0.phase = .locked
+            $0.configuredKind = .password
+            $0.usesHiddenEntry = false
+        }
+        #expect(!store.state.canUseHiddenEntry)
     }
 }
 
 @Suite("Vault credential persistence")
 struct VaultCredentialPersistenceTests {
+    @Test("An empty verification candidate is incorrect without reading storage")
+    func emptyVerificationCandidateIsIncorrectWithoutReadingStorage() async {
+        let storage = TestCredentialStorage()
+        let client = VaultCredentialLiveAdapter(
+            storage: storage,
+            randomBytes: { count in Data(repeating: 0xa5, count: count) },
+        ).client
+
+        #expect(await client.verify("") == .incorrect)
+        #expect(await storage.loadCount == 0)
+    }
+
+    @Test("A failed verification persists a retry throttle")
+    func failedVerificationPersistsRetryThrottle() async throws {
+        let storage = TestCredentialStorage()
+        let client = VaultCredentialLiveAdapter(
+            storage: storage,
+            randomBytes: { count in Data(repeating: 0xa5, count: count) },
+        ).client
+
+        _ = try await client.configure(.pin, "1234", false)
+        #expect(await client.verify("0000") == .incorrect)
+
+        let reloadedClient = VaultCredentialLiveAdapter(
+            storage: storage,
+            randomBytes: { count in Data(repeating: 0xa5, count: count) },
+        ).client
+        #expect(await reloadedClient.verify("1111") == .unavailable)
+
+        let persisted = try #require(await storage.data)
+        let record = try #require(JSONSerialization.jsonObject(with: persisted) as? [String: Any])
+        #expect(record["retryAfter"] != nil)
+    }
+
     @Test("Password validation rejects only an empty string")
     func passwordValidationRejectsOnlyEmptyString() async throws {
         let storage = TestCredentialStorage()
@@ -299,12 +397,18 @@ struct VaultCredentialPersistenceTests {
 
 private actor TestCredentialStorage: VaultCredentialStorage {
     var data: Data?
+    private(set) var loadCount = 0
 
     func load() async throws -> Data? {
-        data
+        loadCount += 1
+        return data
     }
 
     func add(_ data: Data) async throws {
+        self.data = data
+    }
+
+    func update(_ data: Data) async throws {
         self.data = data
     }
 }

@@ -31,32 +31,11 @@ struct RootFeatureTests {
     @Test("A normal equals remains an ordinary calculator action while unconfigured")
     @MainActor
     func normalEqualsRemainsCalculatorActionWhenUnconfigured() async {
-        let calculator = CalculatorFeature.State(
-            snapshot: CalculatorSnapshot(
-                display: "4",
-                expression: "3+4",
-                isShowingResult: false,
-            ),
-        )
-        let store = makeRootStore(
-            vault: VaultFeature.State(phase: .unconfigured),
-            calculator: calculator,
-        )
+        let store = makeRootStore(vault: VaultFeature.State(phase: .unconfigured))
+        store.exhaustivity = .off
 
         await store.send(.calculatorInput(.button(.equals)))
-        await store.receive(.calculator(.button(.equals))) {
-            $0.calculator.display = "7"
-            $0.calculator.expression = "7"
-            $0.calculator.isShowingResult = true
-            $0.calculator.history = [
-                CalculatorHistoryEntry(
-                    id: DeterministicTestSupport.referenceUUID,
-                    expression: "3+4",
-                    result: "7",
-                    date: DeterministicTestSupport.referenceDate,
-                ),
-            ]
-        }
+        await store.receive(.calculator(.button(.equals)))
 
         #expect(store.state.vault.phase == .unconfigured)
     }

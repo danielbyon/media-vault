@@ -109,24 +109,33 @@ extension DependencyValues {
 protocol VaultCredentialStorage: Sendable {
     func load() async throws -> Data?
     func add(_ data: Data) async throws
+    func update(_ data: Data) async throws
 }
 
 /// Coordinates credential record construction and verification without exposing its representation.
 struct VaultCredentialLiveAdapter: Sendable {
     private let storage: any VaultCredentialStorage
     private let randomBytes: @Sendable (Int) throws -> Data
+    private let now: @Sendable () -> Date
 
     init(
         storage: any VaultCredentialStorage,
         randomBytes: @escaping @Sendable (Int) throws -> Data = secureRandomBytes,
+        now: @escaping @Sendable () -> Date = { Date() },
     ) {
         self.storage = storage
         self.randomBytes = randomBytes
+        self.now = now
     }
 
     var client: VaultCredentialClient {
         let storageProvider = storage
         let randomBytesProvider = randomBytes
+        let nowProvider = now
+        let verificationCoordinator = VaultCredentialVerificationCoordinator(
+            storage: storageProvider,
+            now: nowProvider,
+        )
         return VaultCredentialClient(
             loadConfiguration: {
                 try await Self.loadConfiguration(from: storageProvider)
@@ -141,7 +150,7 @@ struct VaultCredentialLiveAdapter: Sendable {
                 )
             },
             verify: { candidate in
-                await Self.verify(candidate: candidate, from: storageProvider)
+                await verificationCoordinator.verify(candidate: candidate)
             },
         )
     }
@@ -169,7 +178,7 @@ struct VaultCredentialLiveAdapter: Sendable {
         storage: any VaultCredentialStorage,
         randomBytes: @Sendable (Int) throws -> Data,
     ) async throws -> VaultCredentialConfiguration {
-        guard CredentialValidation.isValid(
+        guard VaultCredentialValidation.isValid(
             kind: kind,
             credential: credential,
             usesHiddenEntry: usesHiddenEntry,
@@ -206,25 +215,62 @@ struct VaultCredentialLiveAdapter: Sendable {
 
         return record.configuration
     }
+}
 
-    private static func verify(
-        candidate: String,
-        from storage: any VaultCredentialStorage,
-    ) async -> VaultCredentialVerificationResult {
+/// Serializes verification and persists a short retry cooldown in the credential record.
+private actor VaultCredentialVerificationCoordinator {
+    private static let retryDelay: TimeInterval = 1
+
+    private let storage: any VaultCredentialStorage
+    private let now: @Sendable () -> Date
+
+    init(storage: any VaultCredentialStorage, now: @escaping @Sendable () -> Date) {
+        self.storage = storage
+        self.now = now
+    }
+
+    func verify(candidate: String) async -> VaultCredentialVerificationResult {
+        guard !candidate.isEmpty else {
+            return .incorrect
+        }
+
         do {
             guard let data = try await storage.load() else {
                 return .unavailable
             }
 
             let record = try CredentialRecord.decode(data)
+            let currentDate = now()
+            if let retryAfter = record.retryAfter, currentDate < retryAfter {
+                return .unavailable
+            }
+
             let verifier = try CredentialDerivation.derive(
                 candidate,
                 salt: record.salt,
                 workFactor: record.workFactor,
             )
-            return CredentialDerivation.constantTimeEqual(verifier, record.verifier)
-                ? .succeeded
-                : .incorrect
+            guard CredentialDerivation.constantTimeEqual(verifier, record.verifier) else {
+                let throttledRecord = record.withRetryAfter(
+                    currentDate.addingTimeInterval(Self.retryDelay),
+                )
+                do {
+                    try await storage.update(throttledRecord.encoded())
+                } catch {
+                    return .unavailable
+                }
+                return .incorrect
+            }
+            guard record.retryAfter != nil else {
+                return .succeeded
+            }
+
+            do {
+                try await storage.update(record.withRetryAfter(nil).encoded())
+            } catch {
+                return .unavailable
+            }
+            return .succeeded
         } catch {
             return .unavailable
         }
@@ -272,6 +318,27 @@ private actor KeychainCredentialStorage: VaultCredentialStorage {
         }
     }
 
+    func update(_ data: Data) async throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.service,
+            kSecAttrAccount as String: Self.account,
+            kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
+        ]
+        let status = SecItemUpdate(
+            query as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary,
+        )
+        switch status {
+        case errSecSuccess:
+            return
+        case errSecItemNotFound:
+            throw VaultCredentialError.unavailable
+        default:
+            throw VaultCredentialError.unavailable
+        }
+    }
+
     private static func query(returnData: Bool) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -295,6 +362,7 @@ private struct CredentialRecord: Codable, Equatable, Sendable {
     let salt: Data
     let workFactor: UInt32
     let verifier: Data
+    let retryAfter: Date?
 
     init(
         kind: VaultCredentialKind,
@@ -302,6 +370,7 @@ private struct CredentialRecord: Codable, Equatable, Sendable {
         salt: Data,
         workFactor: UInt32,
         verifier: Data,
+        retryAfter: Date? = nil,
     ) {
         formatVersion = Self.currentVersion
         algorithm = Self.currentAlgorithm
@@ -310,6 +379,7 @@ private struct CredentialRecord: Codable, Equatable, Sendable {
         self.salt = salt
         self.workFactor = workFactor
         self.verifier = verifier
+        self.retryAfter = retryAfter
     }
 
     var configuration: VaultCredentialConfiguration {
@@ -321,6 +391,17 @@ private struct CredentialRecord: Codable, Equatable, Sendable {
 
     func encoded() throws -> Data {
         try JSONEncoder().encode(self)
+    }
+
+    func withRetryAfter(_ retryAfter: Date?) -> Self {
+        Self(
+            kind: kind,
+            usesHiddenEntry: usesHiddenEntry,
+            salt: salt,
+            workFactor: workFactor,
+            verifier: verifier,
+            retryAfter: retryAfter,
+        )
     }
 
     static func decode(_ data: Data) throws -> Self {
@@ -342,7 +423,8 @@ private struct CredentialRecord: Codable, Equatable, Sendable {
     }
 }
 
-private enum CredentialValidation {
+/// Applies one credential contract at both the feature and storage boundaries.
+enum VaultCredentialValidation {
     static func isValid(
         kind: VaultCredentialKind,
         credential: String,
