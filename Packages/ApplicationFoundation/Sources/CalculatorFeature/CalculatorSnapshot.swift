@@ -25,7 +25,7 @@ public struct CalculatorSnapshot: Codable, Equatable, Sendable {
     public var history: [CalculatorHistoryEntry]
 
     /// Whether the current display represents a completed calculation.
-    public var isShowingResult: Bool
+    public var isShowingResult = false
 
     /// Creates a calculator snapshot.
     ///
@@ -55,26 +55,6 @@ public struct CalculatorSnapshot: Codable, Equatable, Sendable {
         case memory
         case history
         case isShowingResult
-    }
-
-    /// Creates a snapshot by decoding its persisted representation.
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        display = try container.decode(String.self, forKey: .display)
-        expression = try container.decode(String.self, forKey: .expression)
-        memory = try container.decodeIfPresent(String.self, forKey: .memory)
-        history = try container.decode([CalculatorHistoryEntry].self, forKey: .history)
-        isShowingResult = try container.decodeIfPresent(Bool.self, forKey: .isShowingResult) ?? false
-    }
-
-    /// Encodes the snapshot for persistence.
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(display, forKey: .display)
-        try container.encode(expression, forKey: .expression)
-        try container.encodeIfPresent(memory, forKey: .memory)
-        try container.encode(history, forKey: .history)
-        try container.encode(isShowingResult, forKey: .isShowingResult)
     }
 }
 

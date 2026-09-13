@@ -43,6 +43,7 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
     ///
     /// Reserving synchronously lets the reducer invalidate an older outcome as soon as a newer
     /// edit or load retry is reduced, even if the new effect has not started executing yet.
+    @discardableResult
     func reserveRevision() -> Int {
         lock.withLock {
             nextRevision += 1

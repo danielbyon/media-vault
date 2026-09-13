@@ -230,8 +230,8 @@ private struct Key {
     let accessibilityLabel: String
 
     static let all: [Key] = [
-        Key(title: "AC", button: .clear, isOperator: false, accessibilityLabel: "Clear"),
         Key(title: "⌫", button: .delete, isOperator: false, accessibilityLabel: "Delete"),
+        Key(title: "AC", button: .clear, isOperator: false, accessibilityLabel: "Clear"),
         Key(title: "%", button: .percent, isOperator: true, accessibilityLabel: "Percent"),
         Key(title: "÷", button: .divide, isOperator: true, accessibilityLabel: "Divide"),
         Key(title: "7", button: .digit(7), isOperator: false, accessibilityLabel: "Seven"),
@@ -246,14 +246,14 @@ private struct Key {
         Key(title: "2", button: .digit(2), isOperator: false, accessibilityLabel: "Two"),
         Key(title: "3", button: .digit(3), isOperator: false, accessibilityLabel: "Three"),
         Key(title: "+", button: .add, isOperator: true, accessibilityLabel: "Add"),
-        Key(title: "M+", button: .memoryAdd, isOperator: false, accessibilityLabel: "Add to memory"),
-        Key(title: "M−", button: .memorySubtract, isOperator: false, accessibilityLabel: "Subtract from memory"),
-        Key(title: "MR", button: .memoryRecall, isOperator: false, accessibilityLabel: "Recall memory"),
-        Key(title: "MC", button: .memoryClear, isOperator: false, accessibilityLabel: "Clear memory"),
         Key(title: "0", button: .digit(0), isOperator: false, accessibilityLabel: "Zero"),
         Key(title: "±", button: .sign, isOperator: false, accessibilityLabel: "Change sign"),
         Key(title: ".", button: .decimal, isOperator: false, accessibilityLabel: "Decimal"),
         Key(title: "=", button: .equals, isOperator: true, accessibilityLabel: "Equals"),
+        Key(title: "M+", button: .memoryAdd, isOperator: false, accessibilityLabel: "Add to memory"),
+        Key(title: "M−", button: .memorySubtract, isOperator: false, accessibilityLabel: "Subtract from memory"),
+        Key(title: "MR", button: .memoryRecall, isOperator: false, accessibilityLabel: "Recall memory"),
+        Key(title: "MC", button: .memoryClear, isOperator: false, accessibilityLabel: "Clear memory"),
         Key(title: "(", button: .openParenthesis, isOperator: true, accessibilityLabel: "Open parenthesis"),
         Key(title: ")", button: .closeParenthesis, isOperator: true, accessibilityLabel: "Close parenthesis"),
     ]

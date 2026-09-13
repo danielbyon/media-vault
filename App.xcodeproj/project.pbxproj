@@ -25,7 +25,7 @@
 		B10000000000000000000006 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		B10000000000000000000007 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		B10000000000000000000008 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
-		B10000000000000000000009 /* ApplicationFoundation */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Packages/ApplicationFoundation; sourceTree = "<group>"; };
+		B10000000000000000000009 /* Packages/ApplicationFoundation */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Packages/ApplicationFoundation; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -109,7 +109,7 @@
 		E10000000000000000000007 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				B10000000000000000000009 /* ApplicationFoundation */,
+				B10000000000000000000009 /* Packages/ApplicationFoundation */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -178,7 +178,6 @@
 				};
 			};
 			buildConfigurationList = F10000000000000000000007 /* Build configuration list for PBXProject "App" */;
-			compatibilityVersion = "Xcode 16.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -191,6 +190,7 @@
 				110000000000000000000002 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */,
 				110000000000000000000006 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
 			);
+			preferredProjectObjectVersion = 77;
 			productRefGroup = E10000000000000000000002 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -218,9 +218,6 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
-/* Begin PBXShellScriptBuildPhase section */
-/* End PBXShellScriptBuildPhase section */
-
 /* Begin PBXSourcesBuildPhase section */
 		C10000000000000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -239,9 +236,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXVariantGroup section */
-/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		F10000000000000000000001 /* Debug */ = {
@@ -269,7 +263,10 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_PREVIEWS = YES;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -282,7 +279,10 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_PREVIEWS = YES;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -296,7 +296,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.applicationfoundation.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -311,7 +315,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.applicationfoundation.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -352,6 +360,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ApplicationFoundation;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		110000000000000000000002 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -370,13 +385,6 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/ApplicationFoundation;
-		};
-/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		120000000000000000000001 /* AppFeature */ = {
@@ -400,7 +408,6 @@
 			productName = SnapshotTesting;
 		};
 /* End XCSwiftPackageProductDependency section */
-
 	};
 	rootObject = A10000000000000000000001 /* Project object */;
 }
