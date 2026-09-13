@@ -1,0 +1,113 @@
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultFeature.swift
+  s_ac70d99782e2da::t_586b691f092cb9 496
+  s_ac70d99782e2da::t_5962ed2d26547e 19-24,244-246
+  s_ac70d99782e2da::t_31e001b6881514 186-187,189-195,197-200,202-203,205,207-211,221-222,237,243,248-255,302-327,355-356,359-386,403,408,412-413,417-427,429-431
+  s_ac70d99782e2da::t_f21f6513a274c6 3,452
+  s_ac70d99782e2da::t_5e22d25a1203a4 334,338,399-401,404-406,410,494-495,497
+  s_ac70d99782e2da::t_5611e80720c1df 181,183
+  s_ac70d99782e2da::t_d92b573146473c 402
+  s_ac70d99782e2da::t_2d0807759e4fee 1-2,4-18,25-180,182,184-185,212-215,217-220,223-236,238-239,241-242,247,256-259,261-270,272-282,284-289,291-296,298-301,328-331,333,335-337,339-342,344-349,351-354,357-358,387-394,396-398,409,411,414-416,432-451,453-493,498
+  s_ac70d99782e2da::t_9fd01480a6021d 407
+  s_ac70d99782e2da::t_6323160d54a209 188,196,201,204,206,216,240,260,271,283,290,297,332,343,350,395,428
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultShellFeatureTests.swift
+  s_ac70d99782e2da::t_5e22d25a1203a4 1-34
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature+Editing.swift
+  s_ac70d99782e2da::t_85f2bc089d000a 11-35
+Packages/ApplicationFoundation/Package.swift
+  s_ac70d99782e2da::t_134e850e2ae164 134
+  s_ac70d99782e2da::t_d04f1da04a3550 13,71-82,125-133
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultShellFeature.swift
+  s_ac70d99782e2da::t_9947a236fccf9b 1-2,4-76
+  s_ac70d99782e2da::t_f21f6513a274c6 3
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootFeatureTests+HiddenEntry.swift
+  s_ac70d99782e2da::t_4e2c313d41a13e 1-21,35,37-43,45-49,57-76,78-256
+  s_ac70d99782e2da::t_5e22d25a1203a4 22-34,36,44,50-56,77
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootFeatureTests.swift
+  s_ac70d99782e2da::t_6511e3ab6bf324 24-25,126-127
+  s_ac70d99782e2da::t_f1eab893901f10 123
+  s_ac70d99782e2da::t_08691247d548d6 1-2,4-21,23,26-30,75-80,82-85,115,124-125,128-129,132-134
+  s_ac70d99782e2da::t_1c2e907d38db6d 22,41,67,81,117
+  s_ac70d99782e2da::t_65b50bbd69c64e 64-66,68-74
+  s_ac70d99782e2da::t_f21f6513a274c6 3
+  s_ac70d99782e2da::t_5c08051499ba34 31-40,42-63
+  s_ac70d99782e2da::t_59ad6e8016c752 86-114,116,118-122,130-131
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorPresentation.swift
+  s_ac70d99782e2da::t_85f2bc089d000a 1-37
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureViewSnapshotTests.swift
+  s_ac70d99782e2da::t_54653eb9cef5cc 108-109,111,128-130
+  s_ac70d99782e2da::t_b925b94e109246 110,112-127,137-148
+  s_ac70d99782e2da::t_f58c21bf0bdc29 136,161
+  s_ac70d99782e2da::t_134e850e2ae164 1-2,4-58,91-106,131-135,149-160,162-163
+  s_ac70d99782e2da::t_f21f6513a274c6 3
+  s_ac70d99782e2da::t_cdf5d610657db5 59-90
+  s_ac70d99782e2da::t_3363666deb7689 107
+AppTests/RootSurfaceSnapshotTests.swift
+  s_ac70d99782e2da::t_d63200e2719a28 53
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultCredentialView.swift
+  s_ac70d99782e2da::t_014a80811341a7 185-193
+  s_ac70d99782e2da::t_569a9779d420d4 195
+  s_ac70d99782e2da::t_6323160d54a209 2,42,102
+  s_ac70d99782e2da::t_5962ed2d26547e 32,130,138-141
+  s_ac70d99782e2da::t_abd995c54e18fe 1,3-31,33-41,43-101,103-129,131-137,142-184,194,196-253
+Packages/ApplicationFoundation/Sources/AppFeature/RootFeature.swift
+  s_ac70d99782e2da::t_4ef103a87aaefe 151,153-160
+  s_ac70d99782e2da::t_f21f6513a274c6 87,89,91,94,176,195,217
+  s_ac70d99782e2da::t_40cc12d619bc30 11,15-16,19-34,41-51,53-54,58,60-63,65-70,76,81-86,88,90,92-93,95-103,117,119,121-124,126-129,131,133-143,162,169,174,182-183,186-194,196,199,206-210,212-213,215-216,219,222-228,232,245,247-255,257-259,266-274
+  s_ac70d99782e2da::t_fe8b587f8884b3 106,110-116,118,120,132,211,214,218,220-221,256
+  s_ac70d99782e2da::t_0d74b3ebddf878 104
+  s_ac70d99782e2da::t_cd259052759470 105,107-109
+  s_ac70d99782e2da::t_85f2bc089d000a 260-265
+  s_ac70d99782e2da::t_59eef9198b2d43 125,130,144-150,152,161,163-168,170-173,175,177-181,184-185,197-198,200-205
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorView.swift
+  s_ac70d99782e2da::t_fb0e85f8e47f1c 37,164
+  s_ac70d99782e2da::t_85f2bc089d000a 21,28-31,36,41-43,54-57,84,91,93,98
+  s_ac70d99782e2da::t_48c57816c42dbb 22,26-27,32-35,38-39,44,52-53,138,144-163,165-170
+  s_ac70d99782e2da::t_0fdad9347b788e 45,47-51,106-107,180
+  s_ac70d99782e2da::t_0d74b3ebddf878 46,123
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootFeatureTestSupport.swift
+  s_ac70d99782e2da::t_5e22d25a1203a4 20,29
+  s_ac70d99782e2da::t_1c2e907d38db6d 1-19,21-28,30-35
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootFeatureTests+Replay.swift
+  s_ac70d99782e2da::t_4e2c313d41a13e 1-155
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorInput.swift
+  s_ac70d99782e2da::t_0fdad9347b788e 19
+  s_ac70d99782e2da::t_fa3cff22c5d490 1-2,4-16,20-25
+  s_ac70d99782e2da::t_f21f6513a274c6 3
+  s_ac70d99782e2da::t_0d74b3ebddf878 17-18
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorPresentationTests.swift
+  s_ac70d99782e2da::t_eb0a7cb7d4baaf 1-9,12-58,70-73,75-86,88-102
+  s_ac70d99782e2da::t_4d9d2f1c06ada1 10-11,59-69,74
+  s_ac70d99782e2da::t_c00e2c7ebf8529 87
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureTests.swift
+  s_ac70d99782e2da::t_031b4b4e118d13 9,317,323
+  s_ac70d99782e2da::t_65b50bbd69c64e 81-103,105-125,281-283,286-292
+  s_ac70d99782e2da::t_a777c980eaf4ca 253-268
+  s_ac70d99782e2da::t_7500ef349dff7c 13
+  s_ac70d99782e2da::t_08691247d548d6 1-2,4-8,10-12,14-80,104,126-201,240-252,269-273,275-280,284-285,293-315,318-320,322,324
+  s_ac70d99782e2da::t_2d53ef85be7892 202-239
+  s_ac70d99782e2da::t_f21f6513a274c6 3,274,316,321
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultCredentialClient.swift
+  s_ac70d99782e2da::t_a777c980eaf4ca 357
+  s_ac70d99782e2da::t_7ca4086eea5dd2 428-430,432
+  s_ac70d99782e2da::t_fce7d4f8dc9b02 128-129,132,139-140,144,170,198,200,282,332,366,383,396
+  s_ac70d99782e2da::t_e03f5030993701 1-2,4-127,130-131,133-138,141-143,145-169,171-183,185-197,199,201-217,219-245,247-281,283-331,334-339,341-348,350-356,358-365,367-382,384-395,397-403,405-427,433-436,438-439
+  s_ac70d99782e2da::t_f21f6513a274c6 3,184,218,246,340,404,431,437
+  s_ac70d99782e2da::t_031b4b4e118d13 333
+  s_ac70d99782e2da::t_e65695378e34ce 349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c8dddc9edc2e3013682e0c50e8758e7fa8b47743",
+  "prompts": {},
+  "sessions": {
+    "s_ac70d99782e2da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a097a1-d6a0-7933-a53a-244097d902e8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
