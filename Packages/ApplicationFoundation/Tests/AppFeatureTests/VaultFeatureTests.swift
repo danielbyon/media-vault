@@ -264,6 +264,8 @@ struct VaultFeatureTests {
         await store.receive(.setupCompleted(.failure(.alreadyConfigured))) {
             $0.phase = .loading
             $0.error = nil
+            $0.credentialInput = ""
+            $0.confirmationInput = ""
             $0.isWorking = false
         }
         await store.receive(.task) {
@@ -309,6 +311,37 @@ struct VaultFeatureTests {
             $0.usesHiddenEntry = false
         }
         #expect(!store.state.canUseHiddenEntry)
+    }
+}
+
+@Suite("Vault availability")
+struct VaultAvailabilityTests {
+    @Test("An unavailable configuration can be retried without entering setup")
+    @MainActor
+    func unavailableConfigurationCanBeRetried() async {
+        let configuration = VaultCredentialConfiguration(kind: .pin, usesHiddenEntry: true)
+        let loadCalls = LockIsolated(0)
+        let store = TestStore(initialState: VaultFeature.State(phase: .unavailable)) {
+            VaultFeature()
+        } withDependencies: {
+            $0.vaultCredential.loadConfiguration = {
+                loadCalls.withValue { $0 += 1 }
+                return configuration
+            }
+        }
+
+        await store.send(.retryConfiguration) {
+            $0.phase = .loading
+            $0.error = nil
+            $0.isWorking = true
+        }
+        await store.receive(.configurationLoaded(.success(configuration))) {
+            $0.phase = .locked
+            $0.configuredKind = .pin
+            $0.usesHiddenEntry = true
+            $0.isWorking = false
+        }
+        #expect(loadCalls.value == 1)
     }
 }
 

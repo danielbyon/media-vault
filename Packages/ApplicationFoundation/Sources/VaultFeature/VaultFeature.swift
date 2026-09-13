@@ -117,6 +117,9 @@ public struct VaultFeature {
         /// Starts the initial configuration lookup.
         case task
 
+        /// Retries a configuration lookup after storage was unavailable.
+        case retryConfiguration
+
         /// Delivers the configuration lookup result.
         case configurationLoaded(Result<VaultCredentialConfiguration?, VaultCredentialError>)
 
@@ -184,6 +187,7 @@ extension VaultFeature {
     private func handle(into state: inout State, action: Action) -> Effect<Action> {
         switch action {
         case .task,
+             .retryConfiguration,
              .configurationLoaded:
             handleLoading(into: &state, action: action)
         case .beginSetup,
@@ -214,18 +218,13 @@ extension VaultFeature {
                 return .none
             }
 
-            state.isWorking = true
-            let loadConfiguration = credential.loadConfiguration
-            return .run { send in
-                do {
-                    let configuration = try await loadConfiguration()
-                    await send(.configurationLoaded(.success(configuration)))
-                } catch let error as VaultCredentialError {
-                    await send(.configurationLoaded(.failure(error)))
-                } catch {
-                    await send(.configurationLoaded(.failure(.unavailable)))
-                }
+        case .retryConfiguration:
+            guard state.phase == .unavailable, !state.isWorking else {
+                return .none
             }
+
+            state.phase = .loading
+            state.error = nil
         case let .configurationLoaded(result):
             state.isWorking = false
             switch result {
@@ -248,6 +247,19 @@ extension VaultFeature {
             return .none
         default:
             return .none
+        }
+
+        state.isWorking = true
+        let loadConfiguration = credential.loadConfiguration
+        return .run { send in
+            do {
+                let configuration = try await loadConfiguration()
+                await send(.configurationLoaded(.success(configuration)))
+            } catch let error as VaultCredentialError {
+                await send(.configurationLoaded(.failure(error)))
+            } catch {
+                await send(.configurationLoaded(.failure(.unavailable)))
+            }
         }
     }
 
@@ -321,6 +333,8 @@ extension VaultFeature {
         case let .failure(error):
             if error == .alreadyConfigured {
                 state.phase = .loading
+                state.credentialInput = ""
+                state.confirmationInput = ""
                 state.error = nil
                 return .send(.task)
             }

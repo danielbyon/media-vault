@@ -84,7 +84,10 @@ public struct RootFeature {
         Reduce { state, action in
             switch action {
             case .task:
-                .send(.vault(.task))
+                .merge(
+                    .send(.calculator(.task)),
+                    .send(.vault(.task)),
+                )
             case let .calculatorInput(input):
                 handle(input, state: &state)
             case let .vault(.hiddenVerificationCompleted(result)):
@@ -103,7 +106,9 @@ public struct RootFeature {
         switch input {
         case .retryPersistence:
             guard let hiddenEntry = state.hiddenEntry else {
-                return .send(.calculator(.task))
+                return state.vault.phase == .unavailable
+                    ? .send(.vault(.retryConfiguration))
+                    : .send(.calculator(.task))
             }
             guard !hiddenEntry.isVerifying else {
                 return .none
@@ -122,12 +127,21 @@ public struct RootFeature {
     }
 
     private func handleLongPress(state: inout State) -> Effect<Action> {
+        let candidate = state.hiddenEntry?.candidate
         state.hiddenEntry = nil
         switch state.vault.phase {
         case .unconfigured:
-            return .send(.vault(.beginSetup))
+            guard let candidate else {
+                return .send(.vault(.beginSetup))
+            }
+
+            return replay(candidate: candidate, followedBy: .vault(.beginSetup))
         case .locked:
-            return .send(.vault(.beginAuthentication))
+            guard let candidate else {
+                return .send(.vault(.beginAuthentication))
+            }
+
+            return replay(candidate: candidate, followedBy: .vault(.beginAuthentication))
         case .loading,
              .unavailable,
              .setup,
@@ -247,33 +261,66 @@ public struct RootView: View {
 
     /// Renders the calculator decoy, credential surface, or authenticated shell.
     public var body: some View {
-        Group {
-            switch store.vault.phase {
-            case .setup,
-                 .authentication:
-                VaultCredentialView(store: store.scope(state: \.vault, action: \.vault))
-            case .authenticated:
-                VaultShellView(store: store.scope(state: \.vault.shell, action: \.vault.shell))
-            case .loading,
-                 .unconfigured,
-                 .unavailable,
-                 .locked:
-                CalculatorView(
-                    store: store.scope(state: \.calculator, action: \.calculator),
-                    presentationOverride: store.hiddenEntry.map { hiddenEntry in
-                        CalculatorFeature.projectedPresentation(
-                            afterDigits: hiddenEntry.candidate,
-                            from: store.calculator,
-                        )
-                    },
-                    inputHandler: { input in
-                        store.send(.calculatorInput(input))
-                    },
-                )
-            }
+        ZStack {
+            surface
         }
         .task {
             await store.send(.task).finish()
         }
+    }
+
+    @ViewBuilder
+    private var surface: some View {
+        switch store.vault.phase {
+        case .setup,
+             .authentication:
+            VaultCredentialView(store: store.scope(state: \.vault, action: \.vault))
+        case .authenticated:
+            VaultShellView(store: store.scope(state: \.vault.shell, action: \.vault.shell))
+        case .unavailable:
+            calculatorSurface
+                .safeAreaInset(edge: .bottom) {
+                    vaultUnavailablePanel
+                }
+        case .loading,
+             .unconfigured,
+             .locked:
+            calculatorSurface
+        }
+    }
+
+    private var calculatorSurface: some View {
+        CalculatorView(
+            store: store.scope(state: \.calculator, action: \.calculator),
+            presentationOverride: store.hiddenEntry.map { hiddenEntry in
+                CalculatorFeature.projectedPresentation(
+                    afterDigits: hiddenEntry.candidate,
+                    from: store.calculator,
+                )
+            },
+            inputHandler: { input in
+                store.send(.calculatorInput(input))
+            },
+            loadsPersistenceOnAppear: false,
+        )
+    }
+
+    private var vaultUnavailablePanel: some View {
+        VStack(spacing: 8) {
+            Text("Vault unavailable")
+                .font(.headline)
+                .foregroundStyle(.red)
+            Text("Credential storage could not be read. Try again when it is available.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Retry vault configuration", systemImage: "arrow.clockwise") {
+                store.send(.calculatorInput(.retryPersistence))
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(.thinMaterial)
     }
 }

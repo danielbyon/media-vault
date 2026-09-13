@@ -227,6 +227,52 @@ extension RootFeatureTests {
         #expect(store.state.vault.phase == .locked)
     }
 
+    @Test("A long press cancels hidden verification through normal authentication")
+    @MainActor
+    func longPressCancelsHiddenVerificationThroughAuthentication() async {
+        let (stream, continuation) = AsyncStream.makeStream(of: VaultCredentialVerificationResult.self)
+        let store = makeRootStore(
+            vault: VaultFeature.State(
+                phase: .locked,
+                configuredKind: .pin,
+                usesHiddenEntry: true,
+            ),
+            verify: { _ in
+                for await result in stream {
+                    return result
+                }
+                return .unavailable
+            },
+        )
+
+        await store.send(.calculatorInput(.button(.digit(1)))) {
+            $0.hiddenEntry = .init(candidate: "1")
+        }
+        await store.send(.calculatorInput(.button(.equals))) {
+            $0.hiddenEntry?.isVerifying = true
+        }
+        await store.receive(.vault(.verifyHidden("1"))) {
+            $0.vault.isWorking = true
+        }
+
+        await store.send(.calculatorInput(.longPressEquals)) {
+            $0.hiddenEntry = nil
+        }
+        await store.receive(.calculator(.button(.digit(1)))) {
+            $0.calculator.display = "1"
+            $0.calculator.expression = "1"
+        }
+        await store.receive(.vault(.beginAuthentication)) {
+            $0.vault.phase = .authentication
+            $0.vault.isWorking = false
+        }
+
+        continuation.finish()
+        await store.finish()
+        #expect(store.state.vault.phase == .authentication)
+        #expect(store.state.calculator.display == "1")
+    }
+
     @Test("A non-eligible button cancels capture and replays the buffered digits")
     @MainActor
     func nonEligibleInputCancelsAndReplaysCandidate() async {

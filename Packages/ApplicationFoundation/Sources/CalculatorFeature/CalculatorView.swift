@@ -21,6 +21,7 @@ public struct CalculatorView: View {
     private let presentationOverride: CalculatorPresentation?
     private let displayOverride: String?
     private let inputHandler: (CalculatorInput) -> Void
+    private let loadsPersistenceOnAppear: Bool
 
     /// Creates a calculator surface backed by the supplied store.
     ///
@@ -32,15 +33,20 @@ public struct CalculatorView: View {
     ///     replace the main display. The expression and error continue to come from the store.
     ///   - inputHandler: An optional surface-input handler. When omitted, ordinary button inputs are
     ///     sent directly to the supplied calculator store and long-press input is ignored.
+    ///   - loadsPersistenceOnAppear: Whether this view starts the calculator persistence load when
+    ///     it appears. A composition root that owns a stable lifecycle task can disable this to
+    ///     prevent a remounted calculator surface from reloading over live state.
     public init(
         store: StoreOf<CalculatorFeature>,
         presentationOverride: CalculatorPresentation? = nil,
         displayOverride: String? = nil,
         inputHandler: ((CalculatorInput) -> Void)? = nil,
+        loadsPersistenceOnAppear: Bool = true,
     ) {
         self.store = store
         self.presentationOverride = presentationOverride
         self.displayOverride = displayOverride
+        self.loadsPersistenceOnAppear = loadsPersistenceOnAppear
         self.inputHandler = inputHandler ?? { input in
             switch input {
             case .retryPersistence:
@@ -79,6 +85,10 @@ public struct CalculatorView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .task {
+            guard loadsPersistenceOnAppear else {
+                return
+            }
+
             await store.send(.task).finish()
         }
     }
@@ -155,6 +165,9 @@ public struct CalculatorView: View {
                             inputHandler(.longPressEquals)
                         },
                 )
+                .accessibilityAction(named: Text("Long press")) {
+                    inputHandler(.longPressEquals)
+                }
         } else {
             baseKeyButton(key)
         }

@@ -191,7 +191,7 @@ struct VaultCredentialLiveAdapter: Sendable {
             throw VaultCredentialError.unavailable
         }
 
-        let verifier = try CredentialDerivation.derive(
+        let verifier = try await CredentialDerivation.deriveAsync(
             credential,
             salt: salt,
             workFactor: CredentialDerivation.workFactor,
@@ -245,7 +245,7 @@ private actor VaultCredentialVerificationCoordinator {
                 return .unavailable
             }
 
-            let verifier = try CredentialDerivation.derive(
+            let verifier = try await CredentialDerivation.deriveAsync(
                 candidate,
                 salt: record.salt,
                 workFactor: record.workFactor,
@@ -278,12 +278,33 @@ private actor VaultCredentialVerificationCoordinator {
 }
 
 private actor KeychainCredentialStorage: VaultCredentialStorage {
+    func load() async throws -> Data? {
+        try await Task.detached(priority: .userInitiated) {
+            try KeychainCredentialOperations.load()
+        }.value
+    }
+
+    func add(_ data: Data) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try KeychainCredentialOperations.add(data)
+        }.value
+    }
+
+    func update(_ data: Data) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try KeychainCredentialOperations.update(data)
+        }.value
+    }
+}
+
+/// Performs synchronous Security framework calls away from cooperative actor executors.
+private enum KeychainCredentialOperations {
     private static let service = "vault.credential"
     private static let account = "primary"
 
-    func load() async throws -> Data? {
+    static func load() throws -> Data? {
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(Self.query(returnData: true) as CFDictionary, &result)
+        let status = SecItemCopyMatching(query(returnData: true) as CFDictionary, &result)
         switch status {
         case errSecSuccess:
             guard let data = result as? Data else {
@@ -298,11 +319,11 @@ private actor KeychainCredentialStorage: VaultCredentialStorage {
         }
     }
 
-    func add(_ data: Data) async throws {
+    static func add(_ data: Data) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: Self.account,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
             kSecValueData as String: data,
@@ -318,11 +339,11 @@ private actor KeychainCredentialStorage: VaultCredentialStorage {
         }
     }
 
-    func update(_ data: Data) async throws {
+    static func update(_ data: Data) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: Self.account,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
         ]
         let status = SecItemUpdate(
@@ -436,6 +457,8 @@ enum VaultCredentialValidation {
             return (4 ... 12).contains(bytes.count)
                 && bytes.allSatisfy { (0x30 ... 0x39).contains($0) }
         case .password:
+            // The product contract intentionally accepts every non-empty exact String. Do not
+            // impose a length, whitespace, normalization, or other composition policy here.
             return !credential.isEmpty
         }
     }
@@ -485,6 +508,16 @@ private enum CredentialDerivation {
         }
 
         return output
+    }
+
+    static func deriveAsync(
+        _ credential: String,
+        salt: Data,
+        workFactor: UInt32,
+    ) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            try derive(credential, salt: salt, workFactor: workFactor)
+        }.value
     }
 
     static func constantTimeEqual(_ lhs: Data, _ rhs: Data) -> Bool {
