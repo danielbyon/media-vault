@@ -18,12 +18,43 @@ import SwiftUI
 @preconcurrency
 public struct CalculatorView: View {
     private let store: StoreOf<CalculatorFeature>
+    private let presentationOverride: CalculatorPresentation?
+    private let inputHandler: (CalculatorInput) -> Void
 
     /// Creates a calculator surface backed by the supplied store.
     ///
-    /// - Parameter store: The calculator store that owns displayed state and actions.
-    public init(store: StoreOf<CalculatorFeature>) {
+    /// - Parameters:
+    ///   - store: The calculator store that owns displayed state and actions.
+    ///   - presentationOverride: Optional transient presentation supplied by the composition root.
+    ///     It is presentation-only and never enters the calculator reducer or persistence.
+    ///   - displayOverride: Optional transient display text retained for callers that only need to
+    ///     replace the main display. The expression and error continue to come from the store.
+    ///   - inputHandler: An optional surface-input handler. When omitted, ordinary button inputs are
+    ///     sent directly to the supplied calculator store and long-press input is ignored.
+    public init(
+        store: StoreOf<CalculatorFeature>,
+        presentationOverride: CalculatorPresentation? = nil,
+        displayOverride: String? = nil,
+        inputHandler: ((CalculatorInput) -> Void)? = nil,
+    ) {
         self.store = store
+        self.presentationOverride = presentationOverride ?? displayOverride.map {
+            CalculatorPresentation(display: $0, expression: store.expression, error: store.error)
+        }
+        self.inputHandler = inputHandler ?? { input in
+            switch input {
+            case .retryPersistence:
+                store.send(.task)
+            case let .button(button):
+                store.send(.button(button))
+            case .longPressEquals:
+                break
+            }
+        }
+    }
+
+    private var renderedPresentation: CalculatorPresentation {
+        presentationOverride ?? store.presentation
     }
 
     /// Renders the display, controls, keypad, and calculation history.
@@ -50,21 +81,21 @@ public struct CalculatorView: View {
 
     private var displayPanel: some View {
         VStack(alignment: .trailing, spacing: 6) {
-            Text(store.expression.isEmpty ? " " : store.expression)
+            Text(renderedPresentation.expression.isEmpty ? " " : renderedPresentation.expression)
                 .font(.callout.monospaced())
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            Text(store.error == nil ? store.display : "Error")
+            Text(renderedPresentation.error == nil ? renderedPresentation.display : "Error")
                 .font(.system(size: 44, weight: .regular, design: .rounded).monospacedDigit())
-                .foregroundStyle(store.error == nil ? Color.primary : Color.red)
+                .foregroundStyle(renderedPresentation.error == nil ? Color.primary : Color.red)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .accessibilityLabel("Calculator display")
-                .accessibilityValue(store.error == nil ? store.display : "Error")
+                .accessibilityValue(renderedPresentation.error == nil ? renderedPresentation.display : "Error")
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 12)
@@ -72,8 +103,8 @@ public struct CalculatorView: View {
 
     private var clipboardControls: some View {
         HStack(spacing: 12) {
-            Button("Copy") { store.send(.button(.copy)) }
-            Button("Paste") { store.send(.button(.paste)) }
+            Button("Copy") { inputHandler(.button(.copy)) }
+            Button("Paste") { inputHandler(.button(.paste)) }
         }
         .buttonStyle(.bordered)
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -89,7 +120,7 @@ public struct CalculatorView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Button("Retry") {
-                store.send(.task)
+                inputHandler(.retryPersistence)
             }
             .buttonStyle(.bordered)
         }
@@ -104,20 +135,39 @@ public struct CalculatorView: View {
             spacing: 10,
         ) {
             ForEach(Key.all, id: \.button) { key in
-                Button {
-                    store.send(.button(key.button))
-                } label: {
-                    Text(key.title)
-                        .font(.system(size: 21, weight: .medium, design: .rounded))
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(key.isOperator ? .orange : .gray)
-                .accessibilityLabel(key.accessibilityLabel)
+                keyButton(key)
             }
         }
         .disabled(store.isLoading)
+    }
+
+    @ViewBuilder
+    private func keyButton(_ key: Key) -> some View {
+        if key.button == .equals {
+            baseKeyButton(key)
+                .highPriorityGesture(
+                    LongPressGesture(minimumDuration: 0.75)
+                        .onEnded { _ in
+                            inputHandler(.longPressEquals)
+                        },
+                )
+        } else {
+            baseKeyButton(key)
+        }
+    }
+
+    private func baseKeyButton(_ key: Key) -> some View {
+        Button {
+            inputHandler(.button(key.button))
+        } label: {
+            Text(key.title)
+                .font(.system(size: 21, weight: .medium, design: .rounded))
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(key.isOperator ? .orange : .gray)
+        .accessibilityLabel(key.accessibilityLabel)
     }
 
     private var historyPanel: some View {
@@ -127,7 +177,7 @@ public struct CalculatorView: View {
                     .font(.headline)
                 Spacer()
                 if !store.history.isEmpty {
-                    Button("Clear") { store.send(.button(.clearHistory)) }
+                    Button("Clear") { inputHandler(.button(.clearHistory)) }
                         .font(.subheadline)
                 }
             }

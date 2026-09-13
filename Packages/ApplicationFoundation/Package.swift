@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "AppFeature", type: .static, targets: ["AppFeature"]),
         .library(name: "CalculatorFeature", type: .static, targets: ["CalculatorFeature"]),
+        .library(name: "VaultFeature", type: .static, targets: ["VaultFeature"]),
         .library(name: "AppIdentity", type: .static, targets: ["AppIdentity"]),
         .library(name: "Entitlement", type: .static, targets: ["Entitlement"]),
         .library(name: "FoundationTestSupport", type: .static, targets: ["FoundationTestSupport"]),
@@ -67,6 +68,18 @@ let package = Package(
                     package: "swift-composable-architecture",
                 ),
                 "CalculatorFeature",
+                "VaultFeature",
+            ],
+        ),
+        .target(
+            name: "VaultFeature",
+            dependencies: [
+                .product(
+                    name: "ComposableArchitecture",
+                    package: "swift-composable-architecture",
+                ),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "DependenciesMacros", package: "swift-dependencies"),
             ],
         ),
         .target(
@@ -104,6 +117,18 @@ let package = Package(
                 "CalculatorFeature",
                 "FoundationTestSupport",
                 "PersistenceSupport",
+                .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+            ],
+        ),
+        .testTarget(
+            name: "AppFeatureTests",
+            dependencies: [
+                "AppFeature",
+                "CalculatorFeature",
+                "VaultFeature",
+                "FoundationTestSupport",
                 .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
