@@ -1,0 +1,14 @@
+App.xcodeproj/project.pbxproj
+  h_a1fa5c19d60fed 28,112,193,266-269,282-285,299-303,318-322
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "31f495c61ef7247357020e0e0c5f008882a16b14",
+  "prompts": {},
+  "humans": {
+    "h_a1fa5c19d60fed": {
+      "author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
