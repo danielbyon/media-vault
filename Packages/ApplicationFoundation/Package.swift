@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "VaultFeature", type: .static, targets: ["VaultFeature"]),
         .library(name: "AppIdentity", type: .static, targets: ["AppIdentity"]),
         .library(name: "Entitlement", type: .static, targets: ["Entitlement"]),
+        .library(name: "MediaLibrary", type: .static, targets: ["MediaLibrary"]),
         .library(name: "FoundationTestSupport", type: .static, targets: ["FoundationTestSupport"]),
         .library(name: "PersistenceSupport", type: .static, targets: ["PersistenceSupport"]),
     ],
@@ -80,6 +81,20 @@ let package = Package(
                 ),
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "DependenciesMacros", package: "swift-dependencies"),
+                "MediaLibrary",
+            ],
+        ),
+        .target(
+            name: "MediaLibrary",
+            dependencies: [
+                .product(
+                    name: "ComposableArchitecture",
+                    package: "swift-composable-architecture",
+                ),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "DependenciesMacros", package: "swift-dependencies"),
+                .product(name: "SQLiteData", package: "sqlite-data"),
+                "PersistenceSupport",
             ],
         ),
         .target(
@@ -132,6 +147,22 @@ let package = Package(
                 .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+            ],
+        ),
+        .testTarget(
+            name: "MediaLibraryTests",
+            dependencies: [
+                "MediaLibrary",
+                "FoundationTestSupport",
+                "PersistenceSupport",
+                .product(
+                    name: "ComposableArchitecture",
+                    package: "swift-composable-architecture",
+                ),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "SQLiteData", package: "sqlite-data"),
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+                .product(name: "SnapshotTestingCustomDump", package: "swift-snapshot-testing"),
             ],
         ),
         .testTarget(

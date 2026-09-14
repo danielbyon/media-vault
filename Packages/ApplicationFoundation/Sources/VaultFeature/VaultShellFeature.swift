@@ -6,10 +6,11 @@
 //
 
 import ComposableArchitecture
+import MediaLibrary
 
 /// The authenticated top-level destinations.
 public enum VaultShellTab: String, CaseIterable, Equatable, Hashable, Sendable {
-    /// The media library destination placeholder.
+    /// The authenticated media library destination.
     case library
 
     /// The collections destination placeholder.
@@ -21,8 +22,9 @@ public enum VaultShellTab: String, CaseIterable, Equatable, Hashable, Sendable {
 
 /// The authenticated navigation shell.
 ///
-/// This feature owns navigation state only. It intentionally does not know how credentials are
-/// stored or how downstream media and browser features will be implemented.
+/// This feature owns top-level navigation and composes the authenticated Library state. It
+/// intentionally does not know how credentials are stored or how the Collections and Browser
+/// destinations will be implemented.
 @Reducer
 public struct VaultShellFeature {
     /// State for the authenticated navigation shell.
@@ -34,13 +36,18 @@ public struct VaultShellFeature {
         /// Whether navigation-presented settings is visible.
         public var settingsPresented: Bool
 
+        /// The authenticated Library feature state.
+        public var library: MediaLibraryFeature.State
+
         /// Creates the initial authenticated shell state.
         public init(
             selectedTab: VaultShellTab = .library,
             settingsPresented: Bool = false,
+            library: MediaLibraryFeature.State = .init(),
         ) {
             self.selectedTab = selectedTab
             self.settingsPresented = settingsPresented
+            self.library = library
         }
     }
 
@@ -54,6 +61,9 @@ public struct VaultShellFeature {
 
         /// Dismisses navigation-presented settings.
         case settingsDismissed
+
+        /// Forwards Library actions.
+        case library(MediaLibraryFeature.Action)
     }
 
     /// Creates the authenticated shell reducer.
@@ -61,6 +71,9 @@ public struct VaultShellFeature {
 
     /// Handles tab and settings navigation.
     public var body: some ReducerOf<Self> {
+        Scope(state: \.library, action: \.library) {
+            MediaLibraryFeature()
+        }
         Reduce { state, action in
             switch action {
             case let .tabSelected(tab):
@@ -69,6 +82,8 @@ public struct VaultShellFeature {
                 state.settingsPresented = true
             case .settingsDismissed:
                 state.settingsPresented = false
+            case .library:
+                return .none
             }
             return .none
         }

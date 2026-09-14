@@ -1,0 +1,19 @@
+[
+  [0]: MediaAsset(
+    id: UUID(00000000-0000-0000-0000-000000000030),
+    kind: .stillImage,
+    importedAt: Date(2024-08-30T06:40:00.000Z),
+    capturedAt: Date(2024-08-30T06:23:20.000Z),
+    resources: [
+      [0]: MediaResource(
+        id: UUID(00000000-0000-0000-0000-000000000031),
+        role: .original,
+        relativePath: "00000000-0000-0000-0000-000000000031",
+        sourceFilename: "holiday-photo.png",
+        sourceUTI: "public.png",
+        byteCount: 68,
+        sha256: "1111111111111111111111111111111111111111111111111111111111111111"
+      )
+    ]
+  )
+]

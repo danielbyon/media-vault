@@ -6,6 +6,7 @@
 //
 
 import ComposableArchitecture
+import MediaLibrary
 import SwiftUI
 import UIKit
 
@@ -183,7 +184,7 @@ public struct VaultShellView: View {
         NavigationStack {
             TabView(selection: selectedTab) {
                 Tab("Library", systemImage: "photo.on.rectangle.angled", value: .library) {
-                    placeholder("Library", systemImage: "photo.on.rectangle.angled")
+                    MediaLibraryView(store: store.scope(state: \.library, action: \.library))
                 }
                 Tab("Collections", systemImage: "rectangle.stack", value: .collections) {
                     placeholder("Collections", systemImage: "rectangle.stack")
