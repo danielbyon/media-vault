@@ -20,6 +20,11 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
         case failed
     }
 
+    struct SaveRequest: Sendable {
+        let revision: Int
+        let outcome: AsyncStream<SaveOutcome>
+    }
+
     private enum RetryOperation: Equatable, Sendable {
         case load
         case save
@@ -29,7 +34,7 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
         let revision: Int
         let snapshot: CalculatorSnapshot
         let save: @Sendable (CalculatorSnapshot) async throws -> Void
-        let continuation: CheckedContinuation<SaveOutcome, Never>
+        let continuation: AsyncStream<SaveOutcome>.Continuation
     }
 
     private let lock = NSLock()
@@ -39,10 +44,10 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
     private var worker: Task<Void, Never>?
     private var retryOperation: RetryOperation?
 
-    /// Reserves a revision before an asynchronous persistence effect starts.
+    /// Reserves a revision for a non-persistence operation such as loading.
     ///
-    /// Reserving synchronously lets the reducer invalidate an older outcome as soon as a newer
-    /// edit or load retry is reduced, even if the new effect has not started executing yet.
+    /// A save uses ``enqueue(_:save:)`` instead so revision advancement and save admission happen
+    /// atomically.
     @discardableResult
     func reserveRevision() -> Int {
         lock.withLock {
@@ -54,32 +59,34 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
 
     func enqueue(
         _ snapshot: CalculatorSnapshot,
-        revision: Int,
         save: @escaping @Sendable (CalculatorSnapshot) async throws -> Void,
-    ) async -> SaveOutcome {
-        await withCheckedContinuation { continuation in
-            let supersededContinuation: CheckedContinuation<SaveOutcome, Never>? = lock.withLock {
-                guard revision == latestRevision else {
-                    return continuation
+    ) -> SaveRequest {
+        let outcome = AsyncStream<SaveOutcome>.makeStream()
+        let (revision, supersededContinuation): (
+            Int,
+            AsyncStream<SaveOutcome>.Continuation?,
+        ) = lock.withLock {
+            nextRevision += 1
+            let revision = nextRevision
+            latestRevision = revision
+            let request = PendingRequest(
+                revision: revision,
+                snapshot: snapshot,
+                save: save,
+                continuation: outcome.continuation,
+            )
+            let supersededContinuation = pendingRequest?.continuation
+            pendingRequest = request
+            if worker == nil {
+                worker = Task { [self] in
+                    await run()
                 }
-
-                let request = PendingRequest(
-                    revision: revision,
-                    snapshot: snapshot,
-                    save: save,
-                    continuation: continuation,
-                )
-                let supersededContinuation = pendingRequest?.continuation
-                pendingRequest = request
-                if worker == nil {
-                    worker = Task { [self] in
-                        await run()
-                    }
-                }
-                return supersededContinuation
             }
-            supersededContinuation?.resume(returning: .superseded)
+            return (revision, supersededContinuation)
         }
+        supersededContinuation?.yield(.superseded)
+        supersededContinuation?.finish()
+        return SaveRequest(revision: revision, outcome: outcome.stream)
     }
 
     func isCurrent(_ revision: Int) -> Bool {
@@ -123,21 +130,22 @@ final class CalculatorPersistenceCoordinator: @unchecked Sendable {
                 return
             }
             guard isLatest(request.revision) else {
-                request.continuation.resume(returning: .superseded)
+                finish(.superseded, for: request)
                 continue
             }
 
             do {
                 try await request.save(request.snapshot)
-                request.continuation.resume(
-                    returning: isLatest(request.revision) ? .succeeded : .superseded,
-                )
+                finish(isLatest(request.revision) ? .succeeded : .superseded, for: request)
             } catch {
-                request.continuation.resume(
-                    returning: isLatest(request.revision) ? .failed : .superseded,
-                )
+                finish(isLatest(request.revision) ? .failed : .superseded, for: request)
             }
         }
+    }
+
+    private func finish(_ outcome: SaveOutcome, for request: PendingRequest) {
+        request.continuation.yield(outcome)
+        request.continuation.finish()
     }
 
     private func isLatest(_ revision: Int) -> Bool {

@@ -20,11 +20,11 @@ extension RootFeatureTests {
     @MainActor
     func incorrectDirectPinEqualsReplaysFromNonEmptyCalculator() async throws {
         let entry = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000014"))
-        let calculator = makeNonEmptyCalculator(entry: entry)
+        let snapshot = makeNonEmptyCalculatorSnapshot(entry: entry)
         let directSaves = LockIsolated<[CalculatorSnapshot]>([])
         let ordinarySaves = LockIsolated<[CalculatorSnapshot]>([])
         let (directStore, ordinaryStore) = makeReplayStores(
-            calculator: calculator,
+            snapshot: snapshot,
             entry: entry,
             directSaves: directSaves,
             ordinarySaves: ordinarySaves,
@@ -46,32 +46,144 @@ extension RootFeatureTests {
 
         #expect(directStore.state.vault.phase == .locked)
         #expect(directStore.state.calculator == ordinaryStore.state.calculator)
-        #expect(directSaves.value == ordinarySaves.value)
+
+        await directStore.finish()
+        await ordinaryStore.finish()
+
+        let directSnapshot = try #require(directSaves.value.last)
+        let ordinarySnapshot = try #require(ordinarySaves.value.last)
+        #expect(directSnapshot == ordinarySnapshot)
+        #expect(directSnapshot == calculatorSnapshot(from: directStore.state.calculator))
+        #expect(ordinarySnapshot == calculatorSnapshot(from: ordinaryStore.state.calculator))
+    }
+
+    @Test("A failed hidden replay retains the newest snapshot during a persistence burst")
+    @MainActor
+    func failedHiddenReplayPersistsNewestSnapshotDuringBurst() async throws {
+        let entry = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000015"))
+        let fixtures = makeBurstReplayStores(entry: entry)
+        var firstSaveStartedIterator = fixtures.firstSaveStarted.makeAsyncIterator()
+
+        for (index, digit) in [1, 2, 3, 4].enumerated() {
+            await fixtures.directStore.send(.calculatorInput(.button(.digit(digit)))) {
+                $0.hiddenEntry = .init(candidate: String((1 ... index + 1).map(String.init).joined()))
+            }
+        }
+        await fixtures.directStore.send(.calculatorInput(.button(.equals))) {
+            $0.hiddenEntry?.isVerifying = true
+        }
+
+        let replayTask = Task { @MainActor in
+            await completeFailedDirectCandidate(
+                directStore: fixtures.directStore,
+                ordinaryStore: fixtures.ordinaryStore,
+                entry: entry,
+            )
+        }
+        _ = await firstSaveStartedIterator.next()
+        await replayTask.value
+        fixtures.releaseFirstSave.yield(())
+
+        await fixtures.directStore.finish()
+        await fixtures.ordinaryStore.finish()
+
+        #expect(fixtures.directStore.state.calculator == fixtures.ordinaryStore.state.calculator)
+        #expect(fixtures.directSaves.value.last == calculatorSnapshot(
+            from: fixtures.directStore.state.calculator,
+        ))
     }
 }
 
-private func makeNonEmptyCalculator(entry: UUID) -> CalculatorFeature.State {
-    CalculatorFeature.State(
-        snapshot: CalculatorSnapshot(
-            display: "7",
-            expression: "3+4",
-            memory: "9",
-            history: [
-                CalculatorHistoryEntry(
-                    id: entry,
-                    expression: "2+5",
-                    result: "7",
-                    date: DeterministicTestSupport.referenceDate,
-                ),
-            ],
-            isShowingResult: false,
+private struct BurstReplayFixtures {
+    let directStore: TestStoreOf<RootFeature>
+    let ordinaryStore: TestStoreOf<RootFeature>
+    let firstSaveStarted: AsyncStream<Void>
+    let releaseFirstSave: AsyncStream<Void>.Continuation
+    let directSaves: LockIsolated<[CalculatorSnapshot]>
+}
+
+@MainActor
+private func makeBurstReplayStores(entry: UUID) -> BurstReplayFixtures {
+    let firstSaveStarted = AsyncStream<Void>.makeStream()
+    let releaseFirstSave = AsyncStream<Void>.makeStream()
+    let directSaves = LockIsolated<[CalculatorSnapshot]>([])
+    let saveCount = LockIsolated(0)
+    let directStore = makeRootStore(
+        vault: VaultFeature.State(
+            phase: .locked,
+            configuredKind: .pin,
+            usesHiddenEntry: true,
         ),
+        calculator: makeNonEmptyCalculator(entry: entry),
+        verify: { _ in .incorrect },
+        save: { snapshot in
+            let call = saveCount.withValue { count in
+                let call = count
+                count += 1
+                return call
+            }
+            if call == 0 {
+                firstSaveStarted.continuation.yield(())
+                var releaseIterator = releaseFirstSave.stream.makeAsyncIterator()
+                _ = await releaseIterator.next()
+            }
+            directSaves.withValue { $0.append(snapshot) }
+        },
+        uuid: entry,
     )
+    let ordinaryStore = makeRootStore(
+        vault: VaultFeature.State(
+            phase: .locked,
+            configuredKind: .pin,
+            usesHiddenEntry: false,
+        ),
+        calculator: makeNonEmptyCalculator(entry: entry),
+        save: { _ in },
+        uuid: entry,
+    )
+    return BurstReplayFixtures(
+        directStore: directStore,
+        ordinaryStore: ordinaryStore,
+        firstSaveStarted: firstSaveStarted.stream,
+        releaseFirstSave: releaseFirstSave.continuation,
+        directSaves: directSaves,
+    )
+}
+
+private func calculatorSnapshot(from state: CalculatorFeature.State) -> CalculatorSnapshot {
+    CalculatorSnapshot(
+        display: state.display,
+        expression: state.expression,
+        memory: state.memory,
+        history: state.history,
+        isShowingResult: state.isShowingResult,
+    )
+}
+
+private func makeNonEmptyCalculatorSnapshot(entry: UUID) -> CalculatorSnapshot {
+    CalculatorSnapshot(
+        display: "7",
+        expression: "3+4",
+        memory: "9",
+        history: [
+            CalculatorHistoryEntry(
+                id: entry,
+                expression: "2+5",
+                result: "7",
+                date: DeterministicTestSupport.referenceDate,
+            ),
+        ],
+        isShowingResult: false,
+    )
+}
+
+private func makeNonEmptyCalculator(entry: UUID) -> CalculatorFeature.State {
+    CalculatorFeature.State(snapshot: makeNonEmptyCalculatorSnapshot(entry: entry))
 }
 
 @MainActor
 private func makeReplayStores(
-    calculator: CalculatorFeature.State,
+    snapshot: CalculatorSnapshot,
     entry: UUID,
     directSaves: LockIsolated<[CalculatorSnapshot]>,
     ordinarySaves: LockIsolated<[CalculatorSnapshot]>,
@@ -82,7 +194,7 @@ private func makeReplayStores(
             configuredKind: .pin,
             usesHiddenEntry: true,
         ),
-        calculator: calculator,
+        calculator: CalculatorFeature.State(snapshot: snapshot),
         verify: { _ in .incorrect },
         save: { snapshot in
             directSaves.withValue { $0.append(snapshot) }
@@ -95,7 +207,7 @@ private func makeReplayStores(
             configuredKind: .pin,
             usesHiddenEntry: false,
         ),
-        calculator: calculator,
+        calculator: CalculatorFeature.State(snapshot: snapshot),
         save: { snapshot in
             ordinarySaves.withValue { $0.append(snapshot) }
         },

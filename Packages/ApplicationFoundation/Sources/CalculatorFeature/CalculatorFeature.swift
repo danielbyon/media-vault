@@ -43,6 +43,11 @@ public struct CalculatorFeature {
         /// Whether the current display represents a completed calculation.
         public var isShowingResult: Bool
 
+        /// Coordinates saves for this state instance without becoming part of observable calculator
+        /// data. Keeping it in state preserves one persistence worker when reducer values are rebuilt.
+        @ObservationStateIgnored
+        let persistenceCoordinator: CalculatorPersistenceCoordinator
+
         /// Creates the initial calculator state or restores a previously saved snapshot.
         ///
         /// - Parameter snapshot: An optional persisted snapshot to restore.
@@ -55,6 +60,20 @@ public struct CalculatorFeature {
             persistenceError = nil
             isLoading = false
             isShowingResult = snapshot?.isShowingResult ?? false
+            persistenceCoordinator = CalculatorPersistenceCoordinator()
+        }
+
+        /// Compares the calculator data and persistence status while ignoring the coordinator's
+        /// internal worker state.
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.display == rhs.display
+                && lhs.expression == rhs.expression
+                && lhs.memory == rhs.memory
+                && lhs.history == rhs.history
+                && lhs.error == rhs.error
+                && lhs.persistenceError == rhs.persistenceError
+                && lhs.isLoading == rhs.isLoading
+                && lhs.isShowingResult == rhs.isShowingResult
         }
 
         var snapshot: CalculatorSnapshot {
@@ -91,7 +110,6 @@ public struct CalculatorFeature {
 
     static let maximumHistoryCount = 20
 
-    let persistenceCoordinator: CalculatorPersistenceCoordinator
     @Dependency(\.calculatorClipboard)
     var clipboard
     @Dependency(\.calculatorPersistence)
@@ -101,10 +119,8 @@ public struct CalculatorFeature {
     @Dependency(\.uuid)
     var uuid
 
-    /// Creates a calculator reducer with its persistence coordinator.
-    public init() {
-        persistenceCoordinator = CalculatorPersistenceCoordinator()
-    }
+    /// Creates a calculator reducer.
+    public init() {}
 
     /// Handles lifecycle, input, evaluation, and persistence actions.
     public var body: some ReducerOf<Self> {
@@ -115,27 +131,29 @@ public struct CalculatorFeature {
 
     /// Persists the latest snapshot, superseding any save still in flight for a prior edit.
     ///
-    /// Every edit starts its own asynchronous save, so a slow, older save could otherwise finish
-    /// after a newer one and overwrite it with stale state. The coordinator serializes writes even
-    /// when the persistence implementation does not honor task cancellation, and keeps only the
-    /// newest pending snapshot while suppressing superseded outcomes.
+    /// The coordinator admits the snapshot and advances its revision before this asynchronous effect
+    /// begins waiting for the result. This prevents a newer reduced state from invalidating a save
+    /// that has not yet reached the coordinator, while the worker still serializes writes and keeps
+    /// only the newest pending snapshot.
     func persistenceEffect(for state: State) -> Effect<Action> {
         let snapshot = state.snapshot
         let save = persistence.save
         let shouldClearPersistenceError = state.persistenceError != nil
-        let coordinator = persistenceCoordinator
+        let coordinator = state.persistenceCoordinator
         coordinator.clearRetryOperation()
-        let revision = coordinator.reserveRevision()
+        let request = coordinator.enqueue(snapshot, save: save)
         return .run { send in
-            switch await coordinator.enqueue(snapshot, revision: revision, save: save) {
-            case .succeeded:
-                if shouldClearPersistenceError {
-                    await send(.persistenceSucceeded(revision: revision))
+            for await outcome in request.outcome {
+                switch outcome {
+                case .succeeded:
+                    if shouldClearPersistenceError {
+                        await send(.persistenceSucceeded(revision: request.revision))
+                    }
+                case .failed:
+                    await send(.persistenceFailed(revision: request.revision))
+                case .superseded:
+                    return
                 }
-            case .failed:
-                await send(.persistenceFailed(revision: revision))
-            case .superseded:
-                break
             }
         }
     }

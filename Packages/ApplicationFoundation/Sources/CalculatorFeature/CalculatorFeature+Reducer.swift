@@ -19,19 +19,19 @@ extension CalculatorFeature {
         case let .pasted(value):
             return handlePasted(value, state: &state)
         case let .persistenceFailed(revision):
-            guard persistenceCoordinator.isCurrent(revision) else {
+            guard state.persistenceCoordinator.isCurrent(revision) else {
                 return .none
             }
 
-            persistenceCoordinator.markSaveFailure()
+            state.persistenceCoordinator.markSaveFailure()
             state.persistenceError = .unavailable
             return .none
         case let .persistenceSucceeded(revision):
-            guard persistenceCoordinator.isCurrent(revision) else {
+            guard state.persistenceCoordinator.isCurrent(revision) else {
                 return .none
             }
 
-            persistenceCoordinator.clearRetryOperation()
+            state.persistenceCoordinator.clearRetryOperation()
             state.persistenceError = nil
             return .none
         }
@@ -43,15 +43,15 @@ extension CalculatorFeature {
         }
 
         if state.persistenceError != nil {
-            if persistenceCoordinator.shouldRetryLoad {
-                persistenceCoordinator.reserveRevision()
+            if state.persistenceCoordinator.shouldRetryLoad {
+                state.persistenceCoordinator.reserveRevision()
                 state.isLoading = true
                 return loadEffect()
             }
             return persistenceEffect(for: state)
         }
         state.persistenceError = nil
-        persistenceCoordinator.reserveRevision()
+        state.persistenceCoordinator.reserveRevision()
         state.isLoading = true
         return loadEffect()
     }
@@ -74,7 +74,7 @@ extension CalculatorFeature {
         state.isLoading = false
         switch result {
         case let .success(snapshot):
-            persistenceCoordinator.clearRetryOperation()
+            state.persistenceCoordinator.clearRetryOperation()
             state.persistenceError = nil
             guard let snapshot else {
                 return .none
@@ -86,7 +86,7 @@ extension CalculatorFeature {
             state.history = snapshot.history
             state.isShowingResult = snapshot.isShowingResult
         case let .failure(error):
-            persistenceCoordinator.markLoadFailure()
+            state.persistenceCoordinator.markLoadFailure()
             state.persistenceError = error
         }
         return .none
