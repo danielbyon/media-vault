@@ -1,0 +1,94 @@
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaLibraryFeature.swift
+  s_d49435f6fcf486::t_3cd3a550312289 1-47,49-59,70-107,173,197,236-244,246-267
+  s_d49435f6fcf486::t_372cc99cc53495 108,112
+  s_d49435f6fcf486::t_1657f3cdccc568 109-111,113-114,116,118,120,122,124,126,128,130-172,174-196,198-235
+  s_d49435f6fcf486::t_c268083ce24859 115,117,119,121,123,125,127,129
+  s_d49435f6fcf486::t_2d268a04841773 245
+  s_d49435f6fcf486::t_902e4fe3cb05b7 48
+  s_d49435f6fcf486::t_0ffe0e544c3635 60-69
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/MediaLibraryFeatureTests.swift
+  s_d49435f6fcf486::t_c268083ce24859 156,164
+  s_d49435f6fcf486::t_4556a03d1c41b0 122-124,126,149-155,157-162,165
+  s_d49435f6fcf486::t_0ffe0e544c3635 1-121,125,127-148,163,166
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultShellFeature.swift
+  s_d49435f6fcf486::t_22b49817c96262 9,13,39-41,46,50,64-66,74-76,85-86
+  s_d49435f6fcf486::t_d62c9cad14f519 25-27
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/MediaLibrarySnapshotTests.swift
+  s_d49435f6fcf486::t_5232439e5daf0d 16,102
+  s_d49435f6fcf486::t_4556a03d1c41b0 108-109,111,113,130-135,137-143,145
+  s_d49435f6fcf486::t_c268083ce24859 136,144
+  s_d49435f6fcf486::t_3dcd011cb1bb47 21-24,26-30,32-50,146-160
+  s_d49435f6fcf486::t_6ce1d9e737d759 110
+  s_d49435f6fcf486::t_a32187ce8f5703 128
+  s_d49435f6fcf486::t_fe88640760a1ff 1-15,17-20,51-55,57-58,60-101,103-107,112,114-127,129,161
+  s_d49435f6fcf486::t_9e63732f8941d7 31
+  s_d49435f6fcf486::t_a1a7c60d425efb 25
+  s_d49435f6fcf486::t_926c321b471ce5 56,59
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/MediaLibraryImportTests.swift
+  s_d49435f6fcf486::t_c268083ce24859 378,386
+  s_d49435f6fcf486::t_1349f3f9c27eab 38
+  s_d49435f6fcf486::t_f4d61fc3ebb134 11
+  s_d49435f6fcf486::t_841a229cf2559c 39,41,43
+  s_d49435f6fcf486::t_2d268a04841773 40,42,44,217,341-342,369,390-391
+  s_d49435f6fcf486::t_f4723a27a5b4ae 243-258
+  s_d49435f6fcf486::t_721f10ee8a773c 36,235,242,259-261
+  s_d49435f6fcf486::t_3dcd011cb1bb47 98-127,173,181-185,187
+  s_d49435f6fcf486::t_a1fbe12bfc5cce 10,14,20,22,29-35,37,45-97,159-172,174-180,186,188-216,218-234,236-241,262-264,267,269,271-276,280-288,290-340,343-368,370
+  s_d49435f6fcf486::t_394d1e6fb6c197 1-9,12-13,15-19,21,23-28,385,388-389,392-394
+  s_d49435f6fcf486::t_b617804658b0d0 139
+  s_d49435f6fcf486::t_a1a7c60d425efb 128-138,140-158,277-279,289
+  s_d49435f6fcf486::t_4556a03d1c41b0 265-266,268,270,371-377,379-384,387
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/__Snapshots__/MediaLibrarySnapshotTests/sourceNormalization.1.txt
+  s_d49435f6fcf486::t_d91161c715369a 1-17
+Packages/ApplicationFoundation/Package.swift
+  s_d49435f6fcf486::t_a1fbe12bfc5cce 156,158-162,164-165
+  s_d49435f6fcf486::t_394d1e6fb6c197 16,84-97,152-155,157,163
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/__Snapshots__/MediaLibrarySnapshotTests/persistedDomainMapping.1.txt
+  s_d49435f6fcf486::t_e779466067a970 1-19
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultCredentialView.swift
+  s_d49435f6fcf486::t_22b49817c96262 9,187
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaLibraryStore.swift
+  s_d49435f6fcf486::t_1969fb0b28702d 34,130-131,170-171
+  s_d49435f6fcf486::t_1657f3cdccc568 35-57,59-70,72-80,83-95,97-106,108-110,112-119
+  s_d49435f6fcf486::t_2d268a04841773 96
+  s_d49435f6fcf486::t_8173c6e72f4401 125-128
+  s_d49435f6fcf486::t_3cd3a550312289 1-33,58,71,81-82,107,111,120-124,129,132-169,172-202
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaLibraryView.swift
+  s_d49435f6fcf486::t_c7e87b6376d6a9 67-71
+  s_d49435f6fcf486::t_5232439e5daf0d 18,22-25,27,79-81
+  s_d49435f6fcf486::t_3cd3a550312289 1-17,19-21,26,28-66,73-78,82-121,123-186
+  s_d49435f6fcf486::t_2d268a04841773 72,122
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaAsset.swift
+  s_d49435f6fcf486::t_d626149a85d0e7 1,3-123
+  s_d49435f6fcf486::t_c268083ce24859 2
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaLibraryClient.swift
+  s_d49435f6fcf486::t_d626149a85d0e7 24
+  s_d49435f6fcf486::t_d62c9cad14f519 62-66,80,83-90
+  s_d49435f6fcf486::t_3cd3a550312289 1-23,25-36,38-39,41-61,67-79,81-82,91-99
+  s_d49435f6fcf486::t_1657f3cdccc568 37,40
+Packages/ApplicationFoundation/Sources/MediaLibrary/FileMediaResourceRepository.swift
+  s_d49435f6fcf486::t_aeb3d980059a15 30
+  s_d49435f6fcf486::t_a32187ce8f5703 281
+  s_d49435f6fcf486::t_c268083ce24859 2
+  s_d49435f6fcf486::t_57f666e4fd948d 75-80,92,94
+  s_d49435f6fcf486::t_5fff147aaf30d9 17,21-29,33-35,39,44-45,62,90,93
+  s_d49435f6fcf486::t_daae48a9692d82 31-32
+  s_d49435f6fcf486::t_d626149a85d0e7 1,3-16,18-20,36-38,40-43,46-61,63-74,81-89,91,95-144,156-242,244,251-280,282-288,290-363
+  s_d49435f6fcf486::t_102dd65df95170 145-155,243,245-250,289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0c24b6b6e94f19641ae3d651b100418b9e10c338",
+  "prompts": {},
+  "sessions": {
+    "s_d49435f6fcf486": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0998e-2e15-7e40-9f3c-101b36c1af05",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
