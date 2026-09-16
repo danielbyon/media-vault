@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "AppFeature", type: .static, targets: ["AppFeature"]),
         .library(name: "CalculatorFeature", type: .static, targets: ["CalculatorFeature"]),
+        .library(name: "BrowserFeature", type: .static, targets: ["BrowserFeature"]),
         .library(name: "VaultFeature", type: .static, targets: ["VaultFeature"]),
         .library(name: "AppIdentity", type: .static, targets: ["AppIdentity"]),
         .library(name: "Entitlement", type: .static, targets: ["Entitlement"]),
@@ -62,6 +63,17 @@ let package = Package(
             ],
         ),
         .target(
+            name: "BrowserFeature",
+            dependencies: [
+                .product(
+                    name: "ComposableArchitecture",
+                    package: "swift-composable-architecture",
+                ),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "DependenciesMacros", package: "swift-dependencies"),
+            ],
+        ),
+        .target(
             name: "AppFeature",
             dependencies: [
                 .product(
@@ -81,6 +93,7 @@ let package = Package(
                 ),
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "DependenciesMacros", package: "swift-dependencies"),
+                "BrowserFeature",
                 "MediaLibrary",
             ],
         ),
@@ -124,6 +137,21 @@ let package = Package(
             name: "PersistenceSupport",
             dependencies: [
                 .product(name: "SQLiteData", package: "sqlite-data"),
+            ],
+        ),
+        .testTarget(
+            name: "BrowserFeatureTests",
+            dependencies: [
+                "BrowserFeature",
+                "FoundationTestSupport",
+                .product(
+                    name: "ComposableArchitecture",
+                    package: "swift-composable-architecture",
+                ),
+                .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
+                .product(name: "Clocks", package: "swift-clocks"),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
         ),
         .testTarget(

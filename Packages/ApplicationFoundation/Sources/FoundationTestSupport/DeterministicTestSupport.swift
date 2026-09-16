@@ -124,4 +124,7 @@ public enum DeterministicTestSupport {
 
     /// The representative regular-width iPad configuration used by the root surface snapshots.
     public static let regularWidthIPad = ViewImageConfig.iPadPro11(.portrait)
+
+    /// A narrow resizable iPad column used to verify adaptive browser layouts.
+    public static let narrowWidthIPad = ViewImageConfig.iPadPro11(.portrait(splitView: .oneThird))
 }
