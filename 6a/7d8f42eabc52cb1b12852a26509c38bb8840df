@@ -1,0 +1,25 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_b2d6babd7c0643::t_bb44d6cbaf1d5c 48-49
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserJavaScriptDialogPresentation.swift
+  s_b2d6babd7c0643::t_bb44d6cbaf1d5c 1-27
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  s_b2d6babd7c0643::t_bb44d6cbaf1d5c 25-32
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserBackForwardPresentation.swift
+  s_b2d6babd7c0643::t_bb44d6cbaf1d5c 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6a7d8f42eabc52cb1b12852a26509c38bb8840df",
+  "prompts": {},
+  "sessions": {
+    "s_b2d6babd7c0643": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a1f1-991c-78b2-9046-fd855e1e51f9",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
