@@ -45,7 +45,8 @@ public struct BrowserView: View {
             if store.presentation == .tabOverview {
                 tabOverview
             } else if horizontalSizeClass == .regular {
-                VStack(spacing: 0) { chrome
+                VStack(spacing: 0) {
+                    chrome
                     selectedContentPresentation
                 }
             } else {

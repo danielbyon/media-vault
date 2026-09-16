@@ -22,10 +22,14 @@ extension BrowserFeature {
                     await send(.webKitEvent(event))
                 } },
                 .run { send in
-                    let settings = await loadSettings()
-                    let bookmarks = await (try? loadBookmarks()) ?? []
-                    let history = await (try? loadHistory()) ?? []
-                    await send(.loaded(settings: settings, bookmarks: bookmarks, history: history))
+                    async let settings = loadSettings()
+                    async let bookmarks = (try? loadBookmarks()) ?? []
+                    async let history = (try? loadHistory()) ?? []
+                    await send(.loaded(
+                        settings: settings,
+                        bookmarks: bookmarks,
+                        history: history,
+                    ))
                 },
             )
         case .newTabTapped:
