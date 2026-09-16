@@ -1,0 +1,24 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  h_a1fa5c19d60fed 158-161,340-342
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature.swift
+  h_a1fa5c19d60fed 141-142,219-220
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  h_a1fa5c19d60fed 132-136
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultShellFeature.swift
+  h_a1fa5c19d60fed 91,93
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultShellFeatureTests.swift
+  h_a1fa5c19d60fed 34-46
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserPresentationTests.swift
+  h_a1fa5c19d60fed 127-160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e611724bc4f681bb6d868007f82e6ad5e76a9ea1",
+  "prompts": {},
+  "humans": {
+    "h_a1fa5c19d60fed": {
+      "author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
