@@ -8,6 +8,9 @@
 ## User settings
 xcuserdata/
 
+# Local developer configuration and signing overrides
+App/Configuration/Local.xcconfig
+
 ## compatibility with Xcode 8 and earlier (ignoring not required starting Xcode 9)
 *.xcscmblueprint
 *.xccheckout
