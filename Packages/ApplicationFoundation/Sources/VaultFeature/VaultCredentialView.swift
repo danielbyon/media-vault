@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import BrowserFeature
 import ComposableArchitecture
 import MediaLibrary
 import SwiftUI
@@ -190,7 +191,7 @@ public struct VaultShellView: View {
                     placeholder("Collections", systemImage: "rectangle.stack")
                 }
                 Tab("Browser", systemImage: "safari", value: .browser) {
-                    placeholder("Browser", systemImage: "safari")
+                    BrowserView(store: store.scope(state: \.browser, action: \.browser))
                 }
             }
             .tabViewStyle(.sidebarAdaptable)
@@ -212,7 +213,7 @@ public struct VaultShellView: View {
                     },
                 ),
             ) {
-                SettingsPlaceholderView()
+                AuthenticatedSettingsView(browserStore: store.scope(state: \.browser, action: \.browser))
             }
         }
     }
@@ -244,11 +245,19 @@ public struct VaultShellView: View {
     }
 }
 
-private struct SettingsPlaceholderView: View {
+private struct AuthenticatedSettingsView: View {
+    let browserStore: StoreOf<BrowserFeature>
+
     var body: some View {
         NavigationStack {
-            Text("Settings")
-                .navigationTitle("Settings")
+            List {
+                NavigationLink {
+                    BrowserSettingsView(store: browserStore)
+                } label: {
+                    Label("Browser", systemImage: "safari")
+                }
+            }
+            .navigationTitle("Settings")
         }
     }
 }

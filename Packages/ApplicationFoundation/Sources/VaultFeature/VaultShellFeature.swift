@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import BrowserFeature
 import ComposableArchitecture
 import MediaLibrary
 
@@ -16,15 +17,14 @@ public enum VaultShellTab: String, CaseIterable, Equatable, Hashable, Sendable {
     /// The collections destination placeholder.
     case collections
 
-    /// The browser destination placeholder.
+    /// The authenticated browser destination.
     case browser
 }
 
 /// The authenticated navigation shell.
 ///
 /// This feature owns top-level navigation and composes the authenticated Library state. It
-/// intentionally does not know how credentials are stored or how the Collections and Browser
-/// destinations will be implemented.
+/// intentionally does not know how credentials are stored or how Collections will be implemented.
 @Reducer
 public struct VaultShellFeature {
     /// State for the authenticated navigation shell.
@@ -39,15 +39,20 @@ public struct VaultShellFeature {
         /// The authenticated Library feature state.
         public var library: MediaLibraryFeature.State
 
+        /// The standalone authenticated browser feature state.
+        public var browser: BrowserFeature.State
+
         /// Creates the initial authenticated shell state.
         public init(
             selectedTab: VaultShellTab = .library,
             settingsPresented: Bool = false,
             library: MediaLibraryFeature.State = .init(),
+            browser: BrowserFeature.State = .init(),
         ) {
             self.selectedTab = selectedTab
             self.settingsPresented = settingsPresented
             self.library = library
+            self.browser = browser
         }
     }
 
@@ -64,6 +69,9 @@ public struct VaultShellFeature {
 
         /// Forwards Library actions.
         case library(MediaLibraryFeature.Action)
+
+        /// Forwards Browser actions.
+        case browser(BrowserFeature.Action)
     }
 
     /// Creates the authenticated shell reducer.
@@ -74,6 +82,9 @@ public struct VaultShellFeature {
         Scope(state: \.library, action: \.library) {
             MediaLibraryFeature()
         }
+        Scope(state: \.browser, action: \.browser) {
+            BrowserFeature()
+        }
         Reduce { state, action in
             switch action {
             case let .tabSelected(tab):
@@ -82,7 +93,8 @@ public struct VaultShellFeature {
                 state.settingsPresented = true
             case .settingsDismissed:
                 state.settingsPresented = false
-            case .library:
+            case .library,
+                 .browser:
                 return .none
             }
             return .none
