@@ -155,6 +155,10 @@ extension BrowserFeature {
             } else {
                 state.tabOverviewFocusID = state.selectedTabID
             }
+        case .topLevelDeselected:
+            state.focusedField = .none
+            state.destructiveConfirmation = nil
+            return .none
         case .omniboxFocused:
             state.focusedField = state.selectedTab?.isStartPage == true ? .startPage : .chrome
             if state.focusedField == .chrome, let url = state.selectedTab?.metadata.committedURL {
@@ -333,6 +337,9 @@ extension BrowserFeature {
             return .run { _ in await write(url) }
         case .clearHistoryTapped:
             state.destructiveConfirmation = .clearHistory
+        case .destructiveConfirmationDismissed:
+            state.destructiveConfirmation = nil
+            return .none
         case .deleteAllBookmarksTapped:
             state.destructiveConfirmation = .deleteAllBookmarks(count: state.bookmarks.count)
         case .destructiveActionConfirmed:

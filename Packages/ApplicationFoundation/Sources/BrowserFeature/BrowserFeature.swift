@@ -138,6 +138,8 @@ public struct BrowserFeature {
         case showTabOverviewTapped
         /// Records the deterministic accessibility focus target selected by Tab Overview.
         case tabOverviewFocusChanged(BrowserTabID?)
+        /// Resigns transient Browser presentation state when the authenticated shell leaves Browser.
+        case topLevelDeselected
         /// Focuses the appropriate omnibox and performs an approved clipboard check.
         case omniboxFocused
         /// Resolves and submits the current omnibox draft.
@@ -214,6 +216,8 @@ public struct BrowserFeature {
         case copyURL(BrowserTabID)
         /// Requests the shared clear-History confirmation.
         case clearHistoryTapped(source: BrowserClearHistorySource)
+        /// Clears a pending destructive confirmation dismissed without confirming.
+        case destructiveConfirmationDismissed
         /// Requests the delete-all-bookmarks confirmation.
         case deleteAllBookmarksTapped
         /// Performs the pending destructive operation.

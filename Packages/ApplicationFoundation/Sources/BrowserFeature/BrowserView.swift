@@ -129,7 +129,11 @@ public struct BrowserView: View {
         }
         .confirmationDialog(destructiveTitle, isPresented: Binding(
             get: { store.destructiveConfirmation != nil },
-            set: { _ in },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.destructiveConfirmationDismissed)
+                }
+            },
         ), titleVisibility: .visible) {
             Button("Confirm", role: .destructive) { store.send(.destructiveActionConfirmed) }
         }

@@ -31,4 +31,17 @@ struct VaultShellFeatureTests {
             $0.settingsPresented = false
         }
     }
+
+    @Test("Leaving Browser deactivates its transient presentation state")
+    @MainActor
+    func leavingBrowserDeactivatesTransientPresentation() async {
+        let store = TestStore(initialState: VaultShellFeature.State(selectedTab: .browser)) {
+            VaultShellFeature()
+        }
+
+        await store.send(.tabSelected(.library)) {
+            $0.selectedTab = .library
+        }
+        await store.receive(.browser(.topLevelDeselected))
+    }
 }

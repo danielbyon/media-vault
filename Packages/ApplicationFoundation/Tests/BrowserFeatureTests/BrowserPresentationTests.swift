@@ -124,6 +124,40 @@ struct BrowserPresentationTests {
         #expect(calls.value == 2)
     }
 
+    @Test("Leaving top-level Browser resigns omnibox focus and clears destructive confirmation")
+    func topLevelDeselectionClearsTransientPresentation() async {
+        let tabID = BrowserTabID()
+        let store = TestStore(initialState: BrowserFeature.State(
+            tabs: [.startPage(id: tabID)],
+            selectedTabID: tabID,
+            focusedField: .startPage,
+        )) {
+            BrowserFeature()
+        }
+
+        await store.send(.clearHistoryTapped(source: .settings)) {
+            $0.destructiveConfirmation = .clearHistory
+        }
+        await store.send(.topLevelDeselected) {
+            $0.focusedField = .none
+            $0.destructiveConfirmation = nil
+        }
+    }
+
+    @Test("Dismissing destructive confirmation clears reducer presentation state")
+    func destructiveConfirmationDismissal() async {
+        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+            BrowserFeature()
+        }
+
+        await store.send(.clearHistoryTapped(source: .settings)) {
+            $0.destructiveConfirmation = .clearHistory
+        }
+        await store.send(.destructiveConfirmationDismissed) {
+            $0.destructiveConfirmation = nil
+        }
+    }
+
     @Test("Delete All Bookmarks confirmation carries the available count")
     func deleteAllBookmarksConfirmation() async throws {
         var state = BrowserFeature.State(initialTabID: BrowserTabID())

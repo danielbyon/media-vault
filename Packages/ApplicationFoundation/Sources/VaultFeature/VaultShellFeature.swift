@@ -88,7 +88,9 @@ public struct VaultShellFeature {
         Reduce { state, action in
             switch action {
             case let .tabSelected(tab):
+                let leavesBrowser = state.selectedTab == .browser && tab != .browser
                 state.selectedTab = tab
+                return leavesBrowser ? .send(.browser(.topLevelDeselected)) : .none
             case .settingsTapped:
                 state.settingsPresented = true
             case .settingsDismissed:
