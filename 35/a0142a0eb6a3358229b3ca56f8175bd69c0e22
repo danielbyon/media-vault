@@ -1,0 +1,16 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  h_a1fa5c19d60fed 48,154-168,263-264,266-270,272-305,307-347
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewSnapshotTests.swift
+  h_a1fa5c19d60fed 51-52,60-61,63-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "35a0142a0eb6a3358229b3ca56f8175bd69c0e22",
+  "prompts": {},
+  "humans": {
+    "h_a1fa5c19d60fed": {
+      "author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
