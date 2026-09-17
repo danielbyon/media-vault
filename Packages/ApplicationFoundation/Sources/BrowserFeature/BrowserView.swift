@@ -223,21 +223,26 @@ extension BrowserView {
                         Spacer()
                         Button("All Bookmarks") { store.send(.libraryPresented(.bookmarks)) }
                     }
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 12)], spacing: 12) {
-                        ForEach(BrowserSuggestions.startPageBookmarks(store.bookmarks)) { bookmark in
-                            Button { store.send(.navigate(bookmark.url)) } label: { bookmarkTile(bookmark) }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button("Open") { store.send(.navigate(bookmark.url)) }
-                                    Button("Open in New Tab") { store.send(.openInNewTab(
-                                        bookmark.url,
-                                        openerID: store.selectedTabID,
-                                    )) }
-                                    Button("Edit Bookmark") { store.send(.editBookmarkTapped(bookmark.id)) }
-                                    Button("Delete Bookmark", role: .destructive) {
-                                        store.send(.deleteBookmark(bookmark.id))
+                    if store.bookmarks.isEmpty {
+                        ContentUnavailableView("No Bookmarks", systemImage: "bookmark")
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 12)], spacing: 12) {
+                            ForEach(BrowserSuggestions.startPageBookmarks(store.bookmarks)) { bookmark in
+                                Button { store.send(.navigate(bookmark.url)) } label: { bookmarkTile(bookmark) }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button("Open") { store.send(.navigate(bookmark.url)) }
+                                        Button("Open in New Tab") { store.send(.openInNewTab(
+                                            bookmark.url,
+                                            openerID: store.selectedTabID,
+                                        )) }
+                                        Button("Edit Bookmark") { store.send(.editBookmarkTapped(bookmark.id)) }
+                                        Button("Delete Bookmark", role: .destructive) {
+                                            store.send(.deleteBookmark(bookmark.id))
+                                        }
                                     }
-                                }
+                            }
                         }
                     }
                 }
