@@ -164,11 +164,19 @@ struct BrowserViewSnapshotTests {
         }
     }
 
-    @Test("Browser Library snapshots Bookmarks, History, and local search states")
+    @Test("Browser Library snapshots true-empty, populated, and local search states")
     func browserLibrary() throws {
         let referenceDate = DeterministicTestSupport.referenceDate
         let bookmarkURL = try #require(URL(string: "https://bookmarks.example/private"))
         let historyURL = try #require(URL(string: "https://history.example/visited"))
+
+        var emptyState = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+        emptyState.library = .init(section: .bookmarks, referenceDate: referenceDate)
+        librarySnapshot(emptyState, named: "library-bookmarks-empty-regular-ipad")
+
+        emptyState.library = .init(section: .history, referenceDate: referenceDate)
+        librarySnapshot(emptyState, named: "library-history-empty-regular-ipad")
+
         var state = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
         state.bookmarks = [BrowserBookmark(
             id: UUID(2),
@@ -194,6 +202,13 @@ struct BrowserViewSnapshotTests {
             referenceDate: referenceDate,
         )
         librarySnapshot(state, named: "library-bookmarks-empty-search-regular-ipad")
+
+        state.library = .init(
+            section: .history,
+            historySearch: "no local match",
+            referenceDate: referenceDate,
+        )
+        librarySnapshot(state, named: "library-history-empty-search-regular-ipad")
     }
 
     @Test("Authenticated Browser settings show privacy disclosure and defaults")

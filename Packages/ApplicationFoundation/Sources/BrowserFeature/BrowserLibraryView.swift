@@ -31,89 +31,120 @@ struct BrowserLibraryView: View {
                     bookmarkList
                 }
             }
-            .navigationTitle("Browser Library")
+            .navigationTitle("Library")
             .toolbar { Button("Done") { store.send(.libraryDismissed) } }
         }
     }
 
     private var bookmarkList: some View {
-        ScrollViewReader { proxy in
-            List(BrowserLibrarySearch.bookmarks(store.bookmarks, query: store.library?.bookmarkSearch ?? "")) { item in
-                Button { store.send(.navigate(item.url)) } label: { row(item.title, item.url.host) }
-                    .id(item.id)
-                    .swipeActions {
-                        Button("Delete", role: .destructive) { store.send(.deleteBookmark(item.id)) }
+        Group {
+            if store.bookmarks.isEmpty {
+                ContentUnavailableView("No Bookmarks", systemImage: "bookmark")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if filteredBookmarks.isEmpty {
+                ContentUnavailableView.search(text: store.library?.bookmarkSearch ?? "")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    List(filteredBookmarks) { item in
+                        Button { store.send(.navigate(item.url)) } label: { row(item.title, item.url.host) }
+                            .id(item.id)
+                            .swipeActions {
+                                Button("Delete", role: .destructive) { store.send(.deleteBookmark(item.id)) }
+                            }
+                            .contextMenu {
+                                Button("Open in New Tab") {
+                                    store.send(.openInNewTab(item.url, openerID: store.selectedTabID))
+                                }
+                                Button("Edit Bookmark") { store.send(.editBookmarkTapped(item.id)) }
+                                Button("Delete Bookmark", role: .destructive) { store.send(.deleteBookmark(item.id)) }
+                            }
                     }
-                    .contextMenu {
-                        Button("Open in New Tab") {
-                            store.send(.openInNewTab(item.url, openerID: store.selectedTabID))
+                    .onAppear {
+                        if let bookmarkID = store.library?.revealedBookmarkID {
+                            proxy.scrollTo(bookmarkID, anchor: .center)
+                            store.send(.bookmarkRevealConsumed)
                         }
-                        Button("Edit Bookmark") { store.send(.editBookmarkTapped(item.id)) }
-                        Button("Delete Bookmark", role: .destructive) { store.send(.deleteBookmark(item.id)) }
                     }
-            }
-            .onAppear {
-                if let bookmarkID = store.library?.revealedBookmarkID {
-                    proxy.scrollTo(bookmarkID, anchor: .center)
-                    store.send(.bookmarkRevealConsumed)
+                    .scrollPosition(id: Binding(
+                        get: { store.library?.bookmarkScrollPosition },
+                        set: { position in
+                            guard let position else {
+                                return
+                            }
+
+                            store.send(.libraryScrollChanged(.bookmarks, position))
+                        },
+                    ))
                 }
             }
-            .scrollPosition(id: Binding(
-                get: { store.library?.bookmarkScrollPosition },
-                set: { position in
-                    guard let position else {
-                        return
-                    }
-
-                    store.send(.libraryScrollChanged(.bookmarks, position))
-                },
-            ))
-            .searchable(text: Binding(
-                get: { store.library?.bookmarkSearch ?? "" },
-                set: { store.send(.librarySearchChanged(.bookmarks, $0)) },
-            ))
         }
+        .searchable(text: Binding(
+            get: { store.library?.bookmarkSearch ?? "" },
+            set: { store.send(.librarySearchChanged(.bookmarks, $0)) },
+        ))
     }
 
     private var historyList: some View {
-        List {
-            ForEach(historyGroups) { group in
-                Section(group.title) {
-                    ForEach(group.entries) { item in
-                        Button { store.send(.navigate(item.url)) } label: {
-                            row(item.title, BrowserHistoryGrouping.metadata(for: item, group: group))
-                        }
-                        .id(item.id)
-                        .swipeActions {
-                            Button("Delete", role: .destructive) { store.send(.deleteHistoryEntry(item.id)) }
-                        }
-                        .contextMenu {
-                            Button("Open in New Tab") {
-                                store.send(.openInNewTab(item.url, openerID: store.selectedTabID))
-                            }
-                            Button("Delete History Entry", role: .destructive) {
-                                store.send(.deleteHistoryEntry(item.id))
+        Group {
+            if store.history.isEmpty {
+                ContentUnavailableView("No History", systemImage: "clock")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if historyGroups.isEmpty {
+                VStack(spacing: 0) {
+                    ContentUnavailableView.search(text: store.library?.historySearch ?? "")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    clearHistoryButton
+                }
+            } else {
+                List {
+                    ForEach(historyGroups) { group in
+                        Section(group.title) {
+                            ForEach(group.entries) { item in
+                                Button { store.send(.navigate(item.url)) } label: {
+                                    row(item.title, BrowserHistoryGrouping.metadata(for: item, group: group))
+                                }
+                                .id(item.id)
+                                .swipeActions {
+                                    Button("Delete", role: .destructive) { store.send(.deleteHistoryEntry(item.id)) }
+                                }
+                                .contextMenu {
+                                    Button("Open in New Tab") {
+                                        store.send(.openInNewTab(item.url, openerID: store.selectedTabID))
+                                    }
+                                    Button("Delete History Entry", role: .destructive) {
+                                        store.send(.deleteHistoryEntry(item.id))
+                                    }
+                                }
                             }
                         }
                     }
+                    clearHistoryButton
                 }
-            }
-            Button("Clear History", role: .destructive) { store.send(.clearHistoryTapped(source: .library)) }
-        }
-        .scrollPosition(id: Binding(
-            get: { store.library?.historyScrollPosition },
-            set: { position in
-                guard let position else {
-                    return
-                }
+                .scrollPosition(id: Binding(
+                    get: { store.library?.historyScrollPosition },
+                    set: { position in
+                        guard let position else {
+                            return
+                        }
 
-                store.send(.libraryScrollChanged(.history, position))
-            },
-        ))
+                        store.send(.libraryScrollChanged(.history, position))
+                    },
+                ))
+            }
+        }
         .searchable(text: Binding(
             get: { store.library?.historySearch ?? "" },
             set: { store.send(.librarySearchChanged(.history, $0)) },
         ))
+    }
+
+    private var filteredBookmarks: [BrowserBookmark] {
+        BrowserLibrarySearch.bookmarks(store.bookmarks, query: store.library?.bookmarkSearch ?? "")
+    }
+
+    private var clearHistoryButton: some View {
+        Button("Clear History", role: .destructive) { store.send(.clearHistoryTapped(source: .library)) }
     }
 
     private var historyGroups: [BrowserHistoryGroup] {
