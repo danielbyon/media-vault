@@ -91,6 +91,8 @@ public struct VaultShellFeature {
                 let leavesBrowser = state.selectedTab == .browser && tab != .browser
                 state.selectedTab = tab
                 return leavesBrowser ? .send(.browser(.topLevelDeselected)) : .none
+            case .browser(.settingsTapped):
+                state.settingsPresented = true
             case .settingsTapped:
                 state.settingsPresented = true
             case .settingsDismissed:

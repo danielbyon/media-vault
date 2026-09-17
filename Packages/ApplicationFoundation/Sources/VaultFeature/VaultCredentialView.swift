@@ -197,12 +197,19 @@ public struct VaultShellView: View {
             .tabViewStyle(.sidebarAdaptable)
             .navigationTitle(title(for: store.selectedTab))
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Settings", systemImage: "gearshape") {
-                        store.send(.settingsTapped)
+                if store.selectedTab != .browser {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Settings", systemImage: "gearshape") {
+                            store.send(.settingsTapped)
+                        }
                     }
                 }
             }
+            .toolbar(
+                store.selectedTab == .browser ? .hidden : .visible,
+                for: .navigationBar,
+            )
+            .background { browserKeyboardShortcutHost }
             .sheet(
                 isPresented: Binding(
                     get: { store.settingsPresented },
@@ -215,6 +222,21 @@ public struct VaultShellView: View {
             ) {
                 AuthenticatedSettingsView(browserStore: store.scope(state: \.browser, action: \.browser))
             }
+        }
+    }
+
+    /// Registers Command-L only while Browser owns the authenticated shell destination.
+    @ViewBuilder
+    private var browserKeyboardShortcutHost: some View {
+        if store.selectedTab == .browser {
+            Button {
+                store.send(.browser(.omniboxFocused))
+            } label: {
+                EmptyView()
+            }
+            .keyboardShortcut("l", modifiers: .command)
+            .accessibilityHidden(true)
+            .frame(width: 0, height: 0)
         }
     }
 

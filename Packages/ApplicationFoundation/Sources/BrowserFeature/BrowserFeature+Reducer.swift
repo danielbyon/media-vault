@@ -159,6 +159,8 @@ extension BrowserFeature {
             state.focusedField = .none
             state.destructiveConfirmation = nil
             return .none
+        case .settingsTapped:
+            return .none
         case .omniboxFocused:
             state.focusedField = state.selectedTab?.isStartPage == true ? .startPage : .chrome
             if state.focusedField == .chrome, let url = state.selectedTab?.metadata.committedURL {
