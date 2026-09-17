@@ -6,7 +6,9 @@
 //
 
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 import WebKit
 @testable import BrowserFeature
 
@@ -67,6 +69,28 @@ struct BrowserWebKitAdapterTests {
         bridge.makeCoordinator().refresh()
 
         #expect(refreshCount == 1)
+    }
+
+    @Test("The WebKit bridge receives the adopting presentation's interactive policy")
+    func webKitBridgeReceivesInteractivePolicy() {
+        let tabID = BrowserTabID()
+        let adapter = BrowserWebKitAdapter.shared
+        let controller = UIHostingController(
+            rootView: BrowserWebView(tabID: tabID, onRefresh: {})
+                .scrollDismissesKeyboard(.interactively),
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+
+        let webView = adapter.ensureContext(for: tabID)
+        #expect(webView.scrollView.keyboardDismissMode == .interactive)
+
+        adapter.destroyContext(for: tabID)
+        window.isHidden = true
+        window.rootViewController = nil
     }
 
     @Test("The error-surface refresh bridge forwards pull-to-refresh")

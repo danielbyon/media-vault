@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import PresentationSupport
 import SwiftUI
 import UIKit
 
@@ -67,6 +68,10 @@ public struct BrowserWebView: UIViewRepresentable {
         }
         context.coordinator.tabID = tabID
         let webView = BrowserWebKitAdapter.shared.ensureContext(for: tabID)
+        KeyboardDismissalSupport.setInteractiveDismissal(
+            context.environment.scrollDismissesKeyboardMode == .interactively,
+            on: webView.scrollView,
+        )
         if webView.scrollView.refreshControl == nil {
             let refreshControl = UIRefreshControl()
             refreshControl.addTarget(
