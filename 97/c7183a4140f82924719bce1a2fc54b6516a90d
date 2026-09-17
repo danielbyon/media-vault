@@ -1,0 +1,33 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_90972f02d82858::t_772015530f842d 357
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTests.swift
+  s_90972f02d82858::t_e9f12b00afb8af 101-123,131-133
+  s_90972f02d82858::t_b90252140d3ec6 124-130
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultCredentialView.swift
+  s_90972f02d82858::t_772015530f842d 200-204,208-212,228-239
+  s_90972f02d82858::t_c835a05d2c1d4a 240-242
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature.swift
+  s_90972f02d82858::t_772015530f842d 143-144
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  s_90972f02d82858::t_772015530f842d 162-163
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultShellFeature.swift
+  s_90972f02d82858::t_772015530f842d 94-95
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultShellFeatureTests.swift
+  s_90972f02d82858::t_e9f12b00afb8af 35-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "97c7183a4140f82924719bce1a2fc54b6516a90d",
+  "prompts": {},
+  "sessions": {
+    "s_90972f02d82858": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0ac02-e4d3-7ab1-a52e-dd23152ee1d4",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
