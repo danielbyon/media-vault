@@ -44,16 +44,8 @@ public struct BrowserView: View {
         Group {
             if store.presentation == .tabOverview {
                 tabOverview
-            } else if horizontalSizeClass == .regular {
-                VStack(spacing: 0) {
-                    chrome
-                    selectedContentPresentation
-                }
             } else {
-                VStack(spacing: 0) {
-                    selectedContentPresentation
-                    chrome
-                }
+                selectedContentWithChrome
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -160,6 +152,21 @@ extension BrowserView {
     }
 
     @ViewBuilder
+    private var selectedContentWithChrome: some View {
+        if horizontalSizeClass == .regular {
+            selectedContentPresentation
+                .safeAreaBar(edge: .top, spacing: 0) {
+                    chrome
+                }
+        } else {
+            selectedContentPresentation
+                .safeAreaBar(edge: .bottom, spacing: 0) {
+                    chrome
+                }
+        }
+    }
+
+    @ViewBuilder
     private var selectedContentPresentation: some View {
         if reduceMotionEnabled {
             selectedContent.transition(.opacity)
@@ -253,44 +260,91 @@ extension BrowserView {
         VStack(spacing: 0) {
             if let tab = store.selectedTab,
                tab.metadata.isLoading {
-                ProgressView(value: tab.metadata.estimatedProgress).progressViewStyle(.linear)
+                ProgressView(value: tab.metadata.estimatedProgress)
+                    .progressViewStyle(.linear)
             }
-            HStack(spacing: 16) {
-                Button { store.send(.backTapped) } label: {
-                    Image(systemName: "chevron.backward").accessibilityHidden(true)
+            if horizontalSizeClass == .compact,
+               store.selectedTab?.isStartPage != true {
+                ViewThatFits(in: .horizontal) {
+                    chromeRow(includesOmnibox: true)
+                    stackedCompactChrome
                 }
-                .accessibilityLabel("Back")
-                .disabled(store.selectedTab?.metadata.canGoBack != true)
-                .onLongPressGesture { store.send(.backHistoryRequested) }
-                Button { store.send(.forwardTapped) } label: {
-                    Image(systemName: "chevron.forward").accessibilityHidden(true)
-                }
-                .accessibilityLabel("Forward")
-                .disabled(store.selectedTab?.metadata.canGoForward != true)
-                .onLongPressGesture { store.send(.forwardHistoryRequested) }
-                if store.selectedTab?.isStartPage != true {
-                    omnibox(large: false)
-                }
-                Button { store.send(.reloadOrStopTapped) } label: {
-                    Image(systemName: store.selectedTab?.metadata.isLoading == true ? "xmark" : "arrow.clockwise")
-                        .accessibilityHidden(true)
-                }
-                .accessibilityLabel(store.selectedTab?.metadata.isLoading == true ? "Stop" : "Reload")
-                .disabled(store.selectedTab?.isStartPage == true)
-                Button { store.send(.showTabOverviewTapped) } label: {
-                    Text(store.tabCountLabel)
-                        .font(.caption.bold())
-                        .frame(width: 28, height: 28)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke())
-                }
-                .accessibilityLabel("Show Tabs, \(store.tabCountLabel) tabs")
-                Menu { overflowMenu } label: { Image(systemName: "ellipsis.circle") }
-                    .accessibilityLabel("Browser Menu")
+            } else {
+                chromeRow(includesOmnibox: true)
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-        }.background(.bar)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var stackedCompactChrome: some View {
+        VStack(spacing: 0) {
+            omnibox(large: false)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+            chromeRow(includesOmnibox: false)
+        }
+    }
+
+    private func chromeRow(includesOmnibox: Bool) -> some View {
+        HStack(spacing: 6) {
+            Button { store.send(.backTapped) } label: {
+                Image(systemName: "chevron.backward")
+                    .accessibilityHidden(true)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Back")
+            .disabled(store.selectedTab?.metadata.canGoBack != true)
+            .onLongPressGesture { store.send(.backHistoryRequested) }
+
+            Button { store.send(.forwardTapped) } label: {
+                Image(systemName: "chevron.forward")
+                    .accessibilityHidden(true)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Forward")
+            .disabled(store.selectedTab?.metadata.canGoForward != true)
+            .onLongPressGesture { store.send(.forwardHistoryRequested) }
+
+            if includesOmnibox,
+               store.selectedTab?.isStartPage != true {
+                omnibox(large: false)
+                    .frame(minWidth: 120, maxWidth: .infinity)
+                    .layoutPriority(1)
+            }
+
+            Button { store.send(.reloadOrStopTapped) } label: {
+                Image(systemName: store.selectedTab?.metadata.isLoading == true ? "xmark" : "arrow.clockwise")
+                    .accessibilityHidden(true)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(store.selectedTab?.metadata.isLoading == true ? "Stop" : "Reload")
+            .disabled(store.selectedTab?.isStartPage == true)
+
+            Button { store.send(.showTabOverviewTapped) } label: {
+                Text(store.tabCountLabel)
+                    .font(.caption.bold())
+                    .frame(width: 28, height: 28)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Show Tabs, \(store.tabCountLabel) tabs")
+
+            Menu { overflowMenu } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Browser Menu")
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity)
     }
 
     private func omnibox(large: Bool) -> some View {

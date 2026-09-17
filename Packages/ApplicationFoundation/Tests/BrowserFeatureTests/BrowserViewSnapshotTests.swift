@@ -48,8 +48,8 @@ struct BrowserViewSnapshotTests {
         snapshot(state, named: "bookmark-order-large-phone", config: DeterministicTestSupport.largePhone)
     }
 
-    @Test("Loaded chrome adapts to narrow iPad")
-    func loadedNarrowIPad() throws {
+    @Test("Loaded chrome remains usable at compact and regular widths")
+    func loadedChromeAcrossSizeClasses() throws {
         let url = try #require(URL(string: "http://example.com/private"))
         var tab = BrowserTab.web(id: BrowserTabID(UUID(1)), url: url)
         tab.metadata = .init(
@@ -57,10 +57,17 @@ struct BrowserViewSnapshotTests {
             title: "Example",
             canGoBack: true,
         )
+        let state = BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)
+
         snapshot(
-            .init(tabs: [tab], selectedTabID: tab.id),
-            named: "loaded-chrome-narrow-ipad",
-            config: DeterministicTestSupport.narrowWidthIPad,
+            state,
+            named: "loaded-chrome-compact-phone",
+            config: DeterministicTestSupport.compactPhone,
+        )
+        snapshot(
+            state,
+            named: "loaded-chrome-regular-ipad",
+            config: DeterministicTestSupport.regularWidthIPad,
         )
     }
 
