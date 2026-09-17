@@ -1,0 +1,61 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature.swift
+  s_c680a11202e7b2::t_2dacd97fddc6f8 109,111-116
+  s_c680a11202e7b2::t_4cf12f261a1753 23
+  s_c680a11202e7b2::t_9a4b3952c228aa 24,49,83,157-158
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTests.swift
+  s_c680a11202e7b2::t_c67781b0e7eadf 79,92
+Packages/ApplicationFoundation/Package.swift
+  s_c680a11202e7b2::t_517079e37dd9c4 14,66-68,78,147-150,152
+  s_c680a11202e7b2::t_15a606949ccb05 151
+Packages/ApplicationFoundation/Tests/PresentationSupportTests/KeyboardDismissalTests.swift
+  s_c680a11202e7b2::t_9e5f50968c684c 1-73,75-91
+  s_c680a11202e7b2::t_dd59b1bd07ae89 74
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserSuggestionStateTests.swift
+  s_c680a11202e7b2::t_649bd40312a32c 110-140,200-211,213,224-249
+  s_c680a11202e7b2::t_a4ab391a8efdc7 171-199
+  s_c680a11202e7b2::t_35a2e5e7458202 212,214-223
+  s_c680a11202e7b2::t_f02ed8bea0fd59 22
+  s_c680a11202e7b2::t_796688dcd6d7a6 53,94,107,253,282
+  s_c680a11202e7b2::t_3cef49b9d2a3cf 80-93,95-106,108-109
+  s_c680a11202e7b2::t_429d2520353df0 141-170
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  s_c680a11202e7b2::t_2dacd97fddc6f8 122,183-186
+  s_c680a11202e7b2::t_a3847a284284c6 121
+  s_c680a11202e7b2::t_ffb23242b1cd60 162,177
+  s_c680a11202e7b2::t_64c80af553d18d 215-216,228-233
+  s_c680a11202e7b2::t_d399dec6ed13b4 44,166-170,173-174,176,180
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Helpers.swift
+  s_c680a11202e7b2::t_ffb23242b1cd60 267-274
+  s_c680a11202e7b2::t_4cf12f261a1753 266
+  s_c680a11202e7b2::t_ce74aacf2b7d33 260,301-302
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebView.swift
+  s_c680a11202e7b2::t_7d85a75f202ccc 9,71-74
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_c680a11202e7b2::t_7d85a75f202ccc 10,50,61-65,67-72,74-75
+  s_c680a11202e7b2::t_81d55e68f55f80 66,73
+  s_c680a11202e7b2::t_a6bc65e82b4251 391
+Packages/ApplicationFoundation/Sources/PresentationSupport/KeyboardDismissalSupport.swift
+  s_c680a11202e7b2::t_a4b8f45a7b4cc5 2
+  s_c680a11202e7b2::t_e52ee88686d870 93
+  s_c680a11202e7b2::t_77723bad386081 1,3-91,94-165,167-181
+  s_c680a11202e7b2::t_4cf12f261a1753 92,166
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserWebKitAdapterTests.swift
+  s_c680a11202e7b2::t_1619c0b0d26144 9,11,74-93
+  s_c680a11202e7b2::t_706fbc29270c66 94-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4631bad9f54dd56ce4f0b1601690bc106d920077",
+  "prompts": {},
+  "sessions": {
+    "s_c680a11202e7b2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0adb7-b772-7173-bb2a-e128405d4207",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
