@@ -41,6 +41,7 @@ extension BrowserFeature {
             state.tabOverviewFocusID = nil
             state.focusedField = .startPage
             state.omniboxDraft = ""
+            state.hasUnsubmittedOmniboxDraft = false
             state.providerSuggestionValues = []
             state.rebuildSuggestions()
             return .merge(dismissalEffect, checkClipboardIfAllowed(state: state))
@@ -117,9 +118,10 @@ extension BrowserFeature {
             state.presentation = .browsing
             state.tabOverviewFocusID = nil
             state.omniboxDraft = ""
+            state.hasUnsubmittedOmniboxDraft = false
+            state.focusedField = .startPage
             state.providerSuggestionValues = []
             state.rebuildSuggestions()
-            state.focusedField = .startPage
             return .merge(dismissalEffect, checkClipboardIfAllowed(state: state))
         case .showTabOverviewTapped:
             guard state.library == nil else {
@@ -156,23 +158,32 @@ extension BrowserFeature {
                 state.tabOverviewFocusID = state.selectedTabID
             }
         case .topLevelDeselected:
-            state.focusedField = .none
             state.destructiveConfirmation = nil
-            return .none
+            return reconcileOmniboxFocusLoss(in: &state)
         case .settingsTapped:
             return .none
         case .omniboxFocused:
-            state.focusedField = state.selectedTab?.isStartPage == true ? .startPage : .chrome
-            if state.focusedField == .chrome, let url = state.selectedTab?.metadata.committedURL {
+            let field = state.selectedTab?.isStartPage == true ? BrowserFocusedField.startPage : .chrome
+            state.focusedField = field
+            if field == .chrome,
+               !state.hasUnsubmittedOmniboxDraft,
+               let url = state.selectedTab?.metadata.committedURL {
                 state.omniboxDraft = url.absoluteString
-                state.providerSuggestionValues = []
-                state.rebuildSuggestions()
             }
-            return checkClipboardIfAllowed(state: state)
-        case let .omniboxChanged(draft):
-            state.omniboxDraft = draft
             state.providerSuggestionValues = []
             state.rebuildSuggestions()
+            return checkClipboardIfAllowed(state: state)
+        case .omniboxFocusLost:
+            return reconcileOmniboxFocusLoss(in: &state)
+        case let .omniboxChanged(draft):
+            state.omniboxDraft = draft
+            state.hasUnsubmittedOmniboxDraft = true
+            state.providerSuggestionValues = []
+            state.rebuildSuggestions()
+            guard state.focusedField != .none else {
+                return .cancel(id: CancelID.providerSuggestions)
+            }
+
             let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
             guard state.settings.providerSuggestionsEnabled, trimmed.count >= 2 else {
                 return .cancel(id: CancelID.providerSuggestions)
@@ -201,7 +212,8 @@ extension BrowserFeature {
             }
             .cancellable(id: CancelID.providerSuggestions, cancelInFlight: true)
         case let .providerSuggestionsResponse(draft, provider, result):
-            guard state.settings.providerSuggestionsEnabled,
+            guard state.focusedField != .none,
+                  state.settings.providerSuggestionsEnabled,
                   provider == state.settings.searchProvider,
                   draft == state.omniboxDraft
             else {
@@ -213,6 +225,12 @@ extension BrowserFeature {
                 state.rebuildSuggestions()
             }
         case let .clipboardChecked(url):
+            guard state.focusedField != .none,
+                  state.settings.copiedLinkSuggestionsEnabled
+            else {
+                return .none
+            }
+
             state.copiedLink = url
             state.rebuildSuggestions()
         case let .copiedLinkSuggestionsChanged(enabled):

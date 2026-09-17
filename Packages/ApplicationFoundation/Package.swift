@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "AppFeature", type: .static, targets: ["AppFeature"]),
         .library(name: "CalculatorFeature", type: .static, targets: ["CalculatorFeature"]),
         .library(name: "BrowserFeature", type: .static, targets: ["BrowserFeature"]),
+        .library(name: "PresentationSupport", type: .static, targets: ["PresentationSupport"]),
         .library(name: "VaultFeature", type: .static, targets: ["VaultFeature"]),
         .library(name: "AppIdentity", type: .static, targets: ["AppIdentity"]),
         .library(name: "Entitlement", type: .static, targets: ["Entitlement"]),
@@ -63,6 +64,9 @@ let package = Package(
             ],
         ),
         .target(
+            name: "PresentationSupport",
+        ),
+        .target(
             name: "BrowserFeature",
             dependencies: [
                 .product(
@@ -71,6 +75,7 @@ let package = Package(
                 ),
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "DependenciesMacros", package: "swift-dependencies"),
+                "PresentationSupport",
             ],
         ),
         .target(
@@ -137,6 +142,12 @@ let package = Package(
             name: "PersistenceSupport",
             dependencies: [
                 .product(name: "SQLiteData", package: "sqlite-data"),
+            ],
+        ),
+        .testTarget(
+            name: "PresentationSupportTests",
+            dependencies: [
+                "PresentationSupport",
             ],
         ),
         .testTarget(

@@ -20,6 +20,8 @@ public struct BrowserFeature {
         var tabOverviewFocusID: BrowserTabID?
         var focusedField: BrowserFocusedField
         var omniboxDraft: String
+        /// Distinguishes an intentionally empty edit from a draft that has never been edited.
+        var hasUnsubmittedOmniboxDraft: Bool
         var bookmarks: [BrowserBookmark]
         var history: [BrowserHistoryEntry]
         var settings: BrowserSettings
@@ -44,6 +46,7 @@ public struct BrowserFeature {
             tabOverviewFocusID = nil
             focusedField = .none
             omniboxDraft = ""
+            hasUnsubmittedOmniboxDraft = false
             bookmarks = []
             history = []
             settings = .init()
@@ -77,6 +80,7 @@ public struct BrowserFeature {
             tabOverviewFocusID = nil
             self.focusedField = focusedField
             self.omniboxDraft = omniboxDraft
+            hasUnsubmittedOmniboxDraft = false
             bookmarks = []
             history = []
             settings = .init()
@@ -102,8 +106,14 @@ public struct BrowserFeature {
             tabs.count > 99 ? "99+" : String(tabs.count)
         }
 
-        /// Rebuilds transient suggestions without mutating durable History or query storage.
+        /// Rebuilds transient suggestions only while an omnibox field owns focus.
         mutating func rebuildSuggestions() {
+            guard focusedField != .none else {
+                providerSuggestionValues = []
+                suggestions = []
+                return
+            }
+
             suggestions = BrowserSuggestions.complete(
                 draft: omniboxDraft,
                 provider: settings.searchProvider,
@@ -144,6 +154,8 @@ public struct BrowserFeature {
         case settingsTapped
         /// Focuses the appropriate omnibox and performs an approved clipboard check.
         case omniboxFocused
+        /// Reconciles reducer state after the UI loses omnibox focus externally.
+        case omniboxFocusLost
         /// Resolves and submits the current omnibox draft.
         case omniboxSubmitted
         /// Requests WebKit back navigation for the selected tab.

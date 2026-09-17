@@ -257,9 +257,19 @@ extension BrowserFeature {
 
     func discardDraft(in state: inout State) {
         state.omniboxDraft = ""
+        state.hasUnsubmittedOmniboxDraft = false
         state.focusedField = .none
         state.providerSuggestionValues = []
         state.suggestions = []
+    }
+
+    /// Clears focus-owned transient state while preserving any unsubmitted omnibox draft.
+    func reconcileOmniboxFocusLoss(in state: inout State) -> Effect<Action> {
+        state.focusedField = .none
+        state.providerSuggestionValues = []
+        state.suggestions = []
+        state.copiedLink = nil
+        return .cancel(id: CancelID.providerSuggestions)
     }
 
     func dismissJavaScriptDialog(in state: inout State) -> Effect<Action> {
@@ -288,7 +298,8 @@ extension BrowserFeature {
     }
 
     func checkClipboardIfAllowed(state: State) -> Effect<Action> {
-        guard state.settings.copiedLinkSuggestionsEnabled,
+        guard state.focusedField != .none,
+              state.settings.copiedLinkSuggestionsEnabled,
               state.omniboxDraft.isEmpty || state.selectedTab?.isStartPage == true
         else {
             return .none

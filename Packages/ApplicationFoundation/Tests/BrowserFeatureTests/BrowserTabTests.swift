@@ -76,6 +76,7 @@ struct BrowserTabTests {
         await store.receive(.clipboardChecked(nil))
         await store.send(.omniboxChanged("example.com")) {
             $0.omniboxDraft = "example.com"
+            $0.hasUnsubmittedOmniboxDraft = true
             $0.suggestions = BrowserSuggestions.complete(
                 draft: "example.com",
                 provider: .duckDuckGo,
@@ -88,6 +89,7 @@ struct BrowserTabTests {
             $0.tabs[0] = .web(id: first, url: destination)
             $0.focusedField = .none
             $0.omniboxDraft = ""
+            $0.hasUnsubmittedOmniboxDraft = false
             $0.suggestions = []
         }
         await store.finish()

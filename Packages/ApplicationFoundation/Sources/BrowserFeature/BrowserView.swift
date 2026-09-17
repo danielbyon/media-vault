@@ -7,6 +7,7 @@
 
 import ComposableArchitecture
 import Foundation
+import PresentationSupport
 import SwiftUI
 import UIKit
 
@@ -46,6 +47,7 @@ public struct BrowserView: View {
                 tabOverview
             } else {
                 selectedContentWithChrome
+                    .keyboardDismissal(focus: $focusedField)
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -55,6 +57,21 @@ public struct BrowserView: View {
         )
         .onChange(of: store.focusedField, initial: true) { _, value in
             focusedField = value == BrowserFocusedField.none ? nil : value
+        }
+        .onChange(of: focusedField) { _, value in
+            guard let value else {
+                guard store.focusedField != .none else {
+                    return
+                }
+
+                store.send(.omniboxFocusLost)
+                return
+            }
+            guard store.focusedField != value else {
+                return
+            }
+
+            store.send(.omniboxFocused)
         }
         .onChange(of: store.presentation, initial: true) { _, value in
             accessibilityFocusedTabID = value == .tabOverview
@@ -371,7 +388,7 @@ extension BrowserView {
             }
             TextField("Search or enter website", text: Binding(
                 get: {
-                    if large || store.focusedField == .chrome {
+                    if large || focusedField == .chrome || store.focusedField == .chrome {
                         return store.omniboxDraft
                     }
                     return store.selectedTab?.metadata.committedURL?.host ?? store.omniboxDraft
@@ -382,11 +399,6 @@ extension BrowserView {
             .keyboardType(.webSearch)
             .submitLabel(.go)
             .focused($focusedField, equals: large ? .startPage : .chrome)
-            .onChange(of: focusedField) { _, value in
-                if value == (large ? .startPage : .chrome), store.focusedField != value {
-                    store.send(.omniboxFocused)
-                }
-            }
             .onSubmit { store.send(.omniboxSubmitted) }
         }
     }
