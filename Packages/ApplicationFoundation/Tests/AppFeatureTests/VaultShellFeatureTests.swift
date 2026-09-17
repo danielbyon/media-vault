@@ -32,6 +32,18 @@ struct VaultShellFeatureTests {
         }
     }
 
+    @Test("Browser-originated Settings requests present authenticated settings")
+    @MainActor
+    func browserSettingsRequestPresentsAuthenticatedSettings() async {
+        let store = TestStore(initialState: VaultShellFeature.State(selectedTab: .browser)) {
+            VaultShellFeature()
+        }
+
+        await store.send(.browser(.settingsTapped)) {
+            $0.settingsPresented = true
+        }
+    }
+
     @Test("Leaving Browser deactivates its transient presentation state")
     @MainActor
     func leavingBrowserDeactivatesTransientPresentation() async {

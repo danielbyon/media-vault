@@ -354,8 +354,7 @@ extension BrowserView {
 
     @ViewBuilder
     private var overflowMenu: some View {
-        Button("Focus Address") { store.send(.omniboxFocused) }
-            .keyboardShortcut("l", modifiers: .command)
+        Button("Settings", systemImage: "gearshape") { store.send(.settingsTapped) }
         Button("New Tab", systemImage: "plus") { store.send(.newTabTapped) }
         if store.selectedTab?
             .isStartPage != true {

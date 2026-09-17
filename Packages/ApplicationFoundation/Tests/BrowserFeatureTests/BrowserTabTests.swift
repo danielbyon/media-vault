@@ -98,6 +98,39 @@ struct BrowserTabTests {
         #expect(store.state.tabs[0].canGoBack == false)
     }
 
+    @Test("Omnibox focus distinguishes the Start Page from web chrome")
+    func omniboxFocusRoutesByActiveTab() async throws {
+        let url = try #require(URL(string: "https://example.com/private"))
+
+        let startPageStore = TestStore(initialState: BrowserFeature.State(initialTabID: first)) {
+            BrowserFeature()
+        }
+        await startPageStore.send(.omniboxFocused) {
+            $0.focusedField = .startPage
+        }
+        await startPageStore.receive(.clipboardChecked(nil))
+
+        var webTab = BrowserTab.web(id: first, url: url)
+        webTab.metadata.committedURL = url
+        let webStore = TestStore(initialState: BrowserFeature.State(
+            tabs: [webTab],
+            selectedTabID: first,
+        )) {
+            BrowserFeature()
+        }
+        await webStore.send(.omniboxFocused) {
+            $0.focusedField = .chrome
+            $0.omniboxDraft = url.absoluteString
+            $0.suggestions = BrowserSuggestions.complete(
+                draft: url.absoluteString,
+                provider: .duckDuckGo,
+                bookmarks: [],
+                history: [],
+                providerValues: [],
+            )
+        }
+    }
+
     @Test("Start Page command reuses without focus while explicit New Tab always appends and focuses")
     func startPageReuse() async throws {
         let web = try BrowserTab.web(id: first, url: #require(URL(string: "https://one.example")))

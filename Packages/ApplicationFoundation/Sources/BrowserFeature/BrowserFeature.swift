@@ -140,6 +140,8 @@ public struct BrowserFeature {
         case tabOverviewFocusChanged(BrowserTabID?)
         /// Resigns transient Browser presentation state when the authenticated shell leaves Browser.
         case topLevelDeselected
+        /// Requests presentation of the authenticated shell's Settings flow.
+        case settingsTapped
         /// Focuses the appropriate omnibox and performs an approved clipboard check.
         case omniboxFocused
         /// Resolves and submits the current omnibox draft.
