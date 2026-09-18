@@ -172,6 +172,24 @@ public struct BrowserView: View {
                 }
             }
         }
+        .confirmationDialog(newTabDispositionTitle, isPresented: Binding(
+            get: { store.pendingNewTab != nil },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.newTabDispositionDismissed)
+                }
+            },
+        ), titleVisibility: .visible) {
+            Button("In Foreground") {
+                store.send(.newTabDispositionSelected(.foreground))
+            }
+            Button("In Background") {
+                store.send(.newTabDispositionSelected(.background))
+            }
+            Button("Cancel", role: .cancel) {
+                store.send(.newTabDispositionDismissed)
+            }
+        }
     }
 }
 
@@ -724,6 +742,10 @@ extension BrowserView {
 
     private var backForwardTitle: String {
         store.backForwardList?.direction == .back ? "Back History" : "Forward History"
+    }
+
+    private var newTabDispositionTitle: String {
+        "Open Link in New Tab"
     }
 }
 

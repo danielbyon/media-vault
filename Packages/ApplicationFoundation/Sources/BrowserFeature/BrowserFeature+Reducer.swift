@@ -64,10 +64,12 @@ extension BrowserFeature {
             let meaningfulCount = state.tabs.count(where: { !$0.isStartPage })
             if meaningfulCount > 1 {
                 state.destructiveConfirmation = .closeAllTabs(count: state.tabs.count)
+                state.pendingNewTab = nil
             } else {
                 return .send(.closeAllConfirmed)
             }
         case .closeAllConfirmed:
+            state.pendingNewTab = nil
             let dismissalEffect = dismissPageUI(in: &state)
             let closedIDs = state.tabs.map(\.id)
             let id = BrowserTabID(uuid())
@@ -86,6 +88,7 @@ extension BrowserFeature {
             let meaningfulCount = otherTabs.count(where: { !$0.isStartPage })
             if meaningfulCount >= 2 {
                 state.destructiveConfirmation = .closeOtherTabs(keeping: id, count: otherTabs.count)
+                state.pendingNewTab = nil
             } else {
                 return .send(.closeOtherTabsConfirmed(id))
             }
@@ -94,6 +97,7 @@ extension BrowserFeature {
                 return .none
             }
 
+            state.pendingNewTab = nil
             let dismissalEffect = dismissPageUI(in: &state)
             let closedIDs = state.tabs.filter { $0.id != id }.map(\.id)
             state.tabs = [tab]
@@ -129,6 +133,7 @@ extension BrowserFeature {
             }
 
             let dismissalEffect = dismissPageUI(in: &state)
+            state.pendingNewTab = nil
             state.presentation = .tabOverview
             state.tabOverviewFocusID = state.selectedTabID
             discardDraft(in: &state)
@@ -159,8 +164,10 @@ extension BrowserFeature {
             }
         case .topLevelDeselected:
             state.destructiveConfirmation = nil
+            state.pendingNewTab = nil
             return reconcileOmniboxFocusLoss(in: &state)
         case .settingsTapped:
+            state.pendingNewTab = nil
             return .none
         case .omniboxFocused:
             let field = state.selectedTab?.isStartPage == true ? BrowserFocusedField.startPage : .chrome
@@ -241,6 +248,7 @@ extension BrowserFeature {
             }
             return persist(settings: state.settings)
         case let .libraryPresented(section):
+            state.pendingNewTab = nil
             if state.library == nil {
                 state.library = .init(section: section, referenceDate: now)
             } else {
@@ -276,18 +284,21 @@ extension BrowserFeature {
                 return .none
             }
 
+            state.pendingNewTab = nil
             presentBookmarkEditor(for: tab, state: &state)
         case let .addBookmarkForTab(tabID):
             guard let tab = state.tabs.first(where: { $0.id == tabID }) else {
                 return .none
             }
 
+            state.pendingNewTab = nil
             presentBookmarkEditor(for: tab, state: &state)
         case let .editBookmarkTapped(id):
             guard let bookmark = state.bookmarks.first(where: { $0.id == id }) else {
                 return .none
             }
 
+            state.pendingNewTab = nil
             state.bookmarkEditor = .init(
                 bookmarkID: id,
                 title: bookmark.title,
@@ -357,11 +368,13 @@ extension BrowserFeature {
             return .run { _ in await write(url) }
         case .clearHistoryTapped:
             state.destructiveConfirmation = .clearHistory
+            state.pendingNewTab = nil
         case .destructiveConfirmationDismissed:
             state.destructiveConfirmation = nil
             return .none
         case .deleteAllBookmarksTapped:
             state.destructiveConfirmation = .deleteAllBookmarks(count: state.bookmarks.count)
+            state.pendingNewTab = nil
         case .destructiveActionConfirmed:
             guard let confirmation = state.destructiveConfirmation else {
                 return .none
@@ -391,20 +404,44 @@ extension BrowserFeature {
         case let .navigate(url):
             return navigate(url: url, state: &state)
         case let .openInNewTab(url, openerID):
-            let id = BrowserTabID(uuid())
-            let openerIndex = openerID.flatMap { opener in state.tabs.firstIndex(where: { $0.id == opener }) }
-            let insertion = openerIndex.map { index in
-                var value = index + 1
-                while value < state.tabs.endIndex, state.tabs[value].openerID == openerID {
-                    value += 1
-                }
-                return value
-            } ?? state.tabs.endIndex
-            state.tabs.insert(.web(id: id, url: url, openerID: openerID), at: insertion)
-            if state.settings.openLinksInNewTabs == .foreground {
-                state.selectedTabID = id
+            guard state.pendingNewTab == nil else {
+                return .none
             }
-            return commands([.ensureContext(tabID: id), .load(tabID: id, url: url)])
+
+            switch state.settings.openLinksInNewTabs {
+            case .background:
+                return createRelatedTab(
+                    url: url,
+                    openerID: openerID,
+                    disposition: .background,
+                    state: &state,
+                )
+            case .foreground:
+                return createRelatedTab(
+                    url: url,
+                    openerID: openerID,
+                    disposition: .foreground,
+                    state: &state,
+                )
+            case .askEveryTime:
+                state.pendingNewTab = .init(url: url, openerID: openerID)
+                return .none
+            }
+        case let .newTabDispositionSelected(disposition):
+            guard let request = state.pendingNewTab else {
+                return .none
+            }
+
+            state.pendingNewTab = nil
+            return createRelatedTab(
+                url: request.url,
+                openerID: request.openerID,
+                disposition: disposition,
+                state: &state,
+            )
+        case .newTabDispositionDismissed:
+            state.pendingNewTab = nil
+            return .none
         case let .searchProviderChanged(provider):
             state.settings.searchProvider = provider
             state.providerSuggestionValues = []

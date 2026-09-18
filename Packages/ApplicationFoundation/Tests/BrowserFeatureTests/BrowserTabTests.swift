@@ -183,13 +183,15 @@ struct BrowserTabTests {
         let openerURL = try #require(URL(string: "https://opener.example"))
         let popupOneURL = try #require(URL(string: "https://popup-one.example"))
         let popupTwoURL = try #require(URL(string: "https://popup-two.example"))
-        let store = TestStore(initialState: BrowserFeature.State(
+        var state = BrowserFeature.State(
             tabs: [
                 .web(id: opener, url: openerURL),
                 .startPage(id: unrelated),
             ],
             selectedTabID: opener,
-        )) { BrowserFeature() }
+        )
+        state.settings.openLinksInNewTabs = .askEveryTime
+        let store = TestStore(initialState: state) { BrowserFeature() }
 
         try await store.send(.webKitEvent(.siteCreatedTab(
             openerID: opener,
@@ -218,6 +220,7 @@ struct BrowserTabTests {
         }
         #expect(store.state.tabs.map(\.id) == [opener, popupOne, popupTwo, unrelated])
         #expect(store.state.selectedTabID == popupOne)
+        #expect(store.state.pendingNewTab == nil)
     }
 
     @Test("Selecting a Start Page card exits overview without summoning the keyboard")

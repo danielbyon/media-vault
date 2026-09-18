@@ -5,12 +5,14 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-/// Whether explicit Open in New Tab activates the new tab.
+/// How explicit Open in New Tab actions determine the new tab's presentation.
 public enum BrowserOpenLinkPreference: String, CaseIterable, Equatable, Sendable {
     /// Keep a user-created related tab in the background.
     case background
     /// Focus a user-created related tab immediately.
     case foreground
+    /// Ask for the new tab's presentation before creating it.
+    case askEveryTime
 }
 
 /// Persistent authenticated browser preferences owned by Issue #37.
