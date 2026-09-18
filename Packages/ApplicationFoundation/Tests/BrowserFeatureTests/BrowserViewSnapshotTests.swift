@@ -119,6 +119,8 @@ struct BrowserViewSnapshotTests {
             selectedTabID: BrowserTabID(UUID(2)),
             presentation: .tabOverview,
         )
+        snapshot(state, named: "tab-overview-compact-phone", config: DeterministicTestSupport.compactPhone)
+        snapshot(state, named: "tab-overview-large-phone", config: DeterministicTestSupport.largePhone)
         snapshot(state, named: "tab-overview-regular-ipad", config: DeterministicTestSupport.regularWidthIPad)
     }
 
