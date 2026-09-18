@@ -1,0 +1,60 @@
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTests.swift
+  s_b75d9d62b5999f::t_a0baae5cc0691e 186,192-194,223
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserPresentationTests.swift
+  s_b75d9d62b5999f::t_a3de1912a2a340 136,138
+  s_b75d9d62b5999f::t_a64fb223768191 128,130,134-135,137,139-141,148
+  s_b75d9d62b5999f::t_efc65ec327fc03 192-208
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserBehaviorTests.swift
+  s_b75d9d62b5999f::t_cfbfd0ad922339 400
+  s_b75d9d62b5999f::t_38922038d02b19 475-476
+  s_b75d9d62b5999f::t_e1b72b7279a461 272-273
+  s_b75d9d62b5999f::t_bfbdf28d725940 257,336
+  s_b75d9d62b5999f::t_592acee028101a 243-256,258-269
+  s_b75d9d62b5999f::t_22a87e7b69e1ad 276,303,315-316
+  s_b75d9d62b5999f::t_e828f9bc55cffc 221
+  s_b75d9d62b5999f::t_bfc1280a6c1abd 270-271,274-275,277-302,304-314,317-335,337-399,401-416
+  s_b75d9d62b5999f::t_618fd971e152d1 451-474,477-498
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserNewTabDisposition.swift
+  s_b75d9d62b5999f::t_f816b0bd5f9193 1-22
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature.swift
+  s_b75d9d62b5999f::t_3c69a458cca225 40,66,101,248-251
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserSettings.swift
+  s_b75d9d62b5999f::t_21bd6622cb58da 8,14-15
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_b75d9d62b5999f::t_aca9fcd8eb3b1c 175-192,746-748
+  s_b75d9d62b5999f::t_85dc3bff2dabd3 749
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Helpers.swift
+  s_b75d9d62b5999f::t_ec8c51f20de213 76-97
+  s_b75d9d62b5999f::t_72e2b8147bc63f 245
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  s_b75d9d62b5999f::t_1cd00078dbe5bd 67,72,91,100
+  s_b75d9d62b5999f::t_d99cafb41575af 371,377
+  s_b75d9d62b5999f::t_b67c169945ef2e 136,251,287,294,301
+  s_b75d9d62b5999f::t_bdb086b5db6e38 407-408,411-444
+  s_b75d9d62b5999f::t_9a62b0cf7c9a65 167,170
+  s_b75d9d62b5999f::t_a3de1912a2a340 410
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserSettingsPersistenceTests.swift
+  s_b75d9d62b5999f::t_128402ec7def66 39-63
+  s_b75d9d62b5999f::t_1d4d8c91d7e0db 121-131
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewSnapshotTests.swift
+  s_b75d9d62b5999f::t_5ca62d0b8a36f0 216,218-219,225-231
+  s_b75d9d62b5999f::t_f90291ffe83668 232-233
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserSettingsView.swift
+  s_b75d9d62b5999f::t_aca9fcd8eb3b1c 58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0456b913416e5321a1e3dfadddbb2bed0d0ba48a",
+  "prompts": {},
+  "sessions": {
+    "s_b75d9d62b5999f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b1f1-373f-7d51-a9ef-f315160c4e9e",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
