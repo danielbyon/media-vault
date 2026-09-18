@@ -37,6 +37,7 @@ public struct BrowserFeature {
         var shareURL: URL?
         var shareTitle: String?
         var destructiveConfirmation: BrowserDestructiveConfirmation?
+        var pendingNewTab: BrowserNewTabRequest?
 
         /// Creates a fresh browser containing exactly one native Start Page tab.
         public init(initialTabID: BrowserTabID = .init()) {
@@ -62,6 +63,7 @@ public struct BrowserFeature {
             shareURL = nil
             shareTitle = nil
             destructiveConfirmation = nil
+            pendingNewTab = nil
         }
 
         /// Creates deterministic state for restoration-free tests and previews.
@@ -96,6 +98,7 @@ public struct BrowserFeature {
             shareURL = nil
             shareTitle = nil
             destructiveConfirmation = nil
+            pendingNewTab = nil
         }
 
         var selectedTab: BrowserTab? {
@@ -242,6 +245,10 @@ public struct BrowserFeature {
         case navigate(URL)
         /// Creates and loads a related tab beside its opener.
         case openInNewTab(URL, openerID: BrowserTabID?)
+        /// Confirms the presentation of a pending explicitly created related tab.
+        case newTabDispositionSelected(BrowserNewTabDisposition)
+        /// Cancels a pending explicitly created related tab without creating it.
+        case newTabDispositionDismissed
         /// Changes and persists the selected search provider.
         case searchProviderChanged(BrowserSearchProvider)
         /// Changes and persists provider-suggestion consent.

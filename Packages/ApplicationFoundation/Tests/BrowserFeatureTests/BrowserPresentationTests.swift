@@ -125,22 +125,27 @@ struct BrowserPresentationTests {
     }
 
     @Test("Leaving top-level Browser resigns omnibox focus and clears destructive confirmation")
-    func topLevelDeselectionClearsTransientPresentation() async {
+    func topLevelDeselectionClearsTransientPresentation() async throws {
         let tabID = BrowserTabID()
-        let store = TestStore(initialState: BrowserFeature.State(
+        var state = BrowserFeature.State(
             tabs: [.startPage(id: tabID)],
             selectedTabID: tabID,
             focusedField: .startPage,
-        )) {
+        )
+        state.destructiveConfirmation = .clearHistory
+        let pendingURL = try #require(URL(string: "https://pending.example"))
+        state.pendingNewTab = .init(
+            url: pendingURL,
+            openerID: tabID,
+        )
+        let store = TestStore(initialState: state) {
             BrowserFeature()
         }
 
-        await store.send(.clearHistoryTapped(source: .settings)) {
-            $0.destructiveConfirmation = .clearHistory
-        }
         await store.send(.topLevelDeselected) {
             $0.focusedField = .none
             $0.destructiveConfirmation = nil
+            $0.pendingNewTab = nil
         }
     }
 
@@ -182,6 +187,23 @@ struct BrowserPresentationTests {
         #expect(settings.openLinksInNewTabs == .background)
         #expect(BrowserSettings.providerSuggestionDisclosure.contains("partial typed text"))
         #expect(BrowserSettings.providerSuggestionDisclosure.contains("before submission"))
+    }
+
+    @Test("Changing the new-tab preference persists through the Browser settings client")
+    func newTabPreferencePersists() async {
+        let saved = LockIsolated<[BrowserSettings]>([])
+        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.browserSettings.save = { settings in saved.withValue { $0.append(settings) } }
+        }
+
+        await store.send(.openLinkPreferenceChanged(.askEveryTime)) {
+            $0.settings.openLinksInNewTabs = .askEveryTime
+        }
+        await store.finish()
+
+        #expect(saved.value.last?.openLinksInNewTabs == .askEveryTime)
     }
 
     @Test("Bookmark editor validates addresses and duplicate URLs update stable identity in place")

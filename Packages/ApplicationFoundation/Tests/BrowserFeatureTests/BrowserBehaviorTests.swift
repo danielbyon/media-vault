@@ -218,6 +218,7 @@ struct BrowserBehaviorTests {
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
         var state = BrowserFeature.State(initialTabID: tabID)
         state.tabs[0] = .web(id: tabID, url: pageURL)
+        state.settings.openLinksInNewTabs = .askEveryTime
         let store = TestStore(initialState: state) {
             BrowserFeature()
         } withDependencies: {
@@ -237,6 +238,180 @@ struct BrowserBehaviorTests {
         #expect(opened.value == [externalURL, externalURL])
         #expect(commands.value.isEmpty)
         #expect(store.state.tabs.count == 1)
+    }
+
+    @Test("Ask Every Time defers related-tab creation")
+    func askEveryTimeDefersRelatedTabCreation() async throws {
+        let openerID = BrowserTabID()
+        let openerURL = try #require(URL(string: "https://page.example"))
+        let destination = try #require(URL(string: "https://linked.example"))
+        var state = BrowserFeature.State(
+            tabs: [.web(id: openerID, url: openerURL)],
+            selectedTabID: openerID,
+        )
+        state.settings.openLinksInNewTabs = .askEveryTime
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserWebKit.execute = { command in commands.withValue { $0.append(command) } }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openInNewTab(destination, openerID: openerID))
+        await store.finish()
+
+        #expect(store.state.tabs.count == 1)
+        #expect(store.state.selectedTabID == openerID)
+        #expect(commands.value.isEmpty)
+    }
+
+    @Test("Ask Every Time preserves the original request through navigation and foreground confirmation")
+    func askEveryTimePreservesRequestUntilForegroundConfirmation() async throws {
+        let openerID = BrowserTabID()
+        let existingRelatedID = BrowserTabID()
+        let openerURL = try #require(URL(string: "https://page.example"))
+        let existingRelatedURL = try #require(URL(string: "https://existing.example"))
+        let navigationURL = try #require(URL(string: "https://navigated.example"))
+        let destination = try #require(URL(string: "https://linked.example"))
+        var state = BrowserFeature.State(
+            tabs: [
+                .web(id: openerID, url: openerURL),
+                .web(id: existingRelatedID, url: existingRelatedURL, openerID: openerID),
+            ],
+            selectedTabID: openerID,
+        )
+        state.settings.openLinksInNewTabs = .askEveryTime
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserWebKit.execute = { command in commands.withValue { $0.append(command) } }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openInNewTab(destination, openerID: openerID)) {
+            $0.pendingNewTab = BrowserNewTabRequest(url: destination, openerID: openerID)
+        }
+        await store.send(.openInNewTab(existingRelatedURL, openerID: openerID))
+        await store.send(.webKitEvent(.metadata(
+            tabID: openerID,
+            .init(committedURL: openerURL, isLoading: true),
+        )))
+        await store.send(.navigate(navigationURL))
+        #expect(store.state.pendingNewTab == BrowserNewTabRequest(url: destination, openerID: openerID))
+
+        await store.send(.newTabDispositionSelected(.foreground))
+        await store.finish()
+
+        let newTab = try #require(store.state.tabs.last)
+        #expect(newTab.content == .web(requestedURL: destination))
+        #expect(newTab.openerID == openerID)
+        #expect(store.state.selectedTabID == newTab.id)
+        #expect(store.state.pendingNewTab == nil)
+        #expect(commands.value == [
+            .ensureContext(tabID: openerID),
+            .load(tabID: openerID, url: navigationURL),
+            .ensureContext(tabID: newTab.id),
+            .load(tabID: newTab.id, url: destination),
+        ])
+    }
+
+    @Test("Ask Every Time background confirmation preserves the current selection")
+    func askEveryTimeBackgroundConfirmationPreservesSelection() async throws {
+        let openerID = BrowserTabID()
+        let openerURL = try #require(URL(string: "https://page.example"))
+        let destination = try #require(URL(string: "https://linked.example"))
+        var state = BrowserFeature.State(
+            tabs: [.web(id: openerID, url: openerURL)],
+            selectedTabID: openerID,
+        )
+        state.settings.openLinksInNewTabs = .askEveryTime
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserWebKit.execute = { command in commands.withValue { $0.append(command) } }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openInNewTab(destination, openerID: openerID))
+        await store.send(.newTabDispositionSelected(.background))
+        await store.finish()
+
+        let newTab = try #require(store.state.tabs.last)
+        #expect(newTab.content == .web(requestedURL: destination))
+        #expect(newTab.openerID == openerID)
+        #expect(store.state.selectedTabID == openerID)
+        #expect(store.state.pendingNewTab == nil)
+        #expect(commands.value == [
+            .ensureContext(tabID: newTab.id),
+            .load(tabID: newTab.id, url: destination),
+        ])
+    }
+
+    @Test("Canceling Ask Every Time preserves tabs, selection, and WebKit command state")
+    func askEveryTimeCancellationIsSideEffectFree() async throws {
+        let openerID = BrowserTabID()
+        let openerURL = try #require(URL(string: "https://page.example"))
+        let destination = try #require(URL(string: "https://linked.example"))
+        var state = BrowserFeature.State(
+            tabs: [.web(id: openerID, url: openerURL)],
+            selectedTabID: openerID,
+        )
+        state.settings.openLinksInNewTabs = .askEveryTime
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.browserWebKit.execute = { command in commands.withValue { $0.append(command) } }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openInNewTab(destination, openerID: openerID))
+        await store.send(.newTabDispositionDismissed) {
+            $0.pendingNewTab = nil
+        }
+        await store.finish()
+
+        #expect(store.state.tabs.count == 1)
+        #expect(store.state.selectedTabID == openerID)
+        #expect(store.state.pendingNewTab == nil)
+        #expect(commands.value.isEmpty)
+    }
+
+    @Test("Fixed Background preference creates a related tab without selecting it")
+    func fixedBackgroundPreferencePreservesSelection() async throws {
+        let openerID = BrowserTabID()
+        let openerURL = try #require(URL(string: "https://page.example"))
+        let destination = try #require(URL(string: "https://linked.example"))
+        var state = BrowserFeature.State(
+            tabs: [.web(id: openerID, url: openerURL)],
+            selectedTabID: openerID,
+        )
+        state.settings.openLinksInNewTabs = .background
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserWebKit.execute = { command in commands.withValue { $0.append(command) } }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openInNewTab(destination, openerID: openerID))
+        await store.finish()
+
+        let newTab = try #require(store.state.tabs.last)
+        #expect(newTab.content == .web(requestedURL: destination))
+        #expect(store.state.selectedTabID == openerID)
+        #expect(commands.value == [
+            .ensureContext(tabID: newTab.id),
+            .load(tabID: newTab.id, url: destination),
+        ])
     }
 
     @Test("Web-link context actions route open, new-tab, copy, and share behavior")
@@ -272,5 +447,53 @@ struct BrowserBehaviorTests {
         #expect(store.state.selectedTabID != tabID)
         #expect(commands.value.contains(.ensureContext(tabID: store.state.selectedTabID)))
         #expect(commands.value.contains(.load(tabID: store.state.selectedTabID, url: url)))
+    }
+
+    @Test("Ask Every Time defers HTTP link-context new-tab actions until disposition")
+    func askEveryTimeLinkContextNewTabDefersUntilDisposition() async throws {
+        let openerID = BrowserTabID()
+        let openerURL = try #require(URL(string: "https://page.example"))
+        let destination = try #require(URL(string: "https://linked.example/path"))
+        var state = BrowserFeature.State(
+            tabs: [.web(id: openerID, url: openerURL)],
+            selectedTabID: openerID,
+        )
+        state.settings.openLinksInNewTabs = .askEveryTime
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserWebKit.execute = { command in commands.withValue { $0.append(command) } }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.webKitEvent(.linkContextAction(
+            tabID: openerID,
+            action: .openInNewTab,
+            url: destination,
+        )))
+        await store.receive(.openInNewTab(destination, openerID: openerID)) {
+            $0.pendingNewTab = BrowserNewTabRequest(url: destination, openerID: openerID)
+        }
+
+        #expect(store.state.tabs.count == 1)
+        #expect(store.state.selectedTabID == openerID)
+        #expect(store.state.pendingNewTab == BrowserNewTabRequest(url: destination, openerID: openerID))
+        #expect(commands.value.isEmpty)
+
+        await store.send(.newTabDispositionSelected(.background)) {
+            $0.pendingNewTab = nil
+        }
+        await store.finish()
+
+        let newTab = try #require(store.state.tabs.last)
+        #expect(newTab.content == .web(requestedURL: destination))
+        #expect(newTab.openerID == openerID)
+        #expect(store.state.selectedTabID == openerID)
+        #expect(commands.value == [
+            .ensureContext(tabID: newTab.id),
+            .load(tabID: newTab.id, url: destination),
+        ])
     }
 }

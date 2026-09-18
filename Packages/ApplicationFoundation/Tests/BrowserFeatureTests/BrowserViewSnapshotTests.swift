@@ -213,12 +213,22 @@ struct BrowserViewSnapshotTests {
         librarySnapshot(state, named: "library-history-empty-search-regular-ipad")
     }
 
-    @Test("Authenticated Browser settings show privacy disclosure and defaults")
+    @Test("Authenticated Browser settings show privacy disclosure and new-tab choices")
     func settings() {
-        let store = Store(initialState: BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))) { BrowserFeature() }
+        let state = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+        let store = Store(initialState: state) { BrowserFeature() }
         presentationSnapshot(
             NavigationStack { BrowserSettingsView(store: store) },
             named: "settings-browser-large-phone",
+            config: DeterministicTestSupport.largePhone,
+        )
+
+        var askState = state
+        askState.settings.openLinksInNewTabs = .askEveryTime
+        let askStore = Store(initialState: askState) { BrowserFeature() }
+        presentationSnapshot(
+            NavigationStack { BrowserSettingsView(store: askStore) },
+            named: "settings-browser-ask-every-time-large-phone",
             config: DeterministicTestSupport.largePhone,
         )
     }

@@ -36,6 +36,31 @@ struct BrowserSettingsPersistenceTests {
         #expect(await client.load() == settings)
     }
 
+    @Test("Ask Every Time round-trips through the existing Browser settings client")
+    func askEveryTimeRoundTrip() async throws {
+        let defaults = try isolatedDefaults()
+        let client = liveClient(using: defaults)
+        let settings = BrowserSettings(openLinksInNewTabs: .askEveryTime)
+
+        await client.save(settings)
+
+        #expect(await client.load() == settings)
+    }
+
+    @Test("Legacy open-link values remain valid and invalid values use the Background default")
+    func legacyOpenLinkValuesRemainValid() async throws {
+        let backgroundDefaults = try isolatedDefaults()
+        backgroundDefaults.set("background", forKey: "browser.openLinksInNewTabs")
+        let foregroundDefaults = try isolatedDefaults()
+        foregroundDefaults.set("foreground", forKey: "browser.openLinksInNewTabs")
+        let invalidDefaults = try isolatedDefaults()
+        invalidDefaults.set("unsupported", forKey: "browser.openLinksInNewTabs")
+
+        #expect(await BrowserSettingsStorage(userDefaults: backgroundDefaults).load().openLinksInNewTabs == .background)
+        #expect(await BrowserSettingsStorage(userDefaults: foregroundDefaults).load().openLinksInNewTabs == .foreground)
+        #expect(await BrowserSettingsStorage(userDefaults: invalidDefaults).load().openLinksInNewTabs == .background)
+    }
+
     @Test("Reset removes only Browser-owned namespaced keys")
     func resetPreservesOtherAppStorage() async throws {
         let defaults = try isolatedDefaults()
@@ -91,6 +116,17 @@ struct BrowserSettingsPersistenceTests {
 
         let settings = await storage.load()
         #expect(settings.searchProvider == .bing)
+    }
+
+    @Test("Ask Every Time decodes through the existing Browser preference key")
+    func askEveryTimeDecodesThroughExistingKey() async throws {
+        let defaults = try isolatedDefaults()
+        defaults.set("askEveryTime", forKey: "browser.openLinksInNewTabs")
+        let storage = BrowserSettingsStorage(userDefaults: defaults)
+
+        let settings = await storage.load()
+
+        #expect(settings.openLinksInNewTabs.rawValue == "askEveryTime")
     }
 
     private func isolatedDefaults() throws -> UserDefaults {

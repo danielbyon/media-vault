@@ -73,6 +73,28 @@ extension BrowserFeature {
         )
     }
 
+    func createRelatedTab(
+        url: URL,
+        openerID: BrowserTabID?,
+        disposition: BrowserNewTabDisposition,
+        state: inout State,
+    ) -> Effect<Action> {
+        let id = BrowserTabID(uuid())
+        let openerIndex = openerID.flatMap { opener in state.tabs.firstIndex(where: { $0.id == opener }) }
+        let insertion = openerIndex.map { index in
+            var value = index + 1
+            while value < state.tabs.endIndex, state.tabs[value].openerID == openerID {
+                value += 1
+            }
+            return value
+        } ?? state.tabs.endIndex
+        state.tabs.insert(.web(id: id, url: url, openerID: openerID), at: insertion)
+        if disposition == .foreground {
+            state.selectedTabID = id
+        }
+        return commands([.ensureContext(tabID: id), .load(tabID: id, url: url)])
+    }
+
     func close(tabID: BrowserTabID, state: inout State) -> Effect<Action> {
         guard let index = state.tabs.firstIndex(where: { $0.id == tabID }) else {
             return .none
@@ -220,6 +242,7 @@ extension BrowserFeature {
             let write = clipboard.writeURL
             return .run { _ in await write(url) }
         case .shareLink:
+            state.pendingNewTab = nil
             state.shareURL = url
             state.shareTitle = state.tabs.first(where: { $0.id == tabID })?.metadata.title
                 ?? url.host

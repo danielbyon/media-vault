@@ -55,6 +55,7 @@ public struct BrowserSettingsView: View {
             )) {
                 Text("In Background").tag(BrowserOpenLinkPreference.background)
                 Text("In Foreground").tag(BrowserOpenLinkPreference.foreground)
+                Text("Ask Every Time").tag(BrowserOpenLinkPreference.askEveryTime)
             }
         }
     }
