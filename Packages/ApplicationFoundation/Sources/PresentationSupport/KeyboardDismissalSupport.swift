@@ -164,6 +164,7 @@ final class KeyboardDismissalTapCoordinator: NSObject, UIGestureRecognizerDelega
 }
 
 /// Decides whether a touch inside the adopting subtree is an outside-input dismissal candidate.
+@MainActor
 enum KeyboardDismissalTapPolicy {
     static func shouldDismiss(touchView: UIView?, within hostView: UIView) -> Bool {
         var current = touchView

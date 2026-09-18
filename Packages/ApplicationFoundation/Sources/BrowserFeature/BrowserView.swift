@@ -11,6 +11,13 @@ import PresentationSupport
 import SwiftUI
 import UIKit
 
+/// Transient view state for the card currently receiving a direct-manipulation gesture.
+private struct BrowserTabCardDrag: Equatable {
+    let tabID: BrowserTabID
+    let axis: BrowserTabSwipe.Axis
+    let horizontalTranslation: CGFloat
+}
+
 /// Authenticated native browser presentation.
 @MainActor
 @preconcurrency
@@ -27,6 +34,8 @@ public struct BrowserView: View {
     private var accessibilityFocusedTabID: BrowserTabID?
     @Namespace
     private var tabTransition
+    @State
+    private var tabCardDrag: BrowserTabCardDrag?
 
     /// Creates browser UI bound to deterministic feature state.
     public init(store: StoreOf<BrowserFeature>) {
@@ -74,6 +83,9 @@ public struct BrowserView: View {
             store.send(.omniboxFocused)
         }
         .onChange(of: store.presentation, initial: true) { _, value in
+            if value != .tabOverview {
+                tabCardDrag = nil
+            }
             accessibilityFocusedTabID = value == .tabOverview
                 ? (store.tabOverviewFocusID ?? store.selectedTabID)
                 : nil
@@ -464,13 +476,24 @@ extension BrowserView {
                 Button("New Tab", systemImage: "plus") { store.send(.newTabTapped) }
             }
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 18)], spacing: 18) {
+                LazyVGrid(columns: tabOverviewColumns, spacing: 18) {
                     ForEach(store.tabs) { tab in
                         tabCard(tab)
                     }
                 }
             }
         }.padding(20)
+    }
+
+    private var tabOverviewColumns: [GridItem] {
+        if horizontalSizeClass == .compact {
+            return [
+                GridItem(.flexible(), spacing: 18),
+                GridItem(.flexible(), spacing: 18),
+            ]
+        }
+
+        return [GridItem(.adaptive(minimum: 220), spacing: 18)]
     }
 
     private func tabCard(_ tab: BrowserTab) -> some View {
@@ -483,15 +506,66 @@ extension BrowserView {
                 button.matchedGeometryEffect(id: tab.id, in: tabTransition)
             }
         }
+        .offset(x: tabCardDrag?.tabID == tab.id ? tabCardDrag?.horizontalTranslation ?? 0 : 0)
         .accessibilityFocused($accessibilityFocusedTabID, equals: tab.id)
         .accessibilityValue(tab.id == store.selectedTabID ? "Selected" : "")
         .accessibilityAction(named: "Close Tab") { store.send(.closeTab(tab.id)) }
-        .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { gesture in
-            if abs(gesture.translation.width) > 80 || abs(gesture.translation.height) > 80 {
-                store.send(.closeTab(tab.id))
-            }
-        })
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onChanged { gesture in
+                    updateTabCardDrag(tabID: tab.id, translation: gesture.translation)
+                }
+                .onEnded { gesture in
+                    finishTabCardDrag(tabID: tab.id, translation: gesture.translation)
+                },
+        )
         .contextMenu { tabCardMenu(tab) }
+    }
+
+    private func updateTabCardDrag(tabID: BrowserTabID, translation: CGSize) {
+        if let tabCardDrag, tabCardDrag.tabID == tabID {
+            guard tabCardDrag.axis == .horizontal else {
+                return
+            }
+
+            self.tabCardDrag = .init(
+                tabID: tabID,
+                axis: .horizontal,
+                horizontalTranslation: translation.width,
+            )
+            return
+        }
+
+        let axis = BrowserTabSwipe.axis(for: translation)
+        tabCardDrag = .init(
+            tabID: tabID,
+            axis: axis,
+            horizontalTranslation: axis == .horizontal ? translation.width : 0,
+        )
+    }
+
+    private func finishTabCardDrag(tabID: BrowserTabID, translation: CGSize) {
+        guard let tabCardDrag, tabCardDrag.tabID == tabID else {
+            return
+        }
+        guard let outcome = BrowserTabSwipe.outcome(for: translation, axis: tabCardDrag.axis) else {
+            self.tabCardDrag = nil
+            return
+        }
+
+        switch outcome {
+        case .cancel:
+            withAnimation(tabCardSettleAnimation) {
+                self.tabCardDrag = nil
+            }
+        case .dismiss:
+            self.tabCardDrag = nil
+            store.send(.closeTab(tabID))
+        }
+    }
+
+    private var tabCardSettleAnimation: Animation {
+        reduceMotionEnabled ? .easeOut(duration: 0.15) : .spring(response: 0.42)
     }
 
     private func tabCardContent(_ tab: BrowserTab) -> some View {
@@ -528,6 +602,7 @@ extension BrowserView {
             Image(systemName: tab.isStartPage ? "sparkles" : "globe")
                 .font(.largeTitle)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityHidden(true)
         }
     }
