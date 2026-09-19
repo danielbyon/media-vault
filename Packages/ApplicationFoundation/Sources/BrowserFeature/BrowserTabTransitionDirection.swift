@@ -36,11 +36,11 @@ enum BrowserTabTransitionSurfaceRole: Hashable, Sendable {
     case card(BrowserTabID)
 }
 
-/// Layout-only estimate of the browsing page viewport used while Tab Overview is visible.
+/// Layout-only geometry of the browsing page viewport used while Tab Overview is visible.
 ///
-/// This is deliberately not a persisted snapshot size. It follows the current container, safe
-/// area, and chrome placement so every card uses the current window geometry after rotation or
-/// resizing. A mounted UIKit content boundary is preferred whenever one is available.
+/// The value comes either from the mounted UIKit content boundary or from a SwiftUI layout probe
+/// that uses the same safe-area and chrome structure as the browsing presentation. It is never a
+/// persisted snapshot size.
 struct BrowserContentViewportGeometry: Equatable, Sendable {
     let size: CGSize
 
@@ -51,24 +51,23 @@ struct BrowserContentViewportGeometry: Equatable, Sendable {
 
         return size.width / size.height
     }
+}
 
-    static func measure(
-        containerSize: CGSize,
-        safeAreaTop: CGFloat,
-        safeAreaLeading: CGFloat,
-        safeAreaBottom: CGFloat,
-        safeAreaTrailing: CGFloat,
-        chromeHeight: CGFloat,
-        chromeAtTop: Bool,
-    ) -> Self {
-        let width = max(1, containerSize.width - safeAreaLeading - safeAreaTrailing)
-        let height = max(
-            1,
-            containerSize.height - safeAreaTop - safeAreaBottom - max(0, chromeHeight),
-        )
-        _ = chromeAtTop
-        return Self(size: CGSize(width: width, height: height))
-    }
+/// The transient branch selected by one UIKit transition handoff.
+///
+/// This value is intentionally Browser-local and contains no page identity, URL, or persisted
+/// state. Tests can observe the coordinator's decision without requiring production logging.
+enum BrowserTabTransitionExecution: Equatable, Sendable {
+    /// The source and destination boundaries share compatible geometry and use the normal motion.
+    case geometry
+    /// Reduce Motion requested an opacity-only handoff.
+    case reduceMotion
+    /// The source boundary could not be synchronously cloned.
+    case missingSource
+    /// The destination boundary was not mounted before the bounded wait expired.
+    case missingDestination
+    /// The source and destination aspect ratios exceeded the safety threshold.
+    case aspectMismatch
 }
 
 /// Presentation endpoints shared by the UIKit clone and the overview card surface.
