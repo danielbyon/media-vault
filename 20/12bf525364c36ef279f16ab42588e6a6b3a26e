@@ -1,0 +1,14 @@
+App/Resources/Info.plist
+  h_a1fa5c19d60fed 25-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2012bf525364c36ef279f16ab42588e6a6b3a26e",
+  "prompts": {},
+  "humans": {
+    "h_a1fa5c19d60fed": {
+      "author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
