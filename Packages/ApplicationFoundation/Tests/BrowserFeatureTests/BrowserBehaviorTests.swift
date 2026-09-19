@@ -113,7 +113,7 @@ struct BrowserBehaviorTests {
         ]))
     }
 
-    @Test("Back-forward entries and transient previews project only stable values")
+    @Test("Back-forward entries and transient previews preserve stale imagery on failure")
     func backForwardAndPreviewEvents() async throws {
         let tabID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
@@ -123,18 +123,18 @@ struct BrowserBehaviorTests {
             tabs: [.web(id: tabID, url: url)],
             selectedTabID: tabID,
         )) { BrowserFeature() }
+        let revision = store.state.previewRevision(for: tabID)
 
         await store.send(.webKitEvent(.backForwardEntries(tabID: tabID, direction: .back, entries: [entry]))) {
             $0.backForwardList = .init(tabID: tabID, direction: .back, entries: [entry])
         }
         await store.send(.backForwardListDismissed) { $0.backForwardList = nil }
         let bytes = Data([1, 2, 3])
-        await store.send(.webKitEvent(.preview(tabID: tabID, pngData: bytes))) {
-            $0.tabPreviewData[tabID] = bytes
+        await store.send(.webKitEvent(.preview(tabID: tabID, revision: revision, pngData: bytes))) {
+            $0.tabPreviewData[tabID] = .init(revision: revision, pngData: bytes)
         }
-        await store.send(.webKitEvent(.preview(tabID: tabID, pngData: nil))) {
-            $0.tabPreviewData[tabID] = nil
-        }
+        await store.send(.webKitEvent(.preview(tabID: tabID, revision: revision, pngData: nil)))
+        #expect(store.state.tabPreviewData[tabID]?.pngData == bytes)
     }
 
     @Test("Targeted background-tab bookmark and copy actions do not activate the tab")

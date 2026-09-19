@@ -30,8 +30,8 @@ public enum BrowserWebKitCommand: Equatable, Sendable {
     case find(tabID: BrowserTabID, query: String)
     /// Navigates to a projected back-forward entry by its adapter-scoped opaque token.
     case goToBackForwardEntry(tabID: BrowserTabID, token: BrowserBackForwardEntry.Token)
-    /// Captures an opportunistic in-memory tab preview.
-    case capturePreview(tabID: BrowserTabID)
+    /// Captures a preview tagged with the tab's current document revision.
+    case capturePreview(tabID: BrowserTabID, revision: BrowserTabPreviewRevision)
     /// Resolves any JavaScript dialog owned by a tab.
     case dismissJavaScriptDialog(tabID: BrowserTabID)
 }
@@ -76,8 +76,8 @@ public enum BrowserWebKitEvent: Equatable, Sendable {
         direction: BrowserNavigationDirection,
         entries: [BrowserBackForwardEntry],
     )
-    /// Reports disposable PNG preview bytes for a tab.
-    case preview(tabID: BrowserTabID, pngData: Data?)
+    /// Reports disposable PNG preview bytes with the revision requested by the reducer.
+    case preview(tabID: BrowserTabID, revision: BrowserTabPreviewRevision, pngData: Data?)
     /// Reports an app-owned action selected from a public WebKit link menu.
     case linkContextAction(
         tabID: BrowserTabID,

@@ -33,6 +33,11 @@ extension BrowserFeature {
             }
 
             let id = state.selectedTabID
+            invalidatePreview(
+                for: id,
+                state: &state,
+                operation: .navigation(expectedURL: url),
+            )
             if state.tabs[index].isStartPage {
                 state.tabs[index] = .web(id: id, url: url)
             } else {
@@ -59,6 +64,11 @@ extension BrowserFeature {
         }
 
         let id = state.selectedTabID
+        invalidatePreview(
+            for: id,
+            state: &state,
+            operation: .navigation(expectedURL: url),
+        )
         if state.tabs[index].isStartPage {
             state.tabs[index] = .web(id: id, url: url)
         } else {
@@ -89,6 +99,7 @@ extension BrowserFeature {
             return value
         } ?? state.tabs.endIndex
         state.tabs.insert(.web(id: id, url: url, openerID: openerID), at: insertion)
+        state.previewRevisions[id] = .init()
         if disposition == .foreground {
             state.selectedTabID = id
         }
@@ -103,6 +114,9 @@ extension BrowserFeature {
         let wasSelected = state.selectedTabID == tabID
         let wasOverview = state.presentation == .tabOverview
         let priorOverviewFocusID = state.tabOverviewFocusID
+        state.tabPreviewData.removeValue(forKey: tabID)
+        state.previewRevisions.removeValue(forKey: tabID)
+        state.pendingPreviewInvalidations.removeValue(forKey: tabID)
         let dismissalEffect: Effect<Action> =
             if wasSelected {
                 dismissPageUI(in: &state)
@@ -115,6 +129,7 @@ extension BrowserFeature {
         if state.tabs.isEmpty {
             let replacement = BrowserTabID(uuid())
             state.tabs = [.startPage(id: replacement)]
+            state.previewRevisions[replacement] = .init()
             state.selectedTabID = replacement
             state.presentation = wasOverview ? .tabOverview : .browsing
             discardDraft(in: &state)
@@ -153,6 +168,7 @@ extension BrowserFeature {
                 insertion += 1
             }
             state.tabs.insert(.scriptCreatedWeb(id: tabID, openerID: openerID, url: url), at: insertion)
+            state.previewRevisions[tabID] = .init()
             if foreground {
                 state.selectedTabID = tabID
             }
@@ -164,6 +180,19 @@ extension BrowserFeature {
             let previousCommittedURL = state.tabs[index].metadata.committedURL
             state.tabs[index].metadata = metadata
             if let committedURL = metadata.committedURL {
+                let isSemanticChange = committedURL != previousCommittedURL
+                    || !isWebContent(state.tabs[index].content)
+                let pendingOperation = state.pendingPreviewInvalidations[tabID]
+                let wasExpectedOperation = pendingOperation?.consumes(
+                    committedURL: committedURL,
+                    isSemanticChange: isSemanticChange,
+                ) == true
+                if pendingOperation != nil {
+                    state.pendingPreviewInvalidations.removeValue(forKey: tabID)
+                }
+                if isSemanticChange, !wasExpectedOperation {
+                    invalidatePreview(for: tabID, state: &state, operation: nil)
+                }
                 state.tabs[index].content = .web(requestedURL: committedURL)
                 if tabID == state.selectedTabID, committedURL != previousCommittedURL {
                     state.findDraft = nil
@@ -175,6 +204,10 @@ extension BrowserFeature {
                 return .none
             }
 
+            let wasExpectedOperation = state.pendingPreviewInvalidations.removeValue(forKey: tabID) != nil
+            if !wasExpectedOperation, !isErrorContent(state.tabs[index].content) {
+                invalidatePreview(for: tabID, state: &state, operation: nil)
+            }
             state.tabs[index].metadata.isLoading = false
             state.tabs[index].content = .error(error)
         case let .processTerminated(tabID):
@@ -182,6 +215,10 @@ extension BrowserFeature {
                 return .none
             }
 
+            let wasExpectedOperation = state.pendingPreviewInvalidations.removeValue(forKey: tabID) != nil
+            if !wasExpectedOperation, !isTerminatedContent(state.tabs[index].content) {
+                invalidatePreview(for: tabID, state: &state, operation: nil)
+            }
             state.tabs[index].metadata.isLoading = false
             state.tabs[index].content = .terminated(lastCommittedURL: state.tabs[index].metadata.committedURL)
         case let .scriptCloseRequested(tabID):
@@ -202,12 +239,70 @@ extension BrowserFeature {
             }
 
             state.backForwardList = .init(tabID: tabID, direction: direction, entries: entries)
-        case let .preview(tabID, pngData):
-            state.tabPreviewData[tabID] = pngData
+        case let .preview(tabID, revision, pngData):
+            storePreview(tabID: tabID, revision: revision, pngData: pngData, state: &state)
         case let .linkContextAction(tabID, action, url):
             return handleLinkContextAction(tabID: tabID, action: action, url: url, state: &state)
         }
         return .none
+    }
+
+    /// Stores a capture only when its opaque revision still names the live document.
+    func storePreview(
+        tabID: BrowserTabID,
+        revision: BrowserTabPreviewRevision,
+        pngData: Data?,
+        state: inout State,
+    ) {
+        guard state.tabs.contains(where: { $0.id == tabID }),
+              let pngData,
+              !pngData.isEmpty,
+              revision == state.previewRevisions[tabID]
+        else {
+            return
+        }
+
+        state.tabPreviewData[tabID] = .init(revision: revision, pngData: pngData)
+    }
+
+    /// Invalidates one preview revision before a semantic document change.
+    func invalidatePreview(
+        for tabID: BrowserTabID,
+        state: inout State,
+        operation: BrowserPreviewInvalidationOperation? = .navigation(expectedURL: nil),
+    ) {
+        guard state.tabs.contains(where: { $0.id == tabID }) else {
+            return
+        }
+
+        state.previewRevisions[tabID] = .init()
+        state.tabPreviewData.removeValue(forKey: tabID)
+        if let operation {
+            state.pendingPreviewInvalidations[tabID] = operation
+        } else {
+            state.pendingPreviewInvalidations.removeValue(forKey: tabID)
+        }
+    }
+
+    private func isWebContent(_ content: BrowserTab.Content) -> Bool {
+        if case .web = content {
+            return true
+        }
+        return false
+    }
+
+    private func isErrorContent(_ content: BrowserTab.Content) -> Bool {
+        if case .error = content {
+            return true
+        }
+        return false
+    }
+
+    private func isTerminatedContent(_ content: BrowserTab.Content) -> Bool {
+        if case .terminated = content {
+            return true
+        }
+        return false
     }
 
     func handleLinkContextAction(
@@ -250,15 +345,25 @@ extension BrowserFeature {
         return .none
     }
 
-    func retry(tab: BrowserTab) -> Effect<Action> {
+    func retry(tab: BrowserTab, state: inout State) -> Effect<Action> {
         switch tab.content {
         case let .error(error):
-            command(.load(tabID: tab.id, url: error.url))
+            invalidatePreview(
+                for: tab.id,
+                state: &state,
+                operation: .navigation(expectedURL: error.url),
+            )
+            return command(.load(tabID: tab.id, url: error.url))
         case .terminated:
-            command(.reload(tabID: tab.id))
+            invalidatePreview(
+                for: tab.id,
+                state: &state,
+                operation: .reload(committedURL: tab.metadata.committedURL),
+            )
+            return command(.reload(tabID: tab.id))
         case .startPage,
              .web:
-            .none
+            return .none
         }
     }
 

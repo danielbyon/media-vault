@@ -18,9 +18,24 @@ final class BrowserWebKitAdapter: NSObject {
     private var continuations: [UUID: AsyncStream<BrowserWebKitEvent>.Continuation] = [:]
     private var popupOpenersThisTurn: Set<BrowserTabID> = []
     private let makeTabID: () -> BrowserTabID
+    private let snapshotter: @MainActor (
+        WKWebView,
+        WKSnapshotConfiguration?,
+        @escaping @Sendable (UIImage?, Error?) -> Void,
+    ) -> Void
 
-    init(makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init) {
+    init(
+        makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init,
+        snapshotter: @escaping @MainActor (
+            WKWebView,
+            WKSnapshotConfiguration?,
+            @escaping @Sendable (UIImage?, Error?) -> Void,
+        ) -> Void = { webView, configuration, completion in
+            webView.takeSnapshot(with: configuration, completionHandler: completion)
+        },
+    ) {
         self.makeTabID = makeTabID
+        self.snapshotter = snapshotter
     }
 
     var contextCount: Int {
@@ -112,15 +127,19 @@ final class BrowserWebKitAdapter: NSObject {
             contexts[id]?.webView.find(query) { _ in }
         case let .goToBackForwardEntry(id, token):
             contexts[id]?.goToBackForwardEntry(token)
-        case let .capturePreview(id):
+        case let .capturePreview(id, revision):
             guard let webView = contexts[id]?.webView else {
-                emit(.preview(tabID: id, pngData: nil))
+                emit(.preview(tabID: id, revision: revision, pngData: nil))
                 return
             }
 
-            webView.takeSnapshot(with: nil) { [weak self] image, _ in
+            snapshotter(webView, nil) { [weak self] image, _ in
                 MainActor.assumeIsolated {
-                    self?.emit(.preview(tabID: id, pngData: image?.pngData()))
+                    self?.emit(.preview(
+                        tabID: id,
+                        revision: revision,
+                        pngData: image?.pngData(),
+                    ))
                 }
             }
         case let .dismissJavaScriptDialog(id):

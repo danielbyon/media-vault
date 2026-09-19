@@ -36,6 +36,7 @@ extension BrowserFeature {
             let dismissalEffect = dismissPageUI(in: &state)
             let id = BrowserTabID(uuid())
             state.tabs.append(.startPage(id: id))
+            state.previewRevisions[id] = .init()
             state.selectedTabID = id
             state.presentation = .browsing
             state.tabOverviewFocusID = nil
@@ -72,8 +73,11 @@ extension BrowserFeature {
             state.pendingNewTab = nil
             let dismissalEffect = dismissPageUI(in: &state)
             let closedIDs = state.tabs.map(\.id)
+            state.tabPreviewData.removeAll(keepingCapacity: false)
             let id = BrowserTabID(uuid())
             state.tabs = [.startPage(id: id)]
+            state.previewRevisions = [id: .init()]
+            state.pendingPreviewInvalidations.removeAll()
             state.selectedTabID = id
             state.presentation = .browsing
             state.tabOverviewFocusID = nil
@@ -100,6 +104,9 @@ extension BrowserFeature {
             state.pendingNewTab = nil
             let dismissalEffect = dismissPageUI(in: &state)
             let closedIDs = state.tabs.filter { $0.id != id }.map(\.id)
+            state.tabPreviewData = state.tabPreviewData.filter { $0.key == id }
+            state.previewRevisions = state.previewRevisions.filter { $0.key == id }
+            state.pendingPreviewInvalidations = state.pendingPreviewInvalidations.filter { $0.key == id }
             state.tabs = [tab]
             state.selectedTabID = id
             state.presentation = .browsing
@@ -118,6 +125,7 @@ extension BrowserFeature {
 
             let id = BrowserTabID(uuid())
             state.tabs.append(.startPage(id: id))
+            state.previewRevisions[id] = .init()
             state.selectedTabID = id
             state.presentation = .browsing
             state.tabOverviewFocusID = nil
@@ -137,10 +145,18 @@ extension BrowserFeature {
             state.presentation = .tabOverview
             state.tabOverviewFocusID = state.selectedTabID
             discardDraft(in: &state)
-            let previewCommands = state.tabs.compactMap { tab in
-                tab.isStartPage ? nil : BrowserWebKitCommand.capturePreview(tabID: tab.id)
+            let previewCommands: [BrowserWebKitCommand] = state.tabs.compactMap { tab -> BrowserWebKitCommand? in
+                guard case .web = tab.content else {
+                    return nil
+                }
+
+                return .capturePreview(tabID: tab.id, revision: state.previewRevision(for: tab.id))
             }
             return .merge(dismissalEffect, commands(previewCommands))
+        case let .nativePreviewCaptured(tabID, revision, pngData):
+            storePreview(tabID: tabID, revision: revision, pngData: pngData, state: &state)
+        case .previewCacheEvicted:
+            state.tabPreviewData.removeAll(keepingCapacity: false)
         case let .tabCardSelected(id):
             guard state.tabs.contains(where: { $0.id == id }) else {
                 return .none
@@ -489,8 +505,18 @@ extension BrowserFeature {
         case .omniboxSubmitted:
             return submitOmnibox(state: &state)
         case .backTapped:
+            invalidatePreview(
+                for: state.selectedTabID,
+                state: &state,
+                operation: .history,
+            )
             return selectedCommand(state: state, BrowserWebKitCommand.goBack)
         case .forwardTapped:
+            invalidatePreview(
+                for: state.selectedTabID,
+                state: &state,
+                operation: .history,
+            )
             return selectedCommand(state: state, BrowserWebKitCommand.goForward)
         case .backHistoryRequested:
             return command(.showBackForwardList(tabID: state.selectedTabID, direction: .back))
@@ -502,6 +528,11 @@ extension BrowserFeature {
             }
 
             state.backForwardList = nil
+            invalidatePreview(
+                for: list.tabID,
+                state: &state,
+                operation: .history,
+            )
             return command(.goToBackForwardEntry(tabID: list.tabID, token: token))
         case .backForwardListDismissed:
             state.backForwardList = nil
@@ -510,7 +541,15 @@ extension BrowserFeature {
                 return .none
             }
 
-            return command(tab.metadata.isLoading ? .stop(tabID: tab.id) : .reload(tabID: tab.id))
+            if tab.metadata.isLoading {
+                return command(.stop(tabID: tab.id))
+            }
+            invalidatePreview(
+                for: tab.id,
+                state: &state,
+                operation: .reload(committedURL: tab.metadata.committedURL),
+            )
+            return command(.reload(tabID: tab.id))
         case .pullToRefresh:
             guard let tab = state.selectedTab else {
                 return .none
@@ -520,9 +559,14 @@ extension BrowserFeature {
             case .startPage:
                 return .none
             case .error:
-                return retry(tab: tab)
+                return retry(tab: tab, state: &state)
             case .web,
                  .terminated:
+                invalidatePreview(
+                    for: tab.id,
+                    state: &state,
+                    operation: .reload(committedURL: tab.metadata.committedURL),
+                )
                 return command(.reload(tabID: tab.id))
             }
         case .retryTapped:
@@ -530,7 +574,7 @@ extension BrowserFeature {
                 return .none
             }
 
-            return retry(tab: tab)
+            return retry(tab: tab, state: &state)
         case let .webKitEvent(event):
             return handle(event: event, state: &state)
         }
