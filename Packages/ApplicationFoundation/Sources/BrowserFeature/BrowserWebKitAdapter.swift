@@ -9,6 +9,12 @@ import Foundation
 import UIKit
 import WebKit
 
+/// Internal observation seam for proving WebKit surface ownership without production logging.
+enum BrowserWebKitAttachmentEvent: Equatable {
+    case attached(BrowserTabID)
+    case detached(BrowserTabID)
+}
+
 /// Main-actor registry that exclusively owns live WebKit contexts keyed by logical tab IDs.
 @MainActor
 final class BrowserWebKitAdapter: NSObject {
@@ -18,9 +24,27 @@ final class BrowserWebKitAdapter: NSObject {
     private var continuations: [UUID: AsyncStream<BrowserWebKitEvent>.Continuation] = [:]
     private var popupOpenersThisTurn: Set<BrowserTabID> = []
     private let makeTabID: () -> BrowserTabID
+    private let snapshotter: @MainActor (
+        WKWebView,
+        WKSnapshotConfiguration?,
+        @escaping @Sendable (UIImage?, Error?) -> Void,
+    ) -> Void
 
-    init(makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init) {
+    /// Test-only observation seam for actual adapter attachment operations.
+    var attachmentObserver: ((BrowserWebKitAttachmentEvent) -> Void)?
+
+    init(
+        makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init,
+        snapshotter: @escaping @MainActor (
+            WKWebView,
+            WKSnapshotConfiguration?,
+            @escaping @Sendable (UIImage?, Error?) -> Void,
+        ) -> Void = { webView, configuration, completion in
+            webView.takeSnapshot(with: configuration, completionHandler: completion)
+        },
+    ) {
         self.makeTabID = makeTabID
+        self.snapshotter = snapshotter
     }
 
     var contextCount: Int {
@@ -29,6 +53,16 @@ final class BrowserWebKitAdapter: NSObject {
 
     func hasContext(for tabID: BrowserTabID) -> Bool {
         contexts[tabID] != nil
+    }
+
+    /// Returns an existing live surface without creating a new WebKit context.
+    func webView(for tabID: BrowserTabID) -> WKWebView? {
+        contexts[tabID]?.webView
+    }
+
+    /// Reports whether the adapter-owned context has committed its current document.
+    func hasCommittedDocument(for tabID: BrowserTabID) -> Bool {
+        contexts[tabID]?.hasCommittedDocument == true
     }
 
     /// Creates a context even for an unselected background tab and returns an existing one unchanged.
@@ -70,12 +104,14 @@ final class BrowserWebKitAdapter: NSObject {
             webView.topAnchor.constraint(equalTo: container.topAnchor),
             webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+        attachmentObserver?(.attached(tabID))
     }
 
     /// Detaches only the visual surface; background loading remains adapter-owned.
     func detach(tabID: BrowserTabID, from container: UIView) {
         if contexts[tabID]?.webView.superview === container {
             contexts[tabID]?.webView.removeFromSuperview()
+            attachmentObserver?(.detached(tabID))
         }
     }
 
@@ -112,15 +148,19 @@ final class BrowserWebKitAdapter: NSObject {
             contexts[id]?.webView.find(query) { _ in }
         case let .goToBackForwardEntry(id, token):
             contexts[id]?.goToBackForwardEntry(token)
-        case let .capturePreview(id):
+        case let .capturePreview(id, revision):
             guard let webView = contexts[id]?.webView else {
-                emit(.preview(tabID: id, pngData: nil))
+                emit(.preview(tabID: id, revision: revision, pngData: nil))
                 return
             }
 
-            webView.takeSnapshot(with: nil) { [weak self] image, _ in
+            snapshotter(webView, nil) { [weak self] image, _ in
                 MainActor.assumeIsolated {
-                    self?.emit(.preview(tabID: id, pngData: image?.pngData()))
+                    self?.emit(.preview(
+                        tabID: id,
+                        revision: revision,
+                        pngData: image?.pngData(),
+                    ))
                 }
             }
         case let .dismissJavaScriptDialog(id):
@@ -273,6 +313,7 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     let tabID: BrowserTabID
     let webView: WKWebView
     weak var adapter: BrowserWebKitAdapter?
+    private(set) var hasCommittedDocument = false
     private var pendingDialogResolution: (() -> Void)?
     private var observations: [NSKeyValueObservation] = []
     private var committedURLProjection = BrowserWebKitCommittedURLProjection()
@@ -341,13 +382,19 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         webView.reload()
     }
 
+    func webView(_: WKWebView, didStartProvisionalNavigation _: WKNavigation?) {
+        hasCommittedDocument = false
+    }
+
     func webView(_ webView: WKWebView, didCommit _: WKNavigation?) {
+        hasCommittedDocument = true
         backForwardTokens.invalidate()
         committedURLProjection.update(authoritativeCurrentItemURL: webView.backForwardList.currentItem?.url)
         emitMetadata()
     }
 
     func webView(_: WKWebView, didFinish _: WKNavigation?) {
+        hasCommittedDocument = true
         backForwardTokens.invalidate()
         emitMetadata()
     }

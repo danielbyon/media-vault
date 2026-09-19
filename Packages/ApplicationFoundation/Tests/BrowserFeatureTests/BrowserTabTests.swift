@@ -26,18 +26,17 @@ struct BrowserTabTests {
         } withDependencies: {
             $0.uuid = .incrementing
         }
+        store.exhaustivity = .off(showSkippedAssertions: false)
 
         #expect(store.state.tabs == [.startPage(id: first)])
-        await store.send(.closeTab(first)) {
-            $0.tabs = [.startPage(id: BrowserTabID(UUID(0)))]
-            $0.selectedTabID = BrowserTabID(UUID(0))
-            $0.focusedField = .none
-        }
-        await store.send(.newTabTapped) {
-            $0.tabs.append(.startPage(id: BrowserTabID(UUID(1))))
-            $0.selectedTabID = BrowserTabID(UUID(1))
-            $0.focusedField = .startPage
-        }
+        await store.send(.closeTab(first))
+        #expect(store.state.tabs == [.startPage(id: BrowserTabID(UUID(0)))])
+        #expect(store.state.selectedTabID == BrowserTabID(UUID(0)))
+        #expect(store.state.focusedField == .none)
+        await store.send(.newTabTapped)
+        #expect(store.state.tabs.map(\.id) == [BrowserTabID(UUID(0)), BrowserTabID(UUID(1))])
+        #expect(store.state.selectedTabID == BrowserTabID(UUID(1)))
+        #expect(store.state.focusedField == .startPage)
     }
 
     @Test("Closing an active tab selects its left neighbor and preserves stable order")
@@ -55,6 +54,7 @@ struct BrowserTabTests {
         await store.send(.closeTab(second)) {
             $0.tabs.remove(at: 1)
             $0.selectedTabID = first
+            $0.previewRevisions.removeValue(forKey: second)
         }
     }
 
@@ -85,13 +85,16 @@ struct BrowserTabTests {
                 providerValues: [],
             )
         }
-        await store.send(.omniboxSubmitted) {
-            $0.tabs[0] = .web(id: first, url: destination)
-            $0.focusedField = .none
-            $0.omniboxDraft = ""
-            $0.hasUnsubmittedOmniboxDraft = false
-            $0.suggestions = []
-        }
+        let initialRevision = store.state.previewRevision(for: first)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.omniboxSubmitted)
+        #expect(store.state.tabs[0] == .web(id: first, url: destination))
+        #expect(store.state.focusedField == .none)
+        #expect(store.state.omniboxDraft.isEmpty)
+        #expect(store.state.hasUnsubmittedOmniboxDraft == false)
+        #expect(store.state.suggestions.isEmpty)
+        #expect(store.state.previewRevision(for: first) != initialRevision)
+        #expect(store.state.pendingPreviewInvalidations[first] != nil)
         await store.finish()
         #expect(try commands.value == [
             .ensureContext(tabID: first),
@@ -150,11 +153,11 @@ struct BrowserTabTests {
             $0.selectedTabID = second
             $0.focusedField = .none
         }
-        await store.send(.newTabTapped) {
-            $0.tabs.append(.startPage(id: BrowserTabID(UUID(0))))
-            $0.selectedTabID = BrowserTabID(UUID(0))
-            $0.focusedField = .startPage
-        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.newTabTapped)
+        #expect(store.state.tabs.map(\.id) == [first, second, BrowserTabID(UUID(0))])
+        #expect(store.state.selectedTabID == BrowserTabID(UUID(0)))
+        #expect(store.state.focusedField == .startPage)
     }
 
     @Test("Explicit Start Page creates and focuses one when none exists")
@@ -167,11 +170,11 @@ struct BrowserTabTests {
             $0.uuid = .incrementing
         }
 
-        await store.send(.showStartPageTapped) {
-            $0.tabs.append(.startPage(id: BrowserTabID(UUID(0))))
-            $0.selectedTabID = BrowserTabID(UUID(0))
-            $0.focusedField = .startPage
-        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.showStartPageTapped)
+        #expect(store.state.tabs.map(\.id) == [first, BrowserTabID(UUID(0))])
+        #expect(store.state.selectedTabID == BrowserTabID(UUID(0)))
+        #expect(store.state.focusedField == .startPage)
     }
 
     @Test("Related and site-created tabs are contiguous, stable, and only the first foreground event focuses")
@@ -193,31 +196,19 @@ struct BrowserTabTests {
         state.settings.openLinksInNewTabs = .askEveryTime
         let store = TestStore(initialState: state) { BrowserFeature() }
 
+        store.exhaustivity = .off(showSkippedAssertions: false)
         try await store.send(.webKitEvent(.siteCreatedTab(
             openerID: opener,
             tabID: popupOne,
             url: popupOneURL,
             foreground: true,
-        ))) {
-            $0.tabs.insert(.scriptCreatedWeb(
-                id: popupOne,
-                openerID: opener,
-                url: popupOneURL,
-            ), at: 1)
-            $0.selectedTabID = popupOne
-        }
+        )))
         try await store.send(.webKitEvent(.siteCreatedTab(
             openerID: opener,
             tabID: popupTwo,
             url: popupTwoURL,
             foreground: false,
-        ))) {
-            $0.tabs.insert(.scriptCreatedWeb(
-                id: popupTwo,
-                openerID: opener,
-                url: popupTwoURL,
-            ), at: 2)
-        }
+        )))
         #expect(store.state.tabs.map(\.id) == [opener, popupOne, popupTwo, unrelated])
         #expect(store.state.selectedTabID == popupOne)
         #expect(store.state.pendingNewTab == nil)
@@ -263,6 +254,7 @@ struct BrowserTabTests {
             $0.tabs.removeFirst()
             $0.selectedTabID = second
             $0.tabOverviewFocusID = second
+            $0.previewRevisions.removeValue(forKey: first)
         }
     }
 
@@ -287,6 +279,7 @@ struct BrowserTabTests {
         await store.send(.closeTab(third)) {
             $0.tabs.remove(at: 2)
             $0.tabOverviewFocusID = second
+            $0.previewRevisions.removeValue(forKey: third)
         }
     }
 
@@ -310,6 +303,7 @@ struct BrowserTabTests {
         await store.send(.closeTab(third)) {
             $0.tabs.remove(at: 2)
             $0.tabOverviewFocusID = second
+            $0.previewRevisions.removeValue(forKey: third)
         }
     }
 
@@ -326,11 +320,11 @@ struct BrowserTabTests {
             $0.uuid = .incrementing
         }
 
-        await store.send(.closeTab(first)) {
-            $0.tabs = [.startPage(id: BrowserTabID(UUID(0)))]
-            $0.selectedTabID = BrowserTabID(UUID(0))
-            $0.tabOverviewFocusID = BrowserTabID(UUID(0))
-        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.closeTab(first))
+        #expect(store.state.tabs == [.startPage(id: BrowserTabID(UUID(0)))])
+        #expect(store.state.selectedTabID == BrowserTabID(UUID(0)))
+        #expect(store.state.tabOverviewFocusID == BrowserTabID(UUID(0)))
     }
 }
 

@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import ConcurrencyExtras
 import Foundation
 import SwiftUI
 import Testing
@@ -29,6 +30,189 @@ struct BrowserWebKitAdapterTests {
         adapter.destroyContext(for: first)
         #expect(adapter.hasContext(for: first) == false)
         #expect(adapter.hasContext(for: second))
+    }
+
+    @Test("Preview capture uses the current viewport and projects success or failure as Sendable data")
+    func previewCaptureProjectsViewportAndFailure() async throws {
+        let image = try #require(UIImage(systemName: "globe"))
+        let usedCurrentViewport = LockIsolated(false)
+        let successAdapter = BrowserWebKitAdapter(snapshotter: { _, configuration, completion in
+            usedCurrentViewport.setValue(configuration == nil)
+            completion(image, nil)
+        })
+        let successID = BrowserTabID()
+        let successRevision = BrowserTabPreviewRevision()
+        _ = successAdapter.ensureContext(for: successID)
+        let successStream = successAdapter.makeEventStream()
+        var successEvents = successStream.makeAsyncIterator()
+        successAdapter.execute(.capturePreview(tabID: successID, revision: successRevision))
+
+        guard let successEvent = await successEvents.next() else {
+            Issue.record("The successful snapshot did not produce a preview event")
+            return
+        }
+        guard case let .preview(tabID, revision, pngData) = successEvent else {
+            Issue.record("The successful snapshot produced the wrong event")
+            return
+        }
+
+        #expect(tabID == successID)
+        #expect(revision == successRevision)
+        #expect(pngData?.isEmpty == false)
+        #expect(usedCurrentViewport.value)
+
+        let failureAdapter = BrowserWebKitAdapter(snapshotter: { _, _, completion in
+            completion(nil, NSError(domain: "BrowserWebKitAdapterTests", code: 1))
+        })
+        let failureID = BrowserTabID()
+        let failureRevision = BrowserTabPreviewRevision()
+        _ = failureAdapter.ensureContext(for: failureID)
+        let failureStream = failureAdapter.makeEventStream()
+        var failureEvents = failureStream.makeAsyncIterator()
+        failureAdapter.execute(.capturePreview(tabID: failureID, revision: failureRevision))
+
+        #expect(await failureEvents.next() == .preview(
+            tabID: failureID,
+            revision: failureRevision,
+            pngData: nil,
+        ))
+    }
+
+    @Test("Native preview capture honors draw failure and detachment")
+    func nativePreviewCaptureHonorsFailureAndDetachment() {
+        var requestedAfterScreenUpdates = false
+        let controller = BrowserNativePreviewCaptureController { view, _, afterScreenUpdates in
+            requestedAfterScreenUpdates = afterScreenUpdates
+            guard let context = UIGraphicsGetCurrentContext() else {
+                return false
+            }
+
+            view.layer.render(in: context)
+            return true
+        }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 120, height: 80))
+        let rootViewController = UIViewController()
+        window.rootViewController = rootViewController
+        let surface = UIView(frame: rootViewController.view.bounds)
+        surface.backgroundColor = .systemBackground
+        rootViewController.view.addSubview(surface)
+        window.makeKeyAndVisible()
+        rootViewController.view.frame = window.bounds
+        surface.frame = rootViewController.view.bounds
+        rootViewController.view.layoutIfNeeded()
+        flushUIKitRendering()
+        controller.attach(surface: surface)
+
+        #expect(controller.capture()?.isEmpty == false)
+        #expect(requestedAfterScreenUpdates)
+
+        let failingController = BrowserNativePreviewCaptureController { _, _, _ in false }
+        failingController.attach(surface: surface)
+        #expect(failingController.capture() == nil)
+
+        controller.detach(surface: surface)
+        #expect(controller.capture() == nil)
+        window.isHidden = true
+    }
+
+    @Test("Mounted native preview capture includes only the represented surface")
+    func mountedNativePreviewCaptureUsesRepresentedSurface() throws {
+        let renderLayer: @MainActor (UIView, CGRect, Bool) -> Bool = { view, _, _ in
+            guard let context = UIGraphicsGetCurrentContext() else {
+                return false
+            }
+
+            view.layer.render(in: context)
+            return true
+        }
+        let startController = BrowserNativePreviewCaptureController(drawHierarchy: renderLayer)
+        let errorController = BrowserNativePreviewCaptureController(drawHierarchy: renderLayer)
+        let terminatedController = BrowserNativePreviewCaptureController(drawHierarchy: renderLayer)
+        let rootView = AnyView(
+            VStack(spacing: 0) {
+                Color.blue.frame(height: 40)
+                BrowserNativePreviewCapture(
+                    content: Color.red.overlay {
+                        Text("Start Page")
+                            .foregroundStyle(.white)
+                    },
+                    controller: startController,
+                )
+                .frame(width: 160, height: 100)
+                BrowserNativePreviewCapture(
+                    content: Color.orange.overlay {
+                        Text("Page Error")
+                            .foregroundStyle(.white)
+                    },
+                    controller: errorController,
+                )
+                .frame(width: 160, height: 100)
+                BrowserNativePreviewCapture(
+                    content: Color.purple.overlay {
+                        Text("Page Ended")
+                            .foregroundStyle(.white)
+                    },
+                    controller: terminatedController,
+                )
+                .frame(width: 160, height: 100)
+            }
+            .frame(width: 160, height: 340),
+        )
+        let hostingController = UIHostingController(rootView: rootView)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 160, height: 340))
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        hostingController.view.frame = window.bounds
+        hostingController.view.layoutIfNeeded()
+        flushUIKitRendering()
+
+        let startImageData = try #require(
+            startController.capture(),
+            "The mounted Start Page surface did not produce a capture",
+        )
+        let errorImageData = try #require(
+            errorController.capture(),
+            "The mounted error surface did not produce a capture",
+        )
+        let terminatedImageData = try #require(
+            terminatedController.capture(),
+            "The mounted terminated surface did not produce a capture",
+        )
+        let startImage = try #require(UIImage(data: startImageData))
+        let errorImage = try #require(UIImage(data: errorImageData))
+        let terminatedImage = try #require(UIImage(data: terminatedImageData))
+
+        let expectedPixelSize = CGSize(
+            width: 160 * window.screen.scale,
+            height: 100 * window.screen.scale,
+        )
+        #expect(startImage.size == expectedPixelSize)
+        #expect(errorImage.size == expectedPixelSize)
+        #expect(terminatedImage.size == expectedPixelSize)
+        let startPixel = try #require(rgbaPixel(in: startImage))
+        let errorPixel = try #require(rgbaPixel(in: errorImage))
+        let terminatedPixel = try #require(rgbaPixel(in: terminatedImage))
+
+        #expect(startPixel.red > 180)
+        #expect(startPixel.green < 80)
+        #expect(startPixel.blue < 80)
+        #expect(errorPixel.red > 180)
+        #expect(errorPixel.green > 80)
+        #expect(errorPixel.blue < 80)
+        #expect(terminatedPixel.red > 80)
+        #expect(terminatedPixel.green < 80)
+        #expect(terminatedPixel.blue > 80)
+
+        hostingController.rootView = AnyView(EmptyView())
+        hostingController.view.layoutIfNeeded()
+        #expect(startController.capture() == nil)
+        #expect(errorController.capture() == nil)
+        #expect(terminatedController.capture() == nil)
+        window.isHidden = true
+    }
+
+    private func flushUIKitRendering() {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
     }
 
     @Test("A destroyed context cannot emit a delayed script-close event")
@@ -200,4 +384,44 @@ struct BrowserWebKitAdapterTests {
         #expect(BrowserJavaScriptDialogPresentation.prompt.includesTextField)
         #expect(BrowserJavaScriptDialogPresentation.prompt.actions == [.cancel, .ok])
     }
+}
+
+private struct RGBAPixel {
+    let red: UInt8
+    let green: UInt8
+    let blue: UInt8
+    let alpha: UInt8
+}
+
+private func rgbaPixel(in image: UIImage) -> RGBAPixel? {
+    guard let source = image.cgImage else {
+        return nil
+    }
+
+    var values = [UInt8](repeating: 0, count: 4)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+    let drawn = values.withUnsafeMutableBytes { buffer in
+        guard let baseAddress = buffer.baseAddress,
+              let context = CGContext(
+                  data: baseAddress,
+                  width: 1,
+                  height: 1,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 4,
+                  space: colorSpace,
+                  bitmapInfo: bitmapInfo,
+              )
+        else {
+            return false
+        }
+
+        context.draw(source, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return true
+    }
+    guard drawn else {
+        return nil
+    }
+
+    return RGBAPixel(red: values[0], green: values[1], blue: values[2], alpha: values[3])
 }

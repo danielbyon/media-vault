@@ -7,7 +7,6 @@
 
 import ComposableArchitecture
 import Foundation
-import PresentationSupport
 import SwiftUI
 import UIKit
 
@@ -16,6 +15,228 @@ private struct BrowserTabCardDrag: Equatable {
     let tabID: BrowserTabID
     let axis: BrowserTabSwipe.Axis
     let horizontalTranslation: CGFloat
+}
+
+private struct BrowserChromeHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct BrowserContentViewportPreferenceKey: PreferenceKey {
+    static let defaultValue: BrowserContentViewportGeometry? = nil
+
+    static func reduce(
+        value: inout BrowserContentViewportGeometry?,
+        nextValue: () -> BrowserContentViewportGeometry?,
+    ) {
+        if let nextGeometry = nextValue() {
+            value = nextGeometry
+        }
+    }
+}
+
+/// Measures the page region produced by the same safe-area chrome structure used for browsing.
+///
+/// The geometry reader is inside the view whose bottom or top safe-area bar reserves Browser
+/// chrome. SwiftUI therefore supplies the resulting page region directly instead of requiring a
+/// second implementation of safe-area and chrome arithmetic.
+private struct BrowserContentViewportProbe: View {
+    let chromeHeight: CGFloat
+    let chromeAtTop: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: BrowserContentViewportPreferenceKey.self,
+                value: proxy.size.width > 0 && proxy.size.height > 0
+                    ? BrowserContentViewportGeometry(size: proxy.size)
+                    : nil,
+            )
+        }
+        .safeAreaBar(
+            edge: chromeAtTop ? .top : .bottom,
+            spacing: 0,
+        ) {
+            Color.clear
+                .frame(height: chromeHeight)
+                .accessibilityHidden(true)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+@MainActor
+@preconcurrency
+private struct BrowserPresentationKeyboardDismissalModifier: ViewModifier {
+    let isEnabled: Bool
+    let focus: FocusState<BrowserFocusedField?>.Binding
+
+    func body(content: Content) -> some View {
+        content
+            .scrollDismissesKeyboard(isEnabled ? .interactively : .automatic)
+            .background {
+                BrowserPresentationTapObserver(focus: focus, isEnabled: isEnabled)
+            }
+    }
+}
+
+/// Installs one non-cancelling outside-tap observer on the hosting view for the whole browsing
+/// presentation. SwiftUI's generic keyboard-dismissal modifier mounts its UIKit observer beside a
+/// complex safe-area presentation, so this Browser-owned observer deliberately resolves the
+/// hosting view as its gesture owner and covers both page content and chrome.
+@MainActor
+@preconcurrency
+private struct BrowserPresentationTapObserver: UIViewRepresentable {
+    let focus: FocusState<BrowserFocusedField?>.Binding
+    let isEnabled: Bool
+
+    func makeCoordinator() -> BrowserPresentationTapCoordinator {
+        BrowserPresentationTapCoordinator(
+            isFocused: { focus.wrappedValue != nil },
+            dismiss: { focus.wrappedValue = nil },
+            isEnabled: isEnabled,
+        )
+    }
+
+    func makeUIView(context: Context) -> BrowserPresentationTapAnchorView {
+        let view = BrowserPresentationTapAnchorView()
+        view.onHierarchyChange = { [weak coordinator = context.coordinator, weak view] in
+            coordinator?.mount(on: view.flatMap(Self.hostingView(containing:)))
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: BrowserPresentationTapAnchorView, context: Context) {
+        context.coordinator.update(isEnabled: isEnabled)
+        context.coordinator.mount(on: Self.hostingView(containing: uiView))
+    }
+
+    static func dismantleUIView(
+        _: BrowserPresentationTapAnchorView,
+        coordinator: BrowserPresentationTapCoordinator,
+    ) {
+        coordinator.unmount()
+    }
+
+    private static func hostingView(containing view: UIView) -> UIView? {
+        if let rootView = view.window?.rootViewController?.view {
+            return rootView
+        }
+
+        var rootView = view
+        while let superview = rootView.superview {
+            rootView = superview
+        }
+        return rootView === view ? nil : rootView
+    }
+}
+
+@MainActor
+@preconcurrency
+private final class BrowserPresentationTapAnchorView: UIView {
+    var onHierarchyChange: (() -> Void)?
+
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        onHierarchyChange?()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onHierarchyChange?()
+    }
+}
+
+/// Coordinates the single Browser-wide tap recognizer while leaving the tapped control's own
+/// interaction intact.
+@MainActor
+@preconcurrency
+private final class BrowserPresentationTapCoordinator: NSObject, UIGestureRecognizerDelegate {
+    private let isFocused: () -> Bool
+    private let dismiss: () -> Void
+    private var isEnabled: Bool
+    private weak var hostView: UIView?
+    private var tapRecognizer: UITapGestureRecognizer?
+
+    init(
+        isFocused: @escaping () -> Bool,
+        dismiss: @escaping () -> Void,
+        isEnabled: Bool,
+    ) {
+        self.isFocused = isFocused
+        self.dismiss = dismiss
+        self.isEnabled = isEnabled
+    }
+
+    func update(isEnabled: Bool) {
+        self.isEnabled = isEnabled
+    }
+
+    func mount(on hostView: UIView?) {
+        guard isEnabled, let hostView else {
+            unmount()
+            return
+        }
+        guard self.hostView !== hostView else {
+            return
+        }
+
+        unmount()
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTapGesture(_:)))
+        recognizer.cancelsTouchesInView = false
+        recognizer.delaysTouchesBegan = false
+        recognizer.delaysTouchesEnded = false
+        recognizer.delegate = self
+        hostView.addGestureRecognizer(recognizer)
+        self.hostView = hostView
+        tapRecognizer = recognizer
+    }
+
+    func unmount() {
+        if let tapRecognizer, let hostView {
+            hostView.removeGestureRecognizer(tapRecognizer)
+        }
+        tapRecognizer = nil
+        hostView = nil
+    }
+
+    @objc
+    private func handleTapGesture(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended, isFocused() else {
+            return
+        }
+
+        dismiss()
+    }
+
+    func gestureRecognizer(_: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard let hostView else {
+            return false
+        }
+
+        var current = touch.view
+        while let view = current {
+            if view is UITextField || view is UITextView || view is UISearchBar {
+                return false
+            }
+            if view === hostView {
+                return true
+            }
+            current = view.superview
+        }
+        return false
+    }
+
+    func gestureRecognizer(
+        _: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer,
+    ) -> Bool {
+        true
+    }
 }
 
 /// Authenticated native browser presentation.
@@ -28,42 +249,106 @@ public struct BrowserView: View {
     private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
+    @Environment(\.scenePhase)
+    private var scenePhase
     @FocusState
     private var focusedField: BrowserFocusedField?
     @AccessibilityFocusState
     private var accessibilityFocusedTabID: BrowserTabID?
-    @Namespace
-    private var tabTransition
     @State
     private var tabCardDrag: BrowserTabCardDrag?
+    @State
+    private var isTabTransitionActive = false
+    @State
+    private var tabTransitionToken = 0
+    @State
+    private var tabTransitionTabID: BrowserTabID?
+    @State
+    private var tabTransitionDirection: BrowserTabTransitionDirection?
+    @State
+    private var transitionOwnsVisibleSurface = false
+    @State
+    private var tabOverviewVisualMounted = false
+    @State
+    private var nativePreviewCaptureController = BrowserNativePreviewCaptureController()
+    @State
+    private var tabTransitionUIKitCoordinator = BrowserTabTransitionUIKitCoordinator()
+    @State
+    private var chromeLayoutHeight: CGFloat = 0
+    @State
+    private var latestLayoutProbeGeometry: BrowserContentViewportGeometry?
+    @State
+    private var latchedTransitionGeometry: BrowserContentViewportGeometry?
+    @State
+    private var chromeOpacity: Double = 1
 
     /// Creates browser UI bound to deterministic feature state.
     public init(store: StoreOf<BrowserFeature>) {
-        self.store = store
-        reduceMotionOverride = nil
+        self.init(
+            store: store,
+            reduceMotionOverride: nil,
+            transitionCoordinator: nil,
+        )
     }
 
     /// Creates a deterministic presentation for accessibility snapshot coverage.
     init(store: StoreOf<BrowserFeature>, reduceMotionOverride: Bool) {
+        self.init(
+            store: store,
+            reduceMotionOverride: reduceMotionOverride,
+            transitionCoordinator: nil,
+        )
+    }
+
+    /// Creates a presentation with a caller-owned coordinator for transition-boundary tests.
+    init(
+        store: StoreOf<BrowserFeature>,
+        transitionCoordinator: BrowserTabTransitionUIKitCoordinator,
+    ) {
+        self.init(
+            store: store,
+            reduceMotionOverride: nil,
+            transitionCoordinator: transitionCoordinator,
+        )
+    }
+
+    private init(
+        store: StoreOf<BrowserFeature>,
+        reduceMotionOverride: Bool?,
+        transitionCoordinator: BrowserTabTransitionUIKitCoordinator?,
+    ) {
         self.store = store
         self.reduceMotionOverride = reduceMotionOverride
+        _tabTransitionUIKitCoordinator = State(initialValue: transitionCoordinator ?? .init())
+        _chromeOpacity = State(initialValue: store.presentation == .browsing ? 1 : 0)
+        _tabOverviewVisualMounted = State(initialValue: store.presentation == .tabOverview)
     }
 
     /// Renders the selected browser endpoint or the app-owned tab overview.
     public var body: some View {
-        Group {
-            if store.presentation == .tabOverview {
-                tabOverview
-            } else {
-                selectedContentWithChrome
-                    .keyboardDismissal(focus: $focusedField)
+        ZStack {
+            selectedContentWithChrome
+
+            if tabOverviewVisualMounted || store.presentation == .tabOverview {
+                tabOverviewVisual
             }
+
+            BrowserTabTransitionOverlay(coordinator: tabTransitionUIKitCoordinator)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .zIndex(20)
+            chromeTransitionLayer
+        }
+        .modifier(BrowserPresentationKeyboardDismissalModifier(
+            isEnabled: store.presentation == .browsing,
+            focus: $focusedField,
+        ))
+        .background {
+            BrowserContentViewportProbe(
+                chromeHeight: chromeReservedHeight,
+                chromeAtTop: horizontalSizeClass == .regular,
+            )
         }
         .background(Color(uiColor: .systemBackground))
-        .animation(
-            reduceMotionEnabled ? .easeOut(duration: 0.15) : .spring(response: 0.42),
-            value: store.presentation,
-        )
         .onChange(of: store.focusedField, initial: true) { _, value in
             focusedField = value == BrowserFocusedField.none ? nil : value
         }
@@ -86,6 +371,22 @@ public struct BrowserView: View {
             if value != .tabOverview {
                 tabCardDrag = nil
             }
+            if value == .tabOverview {
+                tabOverviewVisualMounted = true
+            } else if !isTabTransitionActive || tabTransitionDirection != .toBrowsing {
+                tabOverviewVisualMounted = false
+            }
+            if isTabTransitionActive, let tabTransitionDirection {
+                let expectedPresentation: BrowserPresentation = tabTransitionDirection == .toOverview
+                    ? .tabOverview
+                    : .browsing
+                if value != expectedPresentation {
+                    cancelTabTransition()
+                }
+            }
+            withAnimation(.easeOut(duration: 0.15)) {
+                chromeOpacity = value == .browsing ? 1 : 0
+            }
             accessibilityFocusedTabID = value == .tabOverview
                 ? (store.tabOverviewFocusID ?? store.selectedTabID)
                 : nil
@@ -104,6 +405,10 @@ public struct BrowserView: View {
             if store.presentation == .tabOverview {
                 accessibilityFocusedTabID = store.tabOverviewFocusID ?? store.selectedTabID
             }
+            if let tabTransitionTabID,
+               !store.tabs.contains(where: { $0.id == tabTransitionTabID }) {
+                cancelTabTransition()
+            }
         }
         .onChange(of: accessibilityFocusedTabID) { _, value in
             guard store.presentation == .tabOverview,
@@ -114,31 +419,28 @@ public struct BrowserView: View {
 
             store.send(.tabOverviewFocusChanged(value))
         }
+        .onChange(of: scenePhase) { _, value in
+            if value != .active {
+                cancelTabTransition()
+            }
+        }
+        .onPreferenceChange(BrowserContentViewportPreferenceKey.self) { value in
+            latestLayoutProbeGeometry = value
+        }
+        .onPreferenceChange(BrowserChromeHeightPreferenceKey.self) { height in
+            chromeLayoutHeight = height
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            cancelTabTransition()
+            store.send(.previewCacheEvicted)
+        }
         .task { await store.send(.task).finish() }
-        .sheet(isPresented: Binding(
-            get: { store.library != nil },
-            set: {
-                if !$0 {
-                    store.send(.libraryDismissed)
-                }
-            },
-        )) { BrowserLibraryView(store: store) }
-        .sheet(isPresented: Binding(
-            get: { store.bookmarkEditor != nil },
-            set: {
-                if !$0 {
-                    store.send(.bookmarkEditorCancelled)
-                }
-            },
-        )) { BrowserBookmarkEditorView(store: store) }
-        .sheet(isPresented: Binding(
-            get: { store.shareURL != nil },
-            set: {
-                if !$0 {
-                    store.send(.shareDismissed)
-                }
-            },
-        )) {
+        .onDisappear { cancelTabTransition() }
+        .sheet(isPresented: libraryPresentationBinding) { BrowserLibraryView(store: store) }
+        .sheet(isPresented: bookmarkEditorPresentationBinding) {
+            BrowserBookmarkEditorView(store: store)
+        }
+        .sheet(isPresented: sharePresentationBinding) {
             if let url = store.shareURL {
                 BrowserShareSheet(url: url)
             }
@@ -194,32 +496,98 @@ public struct BrowserView: View {
 }
 
 extension BrowserView {
+    private var libraryPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { store.library != nil },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.libraryDismissed)
+                }
+            },
+        )
+    }
+
+    private var bookmarkEditorPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { store.bookmarkEditor != nil },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.bookmarkEditorCancelled)
+                }
+            },
+        )
+    }
+
+    private var sharePresentationBinding: Binding<Bool> {
+        Binding(
+            get: { store.shareURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.shareDismissed)
+                }
+            },
+        )
+    }
+
     private var reduceMotionEnabled: Bool {
         reduceMotionOverride ?? reduceMotion
     }
 
-    @ViewBuilder
     private var selectedContentWithChrome: some View {
-        if horizontalSizeClass == .regular {
-            selectedContentPresentation
-                .safeAreaBar(edge: .top, spacing: 0) {
-                    chrome
-                }
-        } else {
-            selectedContentPresentation
-                .safeAreaBar(edge: .bottom, spacing: 0) {
-                    chrome
-                }
+        Group {
+            if horizontalSizeClass == .regular {
+                selectedContentPresentation
+                    .safeAreaBar(edge: .top, spacing: 0) { chromeLayoutPlaceholder }
+            } else {
+                selectedContentPresentation
+                    .safeAreaBar(edge: .bottom, spacing: 0) { chromeLayoutPlaceholder }
+            }
         }
+        .zIndex(transitionOwnsVisibleSurface && tabTransitionDirection == .toOverview ? 2 : 0)
+        .allowsHitTesting(store.presentation == .browsing && !isTabTransitionActive)
+        .accessibilityHidden(store.presentation != .browsing || isTabTransitionActive)
     }
 
-    @ViewBuilder
-    private var selectedContentPresentation: some View {
-        if reduceMotionEnabled {
-            selectedContent.transition(.opacity)
-        } else {
-            selectedContent.matchedGeometryEffect(id: store.selectedTabID, in: tabTransition)
+    private var chromeLayoutPlaceholder: some View {
+        Color.clear
+            .frame(height: chromeReservedHeight)
+            .accessibilityHidden(true)
+    }
+
+    private var chromeTransitionLayer: some View {
+        Color.clear
+            .safeAreaBar(
+                edge: horizontalSizeClass == .regular ? .top : .bottom,
+                spacing: 0,
+            ) {
+                chrome
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: BrowserChromeHeightPreferenceKey.self,
+                                value: proxy.size.height,
+                            )
+                        }
+                    }
+                    .opacity(chromeOpacity)
+                    .allowsHitTesting(store.presentation == .browsing && !isTabTransitionActive)
+                    .accessibilityHidden(store.presentation != .browsing || isTabTransitionActive)
+            }
+    }
+
+    private var chromeReservedHeight: CGFloat {
+        guard chromeLayoutHeight > 0 else {
+            if horizontalSizeClass == .regular || store.selectedTab?.isStartPage == true {
+                return 52
+            }
+            return 104
         }
+
+        return chromeLayoutHeight
+    }
+
+    private var selectedContentPresentation: some View {
+        selectedContent
     }
 
     @ViewBuilder
@@ -227,19 +595,51 @@ extension BrowserView {
         if let tab = store.selectedTab {
             switch tab.content {
             case .startPage:
-                startPage
+                nativeSurface(startPage)
             case .web:
-                BrowserWebView(tabID: tab.id) { store.send(.pullToRefresh) }
-                    .accessibilityLabel("Web page")
+                BrowserWebView(
+                    tabID: tab.id,
+                    onRefresh: { store.send(.pullToRefresh) },
+                    transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
+                    readinessContext: webKitReadinessContext(for: tab),
+                )
+                .accessibilityLabel("Web page")
             case let .error(error):
-                errorView(error, terminated: false)
+                nativeSurface(errorView(error, terminated: false))
             case .terminated:
-                errorView(
+                nativeSurface(errorView(
                     .pageCouldNotLoad(tab.metadata.committedURL ?? URL(filePath: "/terminated-web-content")),
                     terminated: true,
-                )
+                ))
             }
         }
+    }
+
+    private func nativeSurface(_ content: some View) -> some View {
+        BrowserNativePreviewCapture(
+            content: content,
+            controller: nativePreviewCaptureController,
+            transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
+            transitionRole: .content(store.selectedTabID),
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var tabPreviewAspectRatio: CGFloat {
+        latchedTransitionGeometry?.aspectRatio
+            ?? latestLayoutProbeGeometry?.aspectRatio
+            ?? (4.0 / 3.0)
+    }
+
+    private var tabOverviewVisual: some View {
+        ZStack {
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
+            tabOverview
+        }
+        .zIndex(1)
+        .allowsHitTesting(store.presentation == .tabOverview && !isTabTransitionActive)
+        .accessibilityHidden(store.presentation != .tabOverview || isTabTransitionActive)
     }
 
     private var startPage: some View {
@@ -376,7 +776,7 @@ extension BrowserView {
             .accessibilityLabel(store.selectedTab?.metadata.isLoading == true ? "Stop" : "Reload")
             .disabled(store.selectedTab?.isStartPage == true)
 
-            Button { store.send(.showTabOverviewTapped) } label: {
+            Button { requestTabOverview() } label: {
                 Text(store.tabCountLabel)
                     .font(.caption.bold())
                     .frame(width: 28, height: 28)
@@ -491,7 +891,10 @@ extension BrowserView {
         VStack(spacing: 16) {
             HStack { Text("Tabs").font(.largeTitle.bold())
                 Spacer()
-                Button("New Tab", systemImage: "plus") { store.send(.newTabTapped) }
+                Button("New Tab", systemImage: "plus") {
+                    cancelTabTransition()
+                    store.send(.newTabTapped)
+                }
             }
             ScrollView {
                 LazyVGrid(columns: tabOverviewColumns, spacing: 18) {
@@ -515,29 +918,23 @@ extension BrowserView {
     }
 
     private func tabCard(_ tab: BrowserTab) -> some View {
-        let button = Button { store.send(.tabCardSelected(tab.id)) } label: { tabCardContent(tab) }
+        let button = Button { selectTabCard(tab) } label: { tabCardContent(tab) }
             .buttonStyle(.plain)
-        return Group {
-            if reduceMotionEnabled {
-                button
-            } else {
-                button.matchedGeometryEffect(id: tab.id, in: tabTransition)
-            }
-        }
-        .offset(x: tabCardDrag?.tabID == tab.id ? tabCardDrag?.horizontalTranslation ?? 0 : 0)
-        .accessibilityFocused($accessibilityFocusedTabID, equals: tab.id)
-        .accessibilityValue(tab.id == store.selectedTabID ? "Selected" : "")
-        .accessibilityAction(named: "Close Tab") { store.send(.closeTab(tab.id)) }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24)
-                .onChanged { gesture in
-                    updateTabCardDrag(tabID: tab.id, translation: gesture.translation)
-                }
-                .onEnded { gesture in
-                    finishTabCardDrag(tabID: tab.id, translation: gesture.translation)
-                },
-        )
-        .contextMenu { tabCardMenu(tab) }
+        return button
+            .offset(x: tabCardDrag?.tabID == tab.id ? tabCardDrag?.horizontalTranslation ?? 0 : 0)
+            .accessibilityFocused($accessibilityFocusedTabID, equals: tab.id)
+            .accessibilityValue(tab.id == store.selectedTabID ? "Selected" : "")
+            .accessibilityAction(named: "Close Tab") { store.send(.closeTab(tab.id)) }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 24)
+                    .onChanged { gesture in
+                        updateTabCardDrag(tabID: tab.id, translation: gesture.translation)
+                    }
+                    .onEnded { gesture in
+                        finishTabCardDrag(tabID: tab.id, translation: gesture.translation)
+                    },
+            )
+            .contextMenu { tabCardMenu(tab) }
     }
 
     private func updateTabCardDrag(tabID: BrowserTabID, translation: CGSize) {
@@ -588,46 +985,231 @@ extension BrowserView {
 
     private func tabCardContent(_ tab: BrowserTab) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14).fill(.quaternary)
-                tabPreview(tab)
-                if tab.metadata.isLoading {
-                    ProgressView()
-                }
-            }.aspectRatio(4 / 3, contentMode: .fit)
-            HStack {
+            BrowserTabTransitionSurfaceHost(
+                role: .card(tab.id),
+                registry: tabTransitionUIKitCoordinator.surfaceRegistry,
+            ) {
+                tabPreviewSurface(tab)
+            }
+            .aspectRatio(tabPreviewAspectRatio, contentMode: .fit)
+            HStack(spacing: 6) {
                 if tab.id == store.selectedTabID {
-                    Image(systemName: "checkmark.circle.fill").accessibilityLabel("Selected")
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 28, height: 44)
+                        .accessibilityLabel("Selected")
                 }
-                Text(tabTitle(tab)).lineLimit(1).truncationMode(.tail)
+                Text(tabTitle(tab))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.5)
+                    .allowsTightening(true)
+                    .layoutPriority(1)
                 Spacer()
                 Button { store.send(.closeTab(tab.id)) } label: {
-                    Image(systemName: "xmark.circle.fill").accessibilityHidden(true)
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .accessibilityHidden(true)
                 }
                 .accessibilityLabel("Close \(tabTitle(tab))")
             }
+            .frame(height: 44, alignment: .center)
+            .clipped()
         }
         .padding(10)
+        .frame(maxWidth: .infinity)
         .background(.background, in: RoundedRectangle(cornerRadius: 18))
         .shadow(radius: 3)
     }
 
+    private func tabPreviewSurface(_ tab: BrowserTab) -> some View {
+        tabPreviewSurface(
+            representation: visiblePreviewRepresentation(for: tab),
+            fallback: BrowserTabPreviewRepresentation.fallback(for: tab),
+        )
+    }
+
+    private func visiblePreviewRepresentation(for tab: BrowserTab) -> BrowserTabPreviewRepresentation {
+        .cachedOrFallback(
+            for: tab,
+            revision: store.previewRevisions[tab.id] ?? .init(),
+            cache: store.tabPreviewData,
+        )
+    }
+
+    /// Supplies visual evidence only from the current revision's existing in-memory preview.
+    private func webKitReadinessContext(for tab: BrowserTab) -> BrowserWebKitReadinessContext {
+        let revision = store.previewRevisions[tab.id] ?? .init()
+        let expectedSignature: BrowserWebKitVisualSignature? = {
+            guard case let .snapshot(data) = visiblePreviewRepresentation(for: tab) else {
+                return nil
+            }
+
+            return BrowserWebKitVisualSignature(imageData: data)
+        }()
+        return BrowserWebKitReadinessContext(
+            revision: revision,
+            expectedSignature: expectedSignature,
+        )
+    }
+
+    private func selectTabCard(_ tab: BrowserTab) {
+        performTabTransition(
+            direction: .toBrowsing,
+            tabID: tab.id,
+        ) {
+            store.send(.tabCardSelected(tab.id))
+        }
+    }
+
+    private func requestTabOverview() {
+        guard let tab = store.selectedTab,
+              store.presentation == .browsing
+        else {
+            return
+        }
+
+        let nativeCapture: Data? =
+            if case .web = tab.content {
+                nil
+            } else {
+                nativePreviewCaptureController.capture()
+            }
+        performTabTransition(
+            direction: .toOverview,
+            tabID: tab.id,
+        ) {
+            store.send(.showTabOverviewTapped)
+            if let nativeCapture {
+                let revision = store.previewRevisions[tab.id] ?? BrowserTabPreviewRevision()
+                store.send(.nativePreviewCaptured(
+                    tabID: tab.id,
+                    revision: revision,
+                    pngData: nativeCapture,
+                ))
+            }
+        }
+    }
+
+    private func performTabTransition(
+        direction: BrowserTabTransitionDirection,
+        tabID: BrowserTabID,
+        action: @escaping () -> Void,
+    ) {
+        let returnsToAlreadyMountedTab = direction == .toBrowsing && store.selectedTabID == tabID
+        let sourceRole: BrowserTabTransitionSurfaceRole = direction == .toOverview
+            ? .content(tabID)
+            : .card(tabID)
+        latchedTransitionGeometry = tabTransitionUIKitCoordinator.surfaceRegistry.geometry(for: sourceRole)
+        tabTransitionToken += 1
+        let token = tabTransitionToken
+        isTabTransitionActive = false
+        transitionOwnsVisibleSurface = false
+        tabTransitionDirection = direction
+        tabTransitionTabID = tabID
+        if direction == .toBrowsing {
+            // Keep the opaque overview visual mounted until the card has revealed the live page.
+            tabOverviewVisualMounted = true
+        }
+        var transitionSurfaceWasInstalled = false
+        var destinationWasRevealed = false
+        tabTransitionUIKitCoordinator.begin(
+            token: token,
+            direction: direction,
+            tabID: tabID,
+            reduceMotion: reduceMotionEnabled,
+            destinationRequiresReadiness: !returnsToAlreadyMountedTab,
+            onPresentationChange: action,
+            onCompletion: {
+                isTabTransitionActive = false
+                transitionOwnsVisibleSurface = false
+                if direction == .toOverview {
+                    tabOverviewVisualMounted = true
+                } else if !transitionSurfaceWasInstalled || destinationWasRevealed {
+                    tabOverviewVisualMounted = false
+                }
+                tabTransitionDirection = nil
+                tabTransitionTabID = nil
+                latchedTransitionGeometry = nil
+            },
+            onEvidenceUnavailable: {
+                store.send(.showTabOverviewTapped)
+            },
+            onFrozenSurfaceReady: {
+                transitionSurfaceWasInstalled = true
+                isTabTransitionActive = true
+                transitionOwnsVisibleSurface = true
+            },
+            onDestinationVisible: {
+                destinationWasRevealed = true
+                transitionOwnsVisibleSurface = false
+                if direction == .toBrowsing {
+                    // The clone remains above this layer until the coordinator removes it.
+                    tabOverviewVisualMounted = false
+                }
+            },
+        )
+    }
+
+    private func cancelTabTransition() {
+        tabTransitionUIKitCoordinator.cancel()
+        isTabTransitionActive = false
+        transitionOwnsVisibleSurface = false
+        tabOverviewVisualMounted = store.presentation == .tabOverview
+        tabTransitionDirection = nil
+        tabTransitionTabID = nil
+        latchedTransitionGeometry = nil
+    }
+
+    private func tabPreviewSurface(
+        representation: BrowserTabPreviewRepresentation,
+        fallback: BrowserTabPreviewRepresentation,
+    ) -> some View {
+        ZStack {
+            RoundedRectangle(
+                cornerRadius: BrowserTabTransitionPresentation.cardCornerRadius,
+                style: .continuous,
+            )
+            .fill(.quaternary)
+            switch representation {
+            case let .snapshot(data):
+                if let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .clipped()
+                } else {
+                    placeholderPreview(fallback)
+                }
+            case let .placeholder(placeholder):
+                placeholderPreview(.placeholder(placeholder))
+            }
+        }
+        .clipShape(RoundedRectangle(
+            cornerRadius: BrowserTabTransitionPresentation.cardCornerRadius,
+            style: .continuous,
+        ))
+        .accessibilityHidden(true)
+    }
+
     @ViewBuilder
-    private func tabPreview(_ tab: BrowserTab) -> some View {
-        if let data = store.tabPreviewData[tab.id], let image = UIImage(data: data) {
-            Image(uiImage: image).resizable().scaledToFill().clipped().accessibilityHidden(true)
-        } else {
-            Image(systemName: tab.isStartPage ? "sparkles" : "globe")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityHidden(true)
+    private func placeholderPreview(_ representation: BrowserTabPreviewRepresentation) -> some View {
+        if case let .placeholder(placeholder) = representation {
+            VStack(spacing: 8) {
+                Image(systemName: placeholder.systemImage)
+                    .font(.largeTitle)
+                Text(placeholder.label)
+                    .font(.caption.weight(.medium))
+            }
+            .foregroundStyle(placeholder.tint)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     @ViewBuilder
     private func tabCardMenu(_ tab: BrowserTab) -> some View {
-        Button("Open Tab") { store.send(.tabCardSelected(tab.id)) }
+        Button("Open Tab") { selectTabCard(tab) }
         if case .web = tab.content, let url = tab.metadata.committedURL {
             if let bookmarkID = bookmarkID(for: tab) {
                 Button("View Bookmark") { store.send(.viewBookmark(bookmarkID)) }
@@ -746,6 +1328,47 @@ extension BrowserView {
 
     private var newTabDispositionTitle: String {
         "Open Link in New Tab"
+    }
+}
+
+extension BrowserTabPreviewPlaceholder {
+    fileprivate var systemImage: String {
+        switch self {
+        case .startPage:
+            "sparkles"
+        case .web:
+            "globe"
+        case .error:
+            "wifi.exclamationmark"
+        case .terminated:
+            "xmark.octagon"
+        }
+    }
+
+    fileprivate var label: String {
+        switch self {
+        case .startPage:
+            "Start Page"
+        case .web:
+            "Web Page"
+        case .error:
+            "Page Error"
+        case .terminated:
+            "Page Ended"
+        }
+    }
+
+    fileprivate var tint: Color {
+        switch self {
+        case .startPage:
+            .accentColor
+        case .web:
+            .secondary
+        case .error:
+            .orange
+        case .terminated:
+            .purple
+        }
     }
 }
 
