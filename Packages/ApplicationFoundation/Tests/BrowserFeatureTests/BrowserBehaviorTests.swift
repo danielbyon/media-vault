@@ -33,16 +33,17 @@ struct BrowserBehaviorTests {
         await store.send(.pullToRefresh)
         await store.send(.backHistoryRequested)
         await store.send(.forwardHistoryRequested)
-        await store.send(.webKitEvent(.metadata(tabID: tabID, .init(
+        let operationID = try #require(store.state.previewState.operation(for: tabID))
+        await store.send(.webKitEvent(.metadata(tabID: tabID, metadata: .init(
             committedURL: url,
             isLoading: true,
             canGoBack: true,
             canGoForward: true,
-        ))))
+        ), correlation: .operation(operationID))))
         await store.send(.reloadOrStopTapped)
         await store.finish()
 
-        #expect(commands.value == [
+        #expect(commands.value.map(\.route) == [
             .goBack(tabID: tabID),
             .goForward(tabID: tabID),
             .reload(tabID: tabID),
@@ -69,7 +70,11 @@ struct BrowserBehaviorTests {
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.webKitEvent(.navigationFailed(tabID: tabID, .serverNotFound(failedURL))))
+        await store.send(.webKitEvent(.navigationFailed(
+            tabID: tabID,
+            error: .serverNotFound(failedURL),
+            correlation: .untracked,
+        )))
         #expect(store.state.tabs[0].content == .error(.serverNotFound(failedURL)))
         await store.send(.backTapped)
         await store.send(.retryTapped)
@@ -78,7 +83,7 @@ struct BrowserBehaviorTests {
         await store.send(.retryTapped)
         #expect(store.state.tabs[0].content == .terminated(lastCommittedURL: priorURL))
         await store.finish()
-        #expect(commands.value == [
+        #expect(commands.value.map(\.route) == [
             .goBack(tabID: tabID),
             .load(tabID: tabID, url: failedURL),
             .reload(tabID: tabID),
@@ -123,7 +128,7 @@ struct BrowserBehaviorTests {
             tabs: [.web(id: tabID, url: url)],
             selectedTabID: tabID,
         )) { BrowserFeature() }
-        let revision = store.state.previewRevision(for: tabID)
+        let revision = store.state.previewState.revision(for: tabID)
 
         await store.send(.webKitEvent(.backForwardEntries(tabID: tabID, direction: .back, entries: [entry]))) {
             $0.backForwardList = .init(tabID: tabID, direction: .back, entries: [entry])
@@ -131,10 +136,10 @@ struct BrowserBehaviorTests {
         await store.send(.backForwardListDismissed) { $0.backForwardList = nil }
         let bytes = Data([1, 2, 3])
         await store.send(.webKitEvent(.preview(tabID: tabID, revision: revision, pngData: bytes))) {
-            $0.tabPreviewData[tabID] = .init(revision: revision, pngData: bytes)
+            $0.previewState.setData(.init(revision: revision, pngData: bytes), for: tabID)
         }
         await store.send(.webKitEvent(.preview(tabID: tabID, revision: revision, pngData: nil)))
-        #expect(store.state.tabPreviewData[tabID]?.pngData == bytes)
+        #expect(store.state.previewState.data(for: tabID)?.pngData == bytes)
     }
 
     @Test("Targeted background-tab bookmark and copy actions do not activate the tab")
@@ -183,7 +188,10 @@ struct BrowserBehaviorTests {
         await store.finish()
         #expect(store.state.library == nil)
         #expect(store.state.tabs[0].content == .web(requestedURL: destination))
-        #expect(commands.value == [.ensureContext(tabID: tabID), .load(tabID: tabID, url: destination)])
+        #expect(commands.value.map(\.route) == [
+            .ensureContext(tabID: tabID),
+            .load(tabID: tabID, url: destination),
+        ])
     }
 
     @Test("External omnibox navigation uses the full URL seam and does not touch WebKit")
@@ -298,7 +306,8 @@ struct BrowserBehaviorTests {
         await store.send(.openInNewTab(existingRelatedURL, openerID: openerID))
         await store.send(.webKitEvent(.metadata(
             tabID: openerID,
-            .init(committedURL: openerURL, isLoading: true),
+            metadata: .init(committedURL: openerURL, isLoading: true),
+            correlation: .untracked,
         )))
         await store.send(.navigate(navigationURL))
         #expect(store.state.pendingNewTab == BrowserNewTabRequest(url: destination, openerID: openerID))
@@ -311,7 +320,7 @@ struct BrowserBehaviorTests {
         #expect(newTab.openerID == openerID)
         #expect(store.state.selectedTabID == newTab.id)
         #expect(store.state.pendingNewTab == nil)
-        #expect(commands.value == [
+        #expect(commands.value.map(\.route) == [
             .ensureContext(tabID: openerID),
             .load(tabID: openerID, url: navigationURL),
             .ensureContext(tabID: newTab.id),
@@ -347,7 +356,7 @@ struct BrowserBehaviorTests {
         #expect(newTab.openerID == openerID)
         #expect(store.state.selectedTabID == openerID)
         #expect(store.state.pendingNewTab == nil)
-        #expect(commands.value == [
+        #expect(commands.value.map(\.route) == [
             .ensureContext(tabID: newTab.id),
             .load(tabID: newTab.id, url: destination),
         ])
@@ -408,7 +417,7 @@ struct BrowserBehaviorTests {
         let newTab = try #require(store.state.tabs.last)
         #expect(newTab.content == .web(requestedURL: destination))
         #expect(store.state.selectedTabID == openerID)
-        #expect(commands.value == [
+        #expect(commands.value.map(\.route) == [
             .ensureContext(tabID: newTab.id),
             .load(tabID: newTab.id, url: destination),
         ])
@@ -445,8 +454,8 @@ struct BrowserBehaviorTests {
         #expect(copied.value == [url])
         #expect(store.state.tabs.count == 2)
         #expect(store.state.selectedTabID != tabID)
-        #expect(commands.value.contains(.ensureContext(tabID: store.state.selectedTabID)))
-        #expect(commands.value.contains(.load(tabID: store.state.selectedTabID, url: url)))
+        #expect(commands.value.map(\.route).contains(.ensureContext(tabID: store.state.selectedTabID)))
+        #expect(commands.value.map(\.route).contains(.load(tabID: store.state.selectedTabID, url: url)))
     }
 
     @Test("Ask Every Time defers HTTP link-context new-tab actions until disposition")
@@ -491,9 +500,55 @@ struct BrowserBehaviorTests {
         #expect(newTab.content == .web(requestedURL: destination))
         #expect(newTab.openerID == openerID)
         #expect(store.state.selectedTabID == openerID)
-        #expect(commands.value == [
+        #expect(commands.value.map(\.route) == [
             .ensureContext(tabID: newTab.id),
             .load(tabID: newTab.id, url: destination),
         ])
+    }
+}
+
+private enum BrowserCommandRoute: Equatable {
+    case ensureContext(tabID: BrowserTabID)
+    case destroyContext(tabID: BrowserTabID)
+    case load(tabID: BrowserTabID, url: URL)
+    case goBack(tabID: BrowserTabID)
+    case goForward(tabID: BrowserTabID)
+    case reload(tabID: BrowserTabID)
+    case stop(tabID: BrowserTabID)
+    case showBackForwardList(tabID: BrowserTabID, direction: BrowserNavigationDirection)
+    case find(tabID: BrowserTabID, query: String)
+    case goToBackForwardEntry(tabID: BrowserTabID, token: BrowserBackForwardEntry.Token)
+    case capturePreview(tabID: BrowserTabID, revision: BrowserTabPreviewRevision)
+    case dismissJavaScriptDialog(tabID: BrowserTabID)
+}
+
+extension BrowserWebKitCommand {
+    fileprivate var route: BrowserCommandRoute {
+        switch self {
+        case let .ensureContext(tabID):
+            .ensureContext(tabID: tabID)
+        case let .destroyContext(tabID):
+            .destroyContext(tabID: tabID)
+        case let .load(tabID, url, _):
+            .load(tabID: tabID, url: url)
+        case let .goBack(tabID, _):
+            .goBack(tabID: tabID)
+        case let .goForward(tabID, _):
+            .goForward(tabID: tabID)
+        case let .reload(tabID, _):
+            .reload(tabID: tabID)
+        case let .stop(tabID):
+            .stop(tabID: tabID)
+        case let .showBackForwardList(tabID, direction):
+            .showBackForwardList(tabID: tabID, direction: direction)
+        case let .find(tabID, query):
+            .find(tabID: tabID, query: query)
+        case let .goToBackForwardEntry(tabID, token, _):
+            .goToBackForwardEntry(tabID: tabID, token: token)
+        case let .capturePreview(tabID, revision):
+            .capturePreview(tabID: tabID, revision: revision)
+        case let .dismissJavaScriptDialog(tabID):
+            .dismissJavaScriptDialog(tabID: tabID)
+        }
     }
 }

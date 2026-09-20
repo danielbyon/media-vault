@@ -61,9 +61,9 @@ enum BrowserTabPreviewRepresentation: Equatable, Sendable {
     static func cachedOrFallback(
         for tab: BrowserTab,
         revision: BrowserTabPreviewRevision,
-        cache: [BrowserTabID: BrowserTabPreviewCacheEntry],
+        entry: BrowserTabPreviewCacheEntry?,
     ) -> Self {
-        guard let entry = cache[tab.id],
+        guard let entry,
               entry.revision == revision,
               !entry.pngData.isEmpty
         else {

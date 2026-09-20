@@ -290,7 +290,7 @@ struct BrowserPresentationTests {
         }
         await store.receive(.closeOtherTabsConfirmed(first)) {
             $0.tabs = [.startPage(id: first)]
-            $0.previewRevisions = $0.previewRevisions.filter { $0.key == first }
+            $0.previewState.keepOnlyTab(first)
         }
     }
 
@@ -306,7 +306,7 @@ struct BrowserPresentationTests {
         await store.send(.closeOtherTabsTapped(first))
         await store.receive(.closeOtherTabsConfirmed(first)) {
             $0.tabs = [.startPage(id: first)]
-            $0.previewRevisions = $0.previewRevisions.filter { $0.key == first }
+            $0.previewState.keepOnlyTab(first)
         }
     }
 }

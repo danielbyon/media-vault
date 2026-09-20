@@ -8,28 +8,47 @@
 import Dependencies
 import Foundation
 
+/// Correlates one reducer-issued navigation command with its delegate events.
+public struct BrowserNavigationOperationID: Hashable, Sendable {
+    private let rawValue: UUID
+
+    /// Creates an identity that is unique to one requested WebKit operation.
+    public init() {
+        rawValue = UUID()
+    }
+}
+
 /// Sendable commands accepted by the live main-actor WebKit adapter.
 public enum BrowserWebKitCommand: Equatable, Sendable {
     /// Creates a live context if one does not already exist.
     case ensureContext(tabID: BrowserTabID)
     /// Destroys one live context and resolves its transient UI.
     case destroyContext(tabID: BrowserTabID)
-    /// Loads a destination in a tab context.
-    case load(tabID: BrowserTabID, url: URL)
-    /// Navigates to WebKit's previous item.
-    case goBack(tabID: BrowserTabID)
-    /// Navigates to WebKit's next item.
-    case goForward(tabID: BrowserTabID)
-    /// Reloads the current WebKit item.
-    case reload(tabID: BrowserTabID)
+    /// Loads a destination in a tab context correlated to one preview invalidation.
+    case load(
+        tabID: BrowserTabID,
+        url: URL,
+        operationID: BrowserNavigationOperationID,
+    )
+    /// Navigates to WebKit's previous item correlated to one preview invalidation.
+    case goBack(tabID: BrowserTabID, operationID: BrowserNavigationOperationID)
+    /// Navigates to WebKit's next item correlated to one preview invalidation.
+    case goForward(tabID: BrowserTabID, operationID: BrowserNavigationOperationID)
+    /// Reloads the current WebKit item correlated to one preview invalidation.
+    case reload(tabID: BrowserTabID, operationID: BrowserNavigationOperationID)
     /// Stops the current WebKit load.
     case stop(tabID: BrowserTabID)
     /// Projects one side of WebKit's back-forward list.
     case showBackForwardList(tabID: BrowserTabID, direction: BrowserNavigationDirection)
     /// Runs public WebKit Find on Page.
     case find(tabID: BrowserTabID, query: String)
-    /// Navigates to a projected back-forward entry by its adapter-scoped opaque token.
-    case goToBackForwardEntry(tabID: BrowserTabID, token: BrowserBackForwardEntry.Token)
+    /// Navigates to a projected back-forward entry by its adapter-scoped opaque token, correlated
+    /// to one preview invalidation.
+    case goToBackForwardEntry(
+        tabID: BrowserTabID,
+        token: BrowserBackForwardEntry.Token,
+        operationID: BrowserNavigationOperationID,
+    )
     /// Captures a preview tagged with the tab's current document revision.
     case capturePreview(tabID: BrowserTabID, revision: BrowserTabPreviewRevision)
     /// Resolves any JavaScript dialog owned by a tab.
@@ -56,12 +75,43 @@ public enum BrowserLinkContextAction: Equatable, Sendable {
     case shareLink
 }
 
+/// Identifies whether a WebKit event belongs to a reducer-issued operation.
+public enum BrowserWebKitEventCorrelation: Equatable, Sendable {
+    /// The adapter could not associate the callback with a reducer-issued command.
+    case untracked
+    /// The callback belongs to this reducer-issued operation.
+    case operation(BrowserNavigationOperationID)
+}
+
+extension BrowserWebKitEventCorrelation {
+    /// Returns the reducer operation named by this event, when WebKit supplied one.
+    var operationID: BrowserNavigationOperationID? {
+        switch self {
+        case .untracked:
+            nil
+        case let .operation(operationID):
+            operationID
+        }
+    }
+}
+
 /// Sendable app-relevant events emitted by the live WebKit adapter.
 public enum BrowserWebKitEvent: Equatable, Sendable {
-    /// Reports app-visible page metadata.
-    case metadata(tabID: BrowserTabID, BrowserTab.Metadata)
-    /// Reports a mapped recoverable navigation failure.
-    case navigationFailed(tabID: BrowserTabID, BrowserNavigationError)
+    /// Reports a WebKit navigation that was not issued by the reducer and therefore supersedes any
+    /// pending reducer operation for the same tab.
+    case navigationStarted(tabID: BrowserTabID)
+    /// Reports app-visible page metadata and its explicit correlation status.
+    case metadata(
+        tabID: BrowserTabID,
+        metadata: BrowserTab.Metadata,
+        correlation: BrowserWebKitEventCorrelation,
+    )
+    /// Reports a mapped recoverable navigation failure and its explicit correlation status.
+    case navigationFailed(
+        tabID: BrowserTabID,
+        error: BrowserNavigationError,
+        correlation: BrowserWebKitEventCorrelation,
+    )
     /// Reports termination of one content process.
     case processTerminated(tabID: BrowserTabID)
     /// Reports a site-created window using stable values only.

@@ -52,16 +52,15 @@ final class BrowserNativePreviewCaptureController {
             return nil
         }
 
-        let format = UIGraphicsImageRendererFormat()
         // Preview data preserves the mounted surface's display scale. The card applies its own
         // aspect-fill policy when it renders this disposable cache representation.
-        format.scale = surface.window?.screen.scale ?? surface.traitCollection.displayScale
-        format.opaque = false
-        var didDraw = false
-        let data = UIGraphicsImageRenderer(bounds: surface.bounds, format: format).pngData { _ in
-            didDraw = drawHierarchy(surface, surface.bounds, true)
-        }
-        return didDraw ? data : nil
+        return BrowserSurfaceRenderer.image(
+            from: surface,
+            afterScreenUpdates: true,
+            opaque: false,
+            renderingPolicy: .nativePreview,
+            drawHierarchy: drawHierarchy,
+        )?.pngData()
     }
 }
 
@@ -99,7 +98,11 @@ struct BrowserNativePreviewCapture<Content: View>: UIViewControllerRepresentable
         _ uiViewController: BrowserNativePreviewCaptureHostController<Content>,
         context _: Context,
     ) {
-        uiViewController.update(content: content)
+        uiViewController.update(
+            content: content,
+            transitionRegistry: transitionRegistry,
+            transitionRole: transitionRole,
+        )
     }
 
     static func dismantleUIViewController(
@@ -114,8 +117,8 @@ struct BrowserNativePreviewCapture<Content: View>: UIViewControllerRepresentable
 @MainActor
 final class BrowserNativePreviewCaptureHostController<Content: View>: UIViewController {
     private let controller: BrowserNativePreviewCaptureController
-    private let transitionRegistry: BrowserTabTransitionSurfaceRegistry?
-    private let transitionRole: BrowserTabTransitionSurfaceRole?
+    private var transitionRegistry: BrowserTabTransitionSurfaceRegistry?
+    private var transitionRole: BrowserTabTransitionSurfaceRole?
     private var hostingController: UIHostingController<Content>?
 
     init(
@@ -166,8 +169,16 @@ final class BrowserNativePreviewCaptureHostController<Content: View>: UIViewCont
         applyInteractiveKeyboardDismissal()
     }
 
-    func update(content: Content) {
+    func update(
+        content: Content,
+        transitionRegistry: BrowserTabTransitionSurfaceRegistry?,
+        transitionRole: BrowserTabTransitionSurfaceRole?,
+    ) {
         hostingController?.rootView = content
+        updateTransitionRegistration(
+            transitionRegistry: transitionRegistry,
+            transitionRole: transitionRole,
+        )
         controller.attach(surface: view)
         registerTransitionSurface()
         applyInteractiveKeyboardDismissal()
@@ -190,6 +201,22 @@ final class BrowserNativePreviewCaptureHostController<Content: View>: UIViewCont
         }
 
         transitionRegistry.register(view, for: transitionRole)
+    }
+
+    private func updateTransitionRegistration(
+        transitionRegistry: BrowserTabTransitionSurfaceRegistry?,
+        transitionRole: BrowserTabTransitionSurfaceRole?,
+    ) {
+        guard self.transitionRegistry !== transitionRegistry || self.transitionRole != transitionRole else {
+            return
+        }
+
+        if let oldRegistry = self.transitionRegistry,
+           let oldRole = self.transitionRole {
+            oldRegistry.unregister(view, for: oldRole)
+        }
+        self.transitionRegistry = transitionRegistry
+        self.transitionRole = transitionRole
     }
 
     /// Reapplies Browser's interactive scroll policy inside the nested SwiftUI root.

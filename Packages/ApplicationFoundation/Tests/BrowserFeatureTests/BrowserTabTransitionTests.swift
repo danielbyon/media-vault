@@ -431,8 +431,8 @@ struct BrowserTabTransitionTests {
         harness.window.isHidden = true
     }
 
-    @Test("A missing destination uses the bounded fallback handoff")
-    func uikitCoordinatorFallsBackWhenDestinationNeverMounts() async {
+    @Test("A missing destination aborts after the bounded handoff window")
+    func uikitCoordinatorAbortsWhenDestinationNeverMounts() async {
         var executions: [BrowserTabTransitionExecution] = []
         let harness = BrowserTabTransitionUIKitHarness(
             contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
@@ -441,6 +441,7 @@ struct BrowserTabTransitionTests {
             diagnostics: .init(onExecution: { executions.append($0) }),
         )
         var completed = false
+        var aborted = false
 
         harness.coordinator.begin(
             token: 1,
@@ -449,12 +450,15 @@ struct BrowserTabTransitionTests {
             reduceMotion: false,
             onPresentationChange: {},
             onCompletion: { completed = true },
+            onEvidenceUnavailable: { aborted = true },
         )
-        await harness.waitForAnimation()
+        await harness.waitForDisplayTurns(10)
 
         #expect(completed)
+        #expect(aborted)
+        #expect(harness.coordinator.isActive == false)
         #expect(executions.contains(.missingDestination))
-        #expect(harness.overlay.subviews.count == 1)
+        #expect(harness.overlay.subviews.isEmpty)
         harness.window.isHidden = true
     }
 
@@ -486,8 +490,8 @@ struct BrowserTabTransitionTests {
         harness.window.isHidden = true
     }
 
-    @Test("A missing browsing destination retains the clone until the live surface is ready")
-    func uikitCoordinatorRetainsExitFallbackUntilDestinationReady() async {
+    @Test("A missing browsing destination aborts safely instead of retaining a fallback")
+    func uikitCoordinatorAbortsWhenBrowsingDestinationNeverMounts() async {
         var executions: [BrowserTabTransitionExecution] = []
         var events: [String] = []
         let harness = BrowserTabTransitionUIKitHarness(
@@ -508,20 +512,15 @@ struct BrowserTabTransitionTests {
                 events.append("completion")
                 completed = true
             },
+            onEvidenceUnavailable: { events.append("abort") },
             onDestinationVisible: { events.append("reveal") },
         )
-        await harness.waitForAnimation()
+        await harness.waitForDisplayTurns(10)
 
         #expect(executions.contains(.missingDestination))
         #expect(completed)
+        #expect(events == ["presentation", "completion", "abort"])
         #expect(harness.coordinator.isActive == false)
-        #expect(harness.overlay.subviews.count == 1)
-        #expect(events == ["presentation", "completion"])
-
-        harness.registerContent()
-        await harness.waitForAnimation()
-
-        #expect(events == ["presentation", "completion", "reveal"])
         #expect(harness.overlay.subviews.isEmpty)
         harness.window.isHidden = true
     }
@@ -718,7 +717,11 @@ private final class BrowserTabTransitionUIKitHarness {
     }
 
     func waitForAnimation() async {
-        for _ in 0 ..< 30 {
+        await waitForDisplayTurns(30)
+    }
+
+    func waitForDisplayTurns(_ count: Int) async {
+        for _ in 0 ..< count {
             rootViewController.view.layoutIfNeeded()
             await waitForDisplayTurn()
         }

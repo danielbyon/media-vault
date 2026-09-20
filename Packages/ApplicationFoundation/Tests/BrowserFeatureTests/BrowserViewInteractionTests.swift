@@ -82,6 +82,179 @@ struct BrowserViewInteractionTests {
         window.rootViewController = nil
     }
 
+    @Test("WebKit readiness evidence samples the registered page boundary")
+    func webKitReadinessEvidenceSamplesTheRegisteredPageBoundary() async throws {
+        let tabID = BrowserTabID(UUID(9_008))
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let rootViewController = UIViewController()
+        let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
+        let webView = WKWebView(frame: rootViewController.view.bounds)
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        let coordinator = BrowserWebView.Coordinator(
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: adapter,
+        )
+        _ = adapter.ensureContext(for: tabID)
+        rootViewController.view.addSubview(webView)
+        rootViewController.view.layoutIfNeeded()
+        defer {
+            coordinator.invalidateReadinessProbe()
+            adapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        webView.loadHTMLString(
+            webKitTestDocument(
+                text: "Surface boundary proof",
+                background: "#d94a5a",
+                includeVisibleText: false,
+            ),
+            baseURL: nil,
+        )
+        try await waitForWebKitDocument(in: webView, expectedText: "Surface boundary proof")
+        let expectedPagePixel = RenderedPixel(red: 217, green: 74, blue: 90)
+        let pagePixel = await waitForRenderedPixel(
+            in: webView,
+            expected: expectedPagePixel,
+        ) { CGPoint(x: webView.bounds.midX, y: webView.bounds.midY) }
+        #expect(pagePixel?.approximatelyMatches(expectedPagePixel) == true)
+
+        let overlay = UIView(frame: webView.bounds)
+        overlay.backgroundColor = .systemBlue
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        webView.addSubview(overlay)
+        webView.layoutIfNeeded()
+        let overlayPixel = renderedPixel(
+            in: webView,
+            at: CGPoint(x: webView.bounds.midX, y: webView.bounds.midY),
+        )
+        #expect(overlayPixel?.approximatelyMatches(expectedPagePixel) == false)
+
+        let pageSurfaceSignature = try #require(
+            BrowserWebKitVisualSignature(view: webView.scrollView),
+        )
+        let inputReadinessContext = BrowserWebKitReadinessContext(
+            revision: .init(),
+            expectedSignature: pageSurfaceSignature,
+        )
+        let resolvedReadinessContext = coordinator.resolveReadinessContext(
+            inputReadinessContext,
+            for: webView,
+            tabID: tabID,
+        )
+        #expect(
+            resolvedReadinessContext?.expectedSignature == pageSurfaceSignature,
+            "a UIKit overlay must not replace the cached WebKit evidence",
+        )
+
+        registry.register(
+            webView,
+            for: .content(tabID),
+            representation: .live,
+            isReady: false,
+        )
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: resolvedReadinessContext,
+        )
+        for _ in 0 ..< 30 {
+            await waitForDisplayTurn()
+        }
+        #expect(
+            registry.isReady(for: .content(tabID)) == false,
+            "outer UIKit overlays must not satisfy WebKit page readiness",
+        )
+    }
+
+    @Test("Replacing same-revision preview refreshes WebKit readiness evidence")
+    func replacingSameRevisionPreviewRefreshesReadinessEvidence() async throws {
+        let tabID = BrowserTabID(UUID(9_012))
+        let tab = try BrowserTab.web(
+            id: tabID,
+            url: #require(URL(string: "https://same-revision.example")),
+        )
+        let revision = BrowserTabPreviewRevision()
+        let previewA = try solidPreviewData(red: 217, green: 74, blue: 90)
+        let previewB = try solidPreviewData(red: 59, green: 130, blue: 246)
+        let previewEntryA = BrowserTabPreviewCacheEntry(revision: revision, pngData: previewA)
+        let previewEntryB = BrowserTabPreviewCacheEntry(revision: revision, pngData: previewB)
+        let signatureA = try #require(BrowserWebKitVisualSignature(imageData: previewA))
+        let signatureB = try #require(BrowserWebKitVisualSignature(imageData: previewB))
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let rootViewController = UIViewController()
+        let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
+        let webView = WKWebView(frame: rootViewController.view.bounds)
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let browserViewCoordinator = BrowserWebView.Coordinator(
+            onRefresh: {},
+            transitionRegistry: registry,
+            readinessCoordinator: readinessCoordinator,
+            adapter: adapter,
+        )
+        _ = adapter.ensureContext(for: tabID)
+        rootViewController.view.addSubview(webView)
+        rootViewController.view.layoutIfNeeded()
+        defer {
+            readinessCoordinator.invalidate()
+            adapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let contextA = readinessCoordinator.context(
+            for: tab,
+            revision: revision,
+            previewEntry: previewEntryA,
+        )
+        #expect(contextA.revision == revision)
+        #expect(contextA.expectedSignature == signatureA)
+
+        let contextB = readinessCoordinator.context(
+            for: tab,
+            revision: revision,
+            previewEntry: previewEntryB,
+        )
+        #expect(contextB.revision == revision)
+        #expect(contextB.expectedSignature == signatureB)
+        #expect(contextA.expectedSignature != contextB.expectedSignature)
+
+        webView.loadHTMLString(
+            webKitTestDocument(
+                text: "Same revision preview B",
+                background: "#3b82f6",
+                includeVisibleText: false,
+            ),
+            baseURL: nil,
+        )
+        try await waitForWebKitDocument(in: webView, expectedText: "Same revision preview B")
+        let pagePixel = await waitForRenderedPixel(
+            in: webView,
+            expected: RenderedPixel(red: 59, green: 130, blue: 246),
+        ) { CGPoint(x: webView.bounds.midX, y: webView.bounds.midY) }
+        #expect(pagePixel?.approximatelyMatches(RenderedPixel(red: 59, green: 130, blue: 246)) == true)
+
+        registry.register(
+            webView,
+            for: .content(tabID),
+            representation: .live,
+            isReady: false,
+        )
+        browserViewCoordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: contextB,
+        )
+        for _ in 0 ..< 60 where !registry.isReady(for: .content(tabID)) {
+            await waitForDisplayTurn()
+        }
+
+        #expect(registry.isReady(for: .content(tabID)))
+    }
+
     @Test("Opaque blank WebKit output does not satisfy visual readiness")
     func opaqueBlankWebKitOutputDoesNotSatisfyVisualReadiness() async throws {
         let tabID = BrowserTabID(UUID(9_000))
@@ -89,12 +262,17 @@ struct BrowserViewInteractionTests {
         let rootViewController = UIViewController()
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        var readinessEvents: [BrowserTabTransitionEvent] = []
+        registry.onEvent = { readinessEvents.append($0) }
         rootViewController.view.addSubview(webView)
         rootViewController.view.layoutIfNeeded()
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
+            adapter: adapter,
         )
+        _ = adapter.ensureContext(for: tabID)
         registry.register(
             webView,
             for: .content(tabID),
@@ -103,6 +281,7 @@ struct BrowserViewInteractionTests {
         )
         defer {
             coordinator.invalidateReadinessProbe()
+            adapter.destroyContext(for: tabID)
             window.isHidden = true
             window.rootViewController = nil
         }
@@ -136,7 +315,6 @@ struct BrowserViewInteractionTests {
             for: .content(tabID),
             representation: .live,
             isReady: false,
-            readinessContext: redReadinessContext,
         )
         coordinator.scheduleReadinessProbe(
             for: webView,
@@ -176,7 +354,6 @@ struct BrowserViewInteractionTests {
             for: .content(tabID),
             representation: .live,
             isReady: false,
-            readinessContext: redReadinessContext,
         )
         coordinator.scheduleReadinessProbe(
             for: webView,
@@ -187,6 +364,7 @@ struct BrowserViewInteractionTests {
             await waitForDisplayTurn()
         }
         #expect(registry.isReady(for: .content(tabID)) == false)
+        #expect(readinessEvents.contains(.targetEvidenceUnavailable(tabID)))
 
         let blackSignature = try #require(
             try BrowserWebKitVisualSignature(
@@ -203,7 +381,6 @@ struct BrowserViewInteractionTests {
             for: .content(tabID),
             representation: .live,
             isReady: false,
-            readinessContext: blackReadinessContext,
         )
         coordinator.scheduleReadinessProbe(
             for: webView,
@@ -237,7 +414,6 @@ struct BrowserViewInteractionTests {
             for: .content(tabID),
             representation: .live,
             isReady: false,
-            readinessContext: redReadinessContext,
         )
         coordinator.scheduleReadinessProbe(
             for: webView,
@@ -253,8 +429,161 @@ struct BrowserViewInteractionTests {
         window.rootViewController = nil
     }
 
-    @Test("Loaded background WebKit tabs without preview evidence complete the handoff")
-    func loadedBackgroundWebKitTabWithoutPreviewEvidenceCompletesTransition() async throws {
+    @Test("A trusted WebKit mismatch can settle into matching evidence")
+    func trustedWebKitMismatchCanSettleIntoMatchingEvidence() async throws {
+        let tabID = BrowserTabID(UUID(9_010))
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let rootViewController = UIViewController()
+        let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
+        let webView = WKWebView(frame: rootViewController.view.bounds)
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        var readinessEvents: [BrowserTabTransitionEvent] = []
+        registry.onEvent = { readinessEvents.append($0) }
+        let coordinator = BrowserWebView.Coordinator(
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: adapter,
+        )
+        _ = adapter.ensureContext(for: tabID)
+        rootViewController.view.addSubview(webView)
+        rootViewController.view.layoutIfNeeded()
+        defer {
+            coordinator.invalidateReadinessProbe()
+            adapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let expectedSignature = try #require(
+            BrowserWebKitVisualSignature(
+                imageData: solidPreviewData(red: 217, green: 74, blue: 90),
+            ),
+        )
+        let readinessContext = BrowserWebKitReadinessContext(
+            revision: .init(),
+            expectedSignature: expectedSignature,
+        )
+        webView.loadHTMLString(
+            webKitTestDocument(
+                text: "Initial mismatch",
+                background: "#3b82f6",
+                includeVisibleText: false,
+            ),
+            baseURL: nil,
+        )
+        try await waitForWebKitDocument(in: webView, expectedText: "Initial mismatch")
+        let bluePixel = await waitForRenderedPixel(
+            in: webView,
+            expected: RenderedPixel(red: 59, green: 130, blue: 246),
+        ) { CGPoint(x: webView.bounds.midX, y: webView.bounds.midY) }
+        #expect(bluePixel?.approximatelyMatches(RenderedPixel(red: 59, green: 130, blue: 246)) == true)
+
+        registry.register(
+            webView,
+            for: .content(tabID),
+            representation: .live,
+            isReady: false,
+        )
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: readinessContext,
+        )
+        for _ in 0 ..< 60 where !readinessEvents.contains(.targetVisualInvalid(tabID)) {
+            await waitForDisplayTurn()
+        }
+        #expect(readinessEvents.contains(.targetVisualInvalid(tabID)))
+
+        webView.loadHTMLString(
+            webKitTestDocument(
+                text: "Settled match",
+                background: "#d94a5a",
+                includeVisibleText: false,
+            ),
+            baseURL: nil,
+        )
+        try await waitForWebKitDocument(in: webView, expectedText: "Settled match")
+        for _ in 0 ..< 120 where !registry.isReady(for: .content(tabID)) {
+            await waitForDisplayTurn()
+        }
+
+        #expect(registry.isReady(for: .content(tabID)))
+        #expect(readinessEvents.contains(.targetVisualReady(tabID)))
+        #expect(!readinessEvents.contains(.targetEvidenceUnavailable(tabID)))
+        #expect(readinessEvents.count(where: { $0 == .targetVisualInvalid(tabID) }) == 1)
+    }
+
+    @Test("A trusted WebKit mismatch aborts after one bounded retry")
+    func trustedWebKitMismatchAbortsAfterOneBoundedRetry() async throws {
+        let tabID = BrowserTabID(UUID(9_011))
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let rootViewController = UIViewController()
+        let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
+        let webView = WKWebView(frame: rootViewController.view.bounds)
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        var readinessEvents: [BrowserTabTransitionEvent] = []
+        registry.onEvent = { readinessEvents.append($0) }
+        let coordinator = BrowserWebView.Coordinator(
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: adapter,
+        )
+        _ = adapter.ensureContext(for: tabID)
+        rootViewController.view.addSubview(webView)
+        rootViewController.view.layoutIfNeeded()
+        defer {
+            coordinator.invalidateReadinessProbe()
+            adapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let expectedSignature = try #require(
+            BrowserWebKitVisualSignature(
+                imageData: solidPreviewData(red: 217, green: 74, blue: 90),
+            ),
+        )
+        webView.loadHTMLString(
+            webKitTestDocument(
+                text: "Persistent mismatch",
+                background: "#3b82f6",
+                includeVisibleText: false,
+            ),
+            baseURL: nil,
+        )
+        try await waitForWebKitDocument(in: webView, expectedText: "Persistent mismatch")
+        let bluePixel = await waitForRenderedPixel(
+            in: webView,
+            expected: RenderedPixel(red: 59, green: 130, blue: 246),
+        ) { CGPoint(x: webView.bounds.midX, y: webView.bounds.midY) }
+        #expect(bluePixel?.approximatelyMatches(RenderedPixel(red: 59, green: 130, blue: 246)) == true)
+
+        registry.register(
+            webView,
+            for: .content(tabID),
+            representation: .live,
+            isReady: false,
+        )
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: .init(
+                revision: .init(),
+                expectedSignature: expectedSignature,
+            ),
+        )
+        for _ in 0 ..< 120 where !readinessEvents.contains(.targetEvidenceUnavailable(tabID)) {
+            await waitForDisplayTurn()
+        }
+
+        #expect(readinessEvents.count(where: { $0 == .targetVisualInvalid(tabID) }) == 2)
+        #expect(readinessEvents.contains(.targetEvidenceUnavailable(tabID)))
+        #expect(!readinessEvents.contains(.targetVisualReady(tabID)))
+        #expect(registry.isReady(for: .content(tabID)) == false)
+    }
+
+    @Test("Loaded background WebKit tabs without preview evidence abort safely")
+    func loadedBackgroundWebKitTabWithoutPreviewEvidenceAbortsSafely() async throws {
         let firstID = BrowserTabID(UUID(9_004))
         let secondID = BrowserTabID(UUID(9_005))
         let first = try BrowserTab.web(
@@ -269,10 +598,10 @@ struct BrowserViewInteractionTests {
             tabs: [first, second],
             selectedTabID: firstID,
         )
-        initialState.tabPreviewData[firstID] = try .init(
-            revision: initialState.previewRevision(for: firstID),
+        try initialState.previewState.setData(.init(
+            revision: initialState.previewState.revision(for: firstID),
             pngData: solidPreviewData(red: 217, green: 74, blue: 90),
-        )
+        ), for: firstID)
         let store = Store(initialState: initialState) {
             BrowserFeature()
         }
@@ -311,7 +640,7 @@ struct BrowserViewInteractionTests {
             webKitTestDocument(
                 text: "First WebKit page",
                 background: "#d94a5a",
-                includeVisibleText: false,
+                includeVisibleText: true,
             ),
             baseURL: nil,
         )
@@ -319,21 +648,24 @@ struct BrowserViewInteractionTests {
             webKitTestDocument(
                 text: "Second WebKit page",
                 background: "#3b82f6",
-                includeVisibleText: false,
+                includeVisibleText: true,
             ),
             baseURL: nil,
         )
         try await waitForWebKitDocument(in: firstWebView, expectedText: "First WebKit page")
         try await waitForWebKitDocument(in: secondWebView, expectedText: "Second WebKit page")
         #expect(secondWebView.isLoading == false)
-        #expect(store.state.tabPreviewData[secondID] == nil)
+        #expect(store.state.previewState.data(for: secondID) == nil)
         hostingController.view.layoutIfNeeded()
 
         for _ in 0 ..< 120 where !coordinator.surfaceRegistry.isReady(for: .content(firstID)) {
             await waitForDisplayTurn()
             hostingController.view.layoutIfNeeded()
         }
-        #expect(coordinator.surfaceRegistry.isReady(for: .content(firstID)))
+        #expect(
+            coordinator.surfaceRegistry.isReady(for: .content(firstID)),
+            "readiness events: \(transitionEvents)",
+        )
 
         coordinator.begin(
             token: 1,
@@ -356,7 +688,10 @@ struct BrowserViewInteractionTests {
         for _ in 0 ..< 30 where coordinator.isActive {
             await waitForDisplayTurn()
         }
+        store.send(.previewCacheEvicted)
+        hostingController.view.layoutIfNeeded()
         #expect(store.state.presentation == .tabOverview)
+        #expect(store.state.previewState.data(for: secondID) == nil)
         #expect(
             coordinator.surfaceRegistry.frame(
                 for: .card(secondID),
@@ -377,55 +712,26 @@ struct BrowserViewInteractionTests {
                 hostingController.view.layoutIfNeeded()
             },
             onCompletion: {},
+            onEvidenceUnavailable: {
+                store.send(.showTabOverviewTapped)
+                hostingController.view.layoutIfNeeded()
+            },
         )
-        for _ in 0 ..< 90 where animator == nil {
+        for _ in 0 ..< 120 where coordinator.isActive {
             await waitForDisplayTurn()
             hostingController.view.layoutIfNeeded()
         }
 
-        let browsingAnimator = try #require(
-            animator,
-            "executions: \(executions), events: \(transitionEvents)",
-        )
-        #expect(store.state.presentation == .browsing)
-        #expect(secondWebView.window != nil)
-        let expectedPagePixel = RenderedPixel(red: 59, green: 130, blue: 246)
-        let destinationPixel = await waitForRenderedPixel(
-            in: secondWebView,
-            expected: expectedPagePixel,
-        ) { CGPoint(x: secondWebView.bounds.midX, y: secondWebView.bounds.midY) }
-        #expect(destinationPixel?.approximatelyMatches(expectedPagePixel) == true)
-        #expect(coordinator.surfaceRegistry.isReady(for: .content(secondID)))
-        let attachedIndex = try #require(
-            transitionEvents.firstIndex(of: .targetAttached(secondID)),
-        )
-        let readyIndex = try #require(
-            transitionEvents.firstIndex(of: .targetVisualReady(secondID)),
-        )
-        let geometryIndex = try #require(
-            transitionEvents.firstIndex(of: .geometryAnimatorCreated(secondID)),
-        )
-        #expect(attachedIndex < readyIndex)
-        #expect(readyIndex <= geometryIndex)
-        #expect(!transitionEvents.contains(.destinationRevealed(secondID)))
-
-        browsingAnimator.stopAnimation(false)
-        browsingAnimator.finishAnimation(at: .end)
-        for _ in 0 ..< 30 where coordinator.isActive {
-            await waitForDisplayTurn()
-        }
-        #expect(store.state.presentation == .browsing)
+        #expect(store.state.presentation == .tabOverview)
         #expect(coordinator.isActive == false)
+        #expect(animator == nil)
         #expect(secondWebView.window != nil)
-        #expect(secondWebView.transform == .identity)
-        let revealIndex = try #require(
-            transitionEvents.firstIndex(of: .destinationRevealed(secondID)),
-        )
-        let cloneRemovalIndex = try #require(
-            transitionEvents.firstIndex(of: .cloneRemoved(secondID)),
-        )
-        #expect(geometryIndex < revealIndex)
-        #expect(revealIndex <= cloneRemovalIndex)
+        #expect(coordinator.surfaceRegistry.isReady(for: .content(secondID)) == false)
+        #expect(transitionEvents.contains(.targetAttached(secondID)))
+        #expect(transitionEvents.contains(.targetEvidenceUnavailable(secondID)))
+        #expect(!transitionEvents.contains(.targetVisualReady(secondID)))
+        #expect(!transitionEvents.contains(.geometryAnimatorCreated(secondID)))
+        #expect(!transitionEvents.contains(.destinationRevealed(secondID)))
         let overlays = allViews(in: hostingController.view)
             .compactMap { $0 as? BrowserTabTransitionOverlayView }
         for overlay in overlays {
@@ -438,19 +744,21 @@ struct BrowserViewInteractionTests {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(9_001)), url: url)
         var initialState = BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)
-        initialState.tabPreviewData[tab.id] = try .init(
-            revision: initialState.previewRevision(for: tab.id),
+        try initialState.previewState.setData(.init(
+            revision: initialState.previewState.revision(for: tab.id),
             pngData: solidPreviewData(red: 217, green: 74, blue: 90),
-        )
+        ), for: tab.id)
         let store = Store(initialState: initialState) {
             BrowserFeature()
         }
         var animator: UIViewPropertyAnimator?
         var executions: [BrowserTabTransitionExecution] = []
+        var readinessEvents: [BrowserTabTransitionEvent] = []
         let coordinator = BrowserTabTransitionUIKitCoordinator(
             diagnostics: .init(
                 onExecution: { executions.append($0) },
                 onAnimatorCreated: { animator = $0 },
+                onEvent: { readinessEvents.append($0) },
             ),
         )
         let hostingController = UIHostingController(
@@ -485,6 +793,10 @@ struct BrowserViewInteractionTests {
         try await waitForWebKitDocument(in: webView, expectedText: "WebKit pixel proof")
 
         hostingController.view.layoutIfNeeded()
+        #expect(webView.window != nil)
+        #expect(webView.bounds.width > 0)
+        #expect(webView.bounds.height > 0)
+        #expect(webView.isLoading == false)
         let expectedPagePixel = RenderedPixel(red: 217, green: 74, blue: 90)
         let sourcePixel = await waitForRenderedPixel(
             in: webView,
@@ -492,6 +804,12 @@ struct BrowserViewInteractionTests {
             maximumDisplayTurns: 120,
         ) { CGPoint(x: webView.bounds.midX, y: webView.bounds.midY) }
         #expect(sourcePixel?.approximatelyMatches(expectedPagePixel) == true)
+        let expectedSignature = try #require(
+            BrowserWebKitVisualSignature(imageData: solidPreviewData(red: 217, green: 74, blue: 90)),
+        )
+        let pageSignature = BrowserWebKitVisualSignature(view: webView.scrollView)
+        #expect(pageSignature?.approximatelyMatches(expectedSignature) == true)
+        #expect(BrowserWebKitVisualEvidence.hasOpaqueCover(in: webView) == false)
 
         let fastSnapshot = webView.snapshotView(afterScreenUpdates: false)
         let fastSnapshotPixel = fastSnapshot.flatMap { snapshot in
@@ -515,7 +833,10 @@ struct BrowserViewInteractionTests {
         )
         #expect(registeredSurface === webView)
         #expect(coordinator.surfaceRegistry.representation(for: .content(tab.id)) == .live)
-        #expect(coordinator.surfaceRegistry.isReady(for: .content(tab.id)))
+        #expect(
+            coordinator.surfaceRegistry.isReady(for: .content(tab.id)),
+            "readiness events: \(readinessEvents)",
+        )
         #expect(
             try await webKitValue(
                 "getComputedStyle(document.body).backgroundColor",
@@ -632,14 +953,14 @@ struct BrowserViewInteractionTests {
         )
         let firstPreviewData = try solidPreviewData(red: 217, green: 74, blue: 90)
         let secondPreviewData = try solidPreviewData(red: 59, green: 130, blue: 246)
-        initialState.tabPreviewData[firstID] = try .init(
-            revision: initialState.previewRevision(for: firstID),
+        initialState.previewState.setData(.init(
+            revision: initialState.previewState.revision(for: firstID),
             pngData: firstPreviewData,
-        )
-        initialState.tabPreviewData[secondID] = try .init(
-            revision: initialState.previewRevision(for: secondID),
+        ), for: firstID)
+        initialState.previewState.setData(.init(
+            revision: initialState.previewState.revision(for: secondID),
             pngData: secondPreviewData,
-        )
+        ), for: secondID)
         let store = Store(initialState: initialState) {
             BrowserFeature()
         }
@@ -704,7 +1025,7 @@ struct BrowserViewInteractionTests {
         hostingController.view.layoutIfNeeded()
 
         var currentID = firstID
-        var expectedPagePixels = [
+        let expectedPagePixels = [
             firstID: RenderedPixel(red: 217, green: 74, blue: 90),
             secondID: RenderedPixel(red: 59, green: 130, blue: 246),
         ]
@@ -751,35 +1072,7 @@ struct BrowserViewInteractionTests {
                 ) != nil,
             )
 
-            var expectedPagePixel = try #require(expectedPagePixels[nextID])
-            if cycle == 5 {
-                let revision = store.state.previewRevision(for: nextID)
-                nextWebView.loadHTMLString(
-                    webKitTestDocument(
-                        text: "Same revision changed page",
-                        background: "#10b981",
-                        includeVisibleText: false,
-                    ),
-                    baseURL: nil,
-                )
-                try await waitForWebKitDocument(in: nextWebView, expectedText: "Same revision changed page")
-                store.send(.nativePreviewCaptured(
-                    tabID: nextID,
-                    revision: revision,
-                    pngData: nextID == firstID ? firstPreviewData : secondPreviewData,
-                ))
-                #expect(store.state.previewRevision(for: nextID) == revision)
-                #expect(store.state.tabPreviewData[nextID]?.pngData == (nextID == firstID
-                        ? firstPreviewData
-                        : secondPreviewData))
-                expectedPagePixel = RenderedPixel(red: 16, green: 185, blue: 129)
-                expectedPagePixels[nextID] = expectedPagePixel
-            }
-            if cycle.isMultiple(of: 4) {
-                store.send(.previewCacheEvicted)
-                hostingController.view.layoutIfNeeded()
-                #expect(store.state.tabPreviewData[nextID] == nil)
-            }
+            let expectedPagePixel = try #require(expectedPagePixels[nextID])
 
             animator = nil
             transitionEvents.removeAll()
@@ -788,6 +1081,10 @@ struct BrowserViewInteractionTests {
             blackSurface.isOpaque = true
             blackSurface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             nextWebView.addSubview(blackSurface)
+            #expect(
+                BrowserWebKitVisualEvidence.hasOpaqueCover(in: nextWebView),
+                "the intentionally mounted black surface must be recognized as a covering surface",
+            )
             coordinator.begin(
                 token: cycle * 2 + 2,
                 direction: .toBrowsing,
@@ -824,7 +1121,10 @@ struct BrowserViewInteractionTests {
                 await waitForDisplayTurn()
                 hostingController.view.layoutIfNeeded()
             }
-            let browsingAnimator = try #require(animator, "executions: \(executions)")
+            let browsingAnimator = try #require(
+                animator,
+                "executions: \(executions), events: \(transitionEvents)",
+            )
             let attachedIndex = try #require(
                 transitionEvents.firstIndex(of: .targetAttached(nextID)),
             )

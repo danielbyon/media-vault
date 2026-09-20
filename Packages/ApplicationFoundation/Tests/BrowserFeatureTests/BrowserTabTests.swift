@@ -54,7 +54,7 @@ struct BrowserTabTests {
         await store.send(.closeTab(second)) {
             $0.tabs.remove(at: 1)
             $0.selectedTabID = first
-            $0.previewRevisions.removeValue(forKey: second)
+            $0.previewState.removeTab(second)
         }
     }
 
@@ -85,7 +85,7 @@ struct BrowserTabTests {
                 providerValues: [],
             )
         }
-        let initialRevision = store.state.previewRevision(for: first)
+        let initialRevision = store.state.previewState.revision(for: first)
         store.exhaustivity = .off(showSkippedAssertions: false)
         await store.send(.omniboxSubmitted)
         #expect(store.state.tabs[0] == .web(id: first, url: destination))
@@ -93,12 +93,13 @@ struct BrowserTabTests {
         #expect(store.state.omniboxDraft.isEmpty)
         #expect(store.state.hasUnsubmittedOmniboxDraft == false)
         #expect(store.state.suggestions.isEmpty)
-        #expect(store.state.previewRevision(for: first) != initialRevision)
-        #expect(store.state.pendingPreviewInvalidations[first] != nil)
+        #expect(store.state.previewState.revision(for: first) != initialRevision)
+        #expect(store.state.previewState.operation(for: first) != nil)
+        let operationID = try #require(store.state.previewState.operation(for: first))
         await store.finish()
         #expect(try commands.value == [
             .ensureContext(tabID: first),
-            .load(tabID: first, url: destination),
+            .load(tabID: first, url: destination, operationID: operationID),
         ])
         #expect(store.state.tabs[0].canGoBack == false)
     }
@@ -254,7 +255,7 @@ struct BrowserTabTests {
             $0.tabs.removeFirst()
             $0.selectedTabID = second
             $0.tabOverviewFocusID = second
-            $0.previewRevisions.removeValue(forKey: first)
+            $0.previewState.removeTab(first)
         }
     }
 
@@ -279,7 +280,7 @@ struct BrowserTabTests {
         await store.send(.closeTab(third)) {
             $0.tabs.remove(at: 2)
             $0.tabOverviewFocusID = second
-            $0.previewRevisions.removeValue(forKey: third)
+            $0.previewState.removeTab(third)
         }
     }
 
@@ -303,7 +304,7 @@ struct BrowserTabTests {
         await store.send(.closeTab(third)) {
             $0.tabs.remove(at: 2)
             $0.tabOverviewFocusID = second
-            $0.previewRevisions.removeValue(forKey: third)
+            $0.previewState.removeTab(third)
         }
     }
 

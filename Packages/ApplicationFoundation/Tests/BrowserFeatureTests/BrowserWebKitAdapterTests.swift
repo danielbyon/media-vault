@@ -32,6 +32,26 @@ struct BrowserWebKitAdapterTests {
         #expect(adapter.hasContext(for: second))
     }
 
+    @Test("Tagged history no-ops complete without a WebKit delegate callback")
+    func taggedHistoryNoOpCompletesOperation() async {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        _ = adapter.ensureContext(for: tabID)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        let operationID = BrowserNavigationOperationID()
+
+        adapter.execute(.goBack(tabID: tabID, operationID: operationID))
+
+        guard case let .metadata(eventTabID, _, .operation(eventOperationID)) = await events.next() else {
+            Issue.record("A synchronous history no-op did not complete its tagged operation")
+            return
+        }
+
+        #expect(eventTabID == tabID)
+        #expect(eventOperationID == operationID)
+    }
+
     @Test("Preview capture uses the current viewport and projects success or failure as Sendable data")
     func previewCaptureProjectsViewportAndFailure() async throws {
         let image = try #require(UIImage(systemName: "globe"))
@@ -113,6 +133,35 @@ struct BrowserWebKitAdapterTests {
         controller.detach(surface: surface)
         #expect(controller.capture() == nil)
         window.isHidden = true
+    }
+
+    @Test("Reused native preview hosts follow the current transition role")
+    func reusedNativePreviewHostRebindsTransitionRole() {
+        let firstID = BrowserTabID(UUID(9_101))
+        let secondID = BrowserTabID(UUID(9_102))
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let controller = BrowserNativePreviewCaptureController { view, bounds, afterScreenUpdates in
+            view.drawHierarchy(in: bounds, afterScreenUpdates: afterScreenUpdates)
+        }
+        let host = BrowserNativePreviewCaptureHostController(
+            content: Color.red,
+            controller: controller,
+            transitionRegistry: registry,
+            transitionRole: .content(firstID),
+        )
+        _ = host.view
+        defer { host.detachSurface() }
+
+        #expect(registry.view(for: .content(firstID)) === host.view)
+
+        host.update(
+            content: Color.blue,
+            transitionRegistry: registry,
+            transitionRole: .content(secondID),
+        )
+
+        #expect(registry.view(for: .content(firstID)) == nil)
+        #expect(registry.view(for: .content(secondID)) === host.view)
     }
 
     @Test("Mounted native preview capture includes only the represented surface")

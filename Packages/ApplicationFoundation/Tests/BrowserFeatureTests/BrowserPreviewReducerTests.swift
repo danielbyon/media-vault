@@ -21,19 +21,17 @@ struct BrowserPreviewReducerTests {
         let staleRevision = BrowserTabPreviewRevision()
         let currentRevision = BrowserTabPreviewRevision()
         let staleBytes = Data([1, 2, 3])
-        let cache: [BrowserTabID: BrowserTabPreviewCacheEntry] = [
-            tabID: .init(revision: staleRevision, pngData: staleBytes),
-        ]
+        let entry = BrowserTabPreviewCacheEntry(revision: staleRevision, pngData: staleBytes)
 
         let representation = BrowserTabPreviewRepresentation.cachedOrFallback(
             for: tab,
             revision: currentRevision,
-            cache: cache,
+            entry: entry,
         )
 
         #expect(representation == .placeholder(.web))
-        #expect(cache[tabID]?.revision == staleRevision)
-        #expect(cache[tabID]?.pngData == staleBytes)
+        #expect(entry.revision == staleRevision)
+        #expect(entry.pngData == staleBytes)
     }
 
     @Test("Native preview results replace live-tab cache and failed results preserve stale data")
@@ -46,18 +44,18 @@ struct BrowserPreviewReducerTests {
             tabs: [.web(id: tabID, url: url)],
             selectedTabID: tabID,
         )
-        state.tabPreviewData[tabID] = .init(
-            revision: state.previewRevision(for: tabID),
+        state.previewState.setData(.init(
+            revision: state.previewState.revision(for: tabID),
             pngData: stale,
-        )
-        let revision = state.previewRevision(for: tabID)
+        ), for: tabID)
+        let revision = state.previewState.revision(for: tabID)
         let store = TestStore(initialState: state) { BrowserFeature() }
 
         await store.send(.nativePreviewCaptured(tabID: tabID, revision: revision, pngData: fresh)) {
-            $0.tabPreviewData[tabID] = .init(revision: revision, pngData: fresh)
+            $0.previewState.setData(.init(revision: revision, pngData: fresh), for: tabID)
         }
         await store.send(.nativePreviewCaptured(tabID: tabID, revision: revision, pngData: nil))
-        #expect(store.state.tabPreviewData[tabID]?.pngData == fresh)
+        #expect(store.state.previewState.data(for: tabID)?.pngData == fresh)
     }
 
     @Test("Preview results for closed or unknown tabs cannot recreate cache entries")
@@ -68,24 +66,24 @@ struct BrowserPreviewReducerTests {
             tabs: [.web(id: tabID, url: url)],
             selectedTabID: tabID,
         )
-        state.tabPreviewData[tabID] = .init(
-            revision: state.previewRevision(for: tabID),
+        state.previewState.setData(.init(
+            revision: state.previewState.revision(for: tabID),
             pngData: Data([1, 2, 3]),
-        )
+        ), for: tabID)
         let store = TestStore(initialState: state) { BrowserFeature() } withDependencies: {
             $0.uuid = .incrementing
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
-        let revision = store.state.previewRevision(for: tabID)
+        let revision = store.state.previewState.revision(for: tabID)
 
         await store.send(.closeTab(tabID))
-        #expect(store.state.tabPreviewData[tabID] == nil)
+        #expect(store.state.previewState.data(for: tabID) == nil)
         await store.send(.webKitEvent(.preview(
             tabID: tabID,
             revision: revision,
             pngData: Data([7]),
         )))
-        #expect(store.state.tabPreviewData[tabID] == nil)
+        #expect(store.state.previewState.data(for: tabID) == nil)
     }
 
     @Test("Memory pressure evicts previews without changing authoritative tabs")
@@ -97,14 +95,18 @@ struct BrowserPreviewReducerTests {
             tabs: [.web(id: firstID, url: url), .startPage(id: secondID)],
             selectedTabID: firstID,
         )
-        state.tabPreviewData = [
-            firstID: .init(revision: state.previewRevision(for: firstID), pngData: Data([1])),
-            secondID: .init(revision: state.previewRevision(for: secondID), pngData: Data([2])),
-        ]
+        state.previewState.setData(
+            .init(revision: state.previewState.revision(for: firstID), pngData: Data([1])),
+            for: firstID,
+        )
+        state.previewState.setData(
+            .init(revision: state.previewState.revision(for: secondID), pngData: Data([2])),
+            for: secondID,
+        )
         let store = TestStore(initialState: state) { BrowserFeature() }
 
         await store.send(.previewCacheEvicted) {
-            $0.tabPreviewData = [:]
+            $0.previewState.clearData()
         }
         #expect(store.state.tabs.map(\.id) == [firstID, secondID])
         #expect(store.state.selectedTabID == firstID)
@@ -125,12 +127,12 @@ struct BrowserPreviewReducerTests {
             ],
             selectedTabID: firstID,
         )
-        state.tabPreviewData = Dictionary(uniqueKeysWithValues: closedIDs.map {
-            ($0, BrowserTabPreviewCacheEntry(
-                revision: state.previewRevision(for: $0),
+        for tabID in closedIDs {
+            state.previewState.setData(.init(
+                revision: state.previewState.revision(for: tabID),
                 pngData: Data([1]),
-            ))
-        })
+            ), for: tabID)
+        }
         let store = TestStore(initialState: state) { BrowserFeature() } withDependencies: {
             $0.browserWebKit.execute = { _ in }
             $0.uuid = .incrementing
@@ -138,16 +140,16 @@ struct BrowserPreviewReducerTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.closeAllConfirmed)
-        #expect(store.state.tabPreviewData.isEmpty)
+        #expect(closedIDs.allSatisfy { store.state.previewState.data(for: $0) == nil })
 
         for tabID in closedIDs {
             await store.send(.webKitEvent(.preview(
                 tabID: tabID,
-                revision: state.previewRevision(for: tabID),
+                revision: state.previewState.revision(for: tabID),
                 pngData: Data([9]),
             )))
         }
-        #expect(store.state.tabPreviewData.isEmpty)
+        #expect(closedIDs.allSatisfy { store.state.previewState.data(for: $0) == nil })
     }
 
     @Test("Close other tabs preserves only the survivor preview and rejects closed results")
@@ -164,46 +166,41 @@ struct BrowserPreviewReducerTests {
             ],
             selectedTabID: survivorID,
         )
-        state.tabPreviewData = [
-            survivorID: .init(revision: state.previewRevision(for: survivorID), pngData: Data([1])),
-            closedFirstID: .init(
-                revision: state.previewRevision(for: closedFirstID),
-                pngData: Data([2]),
-            ),
-            closedSecondID: .init(
-                revision: state.previewRevision(for: closedSecondID),
-                pngData: Data([3]),
-            ),
-        ]
+        state.previewState.setData(
+            .init(revision: state.previewState.revision(for: survivorID), pngData: Data([1])),
+            for: survivorID,
+        )
+        state.previewState.setData(.init(
+            revision: state.previewState.revision(for: closedFirstID),
+            pngData: Data([2]),
+        ), for: closedFirstID)
+        state.previewState.setData(.init(
+            revision: state.previewState.revision(for: closedSecondID),
+            pngData: Data([3]),
+        ), for: closedSecondID)
         let store = TestStore(initialState: state) { BrowserFeature() } withDependencies: {
             $0.browserWebKit.execute = { _ in }
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.closeOtherTabsConfirmed(survivorID))
-        #expect(store.state.tabPreviewData == [
-            survivorID: .init(
-                revision: store.state.previewRevision(for: survivorID),
-                pngData: Data([1]),
-            ),
-        ])
+        #expect(store.state.previewState.data(for: survivorID)?.pngData == Data([1]))
+        #expect(store.state.previewState.data(for: closedFirstID) == nil)
+        #expect(store.state.previewState.data(for: closedSecondID) == nil)
 
         await store.send(.webKitEvent(.preview(
             tabID: closedFirstID,
-            revision: state.previewRevision(for: closedFirstID),
+            revision: state.previewState.revision(for: closedFirstID),
             pngData: Data([8]),
         )))
         await store.send(.webKitEvent(.preview(
             tabID: closedSecondID,
-            revision: state.previewRevision(for: closedSecondID),
+            revision: state.previewState.revision(for: closedSecondID),
             pngData: Data([9]),
         )))
-        #expect(store.state.tabPreviewData == [
-            survivorID: .init(
-                revision: store.state.previewRevision(for: survivorID),
-                pngData: Data([1]),
-            ),
-        ])
+        #expect(store.state.previewState.data(for: survivorID)?.pngData == Data([1]))
+        #expect(store.state.previewState.data(for: closedFirstID) == nil)
+        #expect(store.state.previewState.data(for: closedSecondID) == nil)
     }
 
     @Test("Overview entry is immediate and refreshes only web previews")
@@ -223,7 +220,7 @@ struct BrowserPreviewReducerTests {
             ],
             selectedTabID: startID,
         )
-        let webRevision = initialState.previewRevision(for: webID)
+        let webRevision = initialState.previewState.revision(for: webID)
         let store = TestStore(initialState: initialState) { BrowserFeature() } withDependencies: {
             $0.browserWebKit.execute = { command in
                 commands.withValue { $0.append(command) }
@@ -248,7 +245,7 @@ struct BrowserPreviewReducerTests {
             tabs: [.web(id: tabID, url: firstURL)],
             selectedTabID: tabID,
         )
-        let oldRevision = state.previewRevision(for: tabID)
+        let oldRevision = state.previewState.revision(for: tabID)
         let store = TestStore(initialState: state) { BrowserFeature() }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
@@ -259,8 +256,8 @@ struct BrowserPreviewReducerTests {
             pngData: Data([9]),
         )))
 
-        #expect(store.state.tabPreviewData[tabID] == nil)
-        #expect(store.state.previewRevision(for: tabID) != oldRevision)
+        #expect(store.state.previewState.data(for: tabID) == nil)
+        #expect(store.state.previewState.revision(for: tabID) != oldRevision)
     }
 
     @Test("An explicit navigation and its committed metadata share one invalidation")
@@ -276,13 +273,158 @@ struct BrowserPreviewReducerTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.navigate(secondURL))
-        let explicitRevision = store.state.previewRevision(for: tabID)
+        let operationID = try #require(store.state.previewState.operation(for: tabID))
+        let explicitRevision = store.state.previewState.revision(for: tabID)
         await store.send(.webKitEvent(.metadata(
             tabID: tabID,
-            .init(committedURL: secondURL),
+            metadata: .init(committedURL: secondURL),
+            correlation: .operation(operationID),
         )))
 
-        #expect(store.state.previewRevision(for: tabID) == explicitRevision)
+        #expect(store.state.previewState.revision(for: tabID) == explicitRevision)
+    }
+
+    @Test("A correlated commit keeps its operation until loading finishes")
+    func correlatedCommitDoesNotDiscardPendingOperation() async throws {
+        let tabID = BrowserTabID()
+        let firstURL = try #require(URL(string: "https://first.example"))
+        let secondURL = try #require(URL(string: "https://second.example"))
+        var tab = BrowserTab.web(id: tabID, url: firstURL)
+        tab.metadata.committedURL = firstURL
+        let store = TestStore(
+            initialState: BrowserFeature.State(
+                tabs: [tab],
+                selectedTabID: tabID,
+            ),
+        ) { BrowserFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.navigate(secondURL))
+        let operationID = try #require(store.state.previewState.operation(for: tabID))
+
+        await store.send(.webKitEvent(.metadata(
+            tabID: tabID,
+            metadata: .init(committedURL: secondURL, isLoading: true),
+            correlation: .operation(operationID),
+        )))
+
+        #expect(store.state.previewState.operation(for: tabID) == operationID)
+
+        await store.send(.webKitEvent(.metadata(
+            tabID: tabID,
+            metadata: .init(committedURL: secondURL),
+            correlation: .operation(operationID),
+        )))
+
+        #expect(store.state.previewState.operation(for: tabID) == nil)
+    }
+
+    @Test("A tagged no-op metadata event consumes its preview invalidation")
+    func taggedNoOpMetadataCompletesOperation() async throws {
+        let tabID = BrowserTabID()
+        let url = try #require(URL(string: "https://example.com"))
+        let tab = BrowserTab.web(id: tabID, url: url)
+        let store = TestStore(
+            initialState: BrowserFeature.State(
+                tabs: [tab],
+                selectedTabID: tabID,
+            ),
+        ) { BrowserFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.reloadOrStopTapped)
+        let operationID = try #require(store.state.previewState.operation(for: tabID))
+
+        await store.send(.webKitEvent(.metadata(
+            tabID: tabID,
+            metadata: .init(),
+            correlation: .operation(operationID),
+        )))
+
+        #expect(store.state.previewState.operation(for: tabID) == nil)
+    }
+
+    @Test("Overlapping navigation metadata consumes only its matching invalidation")
+    func overlappingNavigationMetadataPreservesNewerInvalidation() async throws {
+        let tabID = BrowserTabID()
+        let firstURL = try #require(URL(string: "https://first.example"))
+        let secondURL = try #require(URL(string: "https://second.example"))
+        let thirdURL = try #require(URL(string: "https://third.example"))
+        var tab = BrowserTab.web(id: tabID, url: firstURL)
+        tab.metadata.committedURL = firstURL
+        let store = TestStore(
+            initialState: BrowserFeature.State(
+                tabs: [tab],
+                selectedTabID: tabID,
+            ),
+        ) { BrowserFeature() } withDependencies: {
+            $0.browserWebKit.execute = { _ in }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.navigate(secondURL))
+        let firstOperationID = try #require(store.state.previewState.operation(for: tabID))
+        await store.send(.navigate(thirdURL))
+        let secondOperationID = try #require(store.state.previewState.operation(for: tabID))
+        let currentRevision = store.state.previewState.revision(for: tabID)
+
+        await store.send(.webKitEvent(.metadata(
+            tabID: tabID,
+            metadata: .init(committedURL: secondURL),
+            correlation: .operation(firstOperationID),
+        )))
+
+        #expect(store.state.previewState.operation(for: tabID) == secondOperationID)
+        #expect(store.state.previewState.revision(for: tabID) == currentRevision)
+
+        await store.send(.webKitEvent(.metadata(
+            tabID: tabID,
+            metadata: .init(committedURL: thirdURL),
+            correlation: .operation(secondOperationID),
+        )))
+
+        #expect(store.state.previewState.operation(for: tabID) == nil)
+        #expect(store.state.tabs.first?.metadata.committedURL == thirdURL)
+        #expect(store.state.previewState.revision(for: tabID) == currentRevision)
+    }
+
+    @Test("Operation identities consume out-of-order WebKit metadata exactly once")
+    func operationIdentityPreservesOutOfOrderInvalidation() async throws {
+        let tabID = BrowserTabID()
+        let firstURL = try #require(URL(string: "https://first.example"))
+        let secondURL = try #require(URL(string: "https://second.example"))
+        let thirdURL = try #require(URL(string: "https://third.example"))
+        var tab = BrowserTab.web(id: tabID, url: firstURL)
+        tab.metadata.committedURL = firstURL
+        let store = TestStore(
+            initialState: BrowserFeature.State(
+                tabs: [tab],
+                selectedTabID: tabID,
+            ),
+        ) { BrowserFeature() } withDependencies: {
+            $0.browserWebKit.execute = { _ in }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.navigate(secondURL))
+        let firstOperationID = try #require(store.state.previewState.operation(for: tabID))
+        await store.send(.navigate(thirdURL))
+        let secondOperationID = try #require(store.state.previewState.operation(for: tabID))
+
+        await store.send(.webKitEvent(.metadata(
+            tabID: tabID,
+            metadata: .init(committedURL: thirdURL),
+            correlation: .operation(secondOperationID),
+        )))
+        #expect(store.state.previewState.operation(for: tabID) == nil)
+
+        await store.send(.webKitEvent(.metadata(
+            tabID: tabID,
+            metadata: .init(committedURL: secondURL),
+            correlation: .operation(firstOperationID),
+        )))
+        #expect(store.state.previewState.operation(for: tabID) == nil)
+        #expect(store.state.tabs[0].metadata.committedURL == thirdURL)
     }
 
     @Test("A reload expectation is consumed by same-URL metadata before a later navigation")
@@ -302,17 +444,20 @@ struct BrowserPreviewReducerTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.reloadOrStopTapped)
-        let revisionAfterReload = store.state.previewRevision(for: tabID)
+        let reloadOperationID = try #require(store.state.previewState.operation(for: tabID))
+        let revisionAfterReload = store.state.previewState.revision(for: tabID)
         await store.send(.webKitEvent(.metadata(
             tabID: tabID,
-            .init(committedURL: firstURL),
+            metadata: .init(committedURL: firstURL),
+            correlation: .operation(reloadOperationID),
         )))
         await store.send(.webKitEvent(.metadata(
             tabID: tabID,
-            .init(committedURL: secondURL),
+            metadata: .init(committedURL: secondURL),
+            correlation: .untracked,
         )))
 
-        #expect(store.state.previewRevision(for: tabID) != revisionAfterReload)
+        #expect(store.state.previewState.revision(for: tabID) != revisionAfterReload)
     }
 
     @Test("A pull-to-refresh expectation cannot suppress a later navigation")
@@ -332,17 +477,20 @@ struct BrowserPreviewReducerTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.pullToRefresh)
-        let revisionAfterRefresh = store.state.previewRevision(for: tabID)
+        let refreshOperationID = try #require(store.state.previewState.operation(for: tabID))
+        let revisionAfterRefresh = store.state.previewState.revision(for: tabID)
         await store.send(.webKitEvent(.metadata(
             tabID: tabID,
-            .init(committedURL: firstURL),
+            metadata: .init(committedURL: firstURL),
+            correlation: .operation(refreshOperationID),
         )))
         await store.send(.webKitEvent(.metadata(
             tabID: tabID,
-            .init(committedURL: secondURL),
+            metadata: .init(committedURL: secondURL),
+            correlation: .untracked,
         )))
 
-        #expect(store.state.previewRevision(for: tabID) != revisionAfterRefresh)
+        #expect(store.state.previewState.revision(for: tabID) != revisionAfterRefresh)
     }
 
     @Test("An unexpected committed document change invalidates the current preview")
@@ -355,20 +503,21 @@ struct BrowserPreviewReducerTests {
             selectedTabID: tabID,
         )
         state.tabs[0].metadata.committedURL = firstURL
-        state.tabPreviewData[tabID] = .init(
-            revision: state.previewRevision(for: tabID),
+        state.previewState.setData(.init(
+            revision: state.previewState.revision(for: tabID),
             pngData: Data([1]),
-        )
-        let oldRevision = state.previewRevision(for: tabID)
+        ), for: tabID)
+        let oldRevision = state.previewState.revision(for: tabID)
         let store = TestStore(initialState: state) { BrowserFeature() }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.webKitEvent(.metadata(
             tabID: tabID,
-            .init(committedURL: secondURL),
+            metadata: .init(committedURL: secondURL),
+            correlation: .untracked,
         )))
 
-        #expect(store.state.tabPreviewData[tabID] == nil)
-        #expect(store.state.previewRevision(for: tabID) != oldRevision)
+        #expect(store.state.previewState.data(for: tabID) == nil)
+        #expect(store.state.previewState.revision(for: tabID) != oldRevision)
     }
 }
