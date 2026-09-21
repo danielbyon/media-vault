@@ -1,0 +1,92 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebView.swift
+  s_f7106db7868e1b::t_ffb37f237c7290 130
+  s_f7106db7868e1b::t_a371cbe2407192 119,133-134,142,146-147,153
+  s_f7106db7868e1b::t_506078ba188511 45,53,224
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTransitionTests.swift
+  s_f7106db7868e1b::t_4e34ec392fdbba 275-311,414-445,475-519,784,793
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserWebKitAdapterTests.swift
+  s_f7106db7868e1b::t_27a2e68c789dc2 106,108
+  s_f7106db7868e1b::t_7073c6a7b44e2b 96-97,107,109,112-114,118-119,122-123,130-135,138-141,148,152-154
+  s_f7106db7868e1b::t_c88f17af99a13f 124-129,136-137,149-151,155-158
+  s_f7106db7868e1b::t_9bc0bacf2cf03b 142,147
+  s_f7106db7868e1b::t_30d28ce73c5ade 81-95
+  s_f7106db7868e1b::t_d583bdf9acfb83 110,143-146
+  s_f7106db7868e1b::t_4cb271fddcead9 111
+  s_f7106db7868e1b::t_5e5a1fee340eb8 411-484
+  s_f7106db7868e1b::t_85f09b5e6b6f7e 19-44
+  s_f7106db7868e1b::t_8f8af1a33eb7dd 98-105,115-117,120-121
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebKitReadinessProbe.swift
+  s_f7106db7868e1b::t_a371cbe2407192 30,43,52,77-78,84,90-92
+  s_f7106db7868e1b::t_e8488a7d716671 33,46-48,55,142
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabOverviewView.swift
+  s_f7106db7868e1b::t_506078ba188511 235-236
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabTransitionUIKitCoordinator+Fallback.swift
+  s_f7106db7868e1b::t_b8491c7dbd4f53 20-23,46
+  s_f7106db7868e1b::t_baf10695e0830b 24
+  s_f7106db7868e1b::t_7bdab7d9e408db 37-45,47-51
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserBehaviorTests.swift
+  s_f7106db7868e1b::t_26a9c7451fad97 58-97,121-122,591-609
+  s_f7106db7868e1b::t_fb679f952974a0 98
+  s_f7106db7868e1b::t_79233640747118 99-120
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_f7106db7868e1b::t_22a7665bdc9696 510-515,521
+  s_f7106db7868e1b::t_e8488a7d716671 68,74,82,87
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabTransitionUIKitCoordinator+Execution.swift
+  s_f7106db7868e1b::t_da837fb4b0f373 124-132
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserPreviewReducerTests.swift
+  s_f7106db7868e1b::t_4b900c677b4210 17
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabTransitionUIKitCoordinator.swift
+  s_f7106db7868e1b::t_d7a2af4e87042c 123
+  s_f7106db7868e1b::t_79233640747118 144
+  s_f7106db7868e1b::t_2c897b7c0aa39a 129,133,143
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebKitVisualEvidence.swift
+  s_f7106db7868e1b::t_506078ba188511 51-53,60
+  s_f7106db7868e1b::t_39f9f84fa1034a 57
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebKitReadinessCoordinator.swift
+  s_f7106db7868e1b::t_e8488a7d716671 110,115-120,122,200
+  s_f7106db7868e1b::t_a371cbe2407192 174,180,188
+  s_f7106db7868e1b::t_3ebbc74fae2bb1 190-191,193
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserPresentationTests.swift
+  s_f7106db7868e1b::t_83ab55241d5aaa 317-318
+  s_f7106db7868e1b::t_c7958544142777 312-316,319-343
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebKitAdapter.swift
+  s_f7106db7868e1b::t_7b90f26105f8f2 512-513,521-522
+  s_f7106db7868e1b::t_4cb271fddcead9 403
+  s_f7106db7868e1b::t_df3605fe230de0 404
+  s_f7106db7868e1b::t_7510b734fc3685 338,340,366,388,399,409,431,437-442,445,463-467,509-511,514,534
+  s_f7106db7868e1b::t_544d313772288f 398,400
+  s_f7106db7868e1b::t_4b900c677b4210 401-402
+  s_f7106db7868e1b::t_c0383c2e9a3b1b 640-641
+  s_f7106db7868e1b::t_da1e5c62de3ff8 468,515-520
+  s_f7106db7868e1b::t_ccff616be179ec 504-508,902,915
+  s_f7106db7868e1b::t_0968d9b7443e0b 394-397,405-408,410-412
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewInteractionTests.swift
+  s_f7106db7868e1b::t_6249d14b5cb599 89-90,173
+  s_f7106db7868e1b::t_a59a284ae18417 97,283,365,542,631
+  s_f7106db7868e1b::t_dec483c630c799 133,153
+  s_f7106db7868e1b::t_34d944f534b0cb 241-242
+  s_f7106db7868e1b::t_f9dd58332cc399 95-96,98,102,281-282,284,363-364,366,370,540-541,543,547,629-630,632,636
+  s_f7106db7868e1b::t_8113a58d428295 176-240,243-259
+  s_f7106db7868e1b::t_59acb04d230da3 143,934
+  s_f7106db7868e1b::t_e22f0d556a26de 726-729,731-735,880-883,885-889,1101-1104,1106-1110
+  s_f7106db7868e1b::t_9170b1de212506 174,1673-1687
+  s_f7106db7868e1b::t_52d610d02f2be1 175
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabPresentation.swift
+  s_f7106db7868e1b::t_506078ba188511 12-22,39-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "67546c30dddd7f3831a3cdd7cff29d83c80049b7",
+  "prompts": {},
+  "sessions": {
+    "s_f7106db7868e1b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b7ad-f299-7f22-9348-3559cfdca216",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
