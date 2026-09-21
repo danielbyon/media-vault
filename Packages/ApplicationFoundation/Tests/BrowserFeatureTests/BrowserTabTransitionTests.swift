@@ -416,6 +416,8 @@ struct BrowserTabTransitionTests {
         var executions: [BrowserTabTransitionExecution] = []
         var completed = false
         var revealed = false
+        var completionCount = 0
+        var frozenAspectAtReveal: CGFloat?
         let harness = BrowserTabTransitionUIKitHarness(
             contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
             cardFrame: CGRect(x: 60, y: 320, width: 200, height: 100),
@@ -428,18 +430,66 @@ struct BrowserTabTransitionTests {
             tabID: harness.tabID,
             reduceMotion: false,
             onPresentationChange: {},
-            onCompletion: { completed = true },
-            onDestinationVisible: { revealed = true },
+            onCompletion: {
+                completed = true
+                completionCount += 1
+            },
+            onDestinationVisible: {
+                revealed = true
+                frozenAspectAtReveal = harness.overlay.subviews.first.map { $0.frame.width / $0.frame.height }
+            },
         )
         await harness.waitForAnimation()
 
+        let sourceAspect = harness.card.bounds.width / harness.card.bounds.height
+        let destinationAspect = harness.content.bounds.width / harness.content.bounds.height
         #expect(executions == [.aspectMismatch])
         #expect(executions.contains(.geometry) == false)
         #expect(revealed)
         #expect(completed)
+        #expect(completionCount == 1)
+        #expect(abs((frozenAspectAtReveal ?? 0) - sourceAspect) < 0.01)
+        #expect(abs((frozenAspectAtReveal ?? 0) - destinationAspect) > 0.1)
         #expect(harness.coordinator.presentationOutcome.destinationWasRevealed)
         #expect(harness.coordinator.isActive == false)
         #expect(harness.overlay.subviews.isEmpty)
+        harness.window.isHidden = true
+    }
+
+    @Test("A frozen browsing aspect mismatch does not restart after destination registration changes")
+    func frozenBrowsingAspectMismatchLatchesDestinationIdentity() async {
+        var executions: [BrowserTabTransitionExecution] = []
+        var animators: [UIViewPropertyAnimator] = []
+        var revealCount = 0
+        var completionCount = 0
+        let harness = BrowserTabTransitionUIKitHarness(
+            contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
+            cardFrame: CGRect(x: 60, y: 320, width: 200, height: 100),
+            diagnostics: .init(
+                onExecution: { executions.append($0) },
+                onAnimatorCreated: { animators.append($0) },
+            ),
+        )
+
+        harness.coordinator.begin(
+            token: 1,
+            direction: .toBrowsing,
+            tabID: harness.tabID,
+            reduceMotion: false,
+            onPresentationChange: {},
+            onCompletion: { completionCount += 1 },
+            onDestinationVisible: {
+                revealCount += 1
+                harness.registerContent()
+            },
+        )
+        await harness.waitForAnimation()
+
+        #expect(executions == [.aspectMismatch])
+        #expect(animators.count == 1)
+        #expect(revealCount == 1)
+        #expect(completionCount == 1)
+        #expect(harness.coordinator.isActive == false)
         harness.window.isHidden = true
     }
 

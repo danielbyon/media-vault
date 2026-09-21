@@ -71,6 +71,11 @@ final class BrowserWebKitAdapter: NSObject {
         contexts[tabID]?.hasCommittedDocument == true
     }
 
+    /// Test-only seam that queues the same deferred metadata work used by KVO observations.
+    func scheduleMetadataEmissionForTesting(for tabID: BrowserTabID) -> Task<Bool, Never>? {
+        contexts[tabID]?.scheduleMetadataEmissionForTesting()
+    }
+
     /// Creates a context even for an unselected background tab and returns an existing one unchanged.
     @discardableResult
     func ensureContext(for tabID: BrowserTabID) -> WKWebView {
@@ -508,6 +513,7 @@ private struct BrowserWebKitNavigationCorrelation {
 
         if navigation == nil {
             hasActiveUnidentifiedNavigation = false
+            generation &+= 1
             return
         }
 
@@ -851,17 +857,26 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         adapter?.emit(.javaScriptDialogChanged(tabID: tabID, isPresented: false))
     }
 
+    fileprivate func scheduleMetadataEmissionForTesting() -> Task<Bool, Never> {
+        scheduleMetadataEmissionTask()
+    }
+
     private func scheduleMetadataEmission() {
+        _ = scheduleMetadataEmissionTask()
+    }
+
+    private func scheduleMetadataEmissionTask() -> Task<Bool, Never> {
         let generation = navigationCorrelation.generation
         let operationID = navigationCorrelation.currentOperationID()
-        Task { @MainActor [weak self] in
+        return Task { @MainActor [weak self] in
             guard let self,
                   navigationCorrelation.generation == generation
             else {
-                return
+                return false
             }
 
             emitMetadata(operationID: operationID)
+            return true
         }
     }
 

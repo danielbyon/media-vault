@@ -29,7 +29,7 @@ extension BrowserTabTransitionUIKitCoordinator {
         )
     }
 
-    func completeWithOpacityOnly(destinationView: UIView, destinationFrame: CGRect) {
+    func completeWithOpacityOnly(destinationView: UIView) {
         guard let session else {
             return
         }
@@ -73,7 +73,6 @@ extension BrowserTabTransitionUIKitCoordinator {
 
         // A Reduce Motion handoff never transforms the clone. It only removes the exact card
         // image after the browsing surface has mounted beneath it.
-        frozenSurface.frame = destinationFrame
         revealDestination()
 
         let fade = UIViewPropertyAnimator(duration: 0.15, curve: .easeOut) { [weak frozenSurface] in

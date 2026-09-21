@@ -156,6 +156,36 @@ struct BrowserWebKitAdapterTests {
         #expect(await events.next() == .navigationStarted(tabID: tabID))
     }
 
+    @Test("Failed unidentified nil navigation invalidates queued metadata")
+    func failedUnidentifiedNilNavigationInvalidatesQueuedMetadata() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let webView = adapter.ensureContext(for: tabID)
+        let delegate = try #require(webView.navigationDelegate as? WKNavigationDelegate)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        let failingURL = try #require(URL(string: "https://example.com/failure"))
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotConnectToHost,
+            userInfo: [NSURLErrorFailingURLErrorKey: failingURL],
+        )
+        defer { adapter.destroyContext(for: tabID) }
+
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+
+        let metadataTask = try #require(adapter.scheduleMetadataEmissionForTesting(for: tabID))
+        delegate.webView?(webView, didFailProvisionalNavigation: nil, withError: error)
+
+        guard case let .navigationFailed(_, _, .untracked) = await events.next() else {
+            Issue.record("An unidentified nil navigation failure was not emitted as untracked")
+            return
+        }
+
+        #expect(await metadataTask.value == false)
+    }
+
     @Test("Preview capture uses the current viewport and projects success or failure as Sendable data")
     func previewCaptureProjectsViewportAndFailure() async throws {
         let image = try #require(UIImage(systemName: "globe"))

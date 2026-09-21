@@ -116,6 +116,8 @@ extension BrowserTabTransitionUIKitCoordinator {
            session.animator != nil {
             return
         }
+        session.destinationRole = role
+        session.destinationFrame = destinationRect
         if session.animator != nil {
             materializePresentation()
         }
@@ -125,10 +127,7 @@ extension BrowserTabTransitionUIKitCoordinator {
                session.frozenSurface != nil {
                 // Preserve the exact frozen card while revealing the mounted browsing surface.
                 // The material geometry guard still prevents an unsafe transform.
-                completeWithOpacityOnly(
-                    destinationView: destinationView,
-                    destinationFrame: destinationRect,
-                )
+                completeWithOpacityOnly(destinationView: destinationView)
             } else {
                 // A live source cannot use the frozen fallback path: finish the handoff while
                 // restoring the existing WebKit surface instead of leaving the coordinator active.
@@ -136,11 +135,9 @@ extension BrowserTabTransitionUIKitCoordinator {
             }
             return
         }
-        session.destinationRole = role
-        session.destinationFrame = destinationRect
         if session.reduceMotion {
             record(.reduceMotion)
-            completeWithOpacityOnly(destinationView: destinationView, destinationFrame: destinationRect)
+            completeWithOpacityOnly(destinationView: destinationView)
         } else {
             record(.geometry)
             animate(to: destinationView, destinationFrame: destinationRect)

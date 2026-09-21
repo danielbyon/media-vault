@@ -341,13 +341,11 @@ struct BrowserChromeView: View {
     }
 
     private var hasPageActions: Bool {
-        guard case .web = store.selectedTab?.content,
-              let url = store.selectedTab?.metadata.committedURL
-        else {
+        guard let tab = store.selectedTab else {
             return false
         }
 
-        return BrowserNavigation.isHTTPURL(url)
+        return BrowserTabPresentation.canShowPageActions(for: tab)
     }
 }
 
