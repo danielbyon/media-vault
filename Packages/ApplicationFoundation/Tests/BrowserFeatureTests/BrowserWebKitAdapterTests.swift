@@ -16,6 +16,32 @@ import WebKit
 @Suite("Browser WebKit adapter")
 @MainActor
 struct BrowserWebKitAdapterTests {
+    @Test("WebKit rendering policy rejects layer-only output")
+    func webKitRenderingPolicyRejectsLayerOnlyOutput() {
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.backgroundColor = .systemBlue
+        view.isOpaque = true
+        let drawFailure: @MainActor (UIView, CGRect, Bool) -> Bool = { _, _, _ in false }
+
+        let webKitImage = BrowserSurfaceRenderer.image(
+            from: view,
+            afterScreenUpdates: false,
+            opaque: true,
+            renderingPolicy: .webKit,
+            drawHierarchy: drawFailure,
+        )
+        let appOwnedImage = BrowserSurfaceRenderer.image(
+            from: view,
+            afterScreenUpdates: false,
+            opaque: true,
+            renderingPolicy: .appOwnedTransition,
+            drawHierarchy: drawFailure,
+        )
+
+        #expect(webKitImage == nil)
+        #expect(appOwnedImage != nil)
+    }
+
     @Test("Contexts are keyed by stable tab ID and destroyed independently of selection")
     func contextLifecycle() {
         let adapter = BrowserWebKitAdapter()
@@ -50,6 +76,84 @@ struct BrowserWebKitAdapterTests {
 
         #expect(eventTabID == tabID)
         #expect(eventOperationID == operationID)
+    }
+
+    @Test("An untracked nil provisional navigation emits an external navigation start")
+    func untrackedNilProvisionalNavigationEmitsNavigationStarted() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let webView = adapter.ensureContext(for: tabID)
+        let delegate = try #require(webView.navigationDelegate as? WKNavigationDelegate)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        defer { adapter.destroyContext(for: tabID) }
+
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+    }
+
+    @Test("An unidentified nil navigation completes its full lifecycle")
+    func unidentifiedNilNavigationCompletesItsFullLifecycle() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let webView = adapter.ensureContext(for: tabID)
+        let delegate = try #require(webView.navigationDelegate as? WKNavigationDelegate)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        defer { adapter.destroyContext(for: tabID) }
+
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+
+        delegate.webView?(webView, didCommit: nil)
+        try #require(adapter.hasCommittedDocument(for: tabID))
+
+        delegate.webView?(webView, didFinish: nil)
+        guard case let .metadata(eventTabID, _, .untracked) = await events.next() else {
+            Issue.record("An unidentified nil navigation did not emit untracked completion metadata")
+            return
+        }
+
+        #expect(eventTabID == tabID)
+        #expect(adapter.hasCommittedDocument(for: tabID))
+    }
+
+    @Test("An unidentified nil navigation failure is processed as untracked")
+    func unidentifiedNilNavigationFailureClearsLifecycle() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let webView = adapter.ensureContext(for: tabID)
+        let delegate = try #require(webView.navigationDelegate as? WKNavigationDelegate)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        let failingURL = try #require(URL(string: "https://example.com/failure"))
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotConnectToHost,
+            userInfo: [NSURLErrorFailingURLErrorKey: failingURL],
+        )
+        defer { adapter.destroyContext(for: tabID) }
+
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+
+        delegate.webView?(webView, didFailProvisionalNavigation: nil, withError: error)
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+        guard case let .navigationFailed(
+            eventTabID,
+            .connectionFailed(eventURL),
+            .untracked,
+        ) = await events.next() else {
+            Issue.record("An unidentified nil navigation failure was not emitted as untracked")
+            return
+        }
+
+        #expect(eventTabID == tabID)
+        #expect(eventURL == failingURL)
+        #expect(adapter.hasCommittedDocument(for: tabID) == false)
+
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
     }
 
     @Test("Preview capture uses the current viewport and projects success or failure as Sendable data")
@@ -302,6 +406,80 @@ struct BrowserWebKitAdapterTests {
         bridge.makeCoordinator().refresh()
 
         #expect(refreshCount == 1)
+    }
+
+    @Test("A custom BrowserWebView adapter owns the default readiness coordinator")
+    func customBrowserWebViewAdapterOwnsDefaultReadinessCoordinator() {
+        let tabID = BrowserTabID()
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let readinessContext = BrowserWebKitReadinessContext(revision: .init())
+        _ = adapter.ensureContext(for: tabID)
+        let bridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: adapter,
+            readinessContext: readinessContext,
+        )
+        let coordinator = bridge.makeCoordinator()
+
+        #expect(
+            coordinator.resolveReadinessContext(
+                readinessContext,
+                for: webView,
+                tabID: tabID,
+            ) == readinessContext,
+        )
+
+        adapter.destroyContext(for: tabID)
+    }
+
+    @Test("Updated BrowserWebView values keep the coordinator-owned adapter surface attached")
+    func updatedBrowserWebViewUsesCoordinatorAdapter() {
+        let tabID = BrowserTabID()
+        let firstWebView = WKWebView(frame: .zero)
+        let secondWebView = WKWebView(frame: .zero)
+        let firstAdapter = BrowserWebKitAdapter(makeWebView: { _, _ in firstWebView })
+        let secondAdapter = BrowserWebKitAdapter(makeWebView: { _, _ in secondWebView })
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let firstBridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: firstAdapter,
+        )
+        let secondBridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: secondAdapter,
+        )
+        let hostingController = UIHostingController(rootView: AnyView(firstBridge))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        hostingController.view.frame = window.bounds
+        hostingController.view.layoutIfNeeded()
+        defer {
+            hostingController.rootView = AnyView(EmptyView())
+            hostingController.view.layoutIfNeeded()
+            firstAdapter.destroyContext(for: tabID)
+            secondAdapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        hostingController.rootView = AnyView(secondBridge)
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
+
+        #expect(firstAdapter.webView(for: tabID) === firstWebView)
+        #expect(firstWebView.superview != nil)
+        #expect(registry.view(for: .content(tabID)) === firstWebView)
+        #expect(secondAdapter.webView(for: tabID) == nil)
+        #expect(secondWebView.superview == nil)
     }
 
     @Test("The WebKit bridge receives the adopting presentation's interactive policy")

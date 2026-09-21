@@ -121,11 +121,17 @@ extension BrowserTabTransitionUIKitCoordinator {
         }
         if hasMaterialAspectMismatch(destinationRect) {
             record(.aspectMismatch)
-            if session.liveSurface != nil {
+            if session.direction == .toBrowsing,
+               session.frozenSurface != nil {
+                // Preserve the exact frozen card while revealing the mounted browsing surface.
+                // The material geometry guard still prevents an unsafe transform.
+                completeWithOpacityOnly(
+                    destinationView: destinationView,
+                    destinationFrame: destinationRect,
+                )
+            } else {
                 // A live source cannot use the frozen fallback path: finish the handoff while
                 // restoring the existing WebKit surface instead of leaving the coordinator active.
-                finish()
-            } else {
                 finish()
             }
             return

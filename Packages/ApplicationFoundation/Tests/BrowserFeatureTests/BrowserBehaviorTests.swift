@@ -55,6 +55,71 @@ struct BrowserBehaviorTests {
         #expect(store.state.tabs[0].content == .web(requestedURL: url))
     }
 
+    @Test("Operation-bearing navigation commands carry the reducer's pending identity")
+    func operationBearingNavigationCommandsCarryPendingIdentity() async throws {
+        let tabID = BrowserTabID()
+        let initialURL = try #require(URL(string: "https://initial.example"))
+        let destinationURL = try #require(URL(string: "https://destination.example"))
+        let tab = BrowserTab.web(id: tabID, url: initialURL)
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let store = TestStore(initialState: BrowserFeature.State(
+            tabs: [tab],
+            selectedTabID: tabID,
+        )) { BrowserFeature() } withDependencies: {
+            $0.browserWebKit.execute = { command in
+                commands.withValue { $0.append(command) }
+            }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.navigate(destinationURL))
+        let loadOperationID = try #require(store.state.previewState.operation(for: tabID))
+        await store.send(.backTapped)
+        let backOperationID = try #require(store.state.previewState.operation(for: tabID))
+        await store.send(.forwardTapped)
+        let forwardOperationID = try #require(store.state.previewState.operation(for: tabID))
+        await store.send(.reloadOrStopTapped)
+        let reloadOperationID = try #require(store.state.previewState.operation(for: tabID))
+        await store.send(.pullToRefresh)
+        let refreshOperationID = try #require(store.state.previewState.operation(for: tabID))
+
+        let entry = BrowserBackForwardEntry(title: "Initial", url: initialURL)
+        await store.send(.webKitEvent(.backForwardEntries(
+            tabID: tabID,
+            direction: .back,
+            entries: [entry],
+        ))) {
+            $0.backForwardList = .init(tabID: tabID, direction: .back, entries: [entry])
+        }
+        await store.send(.backForwardEntrySelected(entry.token))
+        let entryOperationID = try #require(store.state.previewState.operation(for: tabID))
+        await store.finish()
+
+        let recordedCommands = commands.value
+        #expect(
+            recordedCommands.first(where: { $0.route == .load(tabID: tabID, url: destinationURL) })?.operationID
+                == loadOperationID,
+        )
+        #expect(
+            recordedCommands.first(where: { $0.route == .goBack(tabID: tabID) })?.operationID == backOperationID,
+        )
+        #expect(
+            recordedCommands.first(where: { $0.route == .goForward(tabID: tabID) })?.operationID
+                == forwardOperationID,
+        )
+        #expect(
+            recordedCommands.first(where: { $0.route == .reload(tabID: tabID) })?.operationID == reloadOperationID,
+        )
+        #expect(
+            recordedCommands.last(where: { $0.route == .reload(tabID: tabID) })?.operationID == refreshOperationID,
+        )
+        #expect(
+            recordedCommands.first(where: {
+                $0.route == .goToBackForwardEntry(tabID: tabID, token: entry.token)
+            })?.operationID == entryOperationID,
+        )
+    }
+
     @Test("Navigation failure, Back recovery, Retry, and process termination preserve logical identity")
     func errorsAndTermination() async throws {
         let tabID = BrowserTabID()
@@ -523,6 +588,25 @@ private enum BrowserCommandRoute: Equatable {
 }
 
 extension BrowserWebKitCommand {
+    fileprivate var operationID: BrowserNavigationOperationID? {
+        switch self {
+        case let .load(_, _, operationID),
+             let .goBack(_, operationID),
+             let .goForward(_, operationID),
+             let .reload(_, operationID),
+             let .goToBackForwardEntry(_, _, operationID):
+            operationID
+        case .ensureContext,
+             .destroyContext,
+             .stop,
+             .showBackForwardList,
+             .find,
+             .capturePreview,
+             .dismissJavaScriptDialog:
+            nil
+        }
+    }
+
     fileprivate var route: BrowserCommandRoute {
         switch self {
         case let .ensureContext(tabID):

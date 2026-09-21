@@ -120,14 +120,17 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
     var surfaceChangeTaskScheduled = false
     weak var overlay: BrowserTabTransitionOverlayView?
     let diagnostics: BrowserTabTransitionDiagnostics
+    let renderedSurfaceFactory: ((UIView) -> UIView?)?
     private var transitionToken = 0
 
     init(
         registry: BrowserTabTransitionSurfaceRegistry = .init(),
         diagnostics: BrowserTabTransitionDiagnostics = .init(),
+        renderedSurfaceFactory: ((UIView) -> UIView?)? = nil,
     ) {
         self.registry = registry
         self.diagnostics = diagnostics
+        self.renderedSurfaceFactory = renderedSurfaceFactory
         registry.onChange = { [weak self] in
             self?.surfaceChanged()
         }
@@ -137,7 +140,8 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
             }
 
             self.diagnostics.onEvent?(event)
-            if case .targetEvidenceUnavailable = event {
+            if case let .targetEvidenceUnavailable(tabID) = event,
+               session?.tabID == tabID {
                 handleEvidenceUnavailable()
             }
         }

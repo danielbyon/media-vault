@@ -335,7 +335,9 @@ private struct BrowserWebKitNavigationCorrelation {
     private(set) var hasCommittedDocument = false
     private var wasCommittedBeforeNavigation = false
     private var activeNavigationIdentifier: ObjectIdentifier?
+    /// Keeps synchronous command callbacks from being mistaken for untracked external starts.
     private var isAwaitingNavigationRegistration = false
+    private var hasActiveUnidentifiedNavigation = false
     private var operationIDs: [ObjectIdentifier: BrowserNavigationOperationID] = [:]
     private var activeNavigationReference: BrowserWebKitNavigationReference?
     private var supersededNavigations: [BrowserWebKitNavigationReference] = []
@@ -361,6 +363,7 @@ private struct BrowserWebKitNavigationCorrelation {
         activeNavigationIdentifier = nil
         activeNavigationReference = nil
         isAwaitingNavigationRegistration = true
+        hasActiveUnidentifiedNavigation = false
         operationIDs.removeAll(keepingCapacity: true)
         generation &+= 1
     }
@@ -382,11 +385,31 @@ private struct BrowserWebKitNavigationCorrelation {
         activeNavigationIdentifier = navigationIdentifier
         activeNavigationReference = .init(navigation)
         operationIDs[navigationIdentifier] = operationID
+        hasActiveUnidentifiedNavigation = false
         return true
     }
 
     /// Accepts an unregistered navigation created outside the reducer command path.
     mutating func acceptExternalNavigation(_ navigation: WKNavigation?) -> Bool {
+        if navigation == nil {
+            guard !isAwaitingNavigationRegistration else {
+                return false
+            }
+            guard activeNavigationIdentifier == nil,
+                  !hasActiveUnidentifiedNavigation
+            else {
+                return false
+            }
+
+            rememberSupersededNavigation(activeNavigationReference?.value)
+            hasCommittedDocument = false
+            operationIDs.removeAll(keepingCapacity: true)
+            activeNavigationIdentifier = nil
+            activeNavigationReference = nil
+            hasActiveUnidentifiedNavigation = true
+            generation &+= 1
+            return true
+        }
         guard let navigation else {
             return false
         }
@@ -405,16 +428,21 @@ private struct BrowserWebKitNavigationCorrelation {
         operationIDs.removeAll(keepingCapacity: true)
         activeNavigationIdentifier = navigationIdentifier
         activeNavigationReference = .init(navigation)
+        hasActiveUnidentifiedNavigation = false
         generation &+= 1
         return true
     }
 
     func isCurrent(_ navigation: WKNavigation?) -> Bool {
-        guard let navigation, let activeNavigationIdentifier else {
-            return false
+        if let navigation {
+            guard let activeNavigationIdentifier else {
+                return false
+            }
+
+            return ObjectIdentifier(navigation) == activeNavigationIdentifier
         }
 
-        return ObjectIdentifier(navigation) == activeNavigationIdentifier
+        return hasActiveUnidentifiedNavigation
     }
 
     mutating func commit(_ navigation: WKNavigation?) -> Bool {
@@ -432,6 +460,12 @@ private struct BrowserWebKitNavigationCorrelation {
         }
 
         hasCommittedDocument = true
+        if navigation == nil {
+            hasActiveUnidentifiedNavigation = false
+            return Completion(operationID: nil)
+        }
+
+        clearActiveNavigation()
         return Completion(operationID: consumeOperationID(for: navigation))
     }
 
@@ -467,6 +501,25 @@ private struct BrowserWebKitNavigationCorrelation {
         return operationID
     }
 
+    mutating func markFinished(_ navigation: WKNavigation?) {
+        guard isCurrent(navigation) else {
+            return
+        }
+
+        if navigation == nil {
+            hasActiveUnidentifiedNavigation = false
+            return
+        }
+
+        clearActiveNavigation()
+    }
+
+    private mutating func clearActiveNavigation() {
+        rememberSupersededNavigation(activeNavigationReference?.value)
+        activeNavigationIdentifier = nil
+        activeNavigationReference = nil
+    }
+
     mutating func discardSupersededNavigation(_ navigation: WKNavigation?) {
         guard let navigation else {
             return
@@ -478,6 +531,7 @@ private struct BrowserWebKitNavigationCorrelation {
     mutating func processTerminated() {
         hasCommittedDocument = false
         isAwaitingNavigationRegistration = false
+        hasActiveUnidentifiedNavigation = false
         activeNavigationIdentifier = nil
         operationIDs.removeAll(keepingCapacity: true)
         activeNavigationReference = nil
@@ -583,7 +637,8 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
         // A command registers its WKNavigation immediately after issuing the WebKit call. The
         // correlation tracker rejects callbacks from that registration window and from known or
-        // stale navigations before an external page can supersede the pending operation.
+        // stale navigations. Outside that window, a nil callback represents an untracked external
+        // navigation because WebKit supplied no identity to correlate.
         guard navigationCorrelation.acceptExternalNavigation(navigation) else {
             navigationCorrelation.discardSupersededNavigation(navigation)
             return
@@ -844,6 +899,7 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
             // WebKit reports user cancellation as an unmapped navigation error. It still must
             // complete the reducer-issued operation or the preview lifecycle remains pending.
             emitMetadata(operationID: operationID)
+            navigationCorrelation.markFinished(navigation)
             _ = navigationCorrelation.consumeOperationID(for: navigation)
             return
         }
@@ -856,6 +912,7 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
             error: mapped,
             correlation: correlation,
         ))
+        navigationCorrelation.markFinished(navigation)
         _ = navigationCorrelation.consumeOperationID(for: navigation)
     }
 

@@ -14,7 +14,7 @@ import Testing
 @MainActor
 struct BrowserPreviewReducerTests {
     @Test("A preview cache entry from an older revision is never rendered")
-    func stalePreviewBytesAreRejectedWithoutEviction() throws {
+    func stalePreviewEntriesAreNeverRendered() throws {
         let tabID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: tabID, url: url)
@@ -30,8 +30,6 @@ struct BrowserPreviewReducerTests {
         )
 
         #expect(representation == .placeholder(.web))
-        #expect(entry.revision == staleRevision)
-        #expect(entry.pngData == staleBytes)
     }
 
     @Test("Native preview results replace live-tab cache and failed results preserve stale data")

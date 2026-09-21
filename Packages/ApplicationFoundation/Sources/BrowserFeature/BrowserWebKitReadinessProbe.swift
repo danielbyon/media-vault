@@ -27,9 +27,10 @@ final class BrowserWebKitReadinessProbe: NSObject {
     private static let maximumUnavailableViewTurns = 180
     private static let maximumMismatchSettlingTurns = 30
 
-    private weak var view: UIView?
+    private weak var webView: WKWebView?
     private let readinessContext: BrowserWebKitReadinessContext?
     private let hasCommittedDocument: () -> Bool
+    private let visualSignature: (WKWebView) -> BrowserWebKitVisualSignature?
     private let onResult: (BrowserWebKitReadinessResult) -> Void
     private let onVisualInvalid: () -> Void
     private var unavailableViewTurnsRemaining = 0
@@ -39,15 +40,19 @@ final class BrowserWebKitReadinessProbe: NSObject {
     private var displayLink: CADisplayLink?
 
     init(
-        view: UIView,
+        webView: WKWebView,
         readinessContext: BrowserWebKitReadinessContext?,
         hasCommittedDocument: @escaping () -> Bool,
+        visualSignature: @escaping (WKWebView) -> BrowserWebKitVisualSignature? = {
+            BrowserWebKitVisualSignature(webView: $0)
+        },
         onResult: @escaping (BrowserWebKitReadinessResult) -> Void,
         onVisualInvalid: @escaping () -> Void,
     ) {
-        self.view = view
+        self.webView = webView
         self.readinessContext = readinessContext
         self.hasCommittedDocument = hasCommittedDocument
+        self.visualSignature = visualSignature
         self.onResult = onResult
         self.onVisualInvalid = onVisualInvalid
         super.init()
@@ -69,22 +74,22 @@ final class BrowserWebKitReadinessProbe: NSObject {
         displayLink = nil
     }
 
-    func matches(view: UIView, readinessContext: BrowserWebKitReadinessContext?) -> Bool {
-        self.view === view
+    func matches(webView: WKWebView, readinessContext: BrowserWebKitReadinessContext?) -> Bool {
+        self.webView === webView
             && self.readinessContext == readinessContext
     }
 
     @objc
     private func tick(_: CADisplayLink) {
-        guard let view else {
+        guard let webView else {
             if consumeUnavailableViewTurn() {
                 becomeUnavailable()
             }
             return
         }
-        guard view.bounds.width > 0,
-              view.bounds.height > 0,
-              view.window != nil
+        guard webView.bounds.width > 0,
+              webView.bounds.height > 0,
+              webView.window != nil
         else {
             if consumeUnavailableViewTurn() {
                 becomeUnavailable()
@@ -95,10 +100,6 @@ final class BrowserWebKitReadinessProbe: NSObject {
             return
         }
         guard visualSamplesRemaining > 0 else {
-            becomeUnavailable()
-            return
-        }
-        guard let webView = view as? WKWebView else {
             becomeUnavailable()
             return
         }
@@ -138,7 +139,7 @@ final class BrowserWebKitReadinessProbe: NSObject {
             }
             return
         }
-        guard let observedSignature = BrowserWebKitVisualSignature(view: webView.scrollView) else {
+        guard let observedSignature = visualSignature(webView) else {
             handleVisualMismatch(signature: nil)
             return
         }

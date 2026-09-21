@@ -272,6 +272,43 @@ struct BrowserTabTransitionTests {
         harness.window.isHidden = true
     }
 
+    @Test("Destination evidence is scoped to the active transition tab")
+    func destinationEvidenceOnlyAbortsTheActiveTabTransition() {
+        var completed = false
+        let unrelatedTabID = BrowserTabID()
+        let harness = BrowserTabTransitionUIKitHarness(
+            contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
+            cardFrame: CGRect(x: 60, y: 320, width: 100, height: 200),
+            registerContentInitially: false,
+        )
+
+        harness.coordinator.begin(
+            token: 1,
+            direction: .toBrowsing,
+            tabID: harness.tabID,
+            reduceMotion: false,
+            onPresentationChange: {
+                harness.registry.register(
+                    harness.content,
+                    for: .content(harness.tabID),
+                    isReady: false,
+                )
+            },
+            onCompletion: { completed = true },
+        )
+
+        harness.registry.report(.targetEvidenceUnavailable(unrelatedTabID))
+
+        #expect(harness.coordinator.isActive)
+        #expect(completed == false)
+
+        harness.registry.report(.targetEvidenceUnavailable(harness.tabID))
+
+        #expect(harness.coordinator.isActive == false)
+        #expect(completed)
+        harness.window.isHidden = true
+    }
+
     @Test("The real property animator keeps one clone between endpoints mid-transition")
     func uikitCoordinatorKeepsCloneInOverlayAtMidAnimation() async throws {
         var animator: UIViewPropertyAnimator?
@@ -374,6 +411,38 @@ struct BrowserTabTransitionTests {
         mismatchHarness.window.isHidden = true
     }
 
+    @Test("A frozen browsing aspect mismatch reveals the destination through the opacity handoff")
+    func frozenBrowsingAspectMismatchUsesOpacityHandoff() async {
+        var executions: [BrowserTabTransitionExecution] = []
+        var completed = false
+        var revealed = false
+        let harness = BrowserTabTransitionUIKitHarness(
+            contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
+            cardFrame: CGRect(x: 60, y: 320, width: 200, height: 100),
+            diagnostics: .init(onExecution: { executions.append($0) }),
+        )
+
+        harness.coordinator.begin(
+            token: 1,
+            direction: .toBrowsing,
+            tabID: harness.tabID,
+            reduceMotion: false,
+            onPresentationChange: {},
+            onCompletion: { completed = true },
+            onDestinationVisible: { revealed = true },
+        )
+        await harness.waitForAnimation()
+
+        #expect(executions == [.aspectMismatch])
+        #expect(executions.contains(.geometry) == false)
+        #expect(revealed)
+        #expect(completed)
+        #expect(harness.coordinator.presentationOutcome.destinationWasRevealed)
+        #expect(harness.coordinator.isActive == false)
+        #expect(harness.overlay.subviews.isEmpty)
+        harness.window.isHidden = true
+    }
+
     @Test("A live aspect mismatch restores the page and ends the transition")
     func liveAspectMismatchRestoresPageAndEndsTransition() async {
         var executions: [BrowserTabTransitionExecution] = []
@@ -398,6 +467,51 @@ struct BrowserTabTransitionTests {
         #expect(completed)
         #expect(harness.coordinator.isActive == false)
         #expect(executions == [.aspectMismatch])
+        #expect(harness.content.superview === harness.rootViewController.view)
+        #expect(harness.content.transform == .identity)
+        harness.window.isHidden = true
+    }
+
+    @Test("Reduce Motion live overview render failure aborts back to browsing")
+    func reduceMotionLiveOverviewRenderFailureAbortsToBrowsing() async {
+        var executions: [BrowserTabTransitionExecution] = []
+        var presentation = BrowserPresentation.browsing
+        var completed = false
+        var aborted = false
+        var revealed = false
+        let harness = BrowserTabTransitionUIKitHarness(
+            contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
+            cardFrame: CGRect(x: 60, y: 320, width: 100, height: 200),
+            contentRepresentation: .live,
+            diagnostics: .init(onExecution: { executions.append($0) }),
+            renderedSurfaceFactory: { _ in nil },
+        )
+
+        harness.coordinator.begin(
+            token: 1,
+            direction: .toOverview,
+            tabID: harness.tabID,
+            reduceMotion: true,
+            onPresentationChange: {
+                presentation = .tabOverview
+                harness.registerCard()
+            },
+            onCompletion: { completed = true },
+            onEvidenceUnavailable: {
+                presentation = .browsing
+                aborted = true
+            },
+            onDestinationVisible: { revealed = true },
+        )
+        await harness.waitForAnimation()
+
+        #expect(executions == [.reduceMotion])
+        #expect(revealed == false)
+        #expect(aborted)
+        #expect(completed)
+        #expect(presentation == .browsing)
+        #expect(harness.coordinator.isActive == false)
+        #expect(harness.card.subviews.isEmpty)
         #expect(harness.content.superview === harness.rootViewController.view)
         #expect(harness.content.transform == .identity)
         harness.window.isHidden = true
@@ -667,6 +781,7 @@ private final class BrowserTabTransitionUIKitHarness {
         registerContentInitially: Bool = true,
         contentRepresentation: BrowserTabTransitionSurfaceRegistry.Representation = .frozen,
         diagnostics: BrowserTabTransitionDiagnostics = .init(),
+        renderedSurfaceFactory: ((UIView) -> UIView?)? = nil,
     ) {
         window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         rootViewController = UIViewController()
@@ -675,6 +790,7 @@ private final class BrowserTabTransitionUIKitHarness {
         coordinator = BrowserTabTransitionUIKitCoordinator(
             registry: registry,
             diagnostics: diagnostics,
+            renderedSurfaceFactory: renderedSurfaceFactory,
         )
         content = UIView(frame: contentFrame)
         card = UIView(frame: cardFrame)

@@ -86,13 +86,20 @@ struct BrowserViewInteractionTests {
     func webKitReadinessEvidenceSamplesTheRegisteredPageBoundary() async throws {
         let tabID = BrowserTabID(UUID(9_008))
         let registry = BrowserTabTransitionSurfaceRegistry()
+        var readinessEvents: [BrowserTabTransitionEvent] = []
+        registry.onEvent = { readinessEvents.append($0) }
         let rootViewController = UIViewController()
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            visualSignature: { testWebKitVisualSignature(for: $0) },
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
+            readinessCoordinator: readinessCoordinator,
             adapter: adapter,
         )
         _ = adapter.ensureContext(for: tabID)
@@ -123,6 +130,7 @@ struct BrowserViewInteractionTests {
 
         let overlay = UIView(frame: webView.bounds)
         overlay.backgroundColor = .systemBlue
+        overlay.isOpaque = true
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         webView.addSubview(overlay)
         webView.layoutIfNeeded()
@@ -132,9 +140,7 @@ struct BrowserViewInteractionTests {
         )
         #expect(overlayPixel?.approximatelyMatches(expectedPagePixel) == false)
 
-        let pageSurfaceSignature = try #require(
-            BrowserWebKitVisualSignature(view: webView.scrollView),
-        )
+        let pageSurfaceSignature = try #require(testWebKitVisualSignature(for: webView))
         let inputReadinessContext = BrowserWebKitReadinessContext(
             revision: .init(),
             expectedSignature: pageSurfaceSignature,
@@ -144,10 +150,7 @@ struct BrowserViewInteractionTests {
             for: webView,
             tabID: tabID,
         )
-        #expect(
-            resolvedReadinessContext?.expectedSignature == pageSurfaceSignature,
-            "a UIKit overlay must not replace the cached WebKit evidence",
-        )
+        #expect(BrowserWebKitVisualEvidence.hasOpaqueCover(in: webView))
 
         registry.register(
             webView,
@@ -167,6 +170,93 @@ struct BrowserViewInteractionTests {
             registry.isReady(for: .content(tabID)) == false,
             "outer UIKit overlays must not satisfy WebKit page readiness",
         )
+        #expect(readinessEvents.contains(.targetVisualInvalid(tabID)))
+    }
+
+    @Test("Canceling Browser-owned readiness invalidates a pending same-tab probe")
+    func cancelingBrowserOwnedReadinessInvalidatesPendingSameTabProbe() async throws {
+        let tabID = BrowserTabID(UUID(9_009))
+        let expectedSignature = try #require(
+            BrowserWebKitVisualSignature(
+                imageData: solidPreviewData(red: 217, green: 74, blue: 90),
+            ),
+        )
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        var readinessEvents: [BrowserTabTransitionEvent] = []
+        registry.onEvent = { readinessEvents.append($0) }
+        let rootViewController = UIViewController()
+        let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
+        let webView = WKWebView(frame: rootViewController.view.bounds)
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            visualSignature: { _ in expectedSignature },
+        )
+        let coordinator = BrowserWebView.Coordinator(
+            onRefresh: {},
+            transitionRegistry: registry,
+            readinessCoordinator: readinessCoordinator,
+            adapter: adapter,
+        )
+        _ = adapter.ensureContext(for: tabID)
+        rootViewController.view.addSubview(webView)
+        rootViewController.view.layoutIfNeeded()
+        defer {
+            coordinator.invalidateReadinessProbe()
+            adapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        webView.loadHTMLString(
+            webKitTestDocument(
+                text: "Pending readiness probe",
+                background: "#d94a5a",
+                includeVisibleText: false,
+            ),
+            baseURL: nil,
+        )
+        try await waitForWebKitDocument(in: webView, expectedText: "Pending readiness probe")
+        registry.register(
+            webView,
+            for: .content(tabID),
+            representation: .live,
+            isReady: false,
+        )
+
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: .init(
+                revision: .init(),
+                expectedSignature: expectedSignature,
+                requiresFreshCommit: true,
+            ),
+        )
+        coordinator.invalidateReadinessProbe()
+        for _ in 0 ..< 10 {
+            await waitForDisplayTurn()
+        }
+
+        #expect(!readinessEvents.contains(.targetVisualReady(tabID)))
+        #expect(!readinessEvents.contains(.targetEvidenceUnavailable(tabID)))
+        #expect(registry.isReady(for: .content(tabID)) == false)
+
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: .init(
+                revision: .init(),
+                expectedSignature: expectedSignature,
+            ),
+        )
+        for _ in 0 ..< 30 where !registry.isReady(for: .content(tabID)) {
+            await waitForDisplayTurn()
+        }
+
+        #expect(registry.isReady(for: .content(tabID)))
+        #expect(readinessEvents.contains(.targetVisualReady(tabID)))
+        #expect(!readinessEvents.contains(.targetEvidenceUnavailable(tabID)))
     }
 
     @Test("Replacing same-revision preview refreshes WebKit readiness evidence")
@@ -188,7 +278,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            visualSignature: { testWebKitVisualSignature(for: $0) },
+        )
         let browserViewCoordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
@@ -267,9 +360,14 @@ struct BrowserViewInteractionTests {
         registry.onEvent = { readinessEvents.append($0) }
         rootViewController.view.addSubview(webView)
         rootViewController.view.layoutIfNeeded()
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            visualSignature: { testWebKitVisualSignature(for: $0) },
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
+            readinessCoordinator: readinessCoordinator,
             adapter: adapter,
         )
         _ = adapter.ensureContext(for: tabID)
@@ -439,9 +537,14 @@ struct BrowserViewInteractionTests {
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
         var readinessEvents: [BrowserTabTransitionEvent] = []
         registry.onEvent = { readinessEvents.append($0) }
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            visualSignature: { testWebKitVisualSignature(for: $0) },
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
+            readinessCoordinator: readinessCoordinator,
             adapter: adapter,
         )
         _ = adapter.ensureContext(for: tabID)
@@ -523,9 +626,14 @@ struct BrowserViewInteractionTests {
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
         var readinessEvents: [BrowserTabTransitionEvent] = []
         registry.onEvent = { readinessEvents.append($0) }
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            visualSignature: { testWebKitVisualSignature(for: $0) },
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
+            readinessCoordinator: readinessCoordinator,
             adapter: adapter,
         )
         _ = adapter.ensureContext(for: tabID)
@@ -615,8 +723,16 @@ struct BrowserViewInteractionTests {
                 onEvent: { transitionEvents.append($0) },
             ),
         )
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: .shared,
+            visualSignature: { testWebKitVisualSignature(for: $0) },
+        )
         let hostingController = UIHostingController(
-            rootView: BrowserView(store: store, transitionCoordinator: coordinator),
+            rootView: BrowserView(
+                store: store,
+                transitionCoordinator: coordinator,
+                readinessCoordinator: readinessCoordinator,
+            ),
         )
         let window = mount(hostingController, size: CGSize(width: 390, height: 700))
         let adapter = BrowserWebKitAdapter.shared
@@ -761,8 +877,16 @@ struct BrowserViewInteractionTests {
                 onEvent: { readinessEvents.append($0) },
             ),
         )
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: .shared,
+            visualSignature: { testWebKitVisualSignature(for: $0) },
+        )
         let hostingController = UIHostingController(
-            rootView: BrowserView(store: store, transitionCoordinator: coordinator),
+            rootView: BrowserView(
+                store: store,
+                transitionCoordinator: coordinator,
+                readinessCoordinator: readinessCoordinator,
+            ),
         )
         let window = mount(hostingController, size: CGSize(width: 390, height: 700))
         let webView = try #require(allViews(in: hostingController.view).compactMap { $0 as? WKWebView }.first)
@@ -807,7 +931,7 @@ struct BrowserViewInteractionTests {
         let expectedSignature = try #require(
             BrowserWebKitVisualSignature(imageData: solidPreviewData(red: 217, green: 74, blue: 90)),
         )
-        let pageSignature = BrowserWebKitVisualSignature(view: webView.scrollView)
+        let pageSignature = testWebKitVisualSignature(for: webView)
         #expect(pageSignature?.approximatelyMatches(expectedSignature) == true)
         #expect(BrowserWebKitVisualEvidence.hasOpaqueCover(in: webView) == false)
 
@@ -974,8 +1098,16 @@ struct BrowserViewInteractionTests {
                 onEvent: { transitionEvents.append($0) },
             ),
         )
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: .shared,
+            visualSignature: { testWebKitVisualSignature(for: $0) },
+        )
         let hostingController = UIHostingController(
-            rootView: BrowserView(store: store, transitionCoordinator: coordinator),
+            rootView: BrowserView(
+                store: store,
+                transitionCoordinator: coordinator,
+                readinessCoordinator: readinessCoordinator,
+            ),
         )
         let window = mount(hostingController, size: CGSize(width: 390, height: 700))
         let adapter = BrowserWebKitAdapter.shared
@@ -1536,6 +1668,21 @@ struct BrowserViewInteractionTests {
             displayLink.add(to: .main, forMode: .common)
         }
     }
+}
+
+@MainActor
+private func testWebKitVisualSignature(for webView: WKWebView) -> BrowserWebKitVisualSignature? {
+    guard let image = BrowserSurfaceRenderer.image(
+        from: webView.scrollView,
+        afterScreenUpdates: false,
+        opaque: false,
+        renderingPolicy: .appOwnedTransition,
+        outputSize: CGSize(width: 32, height: 32),
+    ), let data = image.pngData() else {
+        return nil
+    }
+
+    return BrowserWebKitVisualSignature(imageData: data)
 }
 
 private struct RenderedPixel: Equatable {

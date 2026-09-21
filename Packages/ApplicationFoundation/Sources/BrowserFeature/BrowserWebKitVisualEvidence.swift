@@ -48,16 +48,16 @@ struct BrowserWebKitVisualSignature: Equatable {
         self.init(cgImage: image)
     }
 
-    /// Builds a signature directly from a mounted surface using only a tiny bitmap context.
-    init?(view: UIView) {
-        guard view.bounds.width > 0, view.bounds.height > 0 else {
+    /// Builds a signature directly from a mounted WebKit surface using only a tiny bitmap context.
+    init?(webView: WKWebView) {
+        guard webView.bounds.width > 0, webView.bounds.height > 0 else {
             return nil
         }
         guard let image = BrowserSurfaceRenderer.image(
-            from: view,
+            from: webView.scrollView,
             afterScreenUpdates: false,
             opaque: false,
-            renderingPolicy: view is WKWebView ? .webKit : .appOwnedTransition,
+            renderingPolicy: .webKit,
             outputSize: CGSize(width: Self.renderDimension, height: Self.renderDimension),
         ), let cgImage = image.cgImage else {
             return nil

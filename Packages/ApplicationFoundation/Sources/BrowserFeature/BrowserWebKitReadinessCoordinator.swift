@@ -107,12 +107,19 @@ private final class BrowserWebKitReadinessCache {
 @MainActor
 final class BrowserWebKitReadinessCoordinator {
     private let adapter: BrowserWebKitAdapter
+    private let visualSignature: (WKWebView) -> BrowserWebKitVisualSignature?
     private let cache = BrowserWebKitReadinessCache()
     private var readinessProbe: BrowserWebKitReadinessProbe?
     private var readinessProbeGeneration = 0
 
-    init(adapter: BrowserWebKitAdapter = .shared) {
+    init(
+        adapter: BrowserWebKitAdapter = .shared,
+        visualSignature: @escaping (WKWebView) -> BrowserWebKitVisualSignature? = {
+            BrowserWebKitVisualSignature(webView: $0)
+        },
+    ) {
         self.adapter = adapter
+        self.visualSignature = visualSignature
     }
 
     func removeEntries(except tabIDs: Set<BrowserTabID>) {
@@ -164,13 +171,13 @@ final class BrowserWebKitReadinessCoordinator {
     }
 
     func schedule(
-        for view: UIView,
+        for webView: WKWebView,
         tabID: BrowserTabID,
         readinessContext: BrowserWebKitReadinessContext?,
         onResult: @escaping (BrowserWebKitReadinessResult) -> Void,
         onVisualInvalid: @escaping () -> Void,
     ) {
-        if readinessProbe?.matches(view: view, readinessContext: readinessContext) == true {
+        if readinessProbe?.matches(webView: webView, readinessContext: readinessContext) == true {
             return
         }
 
@@ -178,18 +185,19 @@ final class BrowserWebKitReadinessCoordinator {
         readinessProbeGeneration &+= 1
         let generation = readinessProbeGeneration
         let probe = BrowserWebKitReadinessProbe(
-            view: view,
+            webView: webView,
             readinessContext: readinessContext,
-            hasCommittedDocument: { [weak view, adapter] in
-                guard let view,
+            hasCommittedDocument: { [weak webView, adapter] in
+                guard let webView,
                       let adapterWebView = adapter.webView(for: tabID),
-                      adapterWebView === view
+                      adapterWebView === webView
                 else {
                     return false
                 }
 
                 return adapter.hasCommittedDocument(for: tabID)
             },
+            visualSignature: visualSignature,
             onResult: { [weak self] result in
                 guard let self,
                       ownsReadinessProbe(generation: generation)

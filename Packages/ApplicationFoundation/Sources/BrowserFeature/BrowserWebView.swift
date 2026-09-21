@@ -42,7 +42,7 @@ public struct BrowserWebView: UIViewRepresentable {
         transitionRegistry: BrowserTabTransitionSurfaceRegistry,
         adapter: BrowserWebKitAdapter = .shared,
         readinessContext: BrowserWebKitReadinessContext? = nil,
-        readinessCoordinator: BrowserWebKitReadinessCoordinator = .init(),
+        readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
         readinessResetToken: Int = 0,
     ) {
         self.tabID = tabID
@@ -50,7 +50,7 @@ public struct BrowserWebView: UIViewRepresentable {
         self.adapter = adapter
         self.transitionRegistry = transitionRegistry
         self.readinessContext = readinessContext
-        self.readinessCoordinator = readinessCoordinator
+        self.readinessCoordinator = readinessCoordinator ?? .init(adapter: adapter)
         self.readinessResetToken = readinessResetToken
     }
 
@@ -116,7 +116,7 @@ public struct BrowserWebView: UIViewRepresentable {
         }
 
         func scheduleReadinessProbe(
-            for view: UIView,
+            for webView: WKWebView,
             tabID: BrowserTabID,
             readinessContext: BrowserWebKitReadinessContext? = nil,
         ) {
@@ -127,11 +127,11 @@ public struct BrowserWebView: UIViewRepresentable {
             }
 
             readinessCoordinator.schedule(
-                for: view,
+                for: webView,
                 tabID: tabID,
                 readinessContext: readinessContext,
-                onResult: { [weak transitionRegistry, weak view] result in
-                    guard let transitionRegistry, let view else {
+                onResult: { [weak transitionRegistry, weak webView] result in
+                    guard let transitionRegistry, let webView else {
                         return
                     }
 
@@ -139,18 +139,18 @@ public struct BrowserWebView: UIViewRepresentable {
                     case .unavailable:
                         transitionRegistry.report(.targetEvidenceUnavailable(tabID))
                     case .ready:
-                        transitionRegistry.markReady(view, for: .content(tabID))
+                        transitionRegistry.markReady(webView, for: .content(tabID))
                         transitionRegistry.report(.targetVisualReady(tabID))
                     }
                 },
-                onVisualInvalid: { [weak transitionRegistry, weak view] in
-                    guard let transitionRegistry, let view else {
+                onVisualInvalid: { [weak transitionRegistry, weak webView] in
+                    guard let transitionRegistry, let webView else {
                         return
                     }
 
                     transitionRegistry.setReadiness(
                         .pending,
-                        view: view,
+                        view: webView,
                         for: .content(tabID),
                     )
                     transitionRegistry.report(.targetVisualInvalid(tabID))
@@ -221,7 +221,7 @@ public struct BrowserWebView: UIViewRepresentable {
             )
             webView.scrollView.refreshControl = refreshControl
         }
-        adapter.attach(tabID: tabID, to: uiView)
+        webKitAdapter.attach(tabID: tabID, to: uiView)
         transitionRegistry?.report(.targetAttached(tabID))
         transitionRegistry?.register(
             webView,

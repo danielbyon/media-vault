@@ -232,7 +232,8 @@ struct BrowserTabOverviewView: View {
     @ViewBuilder
     private func tabCardMenu(_ tab: BrowserTab) -> some View {
         Button("Open Tab") { onSelectTab(tab) }
-        if case .web = tab.content, let url = tab.metadata.committedURL {
+        if BrowserTabPresentation.canShowPageActions(for: tab),
+           let url = tab.metadata.committedURL {
             if let bookmarkID = BrowserTabPresentation.bookmarkID(
                 for: tab,
                 bookmarks: store.bookmarks,

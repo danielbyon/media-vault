@@ -65,11 +65,13 @@ public struct BrowserView: View {
     init(
         store: StoreOf<BrowserFeature>,
         transitionCoordinator: BrowserTabTransitionUIKitCoordinator,
+        readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
     ) {
         self.init(
             store: store,
             reduceMotionOverride: nil,
             transitionCoordinator: transitionCoordinator,
+            readinessCoordinator: readinessCoordinator,
         )
     }
 
@@ -77,10 +79,12 @@ public struct BrowserView: View {
         store: StoreOf<BrowserFeature>,
         reduceMotionOverride: Bool?,
         transitionCoordinator: BrowserTabTransitionUIKitCoordinator?,
+        readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
     ) {
         self.store = store
         self.reduceMotionOverride = reduceMotionOverride
         _tabTransitionUIKitCoordinator = StateObject(wrappedValue: transitionCoordinator ?? .init())
+        _webKitReadinessCoordinator = State(initialValue: readinessCoordinator ?? .init())
         _chromeOpacity = State(initialValue: store.presentation == .browsing ? 1 : 0)
         _tabTransitionState = State(initialValue: .init(overviewVisualMounted: store.presentation == .tabOverview))
     }
@@ -503,12 +507,18 @@ extension BrowserView {
             reduceMotion: reduceMotionEnabled,
             onPresentationChange: action,
             onEvidenceUnavailable: {
-                store.send(.showTabOverviewTapped)
+                switch direction {
+                case .toBrowsing:
+                    store.send(.showTabOverviewTapped)
+                case .toOverview:
+                    store.send(.tabCardSelected(tabID))
+                }
             },
         )
     }
 
     private func cancelTabTransition() {
+        webKitReadinessCoordinator.invalidate()
         BrowserTabTransitionPresentationCoordinator.cancel(
             coordinator: tabTransitionUIKitCoordinator,
             isOverviewPresented: store.presentation == .tabOverview,

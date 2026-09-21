@@ -309,4 +309,36 @@ struct BrowserPresentationTests {
             $0.previewState.keepOnlyTab(first)
         }
     }
+
+    @Test("Tab Overview page actions require an HTTP or HTTPS committed URL")
+    func tabOverviewPageActionsRequireHTTPURL() throws {
+        let httpURL = try #require(URL(string: "https://example.com"))
+        let aboutURL = try #require(URL(string: "about:blank"))
+        var httpTab = BrowserTab.web(id: BrowserTabID(), url: httpURL)
+        httpTab.metadata.committedURL = httpURL
+        var aboutTab = BrowserTab.web(id: BrowserTabID(), url: aboutURL)
+        aboutTab.metadata.committedURL = aboutURL
+
+        #expect(BrowserTabPresentation.canShowPageActions(for: httpTab))
+        #expect(BrowserTabPresentation.canShowPageActions(for: aboutTab) == false)
+    }
+
+    @Test("Tab titles fall back from empty metadata to host and then generic text")
+    func tabTitleFallbacksIgnoreEmptyMetadata() throws {
+        let hostedURL = try #require(URL(string: "https://example.com/path"))
+        let blankURL = try #require(URL(string: "about:blank"))
+        var titledTab = BrowserTab.web(id: BrowserTabID(), url: hostedURL)
+        titledTab.metadata = .init(committedURL: hostedURL, title: "Example")
+        var emptyTitleTab = titledTab
+        emptyTitleTab.metadata.title = ""
+        var whitespaceTitleTab = titledTab
+        whitespaceTitleTab.metadata.title = "  \n"
+        var blankTab = BrowserTab.web(id: BrowserTabID(), url: blankURL)
+        blankTab.metadata = .init(committedURL: blankURL, title: "")
+
+        #expect(BrowserTabPresentation.title(for: titledTab) == "Example")
+        #expect(BrowserTabPresentation.title(for: emptyTitleTab) == "example.com")
+        #expect(BrowserTabPresentation.title(for: whitespaceTitleTab) == "example.com")
+        #expect(BrowserTabPresentation.title(for: blankTab) == "Web Page")
+    }
 }

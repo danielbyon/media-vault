@@ -17,7 +17,11 @@ extension BrowserTabTransitionUIKitCoordinator {
     /// layer renderer gives the direct-live fallback a fixed-bounds card representation without
     /// asking WebKit to navigate, resize, or serialize reducer preview state.
     func makeRenderedSurface(from sourceView: UIView) -> UIView? {
-        BrowserSurfaceRenderer.imageView(
+        if let renderedSurfaceFactory {
+            return renderedSurfaceFactory(sourceView)
+        }
+
+        return BrowserSurfaceRenderer.imageView(
             from: sourceView,
             afterScreenUpdates: false,
             opaque: sourceView.isOpaque,
@@ -30,21 +34,22 @@ extension BrowserTabTransitionUIKitCoordinator {
             return
         }
 
-        if let liveSurface = session.liveSurface,
-           session.direction == .toOverview,
-           let exactCardSurface = makeRenderedSurface(from: liveSurface) {
-            // Reduced Motion removes the geometry animation, but the overview still receives
-            // the exact rendered page rather than exposing a cached or placeholder preview.
-            session.frozenSurface = exactCardSurface
-            parkFrozenSurface(in: destinationView)
-            revealDestination()
-            restoreLiveSurface()
-            session.animator = nil
-            finish()
-            return
-        }
+        if let liveSurface = session.liveSurface {
+            if session.direction == .toOverview {
+                guard let exactCardSurface = makeRenderedSurface(from: liveSurface) else {
+                    // A reduced-motion overview transition must not reveal a card that was not
+                    // proven to contain the live page pixels. The live WebKit surface remains
+                    // authoritative while the Browser owner restores the browsing presentation.
+                    abortUnprovableTransition()
+                    return
+                }
 
-        if session.liveSurface != nil {
+                // Reduced Motion removes the geometry animation, but the overview still receives
+                // the exact rendered page rather than exposing a cached or placeholder preview.
+                session.frozenSurface = exactCardSurface
+                parkFrozenSurface(in: destinationView)
+            }
+
             revealDestination()
             restoreLiveSurface()
             session.animator = nil
