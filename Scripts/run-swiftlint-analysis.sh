@@ -5,16 +5,50 @@ set -o pipefail
 script_directory=$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repository_root=$(cd -- "$script_directory/.." && pwd)
 xcode_wrapper="$script_directory/with-xcode-27-rc.sh"
+swift_tools_adapter="$script_directory/swift-tools.sh"
+swift_tools_local_config="$script_directory/swift-tools-local.sh"
 compiler_log_directory="$repository_root/.build/swiftlint"
 compiler_log="$compiler_log_directory/compiler.log"
 app_derived_data="$compiler_log_directory/DerivedData/App"
 package_derived_data="$compiler_log_directory/DerivedData/ApplicationFoundation"
 iphone_destination="${IPHONE_DESTINATION:-platform=iOS Simulator,name=iPhone 17,OS=27.0}"
-mint_binary="$repository_root/.build/tools/mint/0.18.0/mint"
 
-if [ ! -x "$mint_binary" ]; then
-  printf '%s\n' "Pinned Mint is not bootstrapped. Run Scripts/bootstrap-swift-tools.sh first." >&2
-  exit 1
+if [ ! -x "$swift_tools_adapter" ]; then
+	printf '%s\n' "Shared Swift tooling is not installed. Run Scripts/swift-tools.sh bootstrap first." >&2
+	exit 1
+fi
+
+if [ ! -f "$swift_tools_local_config" ]; then
+	printf '%s\n' "Shared Swift tooling configuration is missing: $swift_tools_local_config" >&2
+	exit 1
+fi
+
+SWIFT_TOOLS_ROOT="$repository_root"
+SWIFT_TOOLS_SOURCE_PATHS=()
+SWIFT_TOOLS_SWIFTLINT_CONFIG=''
+# shellcheck source=/dev/null
+source "$swift_tools_local_config"
+if [ "${#SWIFT_TOOLS_SOURCE_PATHS[@]}" -eq 0 ]; then
+	printf '%s\n' "Shared Swift tooling configuration does not define source paths." >&2
+	exit 1
+fi
+for source_path in "${SWIFT_TOOLS_SOURCE_PATHS[@]}"; do
+	if [[ "$source_path" != /* ]]; then
+		source_path="$repository_root/$source_path"
+	fi
+	if [ ! -e "$source_path" ]; then
+		printf '%s\n' "Configured Swift source path is missing: $source_path" >&2
+		exit 1
+	fi
+done
+if [[ -n "$SWIFT_TOOLS_SWIFTLINT_CONFIG" ]]; then
+	if [[ "$SWIFT_TOOLS_SWIFTLINT_CONFIG" != /* ]]; then
+		SWIFT_TOOLS_SWIFTLINT_CONFIG="$repository_root/$SWIFT_TOOLS_SWIFTLINT_CONFIG"
+	fi
+	if [ ! -f "$SWIFT_TOOLS_SWIFTLINT_CONFIG" ]; then
+		printf '%s\n' "SwiftLint configuration is missing: $SWIFT_TOOLS_SWIFTLINT_CONFIG" >&2
+		exit 1
+	fi
 fi
 
 mkdir -p "$compiler_log_directory"
@@ -40,9 +74,6 @@ run_xcodebuild \
   -derivedDataPath "$package_derived_data" \
   clean build-for-testing
 
-export MINT_PATH="$repository_root/.build/mint"
-export MINT_LINK_PATH="$MINT_PATH/bin"
-
 cd "$repository_root"
 
 # Keep every first-party Swift file in the analyzer input while bounding the
@@ -52,23 +83,19 @@ cd "$repository_root"
 # in smaller explicit batches.
 swift_files=()
 while IFS= read -r swift_file; do
-  swift_files+=("$swift_file")
+	swift_files+=("$swift_file")
 done < <(
-  rg --files App AppTests Packages \
-    -g '*.swift' \
+	rg --files "${SWIFT_TOOLS_SOURCE_PATHS[@]}" \
+		-g '*.swift' \
     -g '!**/Generated/**' \
     -g '!**/*.generated.swift' \
     | sort
 )
 
 analyze_batch() {
-  "$xcode_wrapper" env \
-    MINT_PATH="$MINT_PATH" \
-    MINT_LINK_PATH="$MINT_LINK_PATH" \
-    "$mint_binary" run realm/SwiftLint analyze \
-    --config .swiftlint.yml \
-    --compiler-log-path "$compiler_log" \
-    "$@"
+	"$swift_tools_adapter" configured swiftlint analyze \
+		--compiler-log-path "$compiler_log" \
+		"$@"
 }
 
 batch_size=8

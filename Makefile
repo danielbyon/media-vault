@@ -9,21 +9,15 @@ IPAD_DESTINATION ?= platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.0
 PACKAGE_WORKSPACE := Packages/ApplicationFoundation/.swiftpm/xcode/package.xcworkspace
 PACKAGE_SCHEME := ApplicationFoundation-Package
 
-MINT_VERSION := 0.18.0
-MINT := ./.build/tools/mint/$(MINT_VERSION)/mint
-MINT_ENV := env MINT_PATH="$(CURDIR)/.build/mint" MINT_LINK_PATH="$(CURDIR)/.build/mint/bin"
-SWIFTFORMAT := $(XCODE_WRAPPER) $(MINT_ENV) $(MINT) run nicklockwood/SwiftFormat
-SWIFTLINT := $(XCODE_WRAPPER) $(MINT_ENV) $(MINT) run realm/SwiftLint
-
 .PHONY: all build format lint lint-analyze test tools
 
 all: lint build test
 
 tools:
-	bash ./Scripts/bootstrap-swift-tools.sh
+	bash ./Scripts/swift-tools.sh bootstrap
 
 format: tools
-	$(SWIFTFORMAT) App AppTests Packages --config .swiftformat
+	bash ./Scripts/swift-tools.sh format
 
 build:
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPHONE_DESTINATION)' build
@@ -38,8 +32,7 @@ lint: tools
 	./Scripts/validate-release-identity.sh
 	./Scripts/validate-whitespace.sh
 	git diff --check
-	$(SWIFTFORMAT) App AppTests Packages --config .swiftformat --lint
-	$(SWIFTLINT) lint --config .swiftlint.yml
+	bash ./Scripts/swift-tools.sh lint
 	bash ./Scripts/run-swiftlint-analysis.sh
 
 lint-analyze: tools

@@ -47,3 +47,4 @@ playground.xcworkspace
 
 # Local ChatGPT orchestration state
 .chatgpt/
+.tools/
