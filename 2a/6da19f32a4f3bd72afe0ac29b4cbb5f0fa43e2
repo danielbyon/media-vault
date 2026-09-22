@@ -1,0 +1,44 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature.swift
+  s_bf1cef5a31f7ee::t_c374d98829189a 125-126,155,191,271-272
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  s_bf1cef5a31f7ee::t_1f33963392b94a 77-83,107-113
+  s_bf1cef5a31f7ee::t_59d4955fcbd4d6 184-191
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabOverviewView.swift
+  s_bf1cef5a31f7ee::t_6a71ffef544260 43,46,48-57
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTests.swift
+  s_bf1cef5a31f7ee::t_565db0ceeb4e54 330-337,340-451,457-497
+  s_bf1cef5a31f7ee::t_f0958e06ce5f4d 338-339,452-456
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewInteractionTests.swift
+  s_bf1cef5a31f7ee::t_0fd45ce7f070ff 1151-1162
+  s_bf1cef5a31f7ee::t_cc4d067dbcdb01 1149
+  s_bf1cef5a31f7ee::t_4c7e2380a96d32 967-968,970
+  s_bf1cef5a31f7ee::t_6cf481d4b9046b 1132-1134,1136-1138,1147-1148
+  s_bf1cef5a31f7ee::t_bc5d5c1a5fcbbc 996
+  s_bf1cef5a31f7ee::t_6c504269d7a0e7 1139,1143
+  s_bf1cef5a31f7ee::t_f94311c7159bac 1146
+  s_bf1cef5a31f7ee::t_2aad8c77e40877 966,969,971
+  s_bf1cef5a31f7ee::t_81015d0301165c 997,999,1003
+  s_bf1cef5a31f7ee::t_61aa3997aed6ba 964-965,972-995,998,1000-1002,1004-1035,1048-1051,1053-1062,1129-1131,1150,1163-1165
+  s_bf1cef5a31f7ee::t_ae16b69fc686a8 1036-1047,1052
+  s_bf1cef5a31f7ee::t_66fe4e43533318 1135,1140-1142,1144-1145
+  s_bf1cef5a31f7ee::t_ba8bdeb64644a4 1166
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Helpers.swift
+  s_bf1cef5a31f7ee::t_1cfc7990a382b9 111-135,153-154
+  s_bf1cef5a31f7ee::t_59d590c1420ff3 136-152,172-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2a6da19f32a4f3bd72afe0ac29b4cbb5f0fa43e2",
+  "prompts": {},
+  "sessions": {
+    "s_bf1cef5a31f7ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c9d0-ac2d-7620-9299-089d16e94d71",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
