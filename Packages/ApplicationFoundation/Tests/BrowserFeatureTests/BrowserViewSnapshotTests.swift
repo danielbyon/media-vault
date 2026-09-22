@@ -115,6 +115,7 @@ struct BrowserViewSnapshotTests {
                 .web(id: BrowserTabID(UUID(2)), url: url),
                 .init(id: BrowserTabID(UUID(3)), content: .error(.serverNotFound(url))),
                 loading,
+                .init(id: BrowserTabID(UUID(5)), content: .terminated(lastCommittedURL: url)),
             ],
             selectedTabID: BrowserTabID(UUID(2)),
             presentation: .tabOverview,
@@ -122,6 +123,30 @@ struct BrowserViewSnapshotTests {
         snapshot(state, named: "tab-overview-compact-phone", config: DeterministicTestSupport.compactPhone)
         snapshot(state, named: "tab-overview-large-phone", config: DeterministicTestSupport.largePhone)
         snapshot(state, named: "tab-overview-regular-ipad", config: DeterministicTestSupport.regularWidthIPad)
+    }
+
+    @Test("Tab Overview cards keep bounded geometry at large Dynamic Type")
+    func overviewLargeContentSize() throws {
+        let url = try #require(URL(string: "https://example.com"))
+        let tabs: [BrowserTab] = [
+            .startPage(id: BrowserTabID(UUID(1))),
+            .web(id: BrowserTabID(UUID(2)), url: url),
+            .init(id: BrowserTabID(UUID(3)), content: .error(.serverNotFound(url))),
+            .init(id: BrowserTabID(UUID(4)), content: .terminated(lastCommittedURL: url)),
+        ]
+        let state = BrowserFeature.State(
+            tabs: tabs,
+            selectedTabID: tabs[0].id,
+            presentation: .tabOverview,
+        )
+        let store = Store(initialState: state) { BrowserFeature() }
+        assertSnapshot(
+            of: BrowserView(store: store)
+                .environment(\.colorScheme, .light)
+                .environment(\.dynamicTypeSize, .accessibility3),
+            as: .image(layout: .device(config: DeterministicTestSupport.compactPhone)),
+            named: "tab-overview-large-content-size-compact-phone",
+        )
     }
 
     @Test("Reduced Motion presents the browser endpoint without geometry zoom")

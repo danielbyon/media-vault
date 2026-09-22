@@ -7,16 +7,8 @@
 
 import ComposableArchitecture
 import Foundation
-import PresentationSupport
 import SwiftUI
 import UIKit
-
-/// Transient view state for the card currently receiving a direct-manipulation gesture.
-private struct BrowserTabCardDrag: Equatable {
-    let tabID: BrowserTabID
-    let axis: BrowserTabSwipe.Axis
-    let horizontalTranslation: CGFloat
-}
 
 /// Authenticated native browser presentation.
 @MainActor
@@ -28,42 +20,98 @@ public struct BrowserView: View {
     private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
+    @Environment(\.scenePhase)
+    private var scenePhase
     @FocusState
     private var focusedField: BrowserFocusedField?
     @AccessibilityFocusState
     private var accessibilityFocusedTabID: BrowserTabID?
-    @Namespace
-    private var tabTransition
     @State
-    private var tabCardDrag: BrowserTabCardDrag?
+    private var tabTransitionState = BrowserTabTransitionViewState()
+    @State
+    private var nativePreviewCaptureController = BrowserNativePreviewCaptureController()
+    @State
+    private var webKitReadinessCoordinator = BrowserWebKitReadinessCoordinator()
+    @StateObject
+    private var tabTransitionUIKitCoordinator = BrowserTabTransitionUIKitCoordinator()
+    @State
+    private var chromeLayoutHeight: CGFloat = 0
+    @State
+    private var latestLayoutProbeGeometry: BrowserContentViewportGeometry?
+    @State
+    private var chromeOpacity: Double = 1
 
     /// Creates browser UI bound to deterministic feature state.
     public init(store: StoreOf<BrowserFeature>) {
-        self.store = store
-        reduceMotionOverride = nil
+        self.init(
+            store: store,
+            reduceMotionOverride: nil,
+            transitionCoordinator: nil,
+        )
     }
 
     /// Creates a deterministic presentation for accessibility snapshot coverage.
     init(store: StoreOf<BrowserFeature>, reduceMotionOverride: Bool) {
+        self.init(
+            store: store,
+            reduceMotionOverride: reduceMotionOverride,
+            transitionCoordinator: nil,
+        )
+    }
+
+    /// Creates a presentation with a caller-owned coordinator for transition-boundary tests.
+    init(
+        store: StoreOf<BrowserFeature>,
+        transitionCoordinator: BrowserTabTransitionUIKitCoordinator,
+        readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
+    ) {
+        self.init(
+            store: store,
+            reduceMotionOverride: nil,
+            transitionCoordinator: transitionCoordinator,
+            readinessCoordinator: readinessCoordinator,
+        )
+    }
+
+    private init(
+        store: StoreOf<BrowserFeature>,
+        reduceMotionOverride: Bool?,
+        transitionCoordinator: BrowserTabTransitionUIKitCoordinator?,
+        readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
+    ) {
         self.store = store
         self.reduceMotionOverride = reduceMotionOverride
+        _tabTransitionUIKitCoordinator = StateObject(wrappedValue: transitionCoordinator ?? .init())
+        _webKitReadinessCoordinator = State(initialValue: readinessCoordinator ?? .init())
+        _chromeOpacity = State(initialValue: store.presentation == .browsing ? 1 : 0)
+        _tabTransitionState = State(initialValue: .init(overviewVisualMounted: store.presentation == .tabOverview))
     }
 
     /// Renders the selected browser endpoint or the app-owned tab overview.
     public var body: some View {
-        Group {
-            if store.presentation == .tabOverview {
-                tabOverview
-            } else {
-                selectedContentWithChrome
-                    .keyboardDismissal(focus: $focusedField)
+        ZStack {
+            selectedContentWithChrome
+
+            if tabTransitionState.overviewVisualMounted || store.presentation == .tabOverview {
+                tabOverviewVisual
             }
+
+            BrowserTabTransitionOverlay(coordinator: tabTransitionUIKitCoordinator)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .zIndex(20)
+            chromeTransitionLayer
+        }
+        .modifier(BrowserPresentationKeyboardDismissalModifier(
+            isEnabled: store.presentation == .browsing,
+            focus: $focusedField,
+        ))
+        .background {
+            BrowserContentViewportProbe(
+                chromeHeight: chromeReservedHeight,
+                chromeAtTop: horizontalSizeClass == .regular,
+            )
         }
         .background(Color(uiColor: .systemBackground))
-        .animation(
-            reduceMotionEnabled ? .easeOut(duration: 0.15) : .spring(response: 0.42),
-            value: store.presentation,
-        )
         .onChange(of: store.focusedField, initial: true) { _, value in
             focusedField = value == BrowserFocusedField.none ? nil : value
         }
@@ -83,8 +131,23 @@ public struct BrowserView: View {
             store.send(.omniboxFocused)
         }
         .onChange(of: store.presentation, initial: true) { _, value in
-            if value != .tabOverview {
-                tabCardDrag = nil
+            if value == .tabOverview {
+                tabTransitionState.overviewVisualMounted = true
+            } else if !tabTransitionUIKitCoordinator.isActive
+                || tabTransitionUIKitCoordinator.direction != .toBrowsing {
+                tabTransitionState.overviewVisualMounted = false
+            }
+            if tabTransitionUIKitCoordinator.isActive,
+               let tabTransitionDirection = tabTransitionUIKitCoordinator.direction {
+                let expectedPresentation: BrowserPresentation = tabTransitionDirection == .toOverview
+                    ? .tabOverview
+                    : .browsing
+                if value != expectedPresentation {
+                    cancelTabTransition()
+                }
+            }
+            withAnimation(.easeOut(duration: 0.15)) {
+                chromeOpacity = value == .browsing ? 1 : 0
             }
             accessibilityFocusedTabID = value == .tabOverview
                 ? (store.tabOverviewFocusID ?? store.selectedTabID)
@@ -101,8 +164,16 @@ public struct BrowserView: View {
             }
         }
         .onChange(of: store.tabs.map(\.id)) { _, _ in
+            if let parkedCardID = tabTransitionUIKitCoordinator.parkedSurface?.cardID,
+               !store.tabs.contains(where: { $0.id == parkedCardID }) {
+                tabTransitionUIKitCoordinator.clearParkedSurface(for: parkedCardID)
+            }
             if store.presentation == .tabOverview {
                 accessibilityFocusedTabID = store.tabOverviewFocusID ?? store.selectedTabID
+            }
+            if let tabTransitionTabID = tabTransitionUIKitCoordinator.tabID,
+               !store.tabs.contains(where: { $0.id == tabTransitionTabID }) {
+                cancelTabTransition()
             }
         }
         .onChange(of: accessibilityFocusedTabID) { _, value in
@@ -114,38 +185,35 @@ public struct BrowserView: View {
 
             store.send(.tabOverviewFocusChanged(value))
         }
+        .onChange(of: scenePhase) { _, value in
+            if value != .active {
+                cancelTabTransition()
+            }
+        }
+        .onPreferenceChange(BrowserContentViewportPreferenceKey.self) { value in
+            latestLayoutProbeGeometry = value
+        }
+        .onPreferenceChange(BrowserChromeHeightPreferenceKey.self) { height in
+            chromeLayoutHeight = height
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            cancelTabTransition()
+            store.send(.previewCacheEvicted)
+        }
         .task { await store.send(.task).finish() }
-        .sheet(isPresented: Binding(
-            get: { store.library != nil },
-            set: {
-                if !$0 {
-                    store.send(.libraryDismissed)
-                }
-            },
-        )) { BrowserLibraryView(store: store) }
-        .sheet(isPresented: Binding(
-            get: { store.bookmarkEditor != nil },
-            set: {
-                if !$0 {
-                    store.send(.bookmarkEditorCancelled)
-                }
-            },
-        )) { BrowserBookmarkEditorView(store: store) }
-        .sheet(isPresented: Binding(
-            get: { store.shareURL != nil },
-            set: {
-                if !$0 {
-                    store.send(.shareDismissed)
-                }
-            },
-        )) {
+        .onDisappear { cancelTabTransition() }
+        .sheet(isPresented: libraryPresentationBinding) { BrowserLibraryView(store: store) }
+        .sheet(isPresented: bookmarkEditorPresentationBinding) {
+            BrowserBookmarkEditorView(store: store)
+        }
+        .sheet(isPresented: sharePresentationBinding) {
             if let url = store.shareURL {
                 BrowserShareSheet(url: url)
             }
         }
         .safeAreaInset(edge: .top) {
             if store.findDraft != nil {
-                findBar
+                BrowserFindBar(store: store)
             }
         }
         .confirmationDialog(destructiveTitle, isPresented: Binding(
@@ -194,32 +262,112 @@ public struct BrowserView: View {
 }
 
 extension BrowserView {
+    private var libraryPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { store.library != nil },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.libraryDismissed)
+                }
+            },
+        )
+    }
+
+    private var bookmarkEditorPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { store.bookmarkEditor != nil },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.bookmarkEditorCancelled)
+                }
+            },
+        )
+    }
+
+    private var sharePresentationBinding: Binding<Bool> {
+        Binding(
+            get: { store.shareURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.shareDismissed)
+                }
+            },
+        )
+    }
+
     private var reduceMotionEnabled: Bool {
         reduceMotionOverride ?? reduceMotion
     }
 
-    @ViewBuilder
     private var selectedContentWithChrome: some View {
-        if horizontalSizeClass == .regular {
-            selectedContentPresentation
-                .safeAreaBar(edge: .top, spacing: 0) {
-                    chrome
-                }
-        } else {
-            selectedContentPresentation
-                .safeAreaBar(edge: .bottom, spacing: 0) {
-                    chrome
-                }
+        Group {
+            if horizontalSizeClass == .regular {
+                selectedContentPresentation
+                    .safeAreaBar(edge: .top, spacing: 0) { chromeLayoutPlaceholder }
+            } else {
+                selectedContentPresentation
+                    .safeAreaBar(edge: .bottom, spacing: 0) { chromeLayoutPlaceholder }
+            }
         }
+        .zIndex(
+            tabTransitionUIKitCoordinator.ownsVisibleSurface
+                && tabTransitionUIKitCoordinator.direction == .toOverview ? 2 : 0,
+        )
+        .allowsHitTesting(store.presentation == .browsing && !tabTransitionUIKitCoordinator.isActive)
+        .accessibilityHidden(
+            store.presentation != .browsing || tabTransitionUIKitCoordinator.isActive,
+        )
     }
 
-    @ViewBuilder
-    private var selectedContentPresentation: some View {
-        if reduceMotionEnabled {
-            selectedContent.transition(.opacity)
-        } else {
-            selectedContent.matchedGeometryEffect(id: store.selectedTabID, in: tabTransition)
+    private var chromeLayoutPlaceholder: some View {
+        Color.clear
+            .frame(height: chromeReservedHeight)
+            .accessibilityHidden(true)
+    }
+
+    private var chromeTransitionLayer: some View {
+        Color.clear
+            .safeAreaBar(
+                edge: horizontalSizeClass == .regular ? .top : .bottom,
+                spacing: 0,
+            ) {
+                BrowserChromeView(
+                    store: store,
+                    focusedField: $focusedField,
+                    isTransitionActive: tabTransitionUIKitCoordinator.isActive,
+                    onRequestTabOverview: requestTabOverview,
+                )
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: BrowserChromeHeightPreferenceKey.self,
+                            value: proxy.size.height,
+                        )
+                    }
+                }
+                .opacity(chromeOpacity)
+                .allowsHitTesting(
+                    store.presentation == .browsing && !tabTransitionUIKitCoordinator.isActive,
+                )
+                .accessibilityHidden(
+                    store.presentation != .browsing || tabTransitionUIKitCoordinator.isActive,
+                )
+            }
+    }
+
+    private var chromeReservedHeight: CGFloat {
+        guard chromeLayoutHeight > 0 else {
+            if horizontalSizeClass == .regular || store.selectedTab?.isStartPage == true {
+                return 52
+            }
+            return 104
         }
+
+        return chromeLayoutHeight
+    }
+
+    private var selectedContentPresentation: some View {
+        selectedContent
     }
 
     @ViewBuilder
@@ -227,420 +375,150 @@ extension BrowserView {
         if let tab = store.selectedTab {
             switch tab.content {
             case .startPage:
-                startPage
+                nativeSurface(BrowserStartPageView(store: store, focusedField: $focusedField))
             case .web:
-                BrowserWebView(tabID: tab.id) { store.send(.pullToRefresh) }
-                    .accessibilityLabel("Web page")
+                BrowserWebView(
+                    tabID: tab.id,
+                    onRefresh: { store.send(.pullToRefresh) },
+                    transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
+                    readinessContext: webKitReadinessContext(for: tab),
+                    readinessCoordinator: webKitReadinessCoordinator,
+                )
+                .accessibilityLabel("Web page")
             case let .error(error):
-                errorView(error, terminated: false)
+                nativeSurface(errorView(error, terminated: false))
             case .terminated:
-                errorView(
+                nativeSurface(errorView(
                     .pageCouldNotLoad(tab.metadata.committedURL ?? URL(filePath: "/terminated-web-content")),
                     terminated: true,
-                )
+                ))
             }
         }
     }
 
-    private var startPage: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                Text("Start Page").font(.largeTitle.bold()).frame(maxWidth: .infinity, alignment: .leading)
-                omnibox(large: true)
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Text("Bookmarks").font(.title2.bold())
-                        Spacer()
-                        Button("All Bookmarks") { store.send(.libraryPresented(.bookmarks)) }
-                    }
-                    if store.bookmarks.isEmpty {
-                        ContentUnavailableView("No Bookmarks", systemImage: "bookmark")
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 12)], spacing: 12) {
-                            ForEach(BrowserSuggestions.startPageBookmarks(store.bookmarks)) { bookmark in
-                                Button { store.send(.navigate(bookmark.url)) } label: { bookmarkTile(bookmark) }
-                                    .buttonStyle(.plain)
-                                    .contextMenu {
-                                        Button("Open") { store.send(.navigate(bookmark.url)) }
-                                        Button("Open in New Tab") { store.send(.openInNewTab(
-                                            bookmark.url,
-                                            openerID: store.selectedTabID,
-                                        )) }
-                                        Button("Edit Bookmark") { store.send(.editBookmarkTapped(bookmark.id)) }
-                                        Button("Delete Bookmark", role: .destructive) {
-                                            store.send(.deleteBookmark(bookmark.id))
-                                        }
-                                    }
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(24)
-            .frame(maxWidth: 900)
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    private func bookmarkTile(_ bookmark: BrowserBookmark) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Group {
-                if let data = bookmark.faviconData,
-                   let image = UIImage(data: data) {
-                    Image(uiImage: image).resizable().accessibilityHidden(true)
-                } else {
-                    Text(String((bookmark.url.host ?? bookmark.title).prefix(1)).uppercased())
-                        .font(.title.bold())
-                        .foregroundStyle(.white)
-                }
-            }
-            .frame(width: 44, height: 44)
-            .background(Color.accentColor.gradient, in: RoundedRectangle(cornerRadius: 11))
-            Text(bookmark.title).font(.headline).lineLimit(1)
-            Text(bookmark.url.host ?? bookmark.url.absoluteString)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, minHeight: 118, alignment: .leading)
-        .padding(14)
-        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 18))
-    }
-
-    private var chrome: some View {
-        VStack(spacing: 0) {
-            if let tab = store.selectedTab,
-               tab.metadata.isLoading {
-                ProgressView(value: tab.metadata.estimatedProgress)
-                    .progressViewStyle(.linear)
-            }
-            if horizontalSizeClass == .compact,
-               store.selectedTab?.isStartPage != true {
-                ViewThatFits(in: .horizontal) {
-                    chromeRow(includesOmnibox: true)
-                    stackedCompactChrome
-                }
-            } else {
-                chromeRow(includesOmnibox: true)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var stackedCompactChrome: some View {
-        VStack(spacing: 0) {
-            omnibox(large: false)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 8)
-                .padding(.top, 4)
-            chromeRow(includesOmnibox: false)
-        }
-    }
-
-    private func chromeRow(includesOmnibox: Bool) -> some View {
-        HStack(spacing: 6) {
-            Button { store.send(.backTapped) } label: {
-                Image(systemName: "chevron.backward")
-                    .accessibilityHidden(true)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Back")
-            .disabled(store.selectedTab?.metadata.canGoBack != true)
-            .onLongPressGesture { store.send(.backHistoryRequested) }
-
-            Button { store.send(.forwardTapped) } label: {
-                Image(systemName: "chevron.forward")
-                    .accessibilityHidden(true)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Forward")
-            .disabled(store.selectedTab?.metadata.canGoForward != true)
-            .onLongPressGesture { store.send(.forwardHistoryRequested) }
-
-            if includesOmnibox,
-               store.selectedTab?.isStartPage != true {
-                omnibox(large: false)
-                    .frame(minWidth: 120, maxWidth: .infinity)
-                    .layoutPriority(1)
-            }
-
-            Button { store.send(.reloadOrStopTapped) } label: {
-                Image(systemName: store.selectedTab?.metadata.isLoading == true ? "xmark" : "arrow.clockwise")
-                    .accessibilityHidden(true)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel(store.selectedTab?.metadata.isLoading == true ? "Stop" : "Reload")
-            .disabled(store.selectedTab?.isStartPage == true)
-
-            Button { store.send(.showTabOverviewTapped) } label: {
-                Text(store.tabCountLabel)
-                    .font(.caption.bold())
-                    .frame(width: 28, height: 28)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke())
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Show Tabs, \(store.tabCountLabel) tabs")
-
-            Menu { overflowMenu } label: {
-                Image(systemName: "ellipsis.circle")
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Browser Menu")
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity)
-    }
-
-    private func omnibox(large: Bool) -> some View {
-        VStack(spacing: 0) {
-            omniboxField(large: large)
-                .padding(large ? 16 : 10)
-                .background(.quaternary.opacity(0.8), in: RoundedRectangle(cornerRadius: large
-                        ? 18
-                        : 12))
-            if store.focusedField != .none, !store.suggestions.isEmpty {
-                suggestionRows(limit: large ? 6 : 4)
-            }
-        }
-    }
-
-    private func omniboxField(large: Bool) -> some View {
-        HStack(spacing: 6) {
-            if !large, let url = store.selectedTab?.metadata.committedURL {
-                Image(systemName: url.scheme?.lowercased() == "https"
-                    ? "lock.fill"
-                    : "exclamationmark.triangle.fill")
-                    .foregroundStyle(url.scheme?.lowercased() == "https" ? Color.secondary : Color.orange)
-                    .accessibilityLabel(url.scheme?.lowercased() == "https" ? "Secure connection" : "Not Secure")
-            }
-            TextField("Search or enter website", text: Binding(
-                get: {
-                    if large || focusedField == .chrome || store.focusedField == .chrome {
-                        return store.omniboxDraft
-                    }
-                    return store.selectedTab?.metadata.committedURL?.host ?? store.omniboxDraft
-                },
-                set: { store.send(.omniboxChanged($0)) },
-            ))
-            .textInputAutocapitalization(.never)
-            .keyboardType(.webSearch)
-            .submitLabel(.go)
-            .focused($focusedField, equals: large ? .startPage : .chrome)
-            .onSubmit { store.send(.omniboxSubmitted) }
-        }
-    }
-
-    private func suggestionRows(limit: Int) -> some View {
-        ForEach(store.suggestions.prefix(limit)) { suggestion in
-            Button { selectSuggestion(suggestion) } label: {
-                VStack(alignment: .leading) {
-                    Text(suggestion.title).lineLimit(1)
-                    if let subtitle = suggestion.subtitle {
-                        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 7)
-            }.buttonStyle(.plain)
-        }
-    }
-
-    @ViewBuilder
-    private var overflowMenu: some View {
-        Button("Settings", systemImage: "gearshape") { store.send(.settingsTapped) }
-        Button("New Tab", systemImage: "plus") { store.send(.newTabTapped) }
-        if store.selectedTab?
-            .isStartPage != true {
-            Button("Start Page", systemImage: "house") { store.send(.showStartPageTapped) }
-        }
-        Button("History", systemImage: "clock") { store.send(.libraryPresented(.history)) }
-        if hasPageActions {
-            if let bookmarkID = bookmarkID(for: store.selectedTab) {
-                Button("View Bookmark", systemImage: "bookmark.fill") { store.send(.viewBookmark(bookmarkID)) }
-            } else {
-                Button("Add Bookmark", systemImage: "bookmark") { store.send(.addBookmarkTapped) }
-            }
-            Button("Copy URL", systemImage: "doc.on.doc") { store.send(.copyURL(store.selectedTabID)) }
-            Button("Find on Page", systemImage: "doc.text.magnifyingglass") { store.send(.findPresented) }
-            if let tab = store.selectedTab,
-               let url = tab.metadata.committedURL {
-                ShareLink(item: url, subject: Text(tabTitle(tab))) { Label(
-                    "Share",
-                    systemImage: "square.and.arrow.up",
-                ) }
-            }
-        }
-        Button("Close Tab", systemImage: "xmark") { store.send(.closeTab(store.selectedTabID)) }
-            .keyboardShortcut("w", modifiers: .command)
-        if store.tabs.count > 1 {
-            Button("Close All Tabs", systemImage: "xmark.square", role: .destructive) {
-                store.send(.closeAllTapped)
-            }
-        }
-    }
-
-    private var tabOverview: some View {
-        VStack(spacing: 16) {
-            HStack { Text("Tabs").font(.largeTitle.bold())
-                Spacer()
-                Button("New Tab", systemImage: "plus") { store.send(.newTabTapped) }
-            }
-            ScrollView {
-                LazyVGrid(columns: tabOverviewColumns, spacing: 18) {
-                    ForEach(store.tabs) { tab in
-                        tabCard(tab)
-                    }
-                }
-            }
-        }.padding(20)
-    }
-
-    private var tabOverviewColumns: [GridItem] {
-        if horizontalSizeClass == .compact {
-            return [
-                GridItem(.flexible(), spacing: 18),
-                GridItem(.flexible(), spacing: 18),
-            ]
-        }
-
-        return [GridItem(.adaptive(minimum: 220), spacing: 18)]
-    }
-
-    private func tabCard(_ tab: BrowserTab) -> some View {
-        let button = Button { store.send(.tabCardSelected(tab.id)) } label: { tabCardContent(tab) }
-            .buttonStyle(.plain)
-        return Group {
-            if reduceMotionEnabled {
-                button
-            } else {
-                button.matchedGeometryEffect(id: tab.id, in: tabTransition)
-            }
-        }
-        .offset(x: tabCardDrag?.tabID == tab.id ? tabCardDrag?.horizontalTranslation ?? 0 : 0)
-        .accessibilityFocused($accessibilityFocusedTabID, equals: tab.id)
-        .accessibilityValue(tab.id == store.selectedTabID ? "Selected" : "")
-        .accessibilityAction(named: "Close Tab") { store.send(.closeTab(tab.id)) }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24)
-                .onChanged { gesture in
-                    updateTabCardDrag(tabID: tab.id, translation: gesture.translation)
-                }
-                .onEnded { gesture in
-                    finishTabCardDrag(tabID: tab.id, translation: gesture.translation)
-                },
+    private func nativeSurface(_ content: some View) -> some View {
+        BrowserNativePreviewCapture(
+            content: content,
+            controller: nativePreviewCaptureController,
+            transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
+            transitionRole: .content(store.selectedTabID),
         )
-        .contextMenu { tabCardMenu(tab) }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func updateTabCardDrag(tabID: BrowserTabID, translation: CGSize) {
-        if let tabCardDrag, tabCardDrag.tabID == tabID {
-            guard tabCardDrag.axis == .horizontal else {
-                return
-            }
+    private var tabPreviewAspectRatio: CGFloat {
+        tabTransitionState.latchedGeometry?.aspectRatio
+            ?? latestLayoutProbeGeometry?.aspectRatio
+            ?? (4.0 / 3.0)
+    }
 
-            self.tabCardDrag = .init(
-                tabID: tabID,
-                axis: .horizontal,
-                horizontalTranslation: translation.width,
+    private var tabOverviewVisual: some View {
+        ZStack {
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
+            BrowserTabOverviewView(
+                store: store,
+                transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
+                previewAspectRatio: tabPreviewAspectRatio,
+                reduceMotionEnabled: reduceMotionEnabled,
+                accessibilityFocusedTabID: $accessibilityFocusedTabID,
+                onNewTab: {
+                    cancelTabTransition()
+                    store.send(.newTabTapped)
+                },
+                onSelectTab: selectTabCard,
             )
-            return
         }
-
-        let axis = BrowserTabSwipe.axis(for: translation)
-        tabCardDrag = .init(
-            tabID: tabID,
-            axis: axis,
-            horizontalTranslation: axis == .horizontal ? translation.width : 0,
+        .zIndex(1)
+        .allowsHitTesting(
+            store.presentation == .tabOverview && !tabTransitionUIKitCoordinator.isActive,
+        )
+        .accessibilityHidden(
+            store.presentation != .tabOverview || tabTransitionUIKitCoordinator.isActive,
         )
     }
 
-    private func finishTabCardDrag(tabID: BrowserTabID, translation: CGSize) {
-        guard let tabCardDrag, tabCardDrag.tabID == tabID else {
+    /// Supplies lifecycle state for the current reducer transition.
+    private func webKitReadinessContext(for tab: BrowserTab) -> BrowserWebKitReadinessContext {
+        let navigationOperationID = store.previewState.operation(for: tab.id)
+        return webKitReadinessCoordinator.context(
+            navigationOperationID: navigationOperationID,
+        )
+    }
+
+    private func selectTabCard(_ tab: BrowserTab) {
+        performTabTransition(
+            direction: .toBrowsing,
+            tabID: tab.id,
+        ) {
+            store.send(.tabCardSelected(tab.id))
+        }
+    }
+
+    private func requestTabOverview() {
+        guard let tab = store.selectedTab,
+              store.presentation == .browsing
+        else {
             return
         }
-        guard let outcome = BrowserTabSwipe.outcome(for: translation, axis: tabCardDrag.axis) else {
-            self.tabCardDrag = nil
-            return
-        }
 
-        switch outcome {
-        case .cancel:
-            withAnimation(tabCardSettleAnimation) {
-                self.tabCardDrag = nil
-            }
-        case .dismiss:
-            self.tabCardDrag = nil
-            store.send(.closeTab(tabID))
-        }
-    }
-
-    private var tabCardSettleAnimation: Animation {
-        reduceMotionEnabled ? .easeOut(duration: 0.15) : .spring(response: 0.42)
-    }
-
-    private func tabCardContent(_ tab: BrowserTab) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14).fill(.quaternary)
-                tabPreview(tab)
-                if tab.metadata.isLoading {
-                    ProgressView()
-                }
-            }.aspectRatio(4 / 3, contentMode: .fit)
-            HStack {
-                if tab.id == store.selectedTabID {
-                    Image(systemName: "checkmark.circle.fill").accessibilityLabel("Selected")
-                }
-                Text(tabTitle(tab)).lineLimit(1).truncationMode(.tail)
-                Spacer()
-                Button { store.send(.closeTab(tab.id)) } label: {
-                    Image(systemName: "xmark.circle.fill").accessibilityHidden(true)
-                }
-                .accessibilityLabel("Close \(tabTitle(tab))")
-            }
-        }
-        .padding(10)
-        .background(.background, in: RoundedRectangle(cornerRadius: 18))
-        .shadow(radius: 3)
-    }
-
-    @ViewBuilder
-    private func tabPreview(_ tab: BrowserTab) -> some View {
-        if let data = store.tabPreviewData[tab.id], let image = UIImage(data: data) {
-            Image(uiImage: image).resizable().scaledToFill().clipped().accessibilityHidden(true)
-        } else {
-            Image(systemName: tab.isStartPage ? "sparkles" : "globe")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityHidden(true)
-        }
-    }
-
-    @ViewBuilder
-    private func tabCardMenu(_ tab: BrowserTab) -> some View {
-        Button("Open Tab") { store.send(.tabCardSelected(tab.id)) }
-        if case .web = tab.content, let url = tab.metadata.committedURL {
-            if let bookmarkID = bookmarkID(for: tab) {
-                Button("View Bookmark") { store.send(.viewBookmark(bookmarkID)) }
+        let nativeCapture: Data? =
+            if case .web = tab.content {
+                nil
             } else {
-                Button("Add Bookmark") { store.send(.addBookmarkForTab(tab.id)) }
+                nativePreviewCaptureController.capture()
             }
-            Button("Copy URL") { store.send(.copyURL(tab.id)) }
-            ShareLink(item: url, subject: Text(tabTitle(tab))) { Text("Share Page") }
+        performTabTransition(
+            direction: .toOverview,
+            tabID: tab.id,
+        ) {
+            store.send(.showTabOverviewTapped)
+            if let nativeCapture {
+                let revision = store.previewState.revision(for: tab.id)
+                store.send(.nativePreviewCaptured(
+                    tabID: tab.id,
+                    revision: revision,
+                    pngData: nativeCapture,
+                ))
+            }
         }
-        Button("Close Tab", role: .destructive) { store.send(.closeTab(tab.id)) }
-        if store.tabs.count > 1 {
-            Button("Close Other Tabs", role: .destructive) { store.send(.closeOtherTabsTapped(tab.id)) }
-        }
+    }
+
+    private func performTabTransition(
+        direction: BrowserTabTransitionDirection,
+        tabID: BrowserTabID,
+        action: @escaping () -> Void,
+    ) {
+        BrowserTabTransitionPresentationCoordinator.begin(
+            coordinator: tabTransitionUIKitCoordinator,
+            selectedTabID: store.selectedTabID,
+            bindings: tabTransitionPresentationBindings,
+            direction: direction,
+            tabID: tabID,
+            reduceMotion: reduceMotionEnabled,
+            onPresentationChange: action,
+            onPresentationUnavailable: {
+                switch direction {
+                case .toBrowsing:
+                    store.send(.showTabOverviewTapped)
+                case .toOverview:
+                    store.send(.tabCardSelected(tabID))
+                }
+            },
+        )
+    }
+
+    private func cancelTabTransition() {
+        webKitReadinessCoordinator.invalidate()
+        BrowserTabTransitionPresentationCoordinator.cancel(
+            coordinator: tabTransitionUIKitCoordinator,
+            isOverviewPresented: store.presentation == .tabOverview,
+            bindings: tabTransitionPresentationBindings,
+        )
+    }
+
+    private var tabTransitionPresentationBindings: BrowserTabTransitionPresentationBindings {
+        .init(state: $tabTransitionState)
     }
 
     private func errorView(_ error: BrowserNavigationError, terminated: Bool) -> some View {
@@ -654,64 +532,6 @@ extension BrowserView {
             onRefresh: { store.send(.pullToRefresh) },
             onRetry: { store.send(.retryTapped) },
         )
-    }
-
-    private func selectSuggestion(_ value: BrowserSuggestion) {
-        switch value.kind {
-        case let .bookmark(id):
-            if let item = store.bookmarks
-                .first(where: { $0.id == id }) {
-                store.send(.navigate(item.url))
-            }
-        case let .history(id):
-            if let item = store.history
-                .first(where: { $0.id == id }) {
-                store.send(.navigate(item.url))
-            }
-        case let .copiedLink(url):
-            store.send(.navigate(url))
-        case let .provider(query),
-             let .search(_, query):
-            store.send(.omniboxChanged(query))
-            store.send(.omniboxSubmitted)
-        }
-    }
-
-    private var findBar: some View {
-        HStack {
-            TextField("Find on Page", text: Binding(
-                get: { store.findDraft ?? "" },
-                set: { store.send(.findChanged($0)) },
-            ))
-            .textFieldStyle(.roundedBorder)
-            Button("Done") { store.send(.findDismissed) }
-        }
-        .padding(10)
-        .background(.bar)
-    }
-
-    private var hasPageActions: Bool {
-        guard case .web = store.selectedTab?.content,
-              let url = store.selectedTab?.metadata.committedURL
-        else {
-            return false
-        }
-
-        return BrowserNavigation.isHTTPURL(url)
-    }
-
-    private func bookmarkID(for tab: BrowserTab?) -> UUID? {
-        guard case .web = tab?.content, let url = tab?.metadata.committedURL else {
-            return nil
-        }
-
-        return store.bookmarks.first(where: { $0.url == url })?.id
-    }
-
-    private func tabTitle(_ tab: BrowserTab) -> String {
-        tab.isStartPage
-            ? "Start Page"
-            : (tab.metadata.title ?? tab.metadata.committedURL?.host ?? "Web Page")
     }
 
     private func errorTitle(_ error: BrowserNavigationError) -> String {
@@ -746,6 +566,47 @@ extension BrowserView {
 
     private var newTabDispositionTitle: String {
         "Open Link in New Tab"
+    }
+}
+
+extension BrowserTabPreviewPlaceholder {
+    var systemImage: String {
+        switch self {
+        case .startPage:
+            "sparkles"
+        case .web:
+            "globe"
+        case .error:
+            "wifi.exclamationmark"
+        case .terminated:
+            "xmark.octagon"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .startPage:
+            "Start Page"
+        case .web:
+            "Web Page"
+        case .error:
+            "Page Error"
+        case .terminated:
+            "Page Ended"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .startPage:
+            .accentColor
+        case .web:
+            .secondary
+        case .error:
+            .orange
+        case .terminated:
+            .purple
+        }
     }
 }
 

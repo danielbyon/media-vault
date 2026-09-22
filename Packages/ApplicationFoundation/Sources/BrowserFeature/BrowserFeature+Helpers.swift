@@ -33,6 +33,7 @@ extension BrowserFeature {
             }
 
             let id = state.selectedTabID
+            let operationID = beginPreviewOperation(for: id, state: &state)
             if state.tabs[index].isStartPage {
                 state.tabs[index] = .web(id: id, url: url)
             } else {
@@ -42,7 +43,10 @@ extension BrowserFeature {
             discardDraft(in: &state)
             return .merge(
                 dismissalEffect,
-                commands([.ensureContext(tabID: id), .load(tabID: id, url: url)]),
+                commands([
+                    .ensureContext(tabID: id),
+                    .load(tabID: id, url: url, operationID: operationID),
+                ]),
             )
         case let .external(destination):
             let open = externalNavigation.open
@@ -59,6 +63,7 @@ extension BrowserFeature {
         }
 
         let id = state.selectedTabID
+        let operationID = beginPreviewOperation(for: id, state: &state)
         if state.tabs[index].isStartPage {
             state.tabs[index] = .web(id: id, url: url)
         } else {
@@ -69,7 +74,10 @@ extension BrowserFeature {
         discardDraft(in: &state)
         return .merge(
             dismissalEffect,
-            commands([.ensureContext(tabID: id), .load(tabID: id, url: url)]),
+            commands([
+                .ensureContext(tabID: id),
+                .load(tabID: id, url: url, operationID: operationID),
+            ]),
         )
     }
 
@@ -89,10 +97,15 @@ extension BrowserFeature {
             return value
         } ?? state.tabs.endIndex
         state.tabs.insert(.web(id: id, url: url, openerID: openerID), at: insertion)
+        state.previewState.addTab(id)
+        let operationID = beginPreviewOperation(for: id, state: &state)
         if disposition == .foreground {
             state.selectedTabID = id
         }
-        return commands([.ensureContext(tabID: id), .load(tabID: id, url: url)])
+        return commands([
+            .ensureContext(tabID: id),
+            .load(tabID: id, url: url, operationID: operationID),
+        ])
     }
 
     func close(tabID: BrowserTabID, state: inout State) -> Effect<Action> {
@@ -103,6 +116,7 @@ extension BrowserFeature {
         let wasSelected = state.selectedTabID == tabID
         let wasOverview = state.presentation == .tabOverview
         let priorOverviewFocusID = state.tabOverviewFocusID
+        state.previewState.removeTab(tabID)
         let dismissalEffect: Effect<Action> =
             if wasSelected {
                 dismissPageUI(in: &state)
@@ -115,6 +129,7 @@ extension BrowserFeature {
         if state.tabs.isEmpty {
             let replacement = BrowserTabID(uuid())
             state.tabs = [.startPage(id: replacement)]
+            state.previewState.addTab(replacement)
             state.selectedTabID = replacement
             state.presentation = wasOverview ? .tabOverview : .browsing
             discardDraft(in: &state)
@@ -140,7 +155,6 @@ extension BrowserFeature {
         return .merge(dismissalEffect, command(.destroyContext(tabID: tabID)))
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     func handle(event: BrowserWebKitEvent, state: inout State) -> Effect<Action> {
         switch event {
         case let .siteCreatedTab(openerID, tabID, url, foreground):
@@ -153,35 +167,35 @@ extension BrowserFeature {
                 insertion += 1
             }
             state.tabs.insert(.scriptCreatedWeb(id: tabID, openerID: openerID, url: url), at: insertion)
+            state.previewState.addTab(tabID)
             if foreground {
                 state.selectedTabID = tabID
             }
-        case let .metadata(tabID, metadata):
-            guard let index = state.tabs.firstIndex(where: { $0.id == tabID }) else {
-                return .none
-            }
-
-            let previousCommittedURL = state.tabs[index].metadata.committedURL
-            state.tabs[index].metadata = metadata
-            if let committedURL = metadata.committedURL {
-                state.tabs[index].content = .web(requestedURL: committedURL)
-                if tabID == state.selectedTabID, committedURL != previousCommittedURL {
-                    state.findDraft = nil
-                    state.backForwardList = nil
-                }
-            }
-        case let .navigationFailed(tabID, error):
-            guard let index = state.tabs.firstIndex(where: { $0.id == tabID }) else {
-                return .none
-            }
-
-            state.tabs[index].metadata.isLoading = false
-            state.tabs[index].content = .error(error)
+        case let .navigationStarted(tabID):
+            invalidatePreview(for: tabID, state: &state, operation: nil)
+        case let .metadata(tabID, metadata, correlation):
+            handleMetadata(
+                tabID: tabID,
+                metadata: metadata,
+                operationID: correlation.operationID,
+                state: &state,
+            )
+        case let .navigationFailed(tabID, error, correlation):
+            handleNavigationFailure(
+                tabID: tabID,
+                error: error,
+                operationID: correlation.operationID,
+                state: &state,
+            )
         case let .processTerminated(tabID):
             guard let index = state.tabs.firstIndex(where: { $0.id == tabID }) else {
                 return .none
             }
 
+            let wasExpectedOperation = state.previewState.clearOperations(for: tabID)
+            if !wasExpectedOperation, !isTerminatedContent(state.tabs[index].content) {
+                invalidatePreview(for: tabID, state: &state, operation: nil)
+            }
             state.tabs[index].metadata.isLoading = false
             state.tabs[index].content = .terminated(lastCommittedURL: state.tabs[index].metadata.committedURL)
         case let .scriptCloseRequested(tabID):
@@ -202,12 +216,211 @@ extension BrowserFeature {
             }
 
             state.backForwardList = .init(tabID: tabID, direction: direction, entries: entries)
-        case let .preview(tabID, pngData):
-            state.tabPreviewData[tabID] = pngData
+        case let .preview(tabID, revision, pngData):
+            storePreview(tabID: tabID, revision: revision, pngData: pngData, state: &state)
         case let .linkContextAction(tabID, action, url):
             return handleLinkContextAction(tabID: tabID, action: action, url: url, state: &state)
         }
         return .none
+    }
+
+    private func handleMetadata(
+        tabID: BrowserTabID,
+        metadata: BrowserTab.Metadata,
+        operationID: BrowserNavigationOperationID?,
+        state: inout State,
+    ) {
+        guard let index = state.tabs.firstIndex(where: { $0.id == tabID }) else {
+            return
+        }
+        guard acceptsNavigationEvent(operationID: operationID, for: tabID, state: state) else {
+            return
+        }
+
+        let isExpectedOperation = operationID.map {
+            state.previewState.isCurrent(operationID: $0, for: tabID)
+        } ?? false
+        let previousCommittedURL = state.tabs[index].metadata.committedURL
+        if operationID == nil, handleUntrackedSameDocumentMetadata(
+            tabID: tabID,
+            index: index,
+            metadata: metadata,
+            previousCommittedURL: previousCommittedURL,
+            state: &state,
+        ) {
+            return
+        }
+
+        state.tabs[index].metadata = metadata
+        let representsCompletedOperation = operationID != nil && !metadata.isLoading
+        if representsCompletedOperation, let operationID {
+            _ = consumeNavigationOperation(
+                operationID,
+                for: tabID,
+                state: &state,
+            )
+        }
+        guard let committedURL = metadata.committedURL else {
+            return
+        }
+
+        let isSemanticChange = committedURL != previousCommittedURL
+            || !isWebContent(state.tabs[index].content)
+        if isSemanticChange, !isExpectedOperation {
+            // An uncorrelated document identity change, including a hash/history navigation,
+            // supersedes any reducer operation that never produced a correlated WebKit start.
+            // A correlated event may arrive after didCommit while WebKit is still loading, so
+            // keep that operation identity until its loading-finished metadata arrives.
+            // Clear the obsolete identity before accepting later callbacks from the old page.
+            invalidatePreview(for: tabID, state: &state, operation: nil)
+        }
+        state.tabs[index].content = .web(requestedURL: committedURL)
+        if tabID == state.selectedTabID, committedURL != previousCommittedURL {
+            state.findDraft = nil
+            state.backForwardList = nil
+        }
+    }
+
+    private func handleNavigationFailure(
+        tabID: BrowserTabID,
+        error: BrowserNavigationError,
+        operationID: BrowserNavigationOperationID?,
+        state: inout State,
+    ) {
+        guard let index = state.tabs.firstIndex(where: { $0.id == tabID }) else {
+            return
+        }
+        guard acceptsNavigationEvent(operationID: operationID, for: tabID, state: state) else {
+            return
+        }
+
+        let wasExpectedOperation = operationID.map {
+            consumeNavigationOperation($0, for: tabID, state: &state)
+        } ?? false
+        if !wasExpectedOperation, !isErrorContent(state.tabs[index].content) {
+            invalidatePreview(for: tabID, state: &state, operation: nil)
+        }
+        state.tabs[index].metadata.isLoading = false
+        state.tabs[index].content = .error(error)
+    }
+
+    private func acceptsNavigationEvent(
+        operationID: BrowserNavigationOperationID?,
+        for tabID: BrowserTabID,
+        state: State,
+    ) -> Bool {
+        guard let operationID else {
+            return true
+        }
+
+        return state.previewState.isCurrent(operationID: operationID, for: tabID)
+    }
+
+    @discardableResult
+    private func consumeNavigationOperation(
+        _ operationID: BrowserNavigationOperationID,
+        for tabID: BrowserTabID,
+        state: inout State,
+    ) -> Bool {
+        state.previewState.consume(operationID: operationID, for: tabID)
+    }
+
+    private func handleUntrackedSameDocumentMetadata(
+        tabID: BrowserTabID,
+        index: Int,
+        metadata: BrowserTab.Metadata,
+        previousCommittedURL: URL?,
+        state: inout State,
+    ) -> Bool {
+        guard metadata.committedURL == previousCommittedURL else {
+            return false
+        }
+        guard state.previewState.operation(for: tabID) != nil else {
+            // An uncorrelated observation that names the already-committed document can update
+            // ordinary chrome state when no reducer operation owns that document transition.
+            state.tabs[index].metadata = metadata
+            return true
+        }
+
+        // A same-URL KVO event cannot complete the pending operation, but its loading edge is
+        // still useful for reload/stop. Keep identity-bearing fields owned by the operation and
+        // merge only the monotonic loading evidence.
+        guard metadata.isLoading else {
+            return true
+        }
+
+        state.tabs[index].metadata.isLoading = true
+        state.tabs[index].metadata.estimatedProgress = max(
+            state.tabs[index].metadata.estimatedProgress,
+            metadata.estimatedProgress,
+        )
+        return true
+    }
+
+    /// Stores a capture only when its opaque revision still names the live document.
+    func storePreview(
+        tabID: BrowserTabID,
+        revision: BrowserTabPreviewRevision,
+        pngData: Data?,
+        state: inout State,
+    ) {
+        guard state.tabs.contains(where: { $0.id == tabID }),
+              let pngData,
+              !pngData.isEmpty,
+              revision == state.previewState.revision(for: tabID)
+        else {
+            return
+        }
+
+        state.previewState.setData(.init(revision: revision, pngData: pngData), for: tabID)
+    }
+
+    /// Creates one operation identity and invalidates the matching preview revision.
+    func beginPreviewOperation(
+        for tabID: BrowserTabID,
+        state: inout State,
+    ) -> BrowserNavigationOperationID {
+        let operationID = BrowserNavigationOperationID()
+        invalidatePreview(
+            for: tabID,
+            state: &state,
+            operation: operationID,
+        )
+        return operationID
+    }
+
+    /// Invalidates one preview revision before a semantic document change.
+    func invalidatePreview(
+        for tabID: BrowserTabID,
+        state: inout State,
+        operation: BrowserNavigationOperationID? = nil,
+    ) {
+        guard state.tabs.contains(where: { $0.id == tabID }) else {
+            return
+        }
+
+        state.previewState.invalidate(tabID: tabID, operation: operation)
+    }
+
+    private func isWebContent(_ content: BrowserTab.Content) -> Bool {
+        if case .web = content {
+            return true
+        }
+        return false
+    }
+
+    private func isErrorContent(_ content: BrowserTab.Content) -> Bool {
+        if case .error = content {
+            return true
+        }
+        return false
+    }
+
+    private func isTerminatedContent(_ content: BrowserTab.Content) -> Bool {
+        if case .terminated = content {
+            return true
+        }
+        return false
     }
 
     func handleLinkContextAction(
@@ -250,15 +463,17 @@ extension BrowserFeature {
         return .none
     }
 
-    func retry(tab: BrowserTab) -> Effect<Action> {
+    func retry(tab: BrowserTab, state: inout State) -> Effect<Action> {
         switch tab.content {
         case let .error(error):
-            command(.load(tabID: tab.id, url: error.url))
+            let operationID = beginPreviewOperation(for: tab.id, state: &state)
+            return command(.load(tabID: tab.id, url: error.url, operationID: operationID))
         case .terminated:
-            command(.reload(tabID: tab.id))
+            let operationID = beginPreviewOperation(for: tab.id, state: &state)
+            return command(.reload(tabID: tab.id, operationID: operationID))
         case .startPage,
              .web:
-            .none
+            return .none
         }
     }
 

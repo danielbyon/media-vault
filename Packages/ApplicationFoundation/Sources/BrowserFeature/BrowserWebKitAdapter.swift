@@ -9,6 +9,12 @@ import Foundation
 import UIKit
 import WebKit
 
+/// Internal observation seam for proving WebKit surface ownership without production logging.
+enum BrowserWebKitAttachmentEvent: Equatable {
+    case attached(BrowserTabID)
+    case detached(BrowserTabID)
+}
+
 /// Main-actor registry that exclusively owns live WebKit contexts keyed by logical tab IDs.
 @MainActor
 final class BrowserWebKitAdapter: NSObject {
@@ -18,9 +24,33 @@ final class BrowserWebKitAdapter: NSObject {
     private var continuations: [UUID: AsyncStream<BrowserWebKitEvent>.Continuation] = [:]
     private var popupOpenersThisTurn: Set<BrowserTabID> = []
     private let makeTabID: () -> BrowserTabID
+    private let makeWebView: @MainActor (CGRect, WKWebViewConfiguration) -> WKWebView
+    private let snapshotter: @MainActor (
+        WKWebView,
+        WKSnapshotConfiguration?,
+        @escaping @Sendable (UIImage?, Error?) -> Void,
+    ) -> Void
 
-    init(makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init) {
+    /// Test-only observation seam for actual adapter attachment operations.
+    var attachmentObserver: ((BrowserWebKitAttachmentEvent) -> Void)?
+
+    init(
+        makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init,
+        makeWebView: @escaping @MainActor (CGRect, WKWebViewConfiguration) -> WKWebView = {
+            frame,
+            configuration in WKWebView(frame: frame, configuration: configuration)
+        },
+        snapshotter: @escaping @MainActor (
+            WKWebView,
+            WKSnapshotConfiguration?,
+            @escaping @Sendable (UIImage?, Error?) -> Void,
+        ) -> Void = { webView, configuration, completion in
+            webView.takeSnapshot(with: configuration, completionHandler: completion)
+        },
+    ) {
         self.makeTabID = makeTabID
+        self.makeWebView = makeWebView
+        self.snapshotter = snapshotter
     }
 
     var contextCount: Int {
@@ -29,6 +59,21 @@ final class BrowserWebKitAdapter: NSObject {
 
     func hasContext(for tabID: BrowserTabID) -> Bool {
         contexts[tabID] != nil
+    }
+
+    /// Returns an existing live surface without creating a new WebKit context.
+    func webView(for tabID: BrowserTabID) -> WKWebView? {
+        contexts[tabID]?.webView
+    }
+
+    /// Reports whether the adapter-owned context has committed its current document.
+    func hasCommittedDocument(for tabID: BrowserTabID) -> Bool {
+        contexts[tabID]?.hasCommittedDocument == true
+    }
+
+    /// Test-only seam that queues the same deferred metadata work used by KVO observations.
+    func scheduleMetadataEmissionForTesting(for tabID: BrowserTabID) -> Task<Bool, Never>? {
+        contexts[tabID]?.scheduleMetadataEmissionForTesting()
     }
 
     /// Creates a context even for an unselected background tab and returns an existing one unchanged.
@@ -70,12 +115,14 @@ final class BrowserWebKitAdapter: NSObject {
             webView.topAnchor.constraint(equalTo: container.topAnchor),
             webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+        attachmentObserver?(.attached(tabID))
     }
 
     /// Detaches only the visual surface; background loading remains adapter-owned.
     func detach(tabID: BrowserTabID, from container: UIView) {
         if contexts[tabID]?.webView.superview === container {
             contexts[tabID]?.webView.removeFromSuperview()
+            attachmentObserver?(.detached(tabID))
         }
     }
 
@@ -86,16 +133,15 @@ final class BrowserWebKitAdapter: NSObject {
             _ = ensureContext(for: id)
         case let .destroyContext(id):
             destroyContext(for: id)
-        case let .load(id, url):
+        case let .load(id, url, operationID):
             let context = ensureContextObject(for: id)
-            context.invalidateBackForwardTokens()
-            context.webView.load(URLRequest(url: url))
-        case let .goBack(id):
-            contexts[id]?.goBack()
-        case let .goForward(id):
-            contexts[id]?.goForward()
-        case let .reload(id):
-            contexts[id]?.reload()
+            context.load(url, operationID: operationID)
+        case let .goBack(id, operationID):
+            contexts[id]?.goBack(operationID: operationID)
+        case let .goForward(id, operationID):
+            contexts[id]?.goForward(operationID: operationID)
+        case let .reload(id, operationID):
+            contexts[id]?.reload(operationID: operationID)
         case let .stop(id):
             contexts[id]?.webView.stopLoading()
         case let .showBackForwardList(id, direction):
@@ -110,17 +156,21 @@ final class BrowserWebKitAdapter: NSObject {
             ))
         case let .find(id, query):
             contexts[id]?.webView.find(query) { _ in }
-        case let .goToBackForwardEntry(id, token):
-            contexts[id]?.goToBackForwardEntry(token)
-        case let .capturePreview(id):
+        case let .goToBackForwardEntry(id, token, operationID):
+            contexts[id]?.goToBackForwardEntry(token, operationID: operationID)
+        case let .capturePreview(id, revision):
             guard let webView = contexts[id]?.webView else {
-                emit(.preview(tabID: id, pngData: nil))
+                emit(.preview(tabID: id, revision: revision, pngData: nil))
                 return
             }
 
-            webView.takeSnapshot(with: nil) { [weak self] image, _ in
+            snapshotter(webView, nil) { [weak self] image, _ in
                 MainActor.assumeIsolated {
-                    self?.emit(.preview(tabID: id, pngData: image?.pngData()))
+                    self?.emit(.preview(
+                        tabID: id,
+                        revision: revision,
+                        pngData: image?.pngData(),
+                    ))
                 }
             }
         case let .dismissJavaScriptDialog(id):
@@ -194,7 +244,7 @@ final class BrowserWebKitAdapter: NSObject {
     }
 
     private func createContext(tabID: BrowserTabID, configuration: WKWebViewConfiguration) -> Context {
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = makeWebView(.zero, configuration)
         webView.allowsBackForwardNavigationGestures = true
         let context = Context(tabID: tabID, webView: webView, adapter: self)
         webView.navigationDelegate = context
@@ -268,13 +318,246 @@ struct BrowserWebKitCommittedURLProjection: Equatable, Sendable {
     }
 }
 
+private final class BrowserWebKitNavigationReference {
+    weak var value: WKNavigation?
+
+    init(_ value: WKNavigation) {
+        self.value = value
+    }
+}
+
+/// Keeps one WebKit context's reducer-operation identity and delegate-navigation lifecycle together.
+///
+/// WebKit may deliver callbacks for an older navigation after a newer command has been issued, and
+/// some history commands complete without returning a `WKNavigation` at all. Keeping those cases
+/// in one tracker makes the accepted-current-navigation rule explicit at every delegate boundary.
+@MainActor
+private struct BrowserWebKitNavigationCorrelation {
+    struct Completion {
+        let operationID: BrowserNavigationOperationID?
+    }
+
+    private(set) var hasCommittedDocument = false
+    private var wasCommittedBeforeNavigation = false
+    private var activeNavigationIdentifier: ObjectIdentifier?
+    /// Keeps synchronous command callbacks from being mistaken for untracked external starts.
+    private var isAwaitingNavigationRegistration = false
+    private var hasActiveUnidentifiedNavigation = false
+    private var operationIDs: [ObjectIdentifier: BrowserNavigationOperationID] = [:]
+    private var activeNavigationReference: BrowserWebKitNavigationReference?
+    private var supersededNavigations: [BrowserWebKitNavigationReference] = []
+    private(set) var generation = 0
+
+    private mutating func pruneSupersededNavigations() {
+        supersededNavigations.removeAll { $0.value == nil }
+    }
+
+    private mutating func rememberSupersededNavigation(_ navigation: WKNavigation?) {
+        pruneSupersededNavigations()
+        guard let navigation else {
+            return
+        }
+
+        supersededNavigations.append(.init(navigation))
+    }
+
+    mutating func beginNavigation() {
+        rememberSupersededNavigation(activeNavigationReference?.value)
+        wasCommittedBeforeNavigation = hasCommittedDocument
+        hasCommittedDocument = false
+        activeNavigationIdentifier = nil
+        activeNavigationReference = nil
+        isAwaitingNavigationRegistration = true
+        hasActiveUnidentifiedNavigation = false
+        operationIDs.removeAll(keepingCapacity: true)
+        generation &+= 1
+    }
+
+    /// Registers the navigation returned by a command. Returns `false` for a synchronous no-op.
+    mutating func register(
+        _ navigation: WKNavigation?,
+        operationID: BrowserNavigationOperationID,
+    ) -> Bool {
+        isAwaitingNavigationRegistration = false
+        generation &+= 1
+        guard let navigation else {
+            hasCommittedDocument = wasCommittedBeforeNavigation
+            return false
+        }
+
+        let navigationIdentifier = ObjectIdentifier(navigation)
+        discardSupersededNavigation(navigation)
+        activeNavigationIdentifier = navigationIdentifier
+        activeNavigationReference = .init(navigation)
+        operationIDs[navigationIdentifier] = operationID
+        hasActiveUnidentifiedNavigation = false
+        return true
+    }
+
+    /// Accepts an unregistered navigation created outside the reducer command path.
+    mutating func acceptExternalNavigation(_ navigation: WKNavigation?) -> Bool {
+        if navigation == nil {
+            guard !isAwaitingNavigationRegistration else {
+                return false
+            }
+            guard activeNavigationIdentifier == nil,
+                  !hasActiveUnidentifiedNavigation
+            else {
+                return false
+            }
+
+            rememberSupersededNavigation(activeNavigationReference?.value)
+            hasCommittedDocument = false
+            operationIDs.removeAll(keepingCapacity: true)
+            activeNavigationIdentifier = nil
+            activeNavigationReference = nil
+            hasActiveUnidentifiedNavigation = true
+            generation &+= 1
+            return true
+        }
+        guard let navigation else {
+            return false
+        }
+
+        let navigationIdentifier = ObjectIdentifier(navigation)
+        pruneSupersededNavigations()
+        guard !isAwaitingNavigationRegistration,
+              !supersededNavigations.contains(where: { $0.value === navigation }),
+              operationIDs[navigationIdentifier] == nil,
+              activeNavigationIdentifier != navigationIdentifier
+        else {
+            return false
+        }
+
+        hasCommittedDocument = false
+        operationIDs.removeAll(keepingCapacity: true)
+        activeNavigationIdentifier = navigationIdentifier
+        activeNavigationReference = .init(navigation)
+        hasActiveUnidentifiedNavigation = false
+        generation &+= 1
+        return true
+    }
+
+    func isCurrent(_ navigation: WKNavigation?) -> Bool {
+        if let navigation {
+            guard let activeNavigationIdentifier else {
+                return false
+            }
+
+            return ObjectIdentifier(navigation) == activeNavigationIdentifier
+        }
+
+        return hasActiveUnidentifiedNavigation
+    }
+
+    mutating func commit(_ navigation: WKNavigation?) -> Bool {
+        guard isCurrent(navigation) else {
+            return false
+        }
+
+        hasCommittedDocument = true
+        return true
+    }
+
+    mutating func finish(_ navigation: WKNavigation?) -> Completion? {
+        guard isCurrent(navigation) else {
+            return nil
+        }
+
+        hasCommittedDocument = true
+        if navigation == nil {
+            hasActiveUnidentifiedNavigation = false
+            return Completion(operationID: nil)
+        }
+
+        clearActiveNavigation()
+        return Completion(operationID: consumeOperationID(for: navigation))
+    }
+
+    func operationID(for navigation: WKNavigation?) -> BrowserNavigationOperationID? {
+        guard let navigation else {
+            return nil
+        }
+
+        return operationIDs[ObjectIdentifier(navigation)]
+    }
+
+    /// Returns the operation whose navigation is currently supplying KVO metadata.
+    ///
+    /// KVO does not carry a `WKNavigation`, but metadata emitted after a correlated commit still
+    /// belongs to that operation until its delegate finish callback consumes the identity.
+    func currentOperationID() -> BrowserNavigationOperationID? {
+        guard let activeNavigationIdentifier else {
+            return nil
+        }
+
+        return operationIDs[activeNavigationIdentifier]
+    }
+
+    mutating func consumeOperationID(for navigation: WKNavigation?) -> BrowserNavigationOperationID? {
+        guard let navigation else {
+            return nil
+        }
+        guard let operationID = operationIDs.removeValue(forKey: ObjectIdentifier(navigation)) else {
+            return nil
+        }
+
+        generation &+= 1
+        return operationID
+    }
+
+    mutating func markFinished(_ navigation: WKNavigation?) {
+        guard isCurrent(navigation) else {
+            return
+        }
+
+        if navigation == nil {
+            hasActiveUnidentifiedNavigation = false
+            generation &+= 1
+            return
+        }
+
+        clearActiveNavigation()
+    }
+
+    private mutating func clearActiveNavigation() {
+        rememberSupersededNavigation(activeNavigationReference?.value)
+        activeNavigationIdentifier = nil
+        activeNavigationReference = nil
+    }
+
+    mutating func discardSupersededNavigation(_ navigation: WKNavigation?) {
+        guard let navigation else {
+            return
+        }
+
+        supersededNavigations.removeAll { $0.value === navigation || $0.value == nil }
+    }
+
+    mutating func processTerminated() {
+        hasCommittedDocument = false
+        isAwaitingNavigationRegistration = false
+        hasActiveUnidentifiedNavigation = false
+        activeNavigationIdentifier = nil
+        operationIDs.removeAll(keepingCapacity: true)
+        activeNavigationReference = nil
+        supersededNavigations.removeAll(keepingCapacity: true)
+        generation &+= 1
+    }
+}
+
 @MainActor
 private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     let tabID: BrowserTabID
     let webView: WKWebView
     weak var adapter: BrowserWebKitAdapter?
+    var hasCommittedDocument: Bool {
+        navigationCorrelation.hasCommittedDocument
+    }
+
     private var pendingDialogResolution: (() -> Void)?
     private var observations: [NSKeyValueObservation] = []
+    private var navigationCorrelation = BrowserWebKitNavigationCorrelation()
     private var committedURLProjection = BrowserWebKitCommittedURLProjection()
     private let backForwardTokens = BrowserBackForwardTokenRegistry<WKBackForwardListItem>()
 
@@ -285,22 +568,22 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         super.init()
         observations = [
             webView.observe(\.isLoading, options: [.initial, .new]) { [weak self] _, _ in
-                Task { @MainActor in self?.emitMetadata() }
+                self?.scheduleMetadataEmission()
             },
             webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
-                Task { @MainActor in self?.emitMetadata() }
+                self?.scheduleMetadataEmission()
             },
             webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
-                Task { @MainActor in self?.emitMetadata() }
+                self?.scheduleMetadataEmission()
             },
             webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
-                Task { @MainActor in self?.emitMetadata() }
+                self?.scheduleMetadataEmission()
             },
             webView.observe(\.title, options: [.new]) { [weak self] _, _ in
-                Task { @MainActor in self?.emitMetadata() }
+                self?.scheduleMetadataEmission()
             },
             webView.observe(\.url, options: [.new]) { [weak self] _, _ in
-                Task { @MainActor in self?.emitMetadata() }
+                self?.scheduleMetadataEmission()
             },
         ]
     }
@@ -313,54 +596,113 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
-    func goToBackForwardEntry(_ token: BrowserBackForwardEntry.Token) {
+    func load(_ url: URL, operationID: BrowserNavigationOperationID) {
+        navigationCorrelation.beginNavigation()
+        invalidateBackForwardTokens()
+        let navigation = webView.load(URLRequest(url: url))
+        register(navigation, operationID: operationID)
+    }
+
+    func goToBackForwardEntry(
+        _ token: BrowserBackForwardEntry.Token,
+        operationID: BrowserNavigationOperationID,
+    ) {
         guard let item = backForwardTokens.resolve(token) else {
+            navigationCorrelation.beginNavigation()
+            register(nil, operationID: operationID)
             return
         }
 
         backForwardTokens.invalidate()
-        webView.go(to: item)
+        navigationCorrelation.beginNavigation()
+        register(webView.go(to: item), operationID: operationID)
     }
 
     func invalidateBackForwardTokens() {
         backForwardTokens.invalidate()
     }
 
-    func goBack() {
+    func goBack(operationID: BrowserNavigationOperationID) {
+        navigationCorrelation.beginNavigation()
         invalidateBackForwardTokens()
-        webView.goBack()
+        register(webView.goBack(), operationID: operationID)
     }
 
-    func goForward() {
+    func goForward(operationID: BrowserNavigationOperationID) {
+        navigationCorrelation.beginNavigation()
         invalidateBackForwardTokens()
-        webView.goForward()
+        register(webView.goForward(), operationID: operationID)
     }
 
-    func reload() {
+    func reload(operationID: BrowserNavigationOperationID) {
+        navigationCorrelation.beginNavigation()
         invalidateBackForwardTokens()
-        webView.reload()
+        register(webView.reload(), operationID: operationID)
     }
 
-    func webView(_ webView: WKWebView, didCommit _: WKNavigation?) {
+    func webView(_: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
+        // A command registers its WKNavigation immediately after issuing the WebKit call. The
+        // correlation tracker rejects callbacks from that registration window and from known or
+        // stale navigations. Outside that window, a nil callback represents an untracked external
+        // navigation because WebKit supplied no identity to correlate.
+        guard navigationCorrelation.acceptExternalNavigation(navigation) else {
+            navigationCorrelation.discardSupersededNavigation(navigation)
+            return
+        }
+
+        adapter?.emit(.navigationStarted(tabID: tabID))
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation?) {
+        guard navigationCorrelation.commit(navigation) else {
+            navigationCorrelation.discardSupersededNavigation(navigation)
+            return
+        }
+
         backForwardTokens.invalidate()
         committedURLProjection.update(authoritativeCurrentItemURL: webView.backForwardList.currentItem?.url)
-        emitMetadata()
+        // The committed projection is updated here for adapter-owned history and readiness state.
+        // Reducer metadata is emitted once, from didFinish, so one navigation has one logical
+        // invalidation/completion path instead of a commit observation plus a second completion.
     }
 
-    func webView(_: WKWebView, didFinish _: WKNavigation?) {
+    func webView(_: WKWebView, didFinish navigation: WKNavigation?) {
+        guard let completion = navigationCorrelation.finish(navigation) else {
+            navigationCorrelation.discardSupersededNavigation(navigation)
+            _ = navigationCorrelation.consumeOperationID(for: navigation)
+            return
+        }
+
         backForwardTokens.invalidate()
-        emitMetadata()
+        emitMetadata(operationID: completion.operationID)
     }
 
-    func webView(_: WKWebView, didFail _: WKNavigation?, withError error: Error) {
-        emit(error)
+    func webView(_: WKWebView, didFail navigation: WKNavigation?, withError error: Error) {
+        guard navigationCorrelation.isCurrent(navigation) else {
+            navigationCorrelation.discardSupersededNavigation(navigation)
+            _ = navigationCorrelation.consumeOperationID(for: navigation)
+            return
+        }
+
+        emit(error, navigation: navigation)
     }
 
-    func webView(_: WKWebView, didFailProvisionalNavigation _: WKNavigation?, withError error: Error) {
-        emit(error)
+    func webView(
+        _: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation?,
+        withError error: Error,
+    ) {
+        guard navigationCorrelation.isCurrent(navigation) else {
+            navigationCorrelation.discardSupersededNavigation(navigation)
+            _ = navigationCorrelation.consumeOperationID(for: navigation)
+            return
+        }
+
+        emit(error, navigation: navigation)
     }
 
     func webViewWebContentProcessDidTerminate(_: WKWebView) {
+        navigationCorrelation.processTerminated()
         adapter?.emit(.processTerminated(tabID: tabID))
     }
 
@@ -515,16 +857,46 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         adapter?.emit(.javaScriptDialogChanged(tabID: tabID, isPresented: false))
     }
 
-    private func emitMetadata() {
+    fileprivate func scheduleMetadataEmissionForTesting() -> Task<Bool, Never> {
+        scheduleMetadataEmissionTask()
+    }
+
+    private func scheduleMetadataEmission() {
+        _ = scheduleMetadataEmissionTask()
+    }
+
+    private func scheduleMetadataEmissionTask() -> Task<Bool, Never> {
+        let generation = navigationCorrelation.generation
+        let operationID = navigationCorrelation.currentOperationID()
+        return Task { @MainActor [weak self] in
+            guard let self,
+                  navigationCorrelation.generation == generation
+            else {
+                return false
+            }
+
+            emitMetadata(operationID: operationID)
+            return true
+        }
+    }
+
+    private func emitMetadata(operationID: BrowserNavigationOperationID? = nil) {
         synchronizeCommittedURL()
-        adapter?.emit(.metadata(tabID: tabID, .init(
+        let metadata = BrowserTab.Metadata(
             committedURL: committedURLProjection.committedURL,
             title: webView.title,
             isLoading: webView.isLoading,
             estimatedProgress: webView.estimatedProgress,
             canGoBack: webView.canGoBack,
             canGoForward: webView.canGoForward,
-        )))
+        )
+        let correlation: BrowserWebKitEventCorrelation = operationID.map { .operation($0) }
+            ?? .untracked
+        adapter?.emit(.metadata(
+            tabID: tabID,
+            metadata: metadata,
+            correlation: correlation,
+        ))
     }
 
     private func synchronizeCommittedURL() {
@@ -535,12 +907,38 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
-    private func emit(_ error: Error) {
+    private func emit(_ error: Error, navigation: WKNavigation?) {
         let url = (error as NSError).userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? webView.url
+        let operationID = navigationCorrelation.operationID(for: navigation)
         guard let url, let mapped = BrowserWebKitAdapter.navigationError(error, failingURL: url) else {
+            // WebKit reports user cancellation as an unmapped navigation error. It still must
+            // complete the reducer-issued operation or the preview lifecycle remains pending.
+            emitMetadata(operationID: operationID)
+            navigationCorrelation.markFinished(navigation)
+            _ = navigationCorrelation.consumeOperationID(for: navigation)
             return
         }
 
-        adapter?.emit(.navigationFailed(tabID: tabID, mapped))
+        let correlation: BrowserWebKitEventCorrelation = operationID
+            .map { .operation($0) }
+            ?? .untracked
+        adapter?.emit(.navigationFailed(
+            tabID: tabID,
+            error: mapped,
+            correlation: correlation,
+        ))
+        navigationCorrelation.markFinished(navigation)
+        _ = navigationCorrelation.consumeOperationID(for: navigation)
+    }
+
+    private func register(
+        _ navigation: WKNavigation?,
+        operationID: BrowserNavigationOperationID,
+    ) {
+        if !navigationCorrelation.register(navigation, operationID: operationID) {
+            // History can change between the reducer reading its metadata and this command
+            // reaching WebKit. A synchronous no-op still completes with the command identity.
+            emitMetadata(operationID: operationID)
+        }
     }
 }

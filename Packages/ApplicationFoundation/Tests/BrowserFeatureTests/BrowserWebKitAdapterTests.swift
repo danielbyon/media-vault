@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import ConcurrencyExtras
 import Foundation
 import SwiftUI
 import Testing
@@ -15,6 +16,32 @@ import WebKit
 @Suite("Browser WebKit adapter")
 @MainActor
 struct BrowserWebKitAdapterTests {
+    @Test("WebKit rendering policy rejects layer-only output")
+    func webKitRenderingPolicyRejectsLayerOnlyOutput() {
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.backgroundColor = .systemBlue
+        view.isOpaque = true
+        let drawFailure: @MainActor (UIView, CGRect, Bool) -> Bool = { _, _, _ in false }
+
+        let webKitImage = BrowserSurfaceRenderer.image(
+            from: view,
+            afterScreenUpdates: false,
+            opaque: true,
+            renderingPolicy: .webKit,
+            drawHierarchy: drawFailure,
+        )
+        let appOwnedImage = BrowserSurfaceRenderer.image(
+            from: view,
+            afterScreenUpdates: false,
+            opaque: true,
+            renderingPolicy: .appOwnedTransition,
+            drawHierarchy: drawFailure,
+        )
+
+        #expect(webKitImage == nil)
+        #expect(appOwnedImage != nil)
+    }
+
     @Test("Contexts are keyed by stable tab ID and destroyed independently of selection")
     func contextLifecycle() {
         let adapter = BrowserWebKitAdapter()
@@ -29,6 +56,346 @@ struct BrowserWebKitAdapterTests {
         adapter.destroyContext(for: first)
         #expect(adapter.hasContext(for: first) == false)
         #expect(adapter.hasContext(for: second))
+    }
+
+    @Test("Tagged history no-ops complete without a WebKit delegate callback")
+    func taggedHistoryNoOpCompletesOperation() async {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        _ = adapter.ensureContext(for: tabID)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        let operationID = BrowserNavigationOperationID()
+
+        adapter.execute(.goBack(tabID: tabID, operationID: operationID))
+
+        guard case let .metadata(eventTabID, _, .operation(eventOperationID)) = await events.next() else {
+            Issue.record("A synchronous history no-op did not complete its tagged operation")
+            return
+        }
+
+        #expect(eventTabID == tabID)
+        #expect(eventOperationID == operationID)
+    }
+
+    @Test("An untracked nil provisional navigation emits an external navigation start")
+    func untrackedNilProvisionalNavigationEmitsNavigationStarted() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let webView = adapter.ensureContext(for: tabID)
+        let delegate = try #require(webView.navigationDelegate as? WKNavigationDelegate)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        defer { adapter.destroyContext(for: tabID) }
+
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+    }
+
+    @Test("An unidentified nil navigation completes its full lifecycle")
+    func unidentifiedNilNavigationCompletesItsFullLifecycle() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let webView = adapter.ensureContext(for: tabID)
+        let delegate = try #require(webView.navigationDelegate as? WKNavigationDelegate)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        defer { adapter.destroyContext(for: tabID) }
+
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+
+        delegate.webView?(webView, didCommit: nil)
+        try #require(adapter.hasCommittedDocument(for: tabID))
+
+        delegate.webView?(webView, didFinish: nil)
+        guard case let .metadata(eventTabID, _, .untracked) = await events.next() else {
+            Issue.record("An unidentified nil navigation did not emit untracked completion metadata")
+            return
+        }
+
+        #expect(eventTabID == tabID)
+        #expect(adapter.hasCommittedDocument(for: tabID))
+    }
+
+    @Test("An unidentified nil navigation failure is processed as untracked")
+    func unidentifiedNilNavigationFailureClearsLifecycle() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let webView = adapter.ensureContext(for: tabID)
+        let delegate = try #require(webView.navigationDelegate as? WKNavigationDelegate)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        let failingURL = try #require(URL(string: "https://example.com/failure"))
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotConnectToHost,
+            userInfo: [NSURLErrorFailingURLErrorKey: failingURL],
+        )
+        defer { adapter.destroyContext(for: tabID) }
+
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+
+        delegate.webView?(webView, didFailProvisionalNavigation: nil, withError: error)
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+        guard case let .navigationFailed(
+            eventTabID,
+            .connectionFailed(eventURL),
+            .untracked,
+        ) = await events.next() else {
+            Issue.record("An unidentified nil navigation failure was not emitted as untracked")
+            return
+        }
+
+        #expect(eventTabID == tabID)
+        #expect(eventURL == failingURL)
+        #expect(adapter.hasCommittedDocument(for: tabID) == false)
+
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+    }
+
+    @Test("Failed unidentified nil navigation invalidates queued metadata")
+    func failedUnidentifiedNilNavigationInvalidatesQueuedMetadata() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let webView = adapter.ensureContext(for: tabID)
+        let delegate = try #require(webView.navigationDelegate as? WKNavigationDelegate)
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        let failingURL = try #require(URL(string: "https://example.com/failure"))
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotConnectToHost,
+            userInfo: [NSURLErrorFailingURLErrorKey: failingURL],
+        )
+        defer { adapter.destroyContext(for: tabID) }
+
+        delegate.webView?(webView, didStartProvisionalNavigation: nil)
+        #expect(await events.next() == .navigationStarted(tabID: tabID))
+
+        let metadataTask = try #require(adapter.scheduleMetadataEmissionForTesting(for: tabID))
+        delegate.webView?(webView, didFailProvisionalNavigation: nil, withError: error)
+
+        guard case let .navigationFailed(_, _, .untracked) = await events.next() else {
+            Issue.record("An unidentified nil navigation failure was not emitted as untracked")
+            return
+        }
+
+        #expect(await metadataTask.value == false)
+    }
+
+    @Test("Preview capture uses the current viewport and projects success or failure as Sendable data")
+    func previewCaptureProjectsViewportAndFailure() async throws {
+        let image = try #require(UIImage(systemName: "globe"))
+        let usedCurrentViewport = LockIsolated(false)
+        let successAdapter = BrowserWebKitAdapter(snapshotter: { _, configuration, completion in
+            usedCurrentViewport.setValue(configuration == nil)
+            completion(image, nil)
+        })
+        let successID = BrowserTabID()
+        let successRevision = BrowserTabPreviewRevision()
+        _ = successAdapter.ensureContext(for: successID)
+        let successStream = successAdapter.makeEventStream()
+        var successEvents = successStream.makeAsyncIterator()
+        successAdapter.execute(.capturePreview(tabID: successID, revision: successRevision))
+
+        guard let successEvent = await successEvents.next() else {
+            Issue.record("The successful snapshot did not produce a preview event")
+            return
+        }
+        guard case let .preview(tabID, revision, pngData) = successEvent else {
+            Issue.record("The successful snapshot produced the wrong event")
+            return
+        }
+
+        #expect(tabID == successID)
+        #expect(revision == successRevision)
+        #expect(pngData?.isEmpty == false)
+        #expect(usedCurrentViewport.value)
+
+        let failureAdapter = BrowserWebKitAdapter(snapshotter: { _, _, completion in
+            completion(nil, NSError(domain: "BrowserWebKitAdapterTests", code: 1))
+        })
+        let failureID = BrowserTabID()
+        let failureRevision = BrowserTabPreviewRevision()
+        _ = failureAdapter.ensureContext(for: failureID)
+        let failureStream = failureAdapter.makeEventStream()
+        var failureEvents = failureStream.makeAsyncIterator()
+        failureAdapter.execute(.capturePreview(tabID: failureID, revision: failureRevision))
+
+        #expect(await failureEvents.next() == .preview(
+            tabID: failureID,
+            revision: failureRevision,
+            pngData: nil,
+        ))
+    }
+
+    @Test("Native preview capture honors draw failure and detachment")
+    func nativePreviewCaptureHonorsFailureAndDetachment() {
+        var requestedAfterScreenUpdates = false
+        let controller = BrowserNativePreviewCaptureController { view, _, afterScreenUpdates in
+            requestedAfterScreenUpdates = afterScreenUpdates
+            guard let context = UIGraphicsGetCurrentContext() else {
+                return false
+            }
+
+            view.layer.render(in: context)
+            return true
+        }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 120, height: 80))
+        let rootViewController = UIViewController()
+        window.rootViewController = rootViewController
+        let surface = UIView(frame: rootViewController.view.bounds)
+        surface.backgroundColor = .systemBackground
+        rootViewController.view.addSubview(surface)
+        window.makeKeyAndVisible()
+        rootViewController.view.frame = window.bounds
+        surface.frame = rootViewController.view.bounds
+        rootViewController.view.layoutIfNeeded()
+        flushUIKitRendering()
+        controller.attach(surface: surface)
+
+        #expect(controller.capture()?.isEmpty == false)
+        #expect(requestedAfterScreenUpdates)
+
+        let failingController = BrowserNativePreviewCaptureController { _, _, _ in false }
+        failingController.attach(surface: surface)
+        #expect(failingController.capture() == nil)
+
+        controller.detach(surface: surface)
+        #expect(controller.capture() == nil)
+        window.isHidden = true
+    }
+
+    @Test("Reused native preview hosts follow the current transition role")
+    func reusedNativePreviewHostRebindsTransitionRole() {
+        let firstID = BrowserTabID(UUID(9_101))
+        let secondID = BrowserTabID(UUID(9_102))
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let controller = BrowserNativePreviewCaptureController { view, bounds, afterScreenUpdates in
+            view.drawHierarchy(in: bounds, afterScreenUpdates: afterScreenUpdates)
+        }
+        let host = BrowserNativePreviewCaptureHostController(
+            content: Color.red,
+            controller: controller,
+            transitionRegistry: registry,
+            transitionRole: .content(firstID),
+        )
+        _ = host.view
+        defer { host.detachSurface() }
+
+        #expect(registry.view(for: .content(firstID)) === host.view)
+
+        host.update(
+            content: Color.blue,
+            transitionRegistry: registry,
+            transitionRole: .content(secondID),
+        )
+
+        #expect(registry.view(for: .content(firstID)) == nil)
+        #expect(registry.view(for: .content(secondID)) === host.view)
+    }
+
+    @Test("Mounted native preview capture includes only the represented surface")
+    func mountedNativePreviewCaptureUsesRepresentedSurface() throws {
+        let renderLayer: @MainActor (UIView, CGRect, Bool) -> Bool = { view, _, _ in
+            guard let context = UIGraphicsGetCurrentContext() else {
+                return false
+            }
+
+            view.layer.render(in: context)
+            return true
+        }
+        let startController = BrowserNativePreviewCaptureController(drawHierarchy: renderLayer)
+        let errorController = BrowserNativePreviewCaptureController(drawHierarchy: renderLayer)
+        let terminatedController = BrowserNativePreviewCaptureController(drawHierarchy: renderLayer)
+        let rootView = AnyView(
+            VStack(spacing: 0) {
+                Color.blue.frame(height: 40)
+                BrowserNativePreviewCapture(
+                    content: Color.red.overlay {
+                        Text("Start Page")
+                            .foregroundStyle(.white)
+                    },
+                    controller: startController,
+                )
+                .frame(width: 160, height: 100)
+                BrowserNativePreviewCapture(
+                    content: Color.orange.overlay {
+                        Text("Page Error")
+                            .foregroundStyle(.white)
+                    },
+                    controller: errorController,
+                )
+                .frame(width: 160, height: 100)
+                BrowserNativePreviewCapture(
+                    content: Color.purple.overlay {
+                        Text("Page Ended")
+                            .foregroundStyle(.white)
+                    },
+                    controller: terminatedController,
+                )
+                .frame(width: 160, height: 100)
+            }
+            .frame(width: 160, height: 340),
+        )
+        let hostingController = UIHostingController(rootView: rootView)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 160, height: 340))
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        hostingController.view.frame = window.bounds
+        hostingController.view.layoutIfNeeded()
+        flushUIKitRendering()
+
+        let startImageData = try #require(
+            startController.capture(),
+            "The mounted Start Page surface did not produce a capture",
+        )
+        let errorImageData = try #require(
+            errorController.capture(),
+            "The mounted error surface did not produce a capture",
+        )
+        let terminatedImageData = try #require(
+            terminatedController.capture(),
+            "The mounted terminated surface did not produce a capture",
+        )
+        let startImage = try #require(UIImage(data: startImageData))
+        let errorImage = try #require(UIImage(data: errorImageData))
+        let terminatedImage = try #require(UIImage(data: terminatedImageData))
+
+        let expectedPixelSize = CGSize(
+            width: 160 * window.screen.scale,
+            height: 100 * window.screen.scale,
+        )
+        #expect(startImage.size == expectedPixelSize)
+        #expect(errorImage.size == expectedPixelSize)
+        #expect(terminatedImage.size == expectedPixelSize)
+        let startPixel = try #require(rgbaPixel(in: startImage))
+        let errorPixel = try #require(rgbaPixel(in: errorImage))
+        let terminatedPixel = try #require(rgbaPixel(in: terminatedImage))
+
+        #expect(startPixel.red > 180)
+        #expect(startPixel.green < 80)
+        #expect(startPixel.blue < 80)
+        #expect(errorPixel.red > 180)
+        #expect(errorPixel.green > 80)
+        #expect(errorPixel.blue < 80)
+        #expect(terminatedPixel.red > 80)
+        #expect(terminatedPixel.green < 80)
+        #expect(terminatedPixel.blue > 80)
+
+        hostingController.rootView = AnyView(EmptyView())
+        hostingController.view.layoutIfNeeded()
+        #expect(startController.capture() == nil)
+        #expect(errorController.capture() == nil)
+        #expect(terminatedController.capture() == nil)
+        window.isHidden = true
+    }
+
+    private func flushUIKitRendering() {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
     }
 
     @Test("A destroyed context cannot emit a delayed script-close event")
@@ -69,6 +436,94 @@ struct BrowserWebKitAdapterTests {
         bridge.makeCoordinator().refresh()
 
         #expect(refreshCount == 1)
+    }
+
+    @Test("A custom BrowserWebView adapter owns the default readiness coordinator")
+    func customBrowserWebViewAdapterOwnsDefaultReadinessCoordinator() {
+        let tabID = BrowserTabID()
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let readinessContext = BrowserWebKitReadinessContext()
+        _ = adapter.ensureContext(for: tabID)
+        let bridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: adapter,
+            readinessContext: readinessContext,
+        )
+        let coordinator = bridge.makeCoordinator()
+
+        #expect(
+            coordinator.resolveReadinessContext(
+                readinessContext,
+                for: webView,
+                tabID: tabID,
+            ) == readinessContext,
+        )
+
+        adapter.destroyContext(for: tabID)
+    }
+
+    @Test("Readiness contexts distinguish successive reducer navigation lifecycles")
+    func readinessContextsDistinguishSuccessiveNavigationLifecycles() {
+        let firstOperationID = BrowserNavigationOperationID()
+        let secondOperationID = BrowserNavigationOperationID()
+        let firstContext = BrowserWebKitReadinessContext(
+            navigationOperationID: firstOperationID,
+        )
+        let secondContext = BrowserWebKitReadinessContext(
+            navigationOperationID: secondOperationID,
+        )
+
+        #expect(firstContext != secondContext)
+    }
+
+    @Test("Updated BrowserWebView values keep the coordinator-owned adapter surface attached")
+    func updatedBrowserWebViewUsesCoordinatorAdapter() {
+        let tabID = BrowserTabID()
+        let firstWebView = WKWebView(frame: .zero)
+        let secondWebView = WKWebView(frame: .zero)
+        let firstAdapter = BrowserWebKitAdapter(makeWebView: { _, _ in firstWebView })
+        let secondAdapter = BrowserWebKitAdapter(makeWebView: { _, _ in secondWebView })
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        let firstBridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: firstAdapter,
+        )
+        let secondBridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: {},
+            transitionRegistry: registry,
+            adapter: secondAdapter,
+        )
+        let hostingController = UIHostingController(rootView: AnyView(firstBridge))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        hostingController.view.frame = window.bounds
+        hostingController.view.layoutIfNeeded()
+        defer {
+            hostingController.rootView = AnyView(EmptyView())
+            hostingController.view.layoutIfNeeded()
+            firstAdapter.destroyContext(for: tabID)
+            secondAdapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        hostingController.rootView = AnyView(secondBridge)
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
+
+        #expect(firstAdapter.webView(for: tabID) === firstWebView)
+        #expect(firstWebView.superview != nil)
+        #expect(registry.view(for: .content(tabID)) === firstWebView)
+        #expect(secondAdapter.webView(for: tabID) == nil)
+        #expect(secondWebView.superview == nil)
     }
 
     @Test("The WebKit bridge receives the adopting presentation's interactive policy")
@@ -200,4 +655,44 @@ struct BrowserWebKitAdapterTests {
         #expect(BrowserJavaScriptDialogPresentation.prompt.includesTextField)
         #expect(BrowserJavaScriptDialogPresentation.prompt.actions == [.cancel, .ok])
     }
+}
+
+private struct RGBAPixel {
+    let red: UInt8
+    let green: UInt8
+    let blue: UInt8
+    let alpha: UInt8
+}
+
+private func rgbaPixel(in image: UIImage) -> RGBAPixel? {
+    guard let source = image.cgImage else {
+        return nil
+    }
+
+    var values = [UInt8](repeating: 0, count: 4)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+    let drawn = values.withUnsafeMutableBytes { buffer in
+        guard let baseAddress = buffer.baseAddress,
+              let context = CGContext(
+                  data: baseAddress,
+                  width: 1,
+                  height: 1,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 4,
+                  space: colorSpace,
+                  bitmapInfo: bitmapInfo,
+              )
+        else {
+            return false
+        }
+
+        context.draw(source, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return true
+    }
+    guard drawn else {
+        return nil
+    }
+
+    return RGBAPixel(red: values[0], green: values[1], blue: values[2], alpha: values[3])
 }

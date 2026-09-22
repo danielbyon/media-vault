@@ -8,6 +8,110 @@
 import ComposableArchitecture
 import Foundation
 
+/// Keeps all transient preview lifecycle values in one tab-keyed state owner.
+struct BrowserPreviewState: Equatable, Sendable {
+    private struct Entry: Equatable, Sendable {
+        var data: BrowserTabPreviewCacheEntry?
+        var revision: BrowserTabPreviewRevision
+        var operation: BrowserNavigationOperationID?
+
+        init(
+            data: BrowserTabPreviewCacheEntry? = nil,
+            revision: BrowserTabPreviewRevision = .init(),
+            operation: BrowserNavigationOperationID? = nil,
+        ) {
+            self.data = data
+            self.revision = revision
+            self.operation = operation
+        }
+    }
+
+    private var entries: [BrowserTabID: Entry]
+
+    init(tabIDs: [BrowserTabID]) {
+        entries = Dictionary(uniqueKeysWithValues: tabIDs.map { ($0, .init()) })
+    }
+
+    /// Returns the cached preview entry owned by one live tab.
+    func data(for tabID: BrowserTabID) -> BrowserTabPreviewCacheEntry? {
+        entries[tabID]?.data
+    }
+
+    mutating func addTab(_ tabID: BrowserTabID) {
+        entries[tabID] = .init()
+    }
+
+    mutating func removeTab(_ tabID: BrowserTabID) {
+        entries.removeValue(forKey: tabID)
+    }
+
+    mutating func replaceWithOnlyTab(_ tabID: BrowserTabID) {
+        entries = [tabID: .init()]
+    }
+
+    mutating func keepOnlyTab(_ tabID: BrowserTabID) {
+        entries = entries.filter { $0.key == tabID }
+    }
+
+    mutating func clearData() {
+        for id in entries.keys {
+            entries[id]?.data = nil
+        }
+    }
+
+    mutating func setData(_ entry: BrowserTabPreviewCacheEntry, for tabID: BrowserTabID) {
+        var tabEntry = entries[tabID] ?? .init()
+        tabEntry.data = entry
+        entries[tabID] = tabEntry
+    }
+
+    mutating func invalidate(
+        tabID: BrowserTabID,
+        operation: BrowserNavigationOperationID?,
+    ) {
+        var entry = entries[tabID] ?? .init()
+        entry.revision = .init()
+        entry.data = nil
+        entry.operation = operation
+        entries[tabID] = entry
+    }
+
+    func isCurrent(operationID: BrowserNavigationOperationID, for tabID: BrowserTabID) -> Bool {
+        entries[tabID]?.operation == operationID
+    }
+
+    /// Returns the pending WebKit operation owned by one live tab, if any.
+    func operation(for tabID: BrowserTabID) -> BrowserNavigationOperationID? {
+        entries[tabID]?.operation
+    }
+
+    @discardableResult
+    mutating func consume(operationID: BrowserNavigationOperationID, for tabID: BrowserTabID) -> Bool {
+        guard entries[tabID]?.operation == operationID
+        else {
+            return false
+        }
+
+        entries[tabID]?.operation = nil
+        return true
+    }
+
+    @discardableResult
+    mutating func clearOperations(for tabID: BrowserTabID) -> Bool {
+        guard entries[tabID]?.operation != nil else {
+            return false
+        }
+
+        entries[tabID]?.operation = nil
+        return true
+    }
+
+    /// Returns the current opaque preview revision for a live tab.
+    func revision(for tabID: BrowserTabID) -> BrowserTabPreviewRevision {
+        entries[tabID]?.revision ?? .init()
+    }
+}
+
 /// Deterministic app-owned browser state and routing.
 @Reducer
 public struct BrowserFeature {
@@ -33,7 +137,8 @@ public struct BrowserFeature {
         var findDraft: String?
         var backForwardList: BrowserBackForwardPresentation?
         var javaScriptDialogTabID: BrowserTabID?
-        var tabPreviewData: [BrowserTabID: Data]
+        /// Revision-scoped preview bytes and WebKit operation identities owned by each tab.
+        var previewState: BrowserPreviewState
         var shareURL: URL?
         var shareTitle: String?
         var destructiveConfirmation: BrowserDestructiveConfirmation?
@@ -59,7 +164,7 @@ public struct BrowserFeature {
             findDraft = nil
             backForwardList = nil
             javaScriptDialogTabID = nil
-            tabPreviewData = [:]
+            previewState = .init(tabIDs: [initialTabID])
             shareURL = nil
             shareTitle = nil
             destructiveConfirmation = nil
@@ -94,7 +199,7 @@ public struct BrowserFeature {
             findDraft = nil
             backForwardList = nil
             javaScriptDialogTabID = nil
-            tabPreviewData = [:]
+            previewState = .init(tabIDs: tabs.map(\.id))
             shareURL = nil
             shareTitle = nil
             destructiveConfirmation = nil
@@ -149,6 +254,14 @@ public struct BrowserFeature {
         case showStartPageTapped
         /// Presents the app-owned tab overview.
         case showTabOverviewTapped
+        /// Delivers a revision-scoped capture of the currently visible native selected surface.
+        case nativePreviewCaptured(
+            tabID: BrowserTabID,
+            revision: BrowserTabPreviewRevision,
+            pngData: Data?,
+        )
+        /// Evicts disposable preview bytes after a memory-pressure notification.
+        case previewCacheEvicted
         /// Records the deterministic accessibility focus target selected by Tab Overview.
         case tabOverviewFocusChanged(BrowserTabID?)
         /// Resigns transient Browser presentation state when the authenticated shell leaves Browser.
