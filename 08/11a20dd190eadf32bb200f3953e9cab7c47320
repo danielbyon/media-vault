@@ -1,0 +1,52 @@
+Makefile
+  s_6f10d12e5c684d::t_f5a35747be5905 17
+  s_6f10d12e5c684d::t_482b685ae3e041 20,35
+.swiftlint.yml
+  s_6f10d12e5c684d::t_cdbfa55e0ec172 1-2,4,12-13,21,25-26
+.gitignore
+  s_6f10d12e5c684d::t_fad35829ad9845 50
+Scripts/run-swiftlint-analysis.sh
+  s_6f10d12e5c684d::t_86b6fd2e01bf70 96
+  s_6f10d12e5c684d::t_482b685ae3e041 8,16-18,97-98
+  s_6f10d12e5c684d::t_32bb97c1bfcd2b 9,19,21-27,29-34,86,88-89
+  s_6f10d12e5c684d::t_31afc36bf5f42f 28,44-51
+  s_6f10d12e5c684d::t_ee89623252290d 35-43
+  s_6f10d12e5c684d::t_4f78391cb9bfbe 20
+Scripts/swift-tools-local.sh
+  s_6f10d12e5c684d::t_482b685ae3e041 1-10
+Scripts/swift-tools.sh
+  s_6f10d12e5c684d::t_5474cc245b3b2f 168-172,176-179,183-186,191-220,222-224,226,236,240-241,244-246,253-254,260
+  s_6f10d12e5c684d::t_aed5d25b173f86 51-60,62,64-71,109
+  s_6f10d12e5c684d::t_3bd876667a420d 108,110-111
+  s_6f10d12e5c684d::t_af9716b0b5cb95 221,225
+  s_6f10d12e5c684d::t_ef09bee4b5d098 250,262
+  s_6f10d12e5c684d::t_e5c1850b134877 173-175,180-182
+  s_6f10d12e5c684d::t_263017b295d108 61,63,72-73
+  s_6f10d12e5c684d::t_ee7ef0fa2f710c 1-50,75,84,97-104,118-119,122-123,125-126,128-158,160-162,271-276,278-285,298-300,302-304,307-312
+  s_6f10d12e5c684d::t_593800732deab2 163,166-167,187-190,227-229,233-235,238-239,242-243,247-249,251-252,255-259,261,263-270,277,286-297
+  s_6f10d12e5c684d::t_9939e96c63483e 105-107,112-113,115-117
+  s_6f10d12e5c684d::t_26a670684c2a33 74,76-83,85-96,114,120-121,124,127,159
+  s_6f10d12e5c684d::t_00cfafc5b78ff9 301,305-306
+  s_6f10d12e5c684d::t_2381c0677f9831 164-165
+  s_6f10d12e5c684d::t_6eecc03f482acf 230-232,237
+.swiftformat
+  s_6f10d12e5c684d::t_1d763e3f5070b5 1-2,6
+Scripts/swift-tools.lock
+  s_6f10d12e5c684d::t_52cb97980660d3 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0811a20dd190eadf32bb200f3953e9cab7c47320",
+  "prompts": {},
+  "sessions": {
+    "s_6f10d12e5c684d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c5cc-984b-7b42-b39d-a78a91277495",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
