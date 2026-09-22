@@ -23,7 +23,7 @@ enum BrowserSurfaceRenderer {
         case nativePreview
         /// Captures an app-owned UIKit surface for a transition representation.
         case appOwnedTransition
-        /// Captures a WebKit surface for readiness or transition evidence.
+        /// Captures a WebKit surface for a transition representation.
         case webKit
 
         var allowsLayerFallback: Bool {

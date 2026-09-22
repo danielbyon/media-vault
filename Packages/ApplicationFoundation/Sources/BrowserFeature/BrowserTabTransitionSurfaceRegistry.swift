@@ -331,12 +331,12 @@ final class BrowserTabTransitionOverlayView: UIView {
 enum BrowserTabTransitionEvent: Equatable {
     /// The destination WebKit surface was attached to the single Browser host.
     case targetAttached(BrowserTabID)
-    /// The attached destination did not yet match known-valid page pixels.
-    case targetVisualInvalid(BrowserTabID)
-    /// The attached destination had no trustworthy visual evidence source.
-    case targetEvidenceUnavailable(BrowserTabID)
-    /// The attached destination matched known-valid page pixels.
-    case targetVisualReady(BrowserTabID)
+    /// The attached destination is blocked by an app-owned presentation surface.
+    case targetPresentationBlocked(BrowserTabID)
+    /// The attached destination could not satisfy presentation readiness within its bounded wait.
+    case targetPresentationUnavailable(BrowserTabID)
+    /// The attached destination satisfied lifecycle presentation readiness.
+    case targetPresentationReady(BrowserTabID)
     /// The normal geometry animator was installed.
     case geometryAnimatorCreated(BrowserTabID)
     /// The authoritative destination was made visible beneath or beside the clone.

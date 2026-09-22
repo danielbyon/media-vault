@@ -28,7 +28,7 @@ final class BrowserTabTransitionSession {
     var destinationRequiresReadiness: Bool
     var completion: (() -> Void)?
     var destinationReveal: (() -> Void)?
-    var evidenceUnavailable: (() -> Void)?
+    var presentationUnavailable: (() -> Void)?
     var ownsVisibleSurface: Bool
     var frozenSurface: UIView?
     weak var liveSurface: UIView?
@@ -53,7 +53,7 @@ final class BrowserTabTransitionSession {
         reduceMotion: Bool,
         destinationRequiresReadiness: Bool,
         completion: @escaping () -> Void,
-        evidenceUnavailable: @escaping () -> Void,
+        presentationUnavailable: @escaping () -> Void,
         destinationReveal: @escaping () -> Void,
     ) {
         self.token = token
@@ -62,7 +62,7 @@ final class BrowserTabTransitionSession {
         self.reduceMotion = reduceMotion
         self.destinationRequiresReadiness = destinationRequiresReadiness
         self.completion = completion
-        self.evidenceUnavailable = evidenceUnavailable
+        self.presentationUnavailable = presentationUnavailable
         self.destinationReveal = destinationReveal
         ownsVisibleSurface = false
     }
@@ -74,7 +74,7 @@ final class BrowserTabTransitionSession {
         reduceMotion: Bool,
         destinationRequiresReadiness: Bool,
         completion: @escaping () -> Void,
-        evidenceUnavailable: @escaping () -> Void,
+        presentationUnavailable: @escaping () -> Void,
         destinationReveal: @escaping () -> Void,
     ) {
         self.token = token
@@ -83,7 +83,7 @@ final class BrowserTabTransitionSession {
         self.reduceMotion = reduceMotion
         self.destinationRequiresReadiness = destinationRequiresReadiness
         self.completion = completion
-        self.evidenceUnavailable = evidenceUnavailable
+        self.presentationUnavailable = presentationUnavailable
         self.destinationReveal = destinationReveal
         destinationRole = nil
         destinationFrame = nil
@@ -140,9 +140,9 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
             }
 
             self.diagnostics.onEvent?(event)
-            if case let .targetEvidenceUnavailable(tabID) = event,
+            if case let .targetPresentationUnavailable(tabID) = event,
                session?.tabID == tabID {
-                handleEvidenceUnavailable()
+                handlePresentationUnavailable()
             }
         }
     }
@@ -256,7 +256,7 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
         destinationRequiresReadiness: Bool = true,
         onPresentationChange: () -> Void,
         onCompletion: @escaping () -> Void,
-        onEvidenceUnavailable: @escaping () -> Void = {},
+        onPresentationUnavailable: @escaping () -> Void = {},
         onFrozenSurfaceReady: () -> Void = {},
         onDestinationVisible: @escaping () -> Void = {},
     ) {
@@ -278,7 +278,7 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
                 reduceMotion: reduceMotion,
                 destinationRequiresReadiness: destinationRequiresReadiness,
                 completion: onCompletion,
-                evidenceUnavailable: onEvidenceUnavailable,
+                presentationUnavailable: onPresentationUnavailable,
                 destinationReveal: onDestinationVisible,
             )
             lifecycleRevision &+= 1
@@ -300,7 +300,7 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
             reduceMotion: reduceMotion,
             destinationRequiresReadiness: destinationRequiresReadiness,
             completion: onCompletion,
-            evidenceUnavailable: onEvidenceUnavailable,
+            presentationUnavailable: onPresentationUnavailable,
             destinationReveal: onDestinationVisible,
         )
         lifecycleRevision &+= 1

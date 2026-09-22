@@ -5,101 +5,22 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import Foundation
-import UIKit
 import WebKit
 
-/// Revision-scoped evidence supplied by the current in-memory preview.
+/// Lifecycle state supplied by the current reducer transition.
 @MainActor
 struct BrowserWebKitReadinessContext: Equatable {
-    let revision: BrowserTabPreviewRevision
-    let expectedSignature: BrowserWebKitVisualSignature?
+    /// Distinguishes successive reducer-issued navigation lifecycles while the same WebView stays
+    /// mounted, so a pending probe cannot be reused for a newer operation.
+    let navigationOperationID: BrowserNavigationOperationID?
     /// Prevents a pending reducer navigation from treating the previously committed document as
-    /// evidence until that operation has completed and the reducer has consumed its metadata.
-    let requiresFreshCommit: Bool
-
-    init(
-        revision: BrowserTabPreviewRevision,
-        expectedSignature: BrowserWebKitVisualSignature? = nil,
-        requiresFreshCommit: Bool = false,
-    ) {
-        self.revision = revision
-        self.expectedSignature = expectedSignature
-        self.requiresFreshCommit = requiresFreshCommit
-    }
-}
-
-/// Retains only revision-scoped preview signatures needed to build readiness contexts.
-@MainActor
-private final class BrowserWebKitReadinessCache {
-    private struct CachedPreview {
-        let revision: BrowserTabPreviewRevision
-        /// Required to distinguish same-revision preview replacement without hashing or weakening
-        /// the exact byte-equality contract. `Data` remains copy-on-write with preview state.
-        let pngData: Data
-        let signature: BrowserWebKitVisualSignature?
+    /// presentation-ready until that operation has completed and its metadata has been consumed.
+    var requiresFreshCommit: Bool {
+        navigationOperationID != nil
     }
 
-    private var previewEntries: [BrowserTabID: CachedPreview] = [:]
-
-    /// Removes decoded preview evidence for tabs that no longer exist in reducer state.
-    func removeEntries(except tabIDs: Set<BrowserTabID>) {
-        previewEntries = previewEntries.filter { tabIDs.contains($0.key) }
-    }
-
-    /// Drops every retained preview signature after memory pressure or an explicit readiness reset.
-    func removeAll() {
-        previewEntries.removeAll()
-    }
-
-    /// Builds the revision-scoped evidence context consumed by the mounted WebKit boundary.
-    func context(
-        for tab: BrowserTab,
-        revision: BrowserTabPreviewRevision,
-        previewEntry: BrowserTabPreviewCacheEntry?,
-        requiresFreshCommit: Bool = false,
-    ) -> BrowserWebKitReadinessContext {
-        BrowserWebKitReadinessContext(
-            revision: revision,
-            expectedSignature: expectedSignature(
-                for: tab,
-                revision: revision,
-                previewEntry: previewEntry,
-            ),
-            requiresFreshCommit: requiresFreshCommit,
-        )
-    }
-
-    private func expectedSignature(
-        for tab: BrowserTab,
-        revision: BrowserTabPreviewRevision,
-        previewEntry: BrowserTabPreviewCacheEntry?,
-    ) -> BrowserWebKitVisualSignature? {
-        let representation = BrowserTabPreviewRepresentation.cachedOrFallback(
-            for: tab,
-            revision: revision,
-            entry: previewEntry,
-        )
-        guard case let .snapshot(data) = representation,
-              !data.isEmpty
-        else {
-            previewEntries[tab.id] = nil
-            return nil
-        }
-
-        if let entry = previewEntries[tab.id],
-           entry.revision == revision,
-           entry.pngData == data {
-            return entry.signature
-        }
-
-        let signature = BrowserWebKitVisualSignature(imageData: data)
-        previewEntries[tab.id] = CachedPreview(
-            revision: revision,
-            pngData: data,
-            signature: signature,
-        )
-        return signature
+    init(navigationOperationID: BrowserNavigationOperationID? = nil) {
+        self.navigationOperationID = navigationOperationID
     }
 }
 
@@ -107,42 +28,15 @@ private final class BrowserWebKitReadinessCache {
 @MainActor
 final class BrowserWebKitReadinessCoordinator {
     private let adapter: BrowserWebKitAdapter
-    private let visualSignature: (WKWebView) -> BrowserWebKitVisualSignature?
-    private let cache = BrowserWebKitReadinessCache()
     private var readinessProbe: BrowserWebKitReadinessProbe?
     private var readinessProbeGeneration = 0
 
-    init(
-        adapter: BrowserWebKitAdapter = .shared,
-        visualSignature: @escaping (WKWebView) -> BrowserWebKitVisualSignature? = {
-            BrowserWebKitVisualSignature(webView: $0)
-        },
-    ) {
+    init(adapter: BrowserWebKitAdapter = .shared) {
         self.adapter = adapter
-        self.visualSignature = visualSignature
     }
 
-    func removeEntries(except tabIDs: Set<BrowserTabID>) {
-        cache.removeEntries(except: tabIDs)
-    }
-
-    func removeAll() {
-        invalidate()
-        cache.removeAll()
-    }
-
-    func context(
-        for tab: BrowserTab,
-        revision: BrowserTabPreviewRevision,
-        previewEntry: BrowserTabPreviewCacheEntry?,
-        requiresFreshCommit: Bool = false,
-    ) -> BrowserWebKitReadinessContext {
-        cache.context(
-            for: tab,
-            revision: revision,
-            previewEntry: previewEntry,
-            requiresFreshCommit: requiresFreshCommit,
-        )
+    func context(navigationOperationID: BrowserNavigationOperationID? = nil) -> BrowserWebKitReadinessContext {
+        BrowserWebKitReadinessContext(navigationOperationID: navigationOperationID)
     }
 
     func invalidate() {
@@ -160,10 +54,9 @@ final class BrowserWebKitReadinessCoordinator {
         for webView: WKWebView,
         tabID: BrowserTabID,
     ) -> BrowserWebKitReadinessContext? {
-        guard let readinessContext else {
-            return nil
-        }
-        guard adapter.webView(for: tabID) === webView else {
+        guard let readinessContext,
+              adapter.webView(for: tabID) === webView
+        else {
             return nil
         }
 
@@ -175,7 +68,7 @@ final class BrowserWebKitReadinessCoordinator {
         tabID: BrowserTabID,
         readinessContext: BrowserWebKitReadinessContext?,
         onResult: @escaping (BrowserWebKitReadinessResult) -> Void,
-        onVisualInvalid: @escaping () -> Void,
+        onPresentationBlocked: @escaping () -> Void,
     ) {
         if readinessProbe?.matches(webView: webView, readinessContext: readinessContext) == true {
             return
@@ -187,6 +80,13 @@ final class BrowserWebKitReadinessCoordinator {
         let probe = BrowserWebKitReadinessProbe(
             webView: webView,
             readinessContext: readinessContext,
+            isAdapterOwned: { [weak webView, adapter] in
+                guard let webView else {
+                    return false
+                }
+
+                return adapter.webView(for: tabID) === webView
+            },
             hasCommittedDocument: { [weak webView, adapter] in
                 guard let webView,
                       let adapterWebView = adapter.webView(for: tabID),
@@ -197,7 +97,6 @@ final class BrowserWebKitReadinessCoordinator {
 
                 return adapter.hasCommittedDocument(for: tabID)
             },
-            visualSignature: visualSignature,
             onResult: { [weak self] result in
                 guard let self,
                       ownsReadinessProbe(generation: generation)
@@ -208,14 +107,14 @@ final class BrowserWebKitReadinessCoordinator {
                 readinessProbe = nil
                 onResult(result)
             },
-            onVisualInvalid: { [weak self] in
+            onPresentationBlocked: { [weak self] in
                 guard let self,
                       ownsReadinessProbe(generation: generation)
                 else {
                     return
                 }
 
-                onVisualInvalid()
+                onPresentationBlocked()
             },
         )
         readinessProbe = probe

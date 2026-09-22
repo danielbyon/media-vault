@@ -43,7 +43,7 @@ enum BrowserTabTransitionPresentationCoordinator {
         tabID: BrowserTabID,
         reduceMotion: Bool,
         onPresentationChange: @escaping () -> Void,
-        onEvidenceUnavailable: @escaping () -> Void,
+        onPresentationUnavailable: @escaping () -> Void,
     ) {
         let returnsToAlreadyMountedTab = direction == .toBrowsing && selectedTabID == tabID
         let sourceRole: BrowserTabTransitionSurfaceRole = direction == .toOverview
@@ -71,7 +71,7 @@ enum BrowserTabTransitionPresentationCoordinator {
                 }
                 bindings.latchedGeometry.wrappedValue = nil
             },
-            onEvidenceUnavailable: onEvidenceUnavailable,
+            onPresentationUnavailable: onPresentationUnavailable,
             onFrozenSurfaceReady: {},
             onDestinationVisible: {
                 if direction == .toBrowsing {

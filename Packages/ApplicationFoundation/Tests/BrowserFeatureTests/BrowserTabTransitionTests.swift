@@ -229,8 +229,8 @@ struct BrowserTabTransitionTests {
         harness.window.isHidden = true
     }
 
-    @Test("Unavailable destination evidence aborts without revealing a blank surface")
-    func uikitCoordinatorAbortsWhenDestinationEvidenceUnavailable() {
+    @Test("Unavailable destination presentation aborts without revealing a blank surface")
+    func uikitCoordinatorAbortsWhenDestinationPresentationUnavailable() {
         var completed = false
         var revertedToOverview = false
         var events: [BrowserTabTransitionEvent] = []
@@ -254,15 +254,15 @@ struct BrowserTabTransitionTests {
                 )
             },
             onCompletion: { completed = true },
-            onEvidenceUnavailable: { revertedToOverview = true },
+            onPresentationUnavailable: { revertedToOverview = true },
         )
 
         #expect(harness.coordinator.isActive)
         #expect(harness.overlay.subviews.count == 1)
 
-        harness.registry.report(.targetEvidenceUnavailable(harness.tabID))
+        harness.registry.report(.targetPresentationUnavailable(harness.tabID))
 
-        #expect(events.contains(.targetEvidenceUnavailable(harness.tabID)))
+        #expect(events.contains(.targetPresentationUnavailable(harness.tabID)))
         #expect(completed)
         #expect(revertedToOverview)
         #expect(harness.coordinator.isActive == false)
@@ -272,8 +272,8 @@ struct BrowserTabTransitionTests {
         harness.window.isHidden = true
     }
 
-    @Test("Destination evidence is scoped to the active transition tab")
-    func destinationEvidenceOnlyAbortsTheActiveTabTransition() {
+    @Test("Destination presentation failure is scoped to the active transition tab")
+    func destinationPresentationFailureOnlyAbortsTheActiveTabTransition() {
         var completed = false
         let unrelatedTabID = BrowserTabID()
         let harness = BrowserTabTransitionUIKitHarness(
@@ -297,12 +297,12 @@ struct BrowserTabTransitionTests {
             onCompletion: { completed = true },
         )
 
-        harness.registry.report(.targetEvidenceUnavailable(unrelatedTabID))
+        harness.registry.report(.targetPresentationUnavailable(unrelatedTabID))
 
         #expect(harness.coordinator.isActive)
         #expect(completed == false)
 
-        harness.registry.report(.targetEvidenceUnavailable(harness.tabID))
+        harness.registry.report(.targetPresentationUnavailable(harness.tabID))
 
         #expect(harness.coordinator.isActive == false)
         #expect(completed)
@@ -547,7 +547,7 @@ struct BrowserTabTransitionTests {
                 harness.registerCard()
             },
             onCompletion: { completed = true },
-            onEvidenceUnavailable: {
+            onPresentationUnavailable: {
                 presentation = .browsing
                 aborted = true
             },
@@ -614,7 +614,7 @@ struct BrowserTabTransitionTests {
             reduceMotion: false,
             onPresentationChange: {},
             onCompletion: { completed = true },
-            onEvidenceUnavailable: { aborted = true },
+            onPresentationUnavailable: { aborted = true },
         )
         await harness.waitForDisplayTurns(10)
 
@@ -676,7 +676,7 @@ struct BrowserTabTransitionTests {
                 events.append("completion")
                 completed = true
             },
-            onEvidenceUnavailable: { events.append("abort") },
+            onPresentationUnavailable: { events.append("abort") },
             onDestinationVisible: { events.append("reveal") },
         )
         await harness.waitForDisplayTurns(10)

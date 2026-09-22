@@ -8,61 +8,57 @@
 import UIKit
 import WebKit
 
-/// The only terminal outcomes produced by one WebKit readiness attempt.
+/// The only terminal outcomes produced by one WebKit presentation-readiness attempt.
 @MainActor
 enum BrowserWebKitReadinessResult {
     case ready
     case unavailable
 }
 
-/// Owns the temporal portion of one mounted WebKit readiness attempt.
+/// Owns the temporal portion of one mounted WebKit presentation-readiness attempt.
 ///
-/// The probe waits for the existing lifecycle prerequisites, samples the mounted surface, and
-/// permits only one bounded compositor-settling retry after a nonblack mismatch. Visual evidence
-/// construction and comparison remain in `BrowserWebKitVisualSignature`.
+/// `WKNavigationDelegate.didCommit` means WebKit is beginning to update the main frame and
+/// `didFinish` means navigation completed. Neither public callback certifies that an out-of-process
+/// WebKit page pixel has been presented onscreen. This probe therefore checks lifecycle state and
+/// requires two stable display opportunities without claiming pixel verification.
 @MainActor
 final class BrowserWebKitReadinessProbe: NSObject {
-    /// Allows one initial surface sample and one sample after a compositor-settling window.
-    private static let maximumVisualSamples = 2
-    private static let maximumUnavailableViewTurns = 180
-    private static let maximumMismatchSettlingTurns = 30
+    /// The display-turn barrier is a presentation grace period, not visual evidence.
+    private static let requiredStableDisplayTurns = 2
+    private static let maximumReadinessTurns = 180
 
     private weak var webView: WKWebView?
     private let readinessContext: BrowserWebKitReadinessContext?
+    private let isAdapterOwned: () -> Bool
     private let hasCommittedDocument: () -> Bool
-    private let visualSignature: (WKWebView) -> BrowserWebKitVisualSignature?
     private let onResult: (BrowserWebKitReadinessResult) -> Void
-    private let onVisualInvalid: () -> Void
-    private var unavailableViewTurnsRemaining = 0
-    private var mismatchSettlingTurnsRemaining = 0
-    private var visualSamplesRemaining = 0
-    private var deferredAfterMismatch = false
+    private let onPresentationBlocked: () -> Void
+    private var readinessTurnsRemaining = 0
+    private var stableDisplayTurns = 0
+    private var didReportPresentationBlocked = false
     private var displayLink: CADisplayLink?
 
     init(
         webView: WKWebView,
         readinessContext: BrowserWebKitReadinessContext?,
+        isAdapterOwned: @escaping () -> Bool,
         hasCommittedDocument: @escaping () -> Bool,
-        visualSignature: @escaping (WKWebView) -> BrowserWebKitVisualSignature? = {
-            BrowserWebKitVisualSignature(webView: $0)
-        },
         onResult: @escaping (BrowserWebKitReadinessResult) -> Void,
-        onVisualInvalid: @escaping () -> Void,
+        onPresentationBlocked: @escaping () -> Void,
     ) {
         self.webView = webView
         self.readinessContext = readinessContext
+        self.isAdapterOwned = isAdapterOwned
         self.hasCommittedDocument = hasCommittedDocument
-        self.visualSignature = visualSignature
         self.onResult = onResult
-        self.onVisualInvalid = onVisualInvalid
+        self.onPresentationBlocked = onPresentationBlocked
         super.init()
     }
 
     func start() {
-        unavailableViewTurnsRemaining = Self.maximumUnavailableViewTurns
-        mismatchSettlingTurnsRemaining = 0
-        visualSamplesRemaining = Self.maximumVisualSamples
-        deferredAfterMismatch = false
+        readinessTurnsRemaining = Self.maximumReadinessTurns
+        stableDisplayTurns = 0
+        didReportPresentationBlocked = false
 
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
         displayLink = link
@@ -81,128 +77,74 @@ final class BrowserWebKitReadinessProbe: NSObject {
 
     @objc
     private func tick(_: CADisplayLink) {
-        guard let webView else {
-            if consumeUnavailableViewTurn() {
-                becomeUnavailable()
-            }
+        guard consumeReadinessTurn() else {
+            becomeUnavailable()
             return
         }
-        guard webView.bounds.width > 0,
-              webView.bounds.height > 0,
-              webView.window != nil
+        guard let webView,
+              isAdapterOwned()
         else {
-            if consumeUnavailableViewTurn() {
+            waitForNextDisplayTurn()
+            return
+        }
+        guard webView.window != nil,
+              webView.bounds.width > 0,
+              webView.bounds.height > 0
+        else {
+            waitForNextDisplayTurn()
+            return
+        }
+        guard readinessContext?.requiresFreshCommit != true,
+              hasCommittedDocument(),
+              !webView.isLoading
+        else {
+            waitForNextDisplayTurn()
+            return
+        }
+        guard !BrowserWebKitPresentationGuard.hasOpaqueCover(in: webView) else {
+            stableDisplayTurns = 0
+            if !didReportPresentationBlocked {
+                didReportPresentationBlocked = true
+                onPresentationBlocked()
+            }
+            if readinessTurnsRemaining == 0 {
                 becomeUnavailable()
             }
             return
         }
-        guard !consumeSettlingTurn() else {
-            return
-        }
-        guard visualSamplesRemaining > 0 else {
-            becomeUnavailable()
-            return
-        }
 
-        evaluate(webView: webView)
-    }
-
-    private func evaluate(webView: WKWebView) {
-        // The previously committed document may remain visible while the new operation is still
-        // between command dispatch and WebKit's commit callback. The reducer keeps this flag set
-        // until correlated loading-finished metadata arrives, so never use that older document
-        // as readiness evidence during the pending operation.
-        guard readinessContext?.requiresFreshCommit != true else {
-            waitForLifecycle()
+        didReportPresentationBlocked = false
+        stableDisplayTurns += 1
+        guard stableDisplayTurns >= Self.requiredStableDisplayTurns else {
             return
         }
 
-        // A loading WebKit view has not yet produced the document surface this probe compares.
-        guard !webView.isLoading, hasCommittedDocument() else {
-            waitForLifecycle()
-            return
-        }
-
-        // Without revision-scoped preview evidence, the destination cannot self-certify from its
-        // current pixels.
-        guard let expectedSignature = readinessContext?.expectedSignature else {
-            becomeUnavailable()
-            return
-        }
-
-        // A detected cover is a recoverable ownership conflict, not page evidence. Keep waiting
-        // under the existing bounded attachment budget and preserve the diagnostic event.
-        guard !BrowserWebKitVisualEvidence.hasOpaqueCover(in: webView) else {
-            reportVisualInvalid()
-            if consumeUnavailableViewTurn() {
-                becomeUnavailable()
-            }
-            return
-        }
-        guard let observedSignature = visualSignature(webView) else {
-            handleVisualMismatch(signature: nil)
-            return
-        }
-        guard observedSignature.matches(expected: expectedSignature) else {
-            handleVisualMismatch(signature: observedSignature)
-            return
-        }
-
-        visualSamplesRemaining -= 1
-        completeReady()
-    }
-
-    private func waitForLifecycle() {
-        // A missing commit is not proof of readiness. Bound the wait so a failed WebKit
-        // operation cannot leave the transition pending forever.
-        if consumeUnavailableViewTurn() {
-            becomeUnavailable()
-        }
-    }
-
-    private func handleVisualMismatch(signature: BrowserWebKitVisualSignature?) {
-        visualSamplesRemaining -= 1
-        reportVisualInvalid()
-
-        if signature?.isUniformBlack == true {
-            becomeUnavailable()
-        } else if !deferredAfterMismatch {
-            deferredAfterMismatch = true
-            mismatchSettlingTurnsRemaining = Self.maximumMismatchSettlingTurns
-        } else {
-            becomeUnavailable()
-        }
-    }
-
-    private func consumeSettlingTurn() -> Bool {
-        guard mismatchSettlingTurnsRemaining > 0 else {
-            return false
-        }
-
-        mismatchSettlingTurnsRemaining -= 1
-        return true
-    }
-
-    private func consumeUnavailableViewTurn() -> Bool {
-        guard unavailableViewTurnsRemaining > 0 else {
-            return true
-        }
-
-        unavailableViewTurnsRemaining -= 1
-        return false
-    }
-
-    private func completeReady() {
         onResult(.ready)
         invalidate()
     }
 
-    private func becomeUnavailable() {
-        onResult(.unavailable)
-        invalidate()
+    private func consumeReadinessTurn() -> Bool {
+        guard readinessTurnsRemaining > 0 else {
+            return false
+        }
+
+        readinessTurnsRemaining -= 1
+        return true
     }
 
-    private func reportVisualInvalid() {
-        onVisualInvalid()
+    private func waitForNextDisplayTurn() {
+        stableDisplayTurns = 0
+        if readinessTurnsRemaining == 0 {
+            becomeUnavailable()
+        }
+    }
+
+    private func becomeUnavailable() {
+        guard displayLink != nil else {
+            return
+        }
+
+        onResult(.unavailable)
+        invalidate()
     }
 }

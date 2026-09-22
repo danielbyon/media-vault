@@ -22,7 +22,6 @@ public struct BrowserWebView: UIViewRepresentable {
     private let transitionRegistry: BrowserTabTransitionSurfaceRegistry?
     private let readinessContext: BrowserWebKitReadinessContext?
     private let readinessCoordinator: BrowserWebKitReadinessCoordinator
-    private let readinessResetToken: Int
 
     /// Creates a bridge for an adapter-owned WebKit context.
     public init(tabID: BrowserTabID, onRefresh: @escaping () -> Void) {
@@ -32,7 +31,6 @@ public struct BrowserWebView: UIViewRepresentable {
         transitionRegistry = nil
         readinessContext = nil
         readinessCoordinator = .init(adapter: adapter)
-        readinessResetToken = 0
     }
 
     /// Creates a Browser page surface that also registers its exact transition boundary.
@@ -43,7 +41,6 @@ public struct BrowserWebView: UIViewRepresentable {
         adapter: BrowserWebKitAdapter = .shared,
         readinessContext: BrowserWebKitReadinessContext? = nil,
         readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
-        readinessResetToken: Int = 0,
     ) {
         self.tabID = tabID
         self.onRefresh = onRefresh
@@ -51,7 +48,6 @@ public struct BrowserWebView: UIViewRepresentable {
         self.transitionRegistry = transitionRegistry
         self.readinessContext = readinessContext
         self.readinessCoordinator = readinessCoordinator ?? .init(adapter: adapter)
-        self.readinessResetToken = readinessResetToken
     }
 
     /// Tracks which adapter surface is currently mounted in the UIKit container.
@@ -60,7 +56,6 @@ public struct BrowserWebView: UIViewRepresentable {
     public final class Coordinator: NSObject {
         var tabID: BrowserTabID?
         private var onRefresh: () -> Void
-        private var readinessResetToken = 0
         private var readinessContext: BrowserWebKitReadinessContext?
         let transitionRegistry: BrowserTabTransitionSurfaceRegistry?
         private let readinessCoordinator: BrowserWebKitReadinessCoordinator
@@ -78,12 +73,8 @@ public struct BrowserWebView: UIViewRepresentable {
             self.readinessCoordinator = readinessCoordinator ?? .init(adapter: adapter)
         }
 
-        func update(onRefresh: @escaping () -> Void, readinessResetToken: Int) {
+        func update(onRefresh: @escaping () -> Void) {
             self.onRefresh = onRefresh
-            if self.readinessResetToken != readinessResetToken {
-                self.readinessResetToken = readinessResetToken
-                readinessCoordinator.removeAll()
-            }
         }
 
         func refresh() {
@@ -137,13 +128,13 @@ public struct BrowserWebView: UIViewRepresentable {
 
                     switch result {
                     case .unavailable:
-                        transitionRegistry.report(.targetEvidenceUnavailable(tabID))
+                        transitionRegistry.report(.targetPresentationUnavailable(tabID))
                     case .ready:
                         transitionRegistry.markReady(webView, for: .content(tabID))
-                        transitionRegistry.report(.targetVisualReady(tabID))
+                        transitionRegistry.report(.targetPresentationReady(tabID))
                     }
                 },
-                onVisualInvalid: { [weak transitionRegistry, weak webView] in
+                onPresentationBlocked: { [weak transitionRegistry, weak webView] in
                     guard let transitionRegistry, let webView else {
                         return
                     }
@@ -153,7 +144,7 @@ public struct BrowserWebView: UIViewRepresentable {
                         view: webView,
                         for: .content(tabID),
                     )
-                    transitionRegistry.report(.targetVisualInvalid(tabID))
+                    transitionRegistry.report(.targetPresentationBlocked(tabID))
                 },
             )
         }
@@ -184,7 +175,6 @@ public struct BrowserWebView: UIViewRepresentable {
     public func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.update(
             onRefresh: onRefresh,
-            readinessResetToken: readinessResetToken,
         )
         let webKitAdapter = context.coordinator.adapter
         if let previous = context.coordinator.tabID, previous != tabID {

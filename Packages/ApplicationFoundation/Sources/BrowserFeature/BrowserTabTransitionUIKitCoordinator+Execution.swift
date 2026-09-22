@@ -103,9 +103,8 @@ extension BrowserTabTransitionUIKitCoordinator {
                 record(.missingDestination)
                 session.missingDestinationWasRecorded = true
             }
-            // An attached destination that is still visually unready has a usable exact clone.
-            // Keep it visible until the readiness owner either proves page pixels or reports that
-            // the evidence cannot be established.
+            // An attached destination that is not yet presentation-ready has a usable exact
+            // clone. Keep it visible until the readiness owner reports presentation unavailability.
             cancelDestinationWait()
             return
         }

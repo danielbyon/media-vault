@@ -296,7 +296,7 @@ extension BrowserTabTransitionUIKitCoordinator {
     }
 
     /// Aborts an unprovable browsing handoff without revealing a potentially blank surface.
-    func handleEvidenceUnavailable() {
+    func handlePresentationUnavailable() {
         guard let session,
               session.destinationRequiresReadiness,
               session.direction == .toBrowsing
@@ -313,7 +313,7 @@ extension BrowserTabTransitionUIKitCoordinator {
             return
         }
 
-        let callback = session.evidenceUnavailable
+        let callback = session.presentationUnavailable
         finish()
         callback?()
     }

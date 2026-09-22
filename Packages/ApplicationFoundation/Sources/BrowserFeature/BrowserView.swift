@@ -32,8 +32,6 @@ public struct BrowserView: View {
     private var nativePreviewCaptureController = BrowserNativePreviewCaptureController()
     @State
     private var webKitReadinessCoordinator = BrowserWebKitReadinessCoordinator()
-    @State
-    private var webKitReadinessResetToken = 0
     @StateObject
     private var tabTransitionUIKitCoordinator = BrowserTabTransitionUIKitCoordinator()
     @State
@@ -166,7 +164,6 @@ public struct BrowserView: View {
             }
         }
         .onChange(of: store.tabs.map(\.id)) { _, _ in
-            webKitReadinessCoordinator.removeEntries(except: Set(store.tabs.map(\.id)))
             if let parkedCardID = tabTransitionUIKitCoordinator.parkedSurface?.cardID,
                !store.tabs.contains(where: { $0.id == parkedCardID }) {
                 tabTransitionUIKitCoordinator.clearParkedSurface(for: parkedCardID)
@@ -201,8 +198,6 @@ public struct BrowserView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
             cancelTabTransition()
-            webKitReadinessCoordinator.removeAll()
-            webKitReadinessResetToken += 1
             store.send(.previewCacheEvicted)
         }
         .task { await store.send(.task).finish() }
@@ -388,7 +383,6 @@ extension BrowserView {
                     transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
                     readinessContext: webKitReadinessContext(for: tab),
                     readinessCoordinator: webKitReadinessCoordinator,
-                    readinessResetToken: webKitReadinessResetToken,
                 )
                 .accessibilityLabel("Web page")
             case let .error(error):
@@ -444,14 +438,11 @@ extension BrowserView {
         )
     }
 
-    /// Supplies visual evidence only from the current revision's existing in-memory preview.
+    /// Supplies lifecycle state for the current reducer transition.
     private func webKitReadinessContext(for tab: BrowserTab) -> BrowserWebKitReadinessContext {
-        let revision = store.previewState.revision(for: tab.id)
+        let navigationOperationID = store.previewState.operation(for: tab.id)
         return webKitReadinessCoordinator.context(
-            for: tab,
-            revision: revision,
-            previewEntry: store.previewState.data(for: tab.id),
-            requiresFreshCommit: store.previewState.operation(for: tab.id) != nil,
+            navigationOperationID: navigationOperationID,
         )
     }
 
@@ -506,7 +497,7 @@ extension BrowserView {
             tabID: tabID,
             reduceMotion: reduceMotionEnabled,
             onPresentationChange: action,
-            onEvidenceUnavailable: {
+            onPresentationUnavailable: {
                 switch direction {
                 case .toBrowsing:
                     store.send(.showTabOverviewTapped)

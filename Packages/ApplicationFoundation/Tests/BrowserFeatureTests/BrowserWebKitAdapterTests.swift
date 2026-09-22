@@ -444,7 +444,7 @@ struct BrowserWebKitAdapterTests {
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
         let registry = BrowserTabTransitionSurfaceRegistry()
-        let readinessContext = BrowserWebKitReadinessContext(revision: .init())
+        let readinessContext = BrowserWebKitReadinessContext()
         _ = adapter.ensureContext(for: tabID)
         let bridge = BrowserWebView(
             tabID: tabID,
@@ -464,6 +464,20 @@ struct BrowserWebKitAdapterTests {
         )
 
         adapter.destroyContext(for: tabID)
+    }
+
+    @Test("Readiness contexts distinguish successive reducer navigation lifecycles")
+    func readinessContextsDistinguishSuccessiveNavigationLifecycles() {
+        let firstOperationID = BrowserNavigationOperationID()
+        let secondOperationID = BrowserNavigationOperationID()
+        let firstContext = BrowserWebKitReadinessContext(
+            navigationOperationID: firstOperationID,
+        )
+        let secondContext = BrowserWebKitReadinessContext(
+            navigationOperationID: secondOperationID,
+        )
+
+        #expect(firstContext != secondContext)
     }
 
     @Test("Updated BrowserWebView values keep the coordinator-owned adapter surface attached")
