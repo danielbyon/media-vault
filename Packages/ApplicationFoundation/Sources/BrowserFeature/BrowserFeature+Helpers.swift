@@ -108,6 +108,50 @@ extension BrowserFeature {
         ])
     }
 
+    /// Keeps the transient Tab Overview anchor attached to a live tab after tab mutations.
+    func reconcileTabOverviewScrollPosition(
+        previousAnchor: BrowserTabID?,
+        previousAnchorIndex: Int?,
+        state: inout State,
+    ) {
+        guard let previousAnchor else {
+            state.tabOverviewScrollPosition = nil
+            return
+        }
+        guard !state.tabs.isEmpty else {
+            state.tabOverviewScrollPosition = nil
+            return
+        }
+
+        if state.tabs.contains(where: { $0.id == previousAnchor }) {
+            state.tabOverviewScrollPosition = previousAnchor
+            return
+        }
+
+        let previousIndex = max(0, previousAnchorIndex ?? 0)
+        let fallbackIndex = previousIndex > 0
+            ? min(previousIndex - 1, state.tabs.count - 1)
+            : min(previousIndex, state.tabs.count - 1)
+        state.tabOverviewScrollPosition = state.tabs[fallbackIndex].id
+    }
+
+    /// Applies one tab mutation and reconciles the transient Tab Overview anchor against its survivors.
+    func mutateTabsPreservingTabOverviewScrollPosition(
+        state: inout State,
+        mutation: (inout State) -> Void,
+    ) {
+        let previousAnchor = state.tabOverviewScrollPosition
+        let previousAnchorIndex = previousAnchor.flatMap { anchor in
+            state.tabs.firstIndex(where: { $0.id == anchor })
+        }
+        mutation(&state)
+        reconcileTabOverviewScrollPosition(
+            previousAnchor: previousAnchor,
+            previousAnchorIndex: previousAnchorIndex,
+            state: &state,
+        )
+    }
+
     func close(tabID: BrowserTabID, state: inout State) -> Effect<Action> {
         guard let index = state.tabs.firstIndex(where: { $0.id == tabID }) else {
             return .none
@@ -125,17 +169,19 @@ extension BrowserFeature {
             } else {
                 .none
             }
-        state.tabs.remove(at: index)
-        if state.tabs.isEmpty {
-            let replacement = BrowserTabID(uuid())
-            state.tabs = [.startPage(id: replacement)]
-            state.previewState.addTab(replacement)
-            state.selectedTabID = replacement
-            state.presentation = wasOverview ? .tabOverview : .browsing
-            discardDraft(in: &state)
-        } else if wasSelected {
-            state.selectedTabID = state.tabs[max(0, index - 1)].id
-            discardDraft(in: &state)
+        mutateTabsPreservingTabOverviewScrollPosition(state: &state) { state in
+            state.tabs.remove(at: index)
+            if state.tabs.isEmpty {
+                let replacement = BrowserTabID(uuid())
+                state.tabs = [.startPage(id: replacement)]
+                state.previewState.addTab(replacement)
+                state.selectedTabID = replacement
+                state.presentation = wasOverview ? .tabOverview : .browsing
+                discardDraft(in: &state)
+            } else if wasSelected {
+                state.selectedTabID = state.tabs[max(0, index - 1)].id
+                discardDraft(in: &state)
+            }
         }
         if wasOverview {
             if state.tabs.isEmpty || wasSelected {

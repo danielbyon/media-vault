@@ -327,6 +327,174 @@ struct BrowserTabTests {
         #expect(store.state.selectedTabID == BrowserTabID(UUID(0)))
         #expect(store.state.tabOverviewFocusID == BrowserTabID(UUID(0)))
     }
+
+    @Test("Fresh Browser state starts without a Tab Overview scroll anchor")
+    func freshStateStartsWithoutTabOverviewScrollAnchor() {
+        #expect(BrowserFeature.State(initialTabID: first).tabOverviewScrollPosition == nil)
+        #expect(
+            BrowserFeature.State(
+                tabs: [.startPage(id: first), .startPage(id: second)],
+                selectedTabID: first,
+            )
+            .tabOverviewScrollPosition == nil,
+        )
+    }
+
+    @Test("Tab Overview scroll actions accept only live overview tabs")
+    func tabOverviewScrollActionsAcceptOnlyLiveOverviewTabs() async {
+        let store = TestStore(initialState: BrowserFeature.State(
+            tabs: [.startPage(id: first), .startPage(id: second)],
+            selectedTabID: first,
+            presentation: .tabOverview,
+        )) {
+            BrowserFeature()
+        }
+
+        await store.send(.tabOverviewScrollChanged(second)) {
+            $0.tabOverviewScrollPosition = second
+        }
+        await store.send(.tabOverviewScrollChanged(BrowserTabID(UUID(3))))
+        #expect(store.state.tabOverviewScrollPosition == second)
+
+        await store.send(.tabCardSelected(second)) {
+            $0.selectedTabID = second
+            $0.presentation = .browsing
+            $0.tabOverviewFocusID = nil
+        }
+        await store.send(.tabOverviewScrollChanged(first))
+        #expect(store.state.tabOverviewScrollPosition == second)
+    }
+
+    @Test("Tab Overview scroll anchor survives repeated browsing transitions")
+    func tabOverviewScrollAnchorSurvivesRepeatedBrowsingTransitions() async {
+        let store = TestStore(initialState: BrowserFeature.State(
+            tabs: [
+                .startPage(id: first),
+                .startPage(id: second),
+                .startPage(id: third),
+            ],
+            selectedTabID: first,
+            presentation: .tabOverview,
+        )) {
+            BrowserFeature()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.tabOverviewScrollChanged(third))
+        await store.send(.tabCardSelected(second))
+        await store.send(.showTabOverviewTapped)
+        await store.send(.tabCardSelected(first))
+        await store.send(.showTabOverviewTapped)
+
+        #expect(store.state.tabOverviewScrollPosition == third)
+        #expect(store.state.tabOverviewFocusID == first)
+    }
+
+    @Test("Removing the anchored card chooses the nearest surviving logical tab")
+    func removingAnchoredCardChoosesNearestSurvivingLogicalTab() async throws {
+        let fourth = BrowserTabID(UUID(3))
+        var state = try BrowserFeature.State(
+            tabs: [
+                .web(id: first, url: #require(URL(string: "https://one.example"))),
+                .web(id: second, url: #require(URL(string: "https://two.example"))),
+                .web(id: third, url: #require(URL(string: "https://three.example"))),
+                .web(id: fourth, url: #require(URL(string: "https://four.example"))),
+            ],
+            selectedTabID: first,
+            presentation: .tabOverview,
+        )
+        state.tabOverviewFocusID = first
+        state.tabOverviewScrollPosition = third
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        }
+
+        await store.send(.closeTab(third)) {
+            $0.tabs.remove(at: 2)
+            $0.previewState.removeTab(third)
+            $0.tabOverviewScrollPosition = second
+        }
+
+        #expect(store.state.tabOverviewScrollPosition == second)
+        #expect(store.state.tabOverviewFocusID == first)
+        #expect(store.state.tabs.contains(where: { $0.id == store.state.tabOverviewScrollPosition }))
+    }
+
+    @Test("A live scroll anchor survives unrelated tab removal")
+    func liveScrollAnchorSurvivesUnrelatedTabRemoval() async throws {
+        var state = try BrowserFeature.State(
+            tabs: [
+                .web(id: first, url: #require(URL(string: "https://one.example"))),
+                .web(id: second, url: #require(URL(string: "https://two.example"))),
+                .web(id: third, url: #require(URL(string: "https://three.example"))),
+            ],
+            selectedTabID: first,
+            presentation: .browsing,
+        )
+        state.tabOverviewScrollPosition = second
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        }
+
+        await store.send(.closeTab(first)) {
+            $0.tabs.removeFirst()
+            $0.selectedTabID = second
+            $0.previewState.removeTab(first)
+        }
+
+        #expect(store.state.tabOverviewScrollPosition == second)
+        #expect(store.state.tabOverviewFocusID == nil)
+    }
+
+    @Test("Bulk tab mutations preserve live anchors and reconcile removed anchors")
+    func bulkTabMutationsPreserveAndReconcileScrollAnchors() async throws {
+        let fourth = BrowserTabID(UUID(3))
+        let tabs = try [
+            BrowserTab.web(id: first, url: #require(URL(string: "https://one.example"))),
+            BrowserTab.web(id: second, url: #require(URL(string: "https://two.example"))),
+            BrowserTab.web(id: third, url: #require(URL(string: "https://three.example"))),
+            BrowserTab.web(id: fourth, url: #require(URL(string: "https://four.example"))),
+        ]
+        var state = BrowserFeature.State(
+            tabs: tabs,
+            selectedTabID: first,
+            presentation: .browsing,
+        )
+        state.tabOverviewScrollPosition = third
+        let store = TestStore(initialState: state) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.closeOtherTabsConfirmed(third))
+        #expect(store.state.tabs.map(\.id) == [third])
+        #expect(store.state.tabOverviewScrollPosition == third)
+
+        var replacementState = BrowserFeature.State(
+            tabs: tabs,
+            selectedTabID: first,
+            presentation: .browsing,
+        )
+        replacementState.tabOverviewScrollPosition = second
+        let replacementStore = TestStore(initialState: replacementState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+        }
+        replacementStore.exhaustivity = .off(showSkippedAssertions: false)
+
+        await replacementStore.send(.closeAllConfirmed)
+        let replacementID = try #require(replacementStore.state.tabs.first?.id)
+        #expect(replacementStore.state.tabs.count == 1)
+        #expect(replacementStore.state.tabOverviewScrollPosition == replacementID)
+        #expect(
+            replacementStore.state.tabs.contains {
+                $0.id == replacementStore.state.tabOverviewScrollPosition
+            },
+        )
+    }
 }
 
 extension UUID {

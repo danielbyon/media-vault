@@ -40,9 +40,21 @@ struct BrowserTabOverviewView: View {
                 LazyVGrid(columns: tabOverviewColumns, spacing: 18) {
                     ForEach(store.tabs) { tab in
                         tabCard(tab)
+                            .id(tab.id)
                     }
                 }
+                .scrollTargetLayout()
             }
+            .scrollPosition(id: Binding(
+                get: { store.tabOverviewScrollPosition },
+                set: { position in
+                    guard let position else {
+                        return
+                    }
+
+                    store.send(.tabOverviewScrollChanged(position))
+                },
+            ))
         }
         .padding(20)
     }

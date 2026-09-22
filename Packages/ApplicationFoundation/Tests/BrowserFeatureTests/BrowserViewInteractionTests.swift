@@ -961,6 +961,105 @@ struct BrowserViewInteractionTests {
         window.rootViewController = nil
     }
 
+    @Test("Mounted Tab Overview restores its logical anchor across transitions and layouts")
+    func mountedTabOverviewRestoresLogicalAnchorAcrossTransitionsAndLayouts() async throws {
+        let tabIDs = try (0 ..< 24).map { index in
+            let uuid = try #require(
+                UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", 10_000 + index)),
+            )
+            return BrowserTabID(uuid)
+        }
+        let store = Store(
+            initialState: BrowserFeature.State(
+                tabs: tabIDs.map { .startPage(id: $0) },
+                selectedTabID: tabIDs[0],
+                presentation: .tabOverview,
+            ),
+        ) {
+            BrowserFeature()
+        }
+        let compactController = UIHostingController(
+            rootView: BrowserView(store: store)
+                .environment(\.horizontalSizeClass, .compact),
+        )
+        let compactWindow = mount(compactController, size: CGSize(width: 390, height: 844))
+        defer {
+            compactWindow.isHidden = true
+            compactWindow.rootViewController = nil
+        }
+
+        let compactScrollView = try #require(
+            await waitForTabOverviewScrollView(in: compactController),
+        )
+        let compactMaximumOffset = compactScrollView.contentSize.height - compactScrollView.bounds.height
+        #expect(compactMaximumOffset > 0)
+        let compactAnchor = tabIDs[20]
+        store.send(.tabOverviewScrollChanged(compactAnchor))
+
+        for _ in 0 ..< 60 where compactScrollView.contentOffset.y <= 0 {
+            compactController.view.layoutIfNeeded()
+            await waitForDisplayTurn()
+        }
+        #expect(store.state.tabOverviewScrollPosition == compactAnchor)
+        #expect(compactScrollView.contentOffset.y > 0)
+
+        store.send(.tabCardSelected(compactAnchor))
+        compactController.view.layoutIfNeeded()
+        #expect(store.state.presentation == .browsing)
+        store.send(.showTabOverviewTapped)
+
+        let restoredCompactScrollView = try #require(
+            await waitForTabOverviewScrollView(in: compactController),
+        )
+        for _ in 0 ..< 60 where restoredCompactScrollView.contentOffset.y <= 0 {
+            compactController.view.layoutIfNeeded()
+            await waitForDisplayTurn()
+        }
+        #expect(store.state.tabOverviewScrollPosition == compactAnchor)
+        #expect(restoredCompactScrollView.contentOffset.y > 0)
+
+        compactWindow.isHidden = true
+        compactWindow.rootViewController = nil
+        let regularController = UIHostingController(
+            rootView: BrowserView(store: store)
+                .environment(\.horizontalSizeClass, .regular),
+        )
+        let regularWindow = mount(regularController, size: CGSize(width: 1_194, height: 834))
+        defer {
+            regularWindow.isHidden = true
+            regularWindow.rootViewController = nil
+        }
+
+        let regularScrollView = try #require(
+            await waitForTabOverviewScrollView(in: regularController),
+        )
+        #expect(regularScrollView.contentSize.height > regularScrollView.bounds.height)
+        #expect(store.state.tabOverviewScrollPosition == compactAnchor)
+
+        store.send(.tabCardSelected(compactAnchor))
+        regularController.view.layoutIfNeeded()
+        #expect(store.state.presentation == .browsing)
+        store.send(.showTabOverviewTapped)
+
+        let restoredRegularScrollView = try #require(
+            await waitForTabOverviewScrollView(in: regularController),
+        )
+        for _ in 0 ..< 60 where restoredRegularScrollView.contentOffset.y <= 0 {
+            regularController.view.layoutIfNeeded()
+            await waitForDisplayTurn()
+        }
+        #expect(store.state.tabOverviewScrollPosition == compactAnchor)
+        #expect(restoredRegularScrollView.contentOffset.y > 0)
+
+        store.send(.closeTab(compactAnchor))
+        #expect(!store.state.tabs.contains(where: { $0.id == compactAnchor }))
+        #expect(
+            store.state.tabOverviewScrollPosition.map { anchor in
+                store.state.tabs.contains(where: { $0.id == anchor })
+            } ?? true,
+        )
+    }
+
     @Test("Settled Tab Overview cards follow the resizable layout probe")
     func settledOverviewResizesEveryCardFromTheCurrentProbe() {
         let firstTab = BrowserTab.startPage(id: BrowserTabID(UUID(1)))
@@ -1025,6 +1124,44 @@ struct BrowserViewInteractionTests {
         controller.view.frame = window.bounds
         controller.view.layoutIfNeeded()
         return window
+    }
+
+    private func waitForTabOverviewScrollView(in controller: UIViewController) async -> UIScrollView? {
+        for _ in 0 ..< 60 {
+            controller.view.layoutIfNeeded()
+            // A Tab Overview card's stable close control is unique to the card grid. Walking from
+            // that semantic descendant reaches the exact scroll container without guessing among
+            // unrelated scroll views in the mounted Browser hierarchy.
+            let cardScrollView = allViews(in: controller.view)
+                .filter { $0.accessibilityLabel?.hasPrefix("Close ") == true }
+                .compactMap { view -> UIScrollView? in
+                    var currentAncestor = view.superview
+                    while let ancestor = currentAncestor {
+                        if let scrollView = ancestor as? UIScrollView {
+                            return scrollView
+                        }
+                        currentAncestor = ancestor.superview
+                    }
+                    return nil
+                }
+                .first
+            if let cardScrollView {
+                return cardScrollView
+            }
+
+            let overflowingScrollViews = allViews(in: controller.view)
+                .compactMap { $0 as? UIScrollView }
+                .filter { $0.bounds.height > 0 && $0.contentSize.height > $0.bounds.height + 1 }
+            guard overflowingScrollViews.count == 1,
+                  let overflowingScrollView = overflowingScrollViews.first
+            else {
+                await waitForDisplayTurn()
+                continue
+            }
+
+            return overflowingScrollView
+        }
+        return nil
     }
 
     private func descendants<ViewType: UIView>(
