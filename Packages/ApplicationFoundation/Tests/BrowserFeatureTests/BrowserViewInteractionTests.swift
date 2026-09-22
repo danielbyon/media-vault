@@ -191,6 +191,18 @@ struct BrowserViewInteractionTests {
         await waitForDisplayTurn()
         #expect(registry.isReady(for: .content(tabID)) == false)
 
+        let behindCover = UIView(frame: webView.bounds)
+        behindCover.backgroundColor = .systemBlue
+        behindCover.isOpaque = true
+        behindCover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        webView.insertSubview(
+            behindCover,
+            belowSubview: webView.scrollView,
+        )
+        webView.layoutIfNeeded()
+        #expect(BrowserWebKitPresentationGuard.hasOpaqueCover(in: webView) == false)
+        behindCover.removeFromSuperview()
+
         let partialCover = UIView(frame: CGRect(x: 0, y: 0, width: 80, height: 80))
         partialCover.backgroundColor = .systemBlue
         partialCover.isOpaque = true

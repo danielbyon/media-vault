@@ -13,10 +13,17 @@ import WebKit
 struct BrowserWebKitPresentationGuard {
     /// Rejects a direct opaque UIKit child that covers the registered WebKit boundary.
     static func hasOpaqueCover(in webView: WKWebView) -> Bool {
-        webView.subviews.contains { subview in
+        let subviews = webView.subviews
+
+        guard let scrollViewIndex = subviews.firstIndex(where: {
+            $0 === webView.scrollView
+        }) else {
+            return false
+        }
+
+        return subviews.dropFirst(scrollViewIndex + 1).contains { subview in
             let subviewFrame = subview.convert(subview.bounds, to: webView)
-            guard subview !== webView.scrollView,
-                  !subview.isHidden,
+            guard !subview.isHidden,
                   subview.alpha >= 0.99,
                   subviewFrame.insetBy(dx: -1, dy: -1).contains(webView.bounds)
             else {
