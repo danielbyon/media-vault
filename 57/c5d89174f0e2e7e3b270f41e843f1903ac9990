@@ -1,0 +1,82 @@
+BrowserTabOverviewUITestHost/BrowserTabOverviewUITestHost.swift
+  s_bf1cef5a31f7ee::t_71a6511d71278f 1-65,67-83,89-92,95
+  s_bf1cef5a31f7ee::t_d1185baea5c862 66
+  s_bf1cef5a31f7ee::t_a7b7e8857d093a 84-88,93-94
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabOverviewView.swift
+  s_bf1cef5a31f7ee::t_a5a5f5146f9f9a 34,46-49,55-59,68,87,164
+  s_bf1cef5a31f7ee::t_a52ff869d2672f 172
+  s_bf1cef5a31f7ee::t_d6f9f9805b1de5 26,29,31,33,37-45,50-54,60-62,95,100-102,104-105,107,141,146,148-156,169-170,173-187,189-190
+  s_bf1cef5a31f7ee::t_b229c1d013972c 63
+  s_bf1cef5a31f7ee::t_13a431b636d92c 125-126,158-162,167
+  s_bf1cef5a31f7ee::t_8caabbd3e132a7 129-130
+  s_bf1cef5a31f7ee::t_31bfde9233e8ea 8,25,27-28,30,32
+  s_bf1cef5a31f7ee::t_591927976b8859 120,188
+  s_bf1cef5a31f7ee::t_71a6511d71278f 157
+  s_bf1cef5a31f7ee::t_9bb68df05d174e 35,74-75,78-80,106
+  s_bf1cef5a31f7ee::t_c29261cf978f4f 147,163,165-166
+  s_bf1cef5a31f7ee::t_4bd05a23aab7ee 13-24,36,64-67,69-73,76-77,81-84,94,96-99,103,121,137-138,168,191-194,208,210,222-224,275,381,398-400,403
+  s_bf1cef5a31f7ee::t_0183b1406ccb05 85-86,88-93
+  s_bf1cef5a31f7ee::t_845a6da9535281 171
+App.xcodeproj/project.pbxproj
+  s_bf1cef5a31f7ee::t_fae1bc721e592e 160,359,579,629-633,635-652
+  s_bf1cef5a31f7ee::t_d46b3c5fdbd83d 357,453-461,463-504,506-531,562-578
+  s_bf1cef5a31f7ee::t_1cfe0b12bec6a1 207-245,261-267,290-291
+  s_bf1cef5a31f7ee::t_e9b9c5f9a9732c 311-324,344-356,358
+  s_bf1cef5a31f7ee::t_7383c20e0a27d9 462,505
+  s_bf1cef5a31f7ee::t_3788be192104c5 59-74,83-84,95-96,145-159
+  s_bf1cef5a31f7ee::t_f80ae684bf9075 17-20,33-36
+BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests.swift
+  s_bf1cef5a31f7ee::t_553b9adbbad7a2 24-26
+  s_bf1cef5a31f7ee::t_71a6511d71278f 1-23,27-40
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_bf1cef5a31f7ee::t_591927976b8859 443,478,490,493-495,509-511,514-516
+  s_bf1cef5a31f7ee::t_715ba4af96de94 165-167
+  s_bf1cef5a31f7ee::t_e106cef3bc3af5 445
+  s_bf1cef5a31f7ee::t_a7b7e8857d093a 496-508,512-513,517-518,522-532,536
+  s_bf1cef5a31f7ee::t_9a361c864f1e0e 444,474-477,479-489
+  s_bf1cef5a31f7ee::t_8caabbd3e132a7 38-39,217-222
+  s_bf1cef5a31f7ee::t_727fc6bd9c8f41 137-140,142-147,190,491-492,519-521,533-535
+  s_bf1cef5a31f7ee::t_e671fe7951bbfc 537
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  s_bf1cef5a31f7ee::t_abd70cbbd314b4 187
+  s_bf1cef5a31f7ee::t_9bb68df05d174e 186
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewInteractionTests.swift
+  s_bf1cef5a31f7ee::t_0b247ed6b84950 1006-1015,1017,1023,1050-1059,1061,1067
+  s_bf1cef5a31f7ee::t_4f0a1be1a05364 972-979
+  s_bf1cef5a31f7ee::t_ca2efb28e02481 1153,1161-1162,1164,1169-1183
+  s_bf1cef5a31f7ee::t_3c7fcd3e7ec7d3 1184
+App.xcodeproj/xcshareddata/xcschemes/BrowserTabOverviewUITests.xcscheme
+  s_bf1cef5a31f7ee::t_7211a18d09ed2f 44-52
+  s_bf1cef5a31f7ee::t_be9b268be38b17 12-13
+  s_bf1cef5a31f7ee::t_31a1cac228fbb3 1-11,14-43,53-94
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTests.swift
+  s_bf1cef5a31f7ee::t_a0ea3794a6d61e 387,419,433-435,437-440,443
+  s_bf1cef5a31f7ee::t_dcc178cbf1c3a0 399-402,407-408,411,423-426
+  s_bf1cef5a31f7ee::t_69925d4dabf7e5 369-377,379-386,388-392,397-398,406,409-410,412-414
+  s_bf1cef5a31f7ee::t_561b4d88b10df8 378
+  s_bf1cef5a31f7ee::t_c29bc90ee19b8a 394,403
+  s_bf1cef5a31f7ee::t_7faf4c5e9f02b8 343-344
+  s_bf1cef5a31f7ee::t_3decb5fceb3ef0 393,396
+  s_bf1cef5a31f7ee::t_02f988d8d30858 415-416
+  s_bf1cef5a31f7ee::t_3398c0c341be55 417-418,420-422,427-428
+  s_bf1cef5a31f7ee::t_df9dac0eff4e7e 356
+  s_bf1cef5a31f7ee::t_ce34297f02663f 429-432,436,445-446
+  s_bf1cef5a31f7ee::t_dfc86007ca1ea8 441-442,444
+  s_bf1cef5a31f7ee::t_c983ae193e34f9 395,404-405
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "57c5d89174f0e2e7e3b270f41e843f1903ac9990",
+  "prompts": {},
+  "sessions": {
+    "s_bf1cef5a31f7ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c9d0-ac2d-7620-9299-089d16e94d71",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
