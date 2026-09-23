@@ -28,12 +28,17 @@ private struct BrowserTabOverviewUITestHostView: View {
     private var scrollPosition: BrowserTabOverviewScrollPosition
     @State
     private var committedPositionCount = 0
+    @State
+    private var programmaticRestoreSettled: Bool
     @AccessibilityFocusState
     private var accessibilityFocusedTabID: BrowserTabID?
 
     init() {
         let tabs = (0 ..< 40).map { _ in BrowserTab.startPage(id: BrowserTabID()) }
-        let initialAnchor = tabs[0].id
+        let arguments = ProcessInfo.processInfo.arguments
+        let startsAtLastTab = arguments.contains("--restore-last-tab")
+            || arguments.contains("--reconcile-close-last-tab")
+        let initialAnchor = startsAtLastTab ? tabs[tabs.count - 1].id : tabs[0].id
         var initialState = BrowserFeature.State(
             tabs: tabs,
             selectedTabID: initialAnchor,
@@ -45,9 +50,10 @@ private struct BrowserTabOverviewUITestHostView: View {
             BrowserFeature()
         }
         transitionRegistry = BrowserTabTransitionSurfaceRegistry()
-        _scrollPosition = StateObject(
-            wrappedValue: BrowserTabOverviewScrollPosition(persistedPosition: initialAnchor),
-        )
+        let scrollPosition = BrowserTabOverviewScrollPosition()
+        scrollPosition.restore(with: initialAnchor, liveTabIDs: Set(tabs.map(\.id)))
+        _scrollPosition = StateObject(wrappedValue: scrollPosition)
+        _programmaticRestoreSettled = State(initialValue: !startsAtLastTab)
     }
 
     var body: some View {
@@ -56,6 +62,9 @@ private struct BrowserTabOverviewUITestHostView: View {
                 .font(.caption)
                 .accessibilityIdentifier("browser.tab-overview.saved-anchor")
 
+            Text(programmaticRestoreSettled ? "settled" : "scrolling")
+                .accessibilityIdentifier("browser.tab-overview.programmatic-restore-state")
+
             BrowserTabOverviewView(
                 store: store,
                 transitionRegistry: transitionRegistry,
@@ -63,9 +72,28 @@ private struct BrowserTabOverviewUITestHostView: View {
                 reduceMotionEnabled: true,
                 accessibilityFocusedTabID: $accessibilityFocusedTabID,
                 onCommitScrollPosition: commitScrollPosition,
-                onExitOverview: { _, _ in },
+                onExitOverview: handleOverviewExit,
                 scrollPosition: scrollPosition,
             )
+        }
+        .onChange(of: store.state.tabOverviewScrollPosition) { _, _ in
+            BrowserView.synchronizeTabOverviewScrollPosition(store: store, adapter: scrollPosition)
+        }
+        .onChange(of: scrollPosition.scrollPhase) { _, phase in
+            updateProgrammaticRestoreSettlement(for: phase)
+        }
+        .onChange(of: scrollPosition.isPersistedTargetFullyVisible) { _, _ in
+            updateProgrammaticRestoreSettlement(for: scrollPosition.scrollPhase)
+        }
+        .onChange(of: scrollPosition.persistedPosition) { _, _ in
+            updateProgrammaticRestoreSettlement(for: scrollPosition.scrollPhase)
+        }
+        .onChange(of: store.state.tabs.map(\.id)) { _, _ in
+            if ProcessInfo.processInfo.arguments.contains("--reconcile-close-last-tab") {
+                programmaticRestoreSettled = false
+            }
+            BrowserView.synchronizeTabOverviewScrollPosition(store: store, adapter: scrollPosition)
+            updateProgrammaticRestoreSettlement(for: scrollPosition.scrollPhase)
         }
     }
 
@@ -79,6 +107,19 @@ private struct BrowserTabOverviewUITestHostView: View {
         return "anchor-\(index)"
     }
 
+    private func updateProgrammaticRestoreSettlement(for phase: ScrollPhase) {
+        guard !programmaticRestoreSettled else {
+            return
+        }
+        guard phase == .idle, scrollPosition.isPersistedTargetFullyVisible else {
+            return
+        }
+
+        // Some programmatic restorations remain idle; the production target-visibility callback
+        // confirms that the reducer-owned card actually reached the viewport.
+        programmaticRestoreSettled = true
+    }
+
     /// Mirrors BrowserView's parent callback after the overview reports a stable scroll position.
     private func commitScrollPosition(_ position: BrowserTabID?) {
         guard BrowserView.commitTabOverviewScrollPosition(
@@ -90,6 +131,19 @@ private struct BrowserTabOverviewUITestHostView: View {
         }
 
         committedPositionCount += 1
+    }
+
+    private func handleOverviewExit(
+        _ position: BrowserTabID?,
+        _ action: BrowserTabOverviewExitAction,
+    ) {
+        commitScrollPosition(position)
+        guard case let .closeTab(tabID) = action else {
+            return
+        }
+
+        store.send(.closeTab(tabID))
+        BrowserView.synchronizeTabOverviewScrollPosition(store: store, adapter: scrollPosition)
     }
 
 }

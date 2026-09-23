@@ -32,6 +32,53 @@ struct BrowserViewInteractionTests {
         window.rootViewController = nil
     }
 
+    @Test("Scene deactivation commits the latest overview position and cancels its fallback")
+    func sceneDeactivationCommitsLatestOverviewPosition() async throws {
+        let first = BrowserTabID(UUID(9_020))
+        let second = BrowserTabID(UUID(9_021))
+        var initialState = BrowserFeature.State(
+            tabs: [.startPage(id: first), .startPage(id: second)],
+            selectedTabID: first,
+            presentation: .tabOverview,
+        )
+        initialState.tabOverviewScrollPosition = first
+        let store = Store(initialState: initialState) {
+            BrowserFeature()
+        }
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateScrollPhase(.animating)
+        #expect(adapter.updateLivePosition(second))
+
+        var fallbackWasCalled = false
+        adapter.scheduleStableFallback(after: .milliseconds(50)) {
+            fallbackWasCalled = true
+        }
+
+        BrowserView.commitTabOverviewScrollPositionForInactiveScene(
+            .active,
+            store: store,
+            adapter: adapter,
+        )
+        #expect(store.state.tabOverviewScrollPosition == first)
+
+        BrowserView.commitTabOverviewScrollPositionForInactiveScene(
+            .inactive,
+            store: store,
+            adapter: adapter,
+        )
+        #expect(store.state.tabOverviewScrollPosition == second)
+        #expect(adapter.persistedPosition == second)
+
+        BrowserView.commitTabOverviewScrollPositionForInactiveScene(
+            .background,
+            store: store,
+            adapter: adapter,
+        )
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!fallbackWasCalled)
+        #expect(store.state.tabOverviewScrollPosition == second)
+    }
+
     @Test("Browsing dismissal scope contains the page surface and Browser chrome")
     func browsingDismissalScopeContainsPageAndChrome() throws {
         let url = try #require(URL(string: "https://example.com"))

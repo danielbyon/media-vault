@@ -201,6 +201,11 @@ public struct BrowserView: View {
         .onChange(of: scenePhase) { _, value in
             if value != .active {
                 cancelTabTransition()
+                Self.commitTabOverviewScrollPositionForInactiveScene(
+                    value,
+                    store: store,
+                    adapter: tabOverviewScrollPosition,
+                )
             }
         }
         .onPreferenceChange(BrowserContentViewportPreferenceKey.self) { value in
@@ -533,6 +538,20 @@ extension BrowserView {
             with: store.tabOverviewScrollPosition,
             liveTabIDs: Set(store.tabs.map(\.id)),
         )
+    }
+
+    static func commitTabOverviewScrollPositionForInactiveScene(
+        _ scenePhase: ScenePhase,
+        store: StoreOf<BrowserFeature>,
+        adapter: BrowserTabOverviewScrollPosition,
+    ) {
+        guard scenePhase != .active,
+              store.presentation == .tabOverview
+        else {
+            return
+        }
+
+        _ = commitTabOverviewScrollPosition(adapter.commit(), store: store, adapter: adapter)
     }
 
     private func requestTabOverview() {

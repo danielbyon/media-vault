@@ -426,22 +426,155 @@ struct BrowserTabTests {
         #expect(adapter.commit() == nil)
     }
 
-    @Test("A delayed live scroll target is ignored after the scroll phase settles")
-    func tabOverviewScrollAdapterIgnoresDelayedTargetsAfterSettling() {
+    @Test("A delayed live target remains local after the scroll phase settles")
+    func tabOverviewScrollAdapterAcceptsDelayedTargetsAfterSettling() {
         let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
 
         adapter.updateScrollPhase(.interacting)
         #expect(adapter.updateLivePosition(second))
         adapter.updateScrollPhase(.idle)
         #expect(!adapter.updateLivePosition(second))
-        #expect(!adapter.updateLivePosition(third))
-        #expect(adapter.livePosition == second)
-        #expect(adapter.commit() == second)
+        #expect(adapter.updateLivePosition(third))
+        #expect(adapter.livePosition == third)
+        #expect(adapter.commit() == third)
 
         let fourth = BrowserTabID()
         #expect(!adapter.synchronize(with: first, liveTabIDs: [first, second, third, fourth]))
         #expect(!adapter.updateLivePosition(third))
+        #expect(adapter.livePosition == third)
+    }
+
+    @Test("Animating overview targets are accepted and become the reducer restoration anchor")
+    func tabOverviewScrollAdapterCommitsAnimatingTargets() async {
+        let initialState = BrowserFeature.State(
+            tabs: [
+                .startPage(id: first),
+                .startPage(id: second),
+                .startPage(id: third),
+            ],
+            selectedTabID: first,
+            presentation: .tabOverview,
+        )
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        }
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+
+        adapter.updateScrollPhase(.animating)
+        #expect(adapter.updateLivePosition(second))
+        #expect(adapter.commit() == second)
+        await store.send(.tabOverviewScrollChanged(second)) {
+            $0.tabOverviewScrollPosition = second
+        }
+        #expect(adapter.synchronize(
+            with: store.state.tabOverviewScrollPosition,
+            liveTabIDs: Set(store.state.tabs.map(\.id)),
+        ))
+        #expect(adapter.persistedPosition == second)
+    }
+
+    @Test("Reducer synchronization during interaction preserves subsequent live targets")
+    func tabOverviewScrollAdapterKeepsActivePhaseDuringSynchronization() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+
+        adapter.updateScrollPhase(.interacting)
+        #expect(adapter.updateLivePosition(second))
+        #expect(adapter.synchronize(with: second, liveTabIDs: [second, third]))
+        #expect(adapter.updateLivePosition(third))
+        #expect(adapter.livePosition == third)
+        #expect(adapter.commit() == third)
+    }
+
+    @Test("Scroll adapter exposes the observed phase for deterministic restoration settlement")
+    func tabOverviewScrollAdapterExposesObservedPhase() {
+        let adapter = BrowserTabOverviewScrollPosition()
+
+        #expect(adapter.scrollPhase == .idle)
+        adapter.updateScrollPhase(.animating)
+        #expect(adapter.scrollPhase == .animating)
+        adapter.updateScrollPhase(.idle)
+        #expect(adapter.scrollPhase == .idle)
+    }
+
+    @Test("Scroll adapter exposes full target visibility and resets it on restoration")
+    func tabOverviewScrollAdapterTracksPersistedTargetVisibility() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+
+        #expect(!adapter.isPersistedTargetFullyVisible)
+        adapter.updatePersistedTargetVisibility(true)
+        #expect(adapter.isPersistedTargetFullyVisible)
+
+        #expect(adapter.synchronize(with: second, liveTabIDs: [first, second]))
+        #expect(!adapter.isPersistedTargetFullyVisible)
+        adapter.updatePersistedTargetVisibility(true)
+        #expect(adapter.isPersistedTargetFullyVisible)
+
+        adapter.restore(with: first, liveTabIDs: [first, second])
+        #expect(!adapter.isPersistedTargetFullyVisible)
+    }
+
+    @Test("Reducer-owned restoration and reconciliation targets ignore exact binding echoes")
+    func tabOverviewScrollAdapterIgnoresReducerTargetEchoes() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        let liveTabIDs: Set<BrowserTabID> = [first, second, third]
+
+        adapter.restore(with: second, liveTabIDs: liveTabIDs)
+        #expect(!adapter.updateLivePosition(second))
         #expect(adapter.livePosition == second)
+        #expect(adapter.synchronize(with: third, liveTabIDs: liveTabIDs))
+        #expect(!adapter.updateLivePosition(third))
+        #expect(adapter.livePosition == third)
+        #expect(adapter.commit() == nil)
+    }
+
+    @Test("A new animating target remains eligible after restoration echo handling")
+    func tabOverviewScrollAdapterAcceptsNewTargetAfterRestorationEcho() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+
+        adapter.restore(with: second, liveTabIDs: [first, second, third])
+        #expect(!adapter.updateLivePosition(second))
+        adapter.updateScrollPhase(.animating)
+        #expect(adapter.updateLivePosition(third))
+        #expect(adapter.commit() == third)
+    }
+
+    @Test("A quiet-window fallback commits only the latest local target")
+    func tabOverviewScrollAdapterCoalescesStableFallbacks() async throws {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        var committedPositions: [BrowserTabID] = []
+
+        #expect(adapter.updateLivePosition(second))
+        adapter.scheduleStableFallback(after: .milliseconds(100)) {
+            if let position = adapter.commit() {
+                committedPositions.append(position)
+            }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(adapter.updateLivePosition(third))
+        adapter.scheduleStableFallback(after: .milliseconds(100)) {
+            if let position = adapter.commit() {
+                committedPositions.append(position)
+            }
+        }
+
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(committedPositions.isEmpty)
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(committedPositions == [third])
+    }
+
+    @Test("An explicit stable commit cancels its pending fallback")
+    func tabOverviewScrollAdapterCancelsFallbackAfterCommit() async throws {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        var fallbackWasCalled = false
+
+        #expect(adapter.updateLivePosition(second))
+        adapter.scheduleStableFallback(after: .milliseconds(100)) {
+            fallbackWasCalled = true
+        }
+        #expect(adapter.commit() == second)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(!fallbackWasCalled)
     }
 
     @Test("Tab Overview scroll anchor survives repeated browsing transitions")

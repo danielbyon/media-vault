@@ -31,9 +31,16 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
     private(set) var livePosition: BrowserTabID?
     @Published
     private(set) var persistedPosition: BrowserTabID?
-    private var scrollPhase: ScrollPhase = .idle
+    @Published
+    private(set) var scrollPhase: ScrollPhase = .idle
+    /// Whether the reducer-owned anchor is fully visible in the mounted overview scroll view.
+    @Published
+    private(set) var isPersistedTargetFullyVisible = false
     /// Identifies the last submitted target until the reducer accepts or rejects it.
     private var pendingPosition: BrowserTabID?
+    /// Identifies a reducer-owned target whose matching binding write is a programmatic echo.
+    private var programmaticTargetEcho: BrowserTabID?
+    private var stableFallbackTask: Task<Void, Never>?
 
     init(persistedPosition: BrowserTabID? = nil) {
         livePosition = persistedPosition
@@ -43,10 +50,17 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
     /// Records a non-nil target locally and reports whether its identity changed.
     @discardableResult
     func updateLivePosition(_ position: BrowserTabID?) -> Bool {
-        guard let position,
-              position != livePosition,
-              scrollPhase == .interacting || scrollPhase == .decelerating
-        else {
+        guard let position else {
+            return false
+        }
+
+        if position == programmaticTargetEcho {
+            livePosition = position
+            programmaticTargetEcho = nil
+            return false
+        }
+
+        guard position != livePosition else {
             return false
         }
 
@@ -54,9 +68,21 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
         return true
     }
 
-    /// Tracks whether SwiftUI is reporting targets from a user-driven scroll interaction.
+    /// Tracks scroll timing and releases an outstanding reducer-target echo for new interactions.
     func updateScrollPhase(_ phase: ScrollPhase) {
+        if phase == .tracking || phase == .interacting || phase == .decelerating {
+            programmaticTargetEcho = nil
+        }
         scrollPhase = phase
+    }
+
+    /// Publishes whether the mounted overview reports the reducer-owned anchor fully visible.
+    func updatePersistedTargetVisibility(_ isFullyVisible: Bool) {
+        guard isPersistedTargetFullyVisible != isFullyVisible else {
+            return
+        }
+
+        isPersistedTargetFullyVisible = isFullyVisible
     }
 
     /// Follows a reducer-owned anchor change, including tab-mutation reconciliation.
@@ -65,18 +91,23 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
         with persistedPosition: BrowserTabID?,
         liveTabIDs: Set<BrowserTabID>,
     ) -> Bool {
-        scrollPhase = .idle
         let reducerPosition = persistedPosition.flatMap { liveTabIDs.contains($0) ? $0 : nil }
         let persistedPositionChanged = self.persistedPosition != reducerPosition
         let livePositionWasRemoved = livePosition.map { !liveTabIDs.contains($0) } ?? false
         let reducerAcknowledgedPendingPosition = pendingPosition != nil
             && pendingPosition == reducerPosition
+        let userDrivenScrollIsActive = scrollPhase == .tracking
+            || scrollPhase == .interacting
+            || scrollPhase == .decelerating
 
         if livePositionWasRemoved || (persistedPositionChanged && !reducerAcknowledgedPendingPosition) {
+            cancelStableFallback()
             livePosition = reducerPosition
+            programmaticTargetEcho = userDrivenScrollIsActive ? nil : reducerPosition
         }
         if persistedPositionChanged {
             self.persistedPosition = reducerPosition
+            updatePersistedTargetVisibility(false)
         }
         pendingPosition = nil
         return persistedPositionChanged
@@ -84,15 +115,40 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
 
     /// Starts a newly mounted overview from the reducer-owned restoration anchor.
     func restore(with persistedPosition: BrowserTabID?, liveTabIDs: Set<BrowserTabID>) {
+        cancelStableFallback()
         scrollPhase = .idle
         let reducerPosition = persistedPosition.flatMap { liveTabIDs.contains($0) ? $0 : nil }
         livePosition = reducerPosition
         self.persistedPosition = reducerPosition
+        updatePersistedTargetVisibility(false)
         pendingPosition = nil
+        programmaticTargetEcho = reducerPosition
+    }
+
+    /// Restarts a quiet-window task so rapid logical target changes commit only the latest one.
+    func scheduleStableFallback(
+        after duration: Duration = .milliseconds(300),
+        onCommit: @escaping @MainActor () -> Void,
+    ) {
+        cancelStableFallback()
+        stableFallbackTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: duration)
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else {
+                return
+            }
+
+            stableFallbackTask = nil
+            onCommit()
+        }
     }
 
     /// Returns the latest live identity once while awaiting the reducer's validation.
     func commit() -> BrowserTabID? {
+        cancelStableFallback()
         guard let livePosition,
               livePosition != persistedPosition,
               livePosition != pendingPosition
@@ -102,6 +158,11 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
 
         pendingPosition = livePosition
         return livePosition
+    }
+
+    private func cancelStableFallback() {
+        stableFallbackTask?.cancel()
+        stableFallbackTask = nil
     }
 }
 
@@ -122,10 +183,10 @@ struct BrowserTabOverviewView: View {
 
     @Environment(\.horizontalSizeClass)
     private var horizontalSizeClass
-    @Environment(\.scenePhase)
-    private var scenePhase
     @State
     private var tabCardDrag: BrowserTabCardDrag?
+    @State
+    private var fullyVisibleTargetIDs: Set<BrowserTabID> = []
     @ObservedObject
     var scrollPosition: BrowserTabOverviewScrollPosition
 
@@ -155,16 +216,25 @@ struct BrowserTabOverviewView: View {
         }
         .scrollPosition(id: tabOverviewScrollPositionBinding)
         .accessibilityIdentifier("browser.tab-overview.scroll-view")
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active, store.presentation == .tabOverview {
-                commitScrollPosition()
-            }
-        }
         .onScrollPhaseChange { _, phase in
             scrollPosition.updateScrollPhase(phase)
             if phase == .idle {
                 commitScrollPosition()
             }
+        }
+        .onScrollTargetVisibilityChange(idType: BrowserTabID.self, threshold: 1) { targetIDs in
+            let visibleTargetIDs = Set(targetIDs)
+            if fullyVisibleTargetIDs != visibleTargetIDs {
+                fullyVisibleTargetIDs = visibleTargetIDs
+            }
+            scrollPosition.updatePersistedTargetVisibility(
+                scrollPosition.persistedPosition.map(visibleTargetIDs.contains) ?? false,
+            )
+        }
+        .onChange(of: scrollPosition.persistedPosition, initial: true) { _, position in
+            scrollPosition.updatePersistedTargetVisibility(
+                position.map(fullyVisibleTargetIDs.contains) ?? false,
+            )
         }
     }
 
@@ -175,6 +245,10 @@ struct BrowserTabOverviewView: View {
             set: { position in
                 guard scrollPosition.updateLivePosition(position) else {
                     return
+                }
+
+                scrollPosition.scheduleStableFallback {
+                    commitScrollPosition()
                 }
             },
         )
