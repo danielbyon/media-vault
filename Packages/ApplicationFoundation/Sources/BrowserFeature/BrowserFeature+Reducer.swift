@@ -183,7 +183,8 @@ extension BrowserFeature {
             }
         case let .tabOverviewScrollChanged(id):
             guard state.presentation == .tabOverview,
-                  state.tabs.contains(where: { $0.id == id })
+                  state.tabs.contains(where: { $0.id == id }),
+                  state.tabOverviewScrollPosition != id
             else {
                 return .none
             }

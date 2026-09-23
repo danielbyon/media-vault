@@ -340,8 +340,8 @@ struct BrowserTabTests {
         )
     }
 
-    @Test("Tab Overview scroll actions accept only live overview tabs")
-    func tabOverviewScrollActionsAcceptOnlyLiveOverviewTabs() async {
+    @Test("Tab Overview scroll commits are accepted only before overview exit")
+    func tabOverviewScrollCommitsAreLimitedToOverview() async {
         let store = TestStore(initialState: BrowserFeature.State(
             tabs: [.startPage(id: first), .startPage(id: second)],
             selectedTabID: first,
@@ -353,6 +353,7 @@ struct BrowserTabTests {
         await store.send(.tabOverviewScrollChanged(second)) {
             $0.tabOverviewScrollPosition = second
         }
+        await store.send(.tabOverviewScrollChanged(second))
         await store.send(.tabOverviewScrollChanged(BrowserTabID(UUID(3))))
         #expect(store.state.tabOverviewScrollPosition == second)
 
@@ -363,6 +364,84 @@ struct BrowserTabTests {
         }
         await store.send(.tabOverviewScrollChanged(first))
         #expect(store.state.tabOverviewScrollPosition == second)
+    }
+
+    @Test("Live Tab Overview scroll identity stays local until commit and follows reconciliation")
+    func tabOverviewScrollAdapterCommitsOnlyStableIdentity() async {
+        var initialState = BrowserFeature.State(
+            tabs: [
+                .startPage(id: first),
+                .startPage(id: second),
+                .startPage(id: third),
+            ],
+            selectedTabID: first,
+            presentation: .tabOverview,
+        )
+        initialState.tabOverviewScrollPosition = first
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        }
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+
+        #expect(!adapter.updateLivePosition(nil))
+        adapter.updateScrollPhase(.interacting)
+        #expect(adapter.updateLivePosition(second))
+        #expect(adapter.livePosition == second)
+        #expect(adapter.persistedPosition == first)
+        #expect(store.state.tabOverviewScrollPosition == first)
+
+        #expect(adapter.commit() == second)
+        #expect(adapter.persistedPosition == first)
+        #expect(adapter.updateLivePosition(third))
+        await store.send(.tabOverviewScrollChanged(second)) {
+            $0.tabOverviewScrollPosition = second
+        }
+        #expect(adapter.synchronize(
+            with: store.state.tabOverviewScrollPosition,
+            liveTabIDs: Set(store.state.tabs.map(\.id)),
+        ))
+        #expect(adapter.persistedPosition == second)
+        #expect(adapter.livePosition == third)
+        #expect(adapter.commit() == third)
+
+        let allTabIDs: Set<BrowserTabID> = [first, second, third]
+        #expect(adapter.synchronize(with: third, liveTabIDs: allTabIDs))
+        #expect(adapter.livePosition == third)
+        #expect(adapter.persistedPosition == third)
+        #expect(!adapter.synchronize(with: third, liveTabIDs: allTabIDs))
+        #expect(!adapter.updateLivePosition(nil))
+    }
+
+    @Test("A removed live overview target falls back to the reducer-owned anchor")
+    func tabOverviewScrollAdapterDropsRemovedLiveTargets() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+
+        adapter.updateScrollPhase(.interacting)
+        #expect(adapter.updateLivePosition(third))
+        #expect(adapter.commit() == third)
+        #expect(adapter.persistedPosition == first)
+        #expect(!adapter.synchronize(with: first, liveTabIDs: [first, second]))
+        #expect(adapter.livePosition == first)
+        #expect(adapter.persistedPosition == first)
+        #expect(adapter.commit() == nil)
+    }
+
+    @Test("A delayed live scroll target is ignored after the scroll phase settles")
+    func tabOverviewScrollAdapterIgnoresDelayedTargetsAfterSettling() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+
+        adapter.updateScrollPhase(.interacting)
+        #expect(adapter.updateLivePosition(second))
+        adapter.updateScrollPhase(.idle)
+        #expect(!adapter.updateLivePosition(second))
+        #expect(!adapter.updateLivePosition(third))
+        #expect(adapter.livePosition == second)
+        #expect(adapter.commit() == second)
+
+        let fourth = BrowserTabID()
+        #expect(!adapter.synchronize(with: first, liveTabIDs: [first, second, third, fourth]))
+        #expect(!adapter.updateLivePosition(third))
+        #expect(adapter.livePosition == second)
     }
 
     @Test("Tab Overview scroll anchor survives repeated browsing transitions")

@@ -5,9 +5,105 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import Combine
 import ComposableArchitecture
 import SwiftUI
 import UIKit
+
+/// An action that leaves Tab Overview or mutates its tab collection.
+enum BrowserTabOverviewExitAction {
+    /// Creates and opens a new tab.
+    case newTab
+    /// Opens the selected overview card.
+    case selectTab(BrowserTab)
+    /// Closes one overview card.
+    case closeTab(BrowserTabID)
+    /// Keeps one overview card and closes the rest.
+    case closeOtherTabs(BrowserTabID)
+}
+
+/// Adapts live scroll targets to the reducer-owned Tab Overview restoration anchor.
+///
+/// Only changes to the persisted anchor are published. Live target changes remain local and do not
+/// invalidate the overview's tab cards or send actions through the Browser store.
+@MainActor
+final class BrowserTabOverviewScrollPosition: ObservableObject {
+    private(set) var livePosition: BrowserTabID?
+    @Published
+    private(set) var persistedPosition: BrowserTabID?
+    private var scrollPhase: ScrollPhase = .idle
+    /// Identifies the last submitted target until the reducer accepts or rejects it.
+    private var pendingPosition: BrowserTabID?
+
+    init(persistedPosition: BrowserTabID? = nil) {
+        livePosition = persistedPosition
+        self.persistedPosition = persistedPosition
+    }
+
+    /// Records a non-nil target locally and reports whether its identity changed.
+    @discardableResult
+    func updateLivePosition(_ position: BrowserTabID?) -> Bool {
+        guard let position,
+              position != livePosition,
+              scrollPhase == .interacting || scrollPhase == .decelerating
+        else {
+            return false
+        }
+
+        livePosition = position
+        return true
+    }
+
+    /// Tracks whether SwiftUI is reporting targets from a user-driven scroll interaction.
+    func updateScrollPhase(_ phase: ScrollPhase) {
+        scrollPhase = phase
+    }
+
+    /// Follows a reducer-owned anchor change, including tab-mutation reconciliation.
+    @discardableResult
+    func synchronize(
+        with persistedPosition: BrowserTabID?,
+        liveTabIDs: Set<BrowserTabID>,
+    ) -> Bool {
+        scrollPhase = .idle
+        let reducerPosition = persistedPosition.flatMap { liveTabIDs.contains($0) ? $0 : nil }
+        let persistedPositionChanged = self.persistedPosition != reducerPosition
+        let livePositionWasRemoved = livePosition.map { !liveTabIDs.contains($0) } ?? false
+        let reducerAcknowledgedPendingPosition = pendingPosition != nil
+            && pendingPosition == reducerPosition
+
+        if livePositionWasRemoved || (persistedPositionChanged && !reducerAcknowledgedPendingPosition) {
+            livePosition = reducerPosition
+        }
+        if persistedPositionChanged {
+            self.persistedPosition = reducerPosition
+        }
+        pendingPosition = nil
+        return persistedPositionChanged
+    }
+
+    /// Starts a newly mounted overview from the reducer-owned restoration anchor.
+    func restore(with persistedPosition: BrowserTabID?, liveTabIDs: Set<BrowserTabID>) {
+        scrollPhase = .idle
+        let reducerPosition = persistedPosition.flatMap { liveTabIDs.contains($0) ? $0 : nil }
+        livePosition = reducerPosition
+        self.persistedPosition = reducerPosition
+        pendingPosition = nil
+    }
+
+    /// Returns the latest live identity once while awaiting the reducer's validation.
+    func commit() -> BrowserTabID? {
+        guard let livePosition,
+              livePosition != persistedPosition,
+              livePosition != pendingPosition
+        else {
+            return nil
+        }
+
+        pendingPosition = livePosition
+        return livePosition
+    }
+}
 
 /// Renders Tab Overview cards and their exact preview boundaries.
 ///
@@ -21,42 +117,79 @@ struct BrowserTabOverviewView: View {
     let previewAspectRatio: CGFloat
     let reduceMotionEnabled: Bool
     let accessibilityFocusedTabID: AccessibilityFocusState<BrowserTabID?>.Binding
-    let onNewTab: () -> Void
-    let onSelectTab: (BrowserTab) -> Void
+    let onCommitScrollPosition: (BrowserTabID?) -> Void
+    let onExitOverview: (BrowserTabID?, BrowserTabOverviewExitAction) -> Void
 
     @Environment(\.horizontalSizeClass)
     private var horizontalSizeClass
+    @Environment(\.scenePhase)
+    private var scenePhase
     @State
     private var tabCardDrag: BrowserTabCardDrag?
+    @ObservedObject
+    var scrollPosition: BrowserTabOverviewScrollPosition
 
     var body: some View {
         VStack(spacing: 16) {
             HStack {
                 Text("Tabs").font(.largeTitle.bold())
                 Spacer()
-                Button("New Tab", systemImage: "plus", action: onNewTab)
-            }
-            ScrollView {
-                LazyVGrid(columns: tabOverviewColumns, spacing: 18) {
-                    ForEach(store.tabs) { tab in
-                        tabCard(tab)
-                            .id(tab.id)
-                    }
+                Button("New Tab", systemImage: "plus") {
+                    exitOverview(with: .newTab)
                 }
-                .scrollTargetLayout()
             }
-            .scrollPosition(id: Binding(
-                get: { store.tabOverviewScrollPosition },
-                set: { position in
-                    guard let position else {
-                        return
-                    }
-
-                    store.send(.tabOverviewScrollChanged(position))
-                },
-            ))
+            tabOverviewScrollView
         }
         .padding(20)
+    }
+
+    private var tabOverviewScrollView: some View {
+        ScrollView {
+            LazyVGrid(columns: tabOverviewColumns, spacing: 18) {
+                ForEach(store.tabs) { tab in
+                    tabCard(tab)
+                        .id(tab.id)
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollPosition(id: tabOverviewScrollPositionBinding)
+        .accessibilityIdentifier("browser.tab-overview.scroll-view")
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active, store.presentation == .tabOverview {
+                commitScrollPosition()
+            }
+        }
+        .onScrollPhaseChange { _, phase in
+            scrollPosition.updateScrollPhase(phase)
+            if phase == .idle {
+                commitScrollPosition()
+            }
+        }
+    }
+
+    /// The logical identity binding consumed by the overview's SwiftUI scroll view.
+    var tabOverviewScrollPositionBinding: Binding<BrowserTabID?> {
+        Binding(
+            get: { scrollPosition.livePosition },
+            set: { position in
+                guard scrollPosition.updateLivePosition(position) else {
+                    return
+                }
+            },
+        )
+    }
+
+    private func commitScrollPosition() {
+        guard let position = scrollPosition.commit() else {
+            return
+        }
+
+        onCommitScrollPosition(position)
+    }
+
+    private func exitOverview(with action: BrowserTabOverviewExitAction) {
+        onExitOverview(scrollPosition.commit(), action)
     }
 
     private var tabOverviewColumns: [GridItem] {
@@ -72,9 +205,9 @@ struct BrowserTabOverviewView: View {
 
     private func tabCard(_ tab: BrowserTab) -> some View {
         ZStack(alignment: .bottomTrailing) {
-            Button { onSelectTab(tab) } label: { tabCardContent(tab) }
+            Button { exitOverview(with: .selectTab(tab)) } label: { tabCardContent(tab) }
                 .buttonStyle(.plain)
-            Button { store.send(.closeTab(tab.id)) } label: {
+            Button { exitOverview(with: .closeTab(tab.id)) } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .frame(width: 44, height: 44)
@@ -86,7 +219,9 @@ struct BrowserTabOverviewView: View {
         .offset(x: tabCardDrag?.tabID == tab.id ? tabCardDrag?.horizontalTranslation ?? 0 : 0)
         .accessibilityFocused(accessibilityFocusedTabID, equals: tab.id)
         .accessibilityValue(tab.id == store.selectedTabID ? "Selected" : "")
-        .accessibilityAction(named: "Close Tab") { store.send(.closeTab(tab.id)) }
+        .accessibilityAction(named: "Close Tab") {
+            exitOverview(with: .closeTab(tab.id))
+        }
         .simultaneousGesture(
             DragGesture(minimumDistance: 24)
                 .onChanged { gesture in
@@ -137,7 +272,7 @@ struct BrowserTabOverviewView: View {
             }
         case .dismiss:
             self.tabCardDrag = nil
-            store.send(.closeTab(tabID))
+            exitOverview(with: .closeTab(tabID))
         }
     }
 
@@ -243,7 +378,7 @@ struct BrowserTabOverviewView: View {
 
     @ViewBuilder
     private func tabCardMenu(_ tab: BrowserTab) -> some View {
-        Button("Open Tab") { onSelectTab(tab) }
+        Button("Open Tab") { exitOverview(with: .selectTab(tab)) }
         if BrowserTabPresentation.canShowPageActions(for: tab),
            let url = tab.metadata.committedURL {
             if let bookmarkID = BrowserTabPresentation.bookmarkID(
@@ -260,10 +395,12 @@ struct BrowserTabOverviewView: View {
                 subject: Text(BrowserTabPresentation.title(for: tab)),
             ) { Text("Share Page") }
         }
-        Button("Close Tab", role: .destructive) { store.send(.closeTab(tab.id)) }
+        Button("Close Tab", role: .destructive) {
+            exitOverview(with: .closeTab(tab.id))
+        }
         if store.tabs.count > 1 {
             Button("Close Other Tabs", role: .destructive) {
-                store.send(.closeOtherTabsTapped(tab.id))
+                exitOverview(with: .closeOtherTabs(tab.id))
             }
         }
     }

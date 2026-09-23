@@ -14,6 +14,10 @@
 		A10000000000000000000008 /* FoundationTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000003 /* FoundationTestSupport */; };
 		A10000000000000000000009 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000004 /* SnapshotTesting */; };
 		A10000000000000000000025 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
+		A10000000000000000000026 /* BrowserTabOverviewUITestHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000C /* BrowserTabOverviewUITestHost.swift */; };
+		A10000000000000000000027 /* BrowserFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000005 /* BrowserFeature */; };
+		A10000000000000000000028 /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000002 /* ComposableArchitecture */; };
+		A10000000000000000000029 /* BrowserTabOverviewScrollUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000D /* BrowserTabOverviewScrollUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +30,10 @@
 		B10000000000000000000007 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		B10000000000000000000008 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		B10000000000000000000009 /* Packages/ApplicationFoundation */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Packages/ApplicationFoundation; sourceTree = "<group>"; };
+		B1000000000000000000000A /* BrowserTabOverviewUITestHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BrowserTabOverviewUITestHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1000000000000000000000B /* BrowserTabOverviewUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrowserTabOverviewUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1000000000000000000000C /* BrowserTabOverviewUITestHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabOverviewUITestHost.swift; sourceTree = "<group>"; };
+		B1000000000000000000000D /* BrowserTabOverviewScrollUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabOverviewScrollUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,6 +56,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C10000000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000027 /* BrowserFeature in Frameworks */,
+				A10000000000000000000028 /* ComposableArchitecture in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1000000000000000000000C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -56,6 +80,8 @@
 			children = (
 				E10000000000000000000003 /* App */,
 				E10000000000000000000004 /* AppTests */,
+				E10000000000000000000008 /* BrowserTabOverviewUITestHost */,
+				E10000000000000000000009 /* BrowserTabOverviewUITests */,
 				E10000000000000000000007 /* Packages */,
 				E10000000000000000000002 /* Products */,
 			);
@@ -66,6 +92,8 @@
 			children = (
 				B10000000000000000000001 /* App.app */,
 				B10000000000000000000002 /* AppTests.xctest */,
+				B1000000000000000000000A /* BrowserTabOverviewUITestHost.app */,
+				B1000000000000000000000B /* BrowserTabOverviewUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -114,6 +142,22 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
+		E10000000000000000000008 /* BrowserTabOverviewUITestHost */ = {
+			isa = PBXGroup;
+			children = (
+				B1000000000000000000000C /* BrowserTabOverviewUITestHost.swift */,
+			);
+			path = BrowserTabOverviewUITestHost;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000009 /* BrowserTabOverviewUITests */ = {
+			isa = PBXGroup;
+			children = (
+				B1000000000000000000000D /* BrowserTabOverviewScrollUITests.swift */,
+			);
+			path = BrowserTabOverviewUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -160,6 +204,45 @@
 			productReference = B10000000000000000000002 /* AppTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		D10000000000000000000003 /* BrowserTabOverviewUITestHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1000000000000000000000E /* Build configuration list for PBXNativeTarget "BrowserTabOverviewUITestHost" */;
+			buildPhases = (
+				C10000000000000000000007 /* Sources */,
+				C10000000000000000000008 /* Resources */,
+				C10000000000000000000009 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BrowserTabOverviewUITestHost;
+			packageProductDependencies = (
+				120000000000000000000005 /* BrowserFeature */,
+				120000000000000000000002 /* ComposableArchitecture */,
+			);
+			productName = BrowserTabOverviewUITestHost;
+			productReference = B1000000000000000000000A /* BrowserTabOverviewUITestHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D10000000000000000000004 /* BrowserTabOverviewUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1000000000000000000000F /* Build configuration list for PBXNativeTarget "BrowserTabOverviewUITests" */;
+			buildPhases = (
+				C1000000000000000000000E /* Sources */,
+				C1000000000000000000000B /* Resources */,
+				C1000000000000000000000C /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				H10000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = BrowserTabOverviewUITests;
+			productName = BrowserTabOverviewUITests;
+			productReference = B1000000000000000000000B /* BrowserTabOverviewUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -174,6 +257,13 @@
 					};
 					D10000000000000000000002 = {
 						CreatedOnToolsVersion = 2700;
+					};
+					D10000000000000000000003 = {
+						CreatedOnToolsVersion = 2700;
+					};
+					D10000000000000000000004 = {
+						CreatedOnToolsVersion = 2700;
+						TestTargetID = D10000000000000000000003;
 					};
 				};
 			};
@@ -197,6 +287,8 @@
 			targets = (
 				D10000000000000000000001 /* App */,
 				D10000000000000000000002 /* AppTests */,
+				D10000000000000000000003 /* BrowserTabOverviewUITestHost */,
+				D10000000000000000000004 /* BrowserTabOverviewUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -210,6 +302,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C10000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1000000000000000000000B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -232,6 +338,22 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000005 /* RootSurfaceSnapshotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000026 /* BrowserTabOverviewUITestHost.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1000000000000000000000E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000029 /* BrowserTabOverviewScrollUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -328,6 +450,85 @@
 			};
 			name = Release;
 		};
+		F1000000000000000000000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				ONLY_ACTIVE_ARCH = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsertaboverview.uitesthost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F1000000000000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsertaboverview.uitesthost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F1000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsertaboverview.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserTabOverviewUITestHost;
+			};
+			name = Debug;
+		};
+		F1000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsertaboverview.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserTabOverviewUITestHost;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -354,6 +555,24 @@
 			buildConfigurations = (
 				F10000000000000000000005 /* Debug */,
 				F10000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F1000000000000000000000E /* Build configuration list for PBXNativeTarget "BrowserTabOverviewUITestHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1000000000000000000000A /* Debug */,
+				F1000000000000000000000B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F1000000000000000000000F /* Build configuration list for PBXNativeTarget "BrowserTabOverviewUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1000000000000000000000C /* Debug */,
+				F1000000000000000000000D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -407,7 +626,30 @@
 			package = 110000000000000000000006 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
 			productName = SnapshotTesting;
 		};
+		120000000000000000000005 /* BrowserFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */;
+			productName = BrowserFeature;
+		};
 /* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		G10000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D10000000000000000000003;
+			remoteInfo = BrowserTabOverviewUITestHost;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		H10000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D10000000000000000000003 /* BrowserTabOverviewUITestHost */;
+			targetProxy = G10000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 	};
 	rootObject = A10000000000000000000001 /* Project object */;
 }
