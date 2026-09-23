@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import Clocks
 import ComposableArchitecture
 import Foundation
 import Testing
@@ -539,8 +540,11 @@ struct BrowserTabTests {
     }
 
     @Test("A quiet-window fallback commits only the latest local target")
-    func tabOverviewScrollAdapterCoalescesStableFallbacks() async throws {
-        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+    func tabOverviewScrollAdapterCoalescesStableFallbacks() async {
+        let clock = TestClock()
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first) { duration in
+            try await clock.sleep(for: duration)
+        }
         var committedPositions: [BrowserTabID] = []
 
         #expect(adapter.updateLivePosition(second))
@@ -549,31 +553,37 @@ struct BrowserTabTests {
                 committedPositions.append(position)
             }
         }
-        try await Task.sleep(for: .milliseconds(50))
+        await Task.yield()
+        await clock.advance(by: .milliseconds(50))
         #expect(adapter.updateLivePosition(third))
         adapter.scheduleStableFallback(after: .milliseconds(100)) {
             if let position = adapter.commit() {
                 committedPositions.append(position)
             }
         }
+        await Task.yield()
 
-        try await Task.sleep(for: .milliseconds(60))
+        await clock.advance(by: .milliseconds(60))
         #expect(committedPositions.isEmpty)
-        try await Task.sleep(for: .milliseconds(80))
+        await clock.advance(by: .milliseconds(40))
         #expect(committedPositions == [third])
     }
 
     @Test("An explicit stable commit cancels its pending fallback")
-    func tabOverviewScrollAdapterCancelsFallbackAfterCommit() async throws {
-        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+    func tabOverviewScrollAdapterCancelsFallbackAfterCommit() async {
+        let clock = TestClock()
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first) { duration in
+            try await clock.sleep(for: duration)
+        }
         var fallbackWasCalled = false
 
         #expect(adapter.updateLivePosition(second))
         adapter.scheduleStableFallback(after: .milliseconds(100)) {
             fallbackWasCalled = true
         }
+        await Task.yield()
         #expect(adapter.commit() == second)
-        try await Task.sleep(for: .milliseconds(150))
+        await clock.advance(by: .seconds(1))
         #expect(!fallbackWasCalled)
     }
 

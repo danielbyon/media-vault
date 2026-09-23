@@ -28,8 +28,6 @@ private struct BrowserTabOverviewUITestHostView: View {
     private var scrollPosition: BrowserTabOverviewScrollPosition
     @State
     private var committedPositionCount = 0
-    @State
-    private var programmaticRestoreSettled: Bool
     @AccessibilityFocusState
     private var accessibilityFocusedTabID: BrowserTabID?
 
@@ -53,7 +51,6 @@ private struct BrowserTabOverviewUITestHostView: View {
         let scrollPosition = BrowserTabOverviewScrollPosition()
         scrollPosition.restore(with: initialAnchor, liveTabIDs: Set(tabs.map(\.id)))
         _scrollPosition = StateObject(wrappedValue: scrollPosition)
-        _programmaticRestoreSettled = State(initialValue: !startsAtLastTab)
     }
 
     var body: some View {
@@ -62,8 +59,7 @@ private struct BrowserTabOverviewUITestHostView: View {
                 .font(.caption)
                 .accessibilityIdentifier("browser.tab-overview.saved-anchor")
 
-            Text(programmaticRestoreSettled ? "settled" : "scrolling")
-                .accessibilityIdentifier("browser.tab-overview.programmatic-restore-state")
+            BrowserTabOverviewRestoreSettlementLabel(observation: scrollPosition.scrollObservation)
 
             BrowserTabOverviewView(
                 store: store,
@@ -79,21 +75,8 @@ private struct BrowserTabOverviewUITestHostView: View {
         .onChange(of: store.state.tabOverviewScrollPosition) { _, _ in
             BrowserView.synchronizeTabOverviewScrollPosition(store: store, adapter: scrollPosition)
         }
-        .onChange(of: scrollPosition.scrollPhase) { _, phase in
-            updateProgrammaticRestoreSettlement(for: phase)
-        }
-        .onChange(of: scrollPosition.isPersistedTargetFullyVisible) { _, _ in
-            updateProgrammaticRestoreSettlement(for: scrollPosition.scrollPhase)
-        }
-        .onChange(of: scrollPosition.persistedPosition) { _, _ in
-            updateProgrammaticRestoreSettlement(for: scrollPosition.scrollPhase)
-        }
         .onChange(of: store.state.tabs.map(\.id)) { _, _ in
-            if ProcessInfo.processInfo.arguments.contains("--reconcile-close-last-tab") {
-                programmaticRestoreSettled = false
-            }
             BrowserView.synchronizeTabOverviewScrollPosition(store: store, adapter: scrollPosition)
-            updateProgrammaticRestoreSettlement(for: scrollPosition.scrollPhase)
         }
     }
 
@@ -105,19 +88,6 @@ private struct BrowserTabOverviewUITestHostView: View {
         }
 
         return "anchor-\(index)"
-    }
-
-    private func updateProgrammaticRestoreSettlement(for phase: ScrollPhase) {
-        guard !programmaticRestoreSettled else {
-            return
-        }
-        guard phase == .idle, scrollPosition.isPersistedTargetFullyVisible else {
-            return
-        }
-
-        // Some programmatic restorations remain idle; the production target-visibility callback
-        // confirms that the reducer-owned card actually reached the viewport.
-        programmaticRestoreSettled = true
     }
 
     /// Mirrors BrowserView's parent callback after the overview reports a stable scroll position.
@@ -138,12 +108,23 @@ private struct BrowserTabOverviewUITestHostView: View {
         _ action: BrowserTabOverviewExitAction,
     ) {
         commitScrollPosition(position)
-        guard case let .closeTab(tabID) = action else {
-            return
+        if case let .closeTab(tabID) = action {
+            store.send(.closeTab(tabID))
         }
 
-        store.send(.closeTab(tabID))
         BrowserView.synchronizeTabOverviewScrollPosition(store: store, adapter: scrollPosition)
     }
 
+}
+
+/// Exposes the production scroll-state snapshot to UI-test synchronization.
+@MainActor
+private struct BrowserTabOverviewRestoreSettlementLabel: View {
+    @ObservedObject
+    var observation: BrowserTabOverviewScrollObservation
+
+    var body: some View {
+        Text(observation.state.isSettled ? "settled" : "scrolling")
+            .accessibilityIdentifier("browser.tab-overview.programmatic-restore-state")
+    }
 }

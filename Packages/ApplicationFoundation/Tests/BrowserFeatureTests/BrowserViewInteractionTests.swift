@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import Clocks
 import ComposableArchitecture
 import Foundation
 import SwiftUI
@@ -33,7 +34,7 @@ struct BrowserViewInteractionTests {
     }
 
     @Test("Scene deactivation commits the latest overview position and cancels its fallback")
-    func sceneDeactivationCommitsLatestOverviewPosition() async throws {
+    func sceneDeactivationCommitsLatestOverviewPosition() async {
         let first = BrowserTabID(UUID(9_020))
         let second = BrowserTabID(UUID(9_021))
         var initialState = BrowserFeature.State(
@@ -45,7 +46,10 @@ struct BrowserViewInteractionTests {
         let store = Store(initialState: initialState) {
             BrowserFeature()
         }
-        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        let clock = TestClock()
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first) { duration in
+            try await clock.sleep(for: duration)
+        }
         adapter.updateScrollPhase(.animating)
         #expect(adapter.updateLivePosition(second))
 
@@ -53,6 +57,7 @@ struct BrowserViewInteractionTests {
         adapter.scheduleStableFallback(after: .milliseconds(50)) {
             fallbackWasCalled = true
         }
+        await Task.yield()
 
         BrowserView.commitTabOverviewScrollPositionForInactiveScene(
             .active,
@@ -74,7 +79,7 @@ struct BrowserViewInteractionTests {
             store: store,
             adapter: adapter,
         )
-        try await Task.sleep(for: .milliseconds(100))
+        await clock.advance(by: .seconds(1))
         #expect(!fallbackWasCalled)
         #expect(store.state.tabOverviewScrollPosition == second)
     }
