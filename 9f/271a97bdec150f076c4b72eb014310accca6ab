@@ -1,0 +1,59 @@
+BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests.swift
+  s_bf1cef5a31f7ee::t_730f65e816c308 60-76,78,82-95
+  s_bf1cef5a31f7ee::t_84f76009f13ea1 41-42,44-47,49-59
+  s_bf1cef5a31f7ee::t_9a579dbdfd95be 77,79-81
+  s_bf1cef5a31f7ee::t_a72331e62b5f64 40
+  s_bf1cef5a31f7ee::t_5e4675010a679a 43,48
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTests.swift
+  s_bf1cef5a31f7ee::t_28de61ad077f13 499,504,509
+  s_bf1cef5a31f7ee::t_7ebcb45b86fdf8 530-540
+  s_bf1cef5a31f7ee::t_a72331e62b5f64 447-487,516-522,524-526,528-529
+  s_bf1cef5a31f7ee::t_0d33a6e5250893 500-503,505-508,510-515
+  s_bf1cef5a31f7ee::t_c5afe4183b9fe8 445,541-577
+  s_bf1cef5a31f7ee::t_5f3f89594301a6 527
+  s_bf1cef5a31f7ee::t_6af2bbf713a00b 429-430,437-439,444
+  s_bf1cef5a31f7ee::t_9260388f26f11d 488-498
+  s_bf1cef5a31f7ee::t_52b3060ac6c69c 446
+BrowserTabOverviewUITestHost/BrowserTabOverviewUITestHost.swift
+  s_bf1cef5a31f7ee::t_e11645789ae4dd 114,118-119
+  s_bf1cef5a31f7ee::t_aff8d5e831bddb 83,85-90,96,110-113,115-117,120
+  s_bf1cef5a31f7ee::t_b6652a0e901614 32,41,53-56,81
+  s_bf1cef5a31f7ee::t_28de61ad077f13 80,95
+  s_bf1cef5a31f7ee::t_ccd58b39e5d737 82,84,92-94
+  s_bf1cef5a31f7ee::t_84f76009f13ea1 31,65-67
+  s_bf1cef5a31f7ee::t_961c2b0922be94 79
+  s_bf1cef5a31f7ee::t_d2372d0acdc8e1 38-40,75,91,97,136-146
+  s_bf1cef5a31f7ee::t_8fb1f0813d8795 121-122
+  s_bf1cef5a31f7ee::t_ac4f9c4995aa11 147-148
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_bf1cef5a31f7ee::t_b178afc91df259 204-208,543-554
+  s_bf1cef5a31f7ee::t_e8b6d1241b06e6 555-556
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabOverviewView.swift
+  s_bf1cef5a31f7ee::t_ccd58b39e5d737 34-35
+  s_bf1cef5a31f7ee::t_5dd0ee62501861 227-229
+  s_bf1cef5a31f7ee::t_70bea7c34d0855 41-43,53-63,71,73-75,104,118,125-143,145-146,151,162-165,250-251
+  s_bf1cef5a31f7ee::t_28de61ad077f13 79-85,110,123,188-189,226,230-238
+  s_bf1cef5a31f7ee::t_a081a09cd7265c 144,249
+  s_bf1cef5a31f7ee::t_aff8d5e831bddb 36-38,86-87,166,225
+  s_bf1cef5a31f7ee::t_154431bd4fdc77 99-101,106
+  s_bf1cef5a31f7ee::t_2f3fec53e5f89b 252
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewInteractionTests.swift
+  s_bf1cef5a31f7ee::t_57bda065591b89 39,43-45
+  s_bf1cef5a31f7ee::t_270a957032bb85 35-38,40-42,46-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9f271a97bdec150f076c4b72eb014310accca6ab",
+  "prompts": {},
+  "sessions": {
+    "s_bf1cef5a31f7ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c9d0-ac2d-7620-9299-089d16e94d71",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
