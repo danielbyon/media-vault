@@ -122,6 +122,8 @@ public struct BrowserFeature {
         var selectedTabID: BrowserTabID
         var presentation: BrowserPresentation
         var tabOverviewFocusID: BrowserTabID?
+        /// Transient logical tab that anchors Tab Overview viewport restoration while Browser remains alive.
+        var tabOverviewScrollPosition: BrowserTabID?
         var focusedField: BrowserFocusedField
         var omniboxDraft: String
         /// Distinguishes an intentionally empty edit from a draft that has never been edited.
@@ -150,6 +152,7 @@ public struct BrowserFeature {
             selectedTabID = initialTabID
             presentation = .browsing
             tabOverviewFocusID = nil
+            tabOverviewScrollPosition = nil
             focusedField = .none
             omniboxDraft = ""
             hasUnsubmittedOmniboxDraft = false
@@ -185,6 +188,7 @@ public struct BrowserFeature {
             self.selectedTabID = selectedTabID
             self.presentation = presentation
             tabOverviewFocusID = nil
+            tabOverviewScrollPosition = nil
             self.focusedField = focusedField
             self.omniboxDraft = omniboxDraft
             hasUnsubmittedOmniboxDraft = false
@@ -264,6 +268,8 @@ public struct BrowserFeature {
         case previewCacheEvicted
         /// Records the deterministic accessibility focus target selected by Tab Overview.
         case tabOverviewFocusChanged(BrowserTabID?)
+        /// Records the logical tab currently anchoring the transient Tab Overview viewport.
+        case tabOverviewScrollChanged(BrowserTabID)
         /// Resigns transient Browser presentation state when the authenticated shell leaves Browser.
         case topLevelDeselected
         /// Requests presentation of the authenticated shell's Settings flow.

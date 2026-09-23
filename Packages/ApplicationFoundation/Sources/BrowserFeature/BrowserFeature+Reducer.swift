@@ -74,11 +74,13 @@ extension BrowserFeature {
             let dismissalEffect = dismissPageUI(in: &state)
             let closedIDs = state.tabs.map(\.id)
             let id = BrowserTabID(uuid())
-            state.tabs = [.startPage(id: id)]
-            state.previewState.replaceWithOnlyTab(id)
-            state.selectedTabID = id
-            state.presentation = .browsing
-            state.tabOverviewFocusID = nil
+            mutateTabsPreservingTabOverviewScrollPosition(state: &state) { state in
+                state.tabs = [.startPage(id: id)]
+                state.previewState.replaceWithOnlyTab(id)
+                state.selectedTabID = id
+                state.presentation = .browsing
+                state.tabOverviewFocusID = nil
+            }
             discardDraft(in: &state)
             return .merge(dismissalEffect, commands(closedIDs.map { .destroyContext(tabID: $0) }))
         case let .closeOtherTabsTapped(id):
@@ -102,11 +104,13 @@ extension BrowserFeature {
             state.pendingNewTab = nil
             let dismissalEffect = dismissPageUI(in: &state)
             let closedIDs = state.tabs.filter { $0.id != id }.map(\.id)
-            state.previewState.keepOnlyTab(id)
-            state.tabs = [tab]
-            state.selectedTabID = id
-            state.presentation = .browsing
-            state.tabOverviewFocusID = nil
+            mutateTabsPreservingTabOverviewScrollPosition(state: &state) { state in
+                state.previewState.keepOnlyTab(id)
+                state.tabs = [tab]
+                state.selectedTabID = id
+                state.presentation = .browsing
+                state.tabOverviewFocusID = nil
+            }
             discardDraft(in: &state)
             return .merge(dismissalEffect, commands(closedIDs.map { .destroyContext(tabID: $0) }))
         case .showStartPageTapped:
@@ -177,6 +181,15 @@ extension BrowserFeature {
             } else {
                 state.tabOverviewFocusID = state.selectedTabID
             }
+        case let .tabOverviewScrollChanged(id):
+            guard state.presentation == .tabOverview,
+                  state.tabs.contains(where: { $0.id == id }),
+                  state.tabOverviewScrollPosition != id
+            else {
+                return .none
+            }
+
+            state.tabOverviewScrollPosition = id
         case .topLevelDeselected:
             state.destructiveConfirmation = nil
             state.pendingNewTab = nil

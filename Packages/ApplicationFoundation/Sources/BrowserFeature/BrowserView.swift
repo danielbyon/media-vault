@@ -35,6 +35,8 @@ public struct BrowserView: View {
     @StateObject
     private var tabTransitionUIKitCoordinator = BrowserTabTransitionUIKitCoordinator()
     @State
+    private var tabOverviewScrollPosition = BrowserTabOverviewScrollPosition()
+    @State
     private var chromeLayoutHeight: CGFloat = 0
     @State
     private var latestLayoutProbeGeometry: BrowserContentViewportGeometry?
@@ -132,10 +134,17 @@ public struct BrowserView: View {
         }
         .onChange(of: store.presentation, initial: true) { _, value in
             if value == .tabOverview {
+                tabOverviewScrollPosition.restore(
+                    with: store.tabOverviewScrollPosition,
+                    liveTabIDs: Set(store.tabs.map(\.id)),
+                )
                 tabTransitionState.overviewVisualMounted = true
-            } else if !tabTransitionUIKitCoordinator.isActive
-                || tabTransitionUIKitCoordinator.direction != .toBrowsing {
-                tabTransitionState.overviewVisualMounted = false
+            } else {
+                synchronizeTabOverviewScrollPosition()
+                if !tabTransitionUIKitCoordinator.isActive
+                    || tabTransitionUIKitCoordinator.direction != .toBrowsing {
+                    tabTransitionState.overviewVisualMounted = false
+                }
             }
             if tabTransitionUIKitCoordinator.isActive,
                let tabTransitionDirection = tabTransitionUIKitCoordinator.direction {
@@ -152,6 +161,9 @@ public struct BrowserView: View {
             accessibilityFocusedTabID = value == .tabOverview
                 ? (store.tabOverviewFocusID ?? store.selectedTabID)
                 : nil
+        }
+        .onChange(of: store.tabOverviewScrollPosition, initial: true) { _, _ in
+            synchronizeTabOverviewScrollPosition()
         }
         .onChange(of: store.selectedTabID) { _, value in
             if store.presentation == .tabOverview {
@@ -175,6 +187,7 @@ public struct BrowserView: View {
                !store.tabs.contains(where: { $0.id == tabTransitionTabID }) {
                 cancelTabTransition()
             }
+            synchronizeTabOverviewScrollPosition()
         }
         .onChange(of: accessibilityFocusedTabID) { _, value in
             guard store.presentation == .tabOverview,
@@ -188,6 +201,11 @@ public struct BrowserView: View {
         .onChange(of: scenePhase) { _, value in
             if value != .active {
                 cancelTabTransition()
+                Self.commitTabOverviewScrollPositionForInactiveScene(
+                    value,
+                    store: store,
+                    adapter: tabOverviewScrollPosition,
+                )
             }
         }
         .onPreferenceChange(BrowserContentViewportPreferenceKey.self) { value in
@@ -201,7 +219,12 @@ public struct BrowserView: View {
             store.send(.previewCacheEvicted)
         }
         .task { await store.send(.task).finish() }
-        .onDisappear { cancelTabTransition() }
+        .onDisappear {
+            cancelTabTransition()
+            if store.presentation == .tabOverview {
+                commitTabOverviewScrollPosition(tabOverviewScrollPosition.commit())
+            }
+        }
         .sheet(isPresented: libraryPresentationBinding) { BrowserLibraryView(store: store) }
         .sheet(isPresented: bookmarkEditorPresentationBinding) {
             BrowserBookmarkEditorView(store: store)
@@ -422,11 +445,9 @@ extension BrowserView {
                 previewAspectRatio: tabPreviewAspectRatio,
                 reduceMotionEnabled: reduceMotionEnabled,
                 accessibilityFocusedTabID: $accessibilityFocusedTabID,
-                onNewTab: {
-                    cancelTabTransition()
-                    store.send(.newTabTapped)
-                },
-                onSelectTab: selectTabCard,
+                onCommitScrollPosition: commitTabOverviewScrollPosition,
+                onExitOverview: handleTabOverviewExit,
+                scrollPosition: tabOverviewScrollPosition,
             )
         }
         .zIndex(1)
@@ -453,6 +474,84 @@ extension BrowserView {
         ) {
             store.send(.tabCardSelected(tab.id))
         }
+    }
+
+    private func handleTabOverviewExit(
+        _ scrollPosition: BrowserTabID?,
+        _ action: BrowserTabOverviewExitAction,
+    ) {
+        commitTabOverviewScrollPosition(scrollPosition)
+
+        switch action {
+        case .newTab:
+            cancelTabTransition()
+            store.send(.newTabTapped)
+        case let .selectTab(tab):
+            selectTabCard(tab)
+        case let .closeTab(tabID):
+            store.send(.closeTab(tabID))
+        case let .closeOtherTabs(tabID):
+            store.send(.closeOtherTabsTapped(tabID))
+        }
+
+        synchronizeTabOverviewScrollPosition()
+    }
+
+    private func commitTabOverviewScrollPosition(_ scrollPosition: BrowserTabID?) {
+        Self.commitTabOverviewScrollPosition(
+            scrollPosition,
+            store: store,
+            adapter: tabOverviewScrollPosition,
+        )
+    }
+
+    @discardableResult
+    static func commitTabOverviewScrollPosition(
+        _ scrollPosition: BrowserTabID?,
+        store: StoreOf<BrowserFeature>,
+        adapter: BrowserTabOverviewScrollPosition,
+    ) -> Bool {
+        guard store.presentation == .tabOverview,
+              let scrollPosition
+        else {
+            synchronizeTabOverviewScrollPosition(store: store, adapter: adapter)
+            return false
+        }
+
+        store.send(.tabOverviewScrollChanged(scrollPosition))
+        synchronizeTabOverviewScrollPosition(store: store, adapter: adapter)
+        return true
+    }
+
+    private func synchronizeTabOverviewScrollPosition() {
+        Self.synchronizeTabOverviewScrollPosition(
+            store: store,
+            adapter: tabOverviewScrollPosition,
+        )
+    }
+
+    static func synchronizeTabOverviewScrollPosition(
+        store: StoreOf<BrowserFeature>,
+        adapter: BrowserTabOverviewScrollPosition,
+    ) {
+        adapter.synchronize(
+            with: store.tabOverviewScrollPosition,
+            liveTabIDs: Set(store.tabs.map(\.id)),
+        )
+    }
+
+    static func commitTabOverviewScrollPositionForInactiveScene(
+        _ scenePhase: ScenePhase,
+        store: StoreOf<BrowserFeature>,
+        adapter: BrowserTabOverviewScrollPosition,
+    ) {
+        guard scenePhase != .active,
+              store.presentation == .tabOverview
+        else {
+            return
+        }
+
+        _ = commitTabOverviewScrollPosition(adapter.commit(), store: store, adapter: adapter)
     }
 
     private func requestTabOverview() {
