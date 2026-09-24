@@ -394,30 +394,73 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
         Coordinator(presence: presence, notificationCenter: notificationCenter)
     }
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+    func makeUIView(context: Context) -> AnchorView {
+        let view = AnchorView()
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = false
         context.coordinator.attach(view)
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
+    func updateUIView(_ uiView: AnchorView, context: Context) {
         context.coordinator.attach(uiView)
     }
 
-    static func dismantleUIView(_: UIView, coordinator: Coordinator) {
+    static func dismantleUIView(_: AnchorView, coordinator: Coordinator) {
         coordinator.stopObserving()
+    }
+
+    /// Reports UIKit window changes so pending keyboard frames can be reconciled without a delay.
+    @MainActor
+    @preconcurrency
+    final class AnchorView: UIView {
+        var onWindowChange: (() -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onWindowChange?()
+        }
     }
 
     /// Owns notification registration separately from the pure keyboard and gesture state models.
     @MainActor
     @preconcurrency
     final class Coordinator: NSObject {
+        private struct NotificationScope: Equatable {
+            let screenID: ObjectIdentifier?
+            let sceneID: ObjectIdentifier?
+
+            @MainActor
+            func belongs(to window: UIWindow) -> Bool {
+                if let screenID, screenID != ObjectIdentifier(window.screen) {
+                    return false
+                }
+
+                if let sceneID,
+                   let targetScene = window.windowScene,
+                   sceneID != ObjectIdentifier(targetScene) {
+                    return false
+                }
+
+                return true
+            }
+        }
+
+        /// A compact notification snapshot retained only while the Browser anchor has no window.
+        private struct PendingKeyboardNotification {
+            let scope: NotificationScope
+            let name: Notification.Name
+            let beginFrame: CGRect?
+            let endFrame: CGRect?
+            let visibleFrame: CGRect?
+        }
+
         private let presence: BrowserSoftwareKeyboardPresence
         private let notificationCenter: NotificationCenter
         private weak var anchorView: UIView?
+        private weak var observedWindow: UIWindow?
         private weak var scopedWindow: UIWindow?
+        private var pendingKeyboardNotification: PendingKeyboardNotification?
         private var isObserving = false
 
         init(presence: BrowserSoftwareKeyboardPresence, notificationCenter: NotificationCenter) {
@@ -426,102 +469,258 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
         }
 
         func attach(_ view: UIView) {
-            anchorView = view
-            guard !isObserving else {
-                return
+            if anchorView !== view {
+                if anchorView != nil {
+                    clearKeyboardState()
+                    observedWindow = nil
+                }
+                if let oldAnchor = anchorView as? BrowserSoftwareKeyboardPresenceObserver.AnchorView {
+                    oldAnchor.onWindowChange = nil
+                }
+                anchorView = view
             }
 
-            let notifications: [Notification.Name] = [
-                UIResponder.keyboardWillShowNotification,
-                UIResponder.keyboardDidShowNotification,
-                UIResponder.keyboardWillChangeFrameNotification,
-                UIResponder.keyboardDidChangeFrameNotification,
-                UIResponder.keyboardWillHideNotification,
-                UIResponder.keyboardDidHideNotification,
-            ]
-            for name in notifications {
-                notificationCenter.addObserver(
-                    self,
-                    selector: #selector(handleKeyboardNotification(_:)),
-                    name: name,
-                    object: nil,
-                )
+            if let anchorView = view as? BrowserSoftwareKeyboardPresenceObserver.AnchorView {
+                anchorView.onWindowChange = { [weak self] in
+                    self?.anchorViewDidMoveToWindow()
+                }
             }
-            isObserving = true
+
+            if !isObserving {
+                let notifications: [Notification.Name] = [
+                    UIResponder.keyboardWillShowNotification,
+                    UIResponder.keyboardDidShowNotification,
+                    UIResponder.keyboardWillChangeFrameNotification,
+                    UIResponder.keyboardDidChangeFrameNotification,
+                    UIResponder.keyboardWillHideNotification,
+                    UIResponder.keyboardDidHideNotification,
+                ]
+                for name in notifications {
+                    notificationCenter.addObserver(
+                        self,
+                        selector: #selector(handleKeyboardNotification(_:)),
+                        name: name,
+                        object: nil,
+                    )
+                }
+                isObserving = true
+            }
+
+            updateObservedWindow(to: view.window)
         }
 
         func stopObserving() {
             notificationCenter.removeObserver(self)
             isObserving = false
-            scopedWindow = nil
+            if let anchorView = anchorView as? BrowserSoftwareKeyboardPresenceObserver.AnchorView {
+                anchorView.onWindowChange = nil
+            }
             anchorView = nil
-            presence.receive(.didHide)
+            observedWindow = nil
+            clearKeyboardState()
+        }
+
+        private func anchorViewDidMoveToWindow() {
+            guard let anchorView else {
+                return
+            }
+
+            updateObservedWindow(to: anchorView.window)
+        }
+
+        private func updateObservedWindow(to window: UIWindow?) {
+            guard observedWindow !== window else {
+                return
+            }
+
+            if observedWindow != nil {
+                clearKeyboardState()
+            }
+            observedWindow = window
+
+            if let window {
+                reconcilePendingKeyboardNotification(in: window)
+            }
         }
 
         @objc
         private func handleKeyboardNotification(_ notification: Notification) {
-            guard let window = anchorView?.window,
-                  isLocalNotification(notification, for: window)
-            else {
+            guard let scope = notificationScope(for: notification) else {
                 return
             }
 
-            switch notification.name {
+            let beginFrame = notification.userInfo?[UIResponder.keyboardFrameBeginUserInfoKey] as? CGRect
+            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+            guard let window = anchorView?.window else {
+                retainPendingKeyboardNotification(
+                    name: notification.name,
+                    scope: scope,
+                    beginFrame: beginFrame,
+                    endFrame: endFrame,
+                )
+                return
+            }
+            guard scope.belongs(to: window) else {
+                return
+            }
+
+            handleKeyboardNotification(
+                named: notification.name,
+                beginFrame: beginFrame,
+                endFrame: endFrame,
+                window: window,
+            )
+        }
+
+        private func notificationScope(for notification: Notification) -> NotificationScope? {
+            if let localValue = notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? NSNumber,
+               !localValue.boolValue {
+                return nil
+            }
+
+            if let sourceWindow = notification.object as? UIWindow {
+                return NotificationScope(
+                    screenID: ObjectIdentifier(sourceWindow.screen),
+                    sceneID: sourceWindow.windowScene.map { ObjectIdentifier($0) },
+                )
+            }
+
+            if let sourceScreen = notification.object as? UIScreen {
+                return NotificationScope(
+                    screenID: ObjectIdentifier(sourceScreen),
+                    sceneID: nil,
+                )
+            }
+
+            return NotificationScope(screenID: nil, sceneID: nil)
+        }
+
+        private func retainPendingKeyboardNotification(
+            name: Notification.Name,
+            scope: NotificationScope,
+            beginFrame: CGRect?,
+            endFrame: CGRect?,
+        ) {
+            let previous = pendingKeyboardNotification?.scope == scope
+                ? pendingKeyboardNotification
+                : nil
+            var visibleFrame = previous?.visibleFrame
+
+            switch name {
             case UIResponder.keyboardWillShowNotification:
-                guard intersectsWindow(
-                    notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-                    window: window,
-                ) else {
+                visibleFrame = endFrame
+            case UIResponder.keyboardDidShowNotification:
+                break
+            case UIResponder.keyboardWillChangeFrameNotification:
+                if visibleFrame == nil {
+                    visibleFrame = beginFrame ?? endFrame
+                }
+            case UIResponder.keyboardDidChangeFrameNotification:
+                if let endFrame {
+                    visibleFrame = endFrame
+                }
+            case UIResponder.keyboardWillHideNotification:
+                if visibleFrame == nil {
+                    visibleFrame = beginFrame ?? endFrame
+                }
+            case UIResponder.keyboardDidHideNotification:
+                if visibleFrame == nil {
+                    visibleFrame = beginFrame ?? endFrame
+                }
+            default:
+                return
+            }
+
+            pendingKeyboardNotification = PendingKeyboardNotification(
+                scope: scope,
+                name: name,
+                beginFrame: beginFrame,
+                endFrame: endFrame,
+                visibleFrame: visibleFrame,
+            )
+        }
+
+        private func reconcilePendingKeyboardNotification(in window: UIWindow) {
+            guard let pendingKeyboardNotification else {
+                return
+            }
+
+            self.pendingKeyboardNotification = nil
+
+            guard pendingKeyboardNotification.scope.belongs(to: window) else {
+                return
+            }
+
+            handleKeyboardNotification(
+                named: pendingKeyboardNotification.name,
+                beginFrame: pendingKeyboardNotification.beginFrame,
+                endFrame: pendingKeyboardNotification.endFrame,
+                visibleFrameEvidence: pendingKeyboardNotification.visibleFrame,
+                isReplayingPendingNotification: true,
+                window: window,
+            )
+        }
+
+        private func handleKeyboardNotification(
+            named name: Notification.Name,
+            beginFrame: CGRect?,
+            endFrame: CGRect?,
+            visibleFrameEvidence: CGRect? = nil,
+            isReplayingPendingNotification: Bool = false,
+            window: UIWindow,
+        ) {
+            let beginIntersects = intersectsWindow(beginFrame, window: window)
+            let endIntersects = intersectsWindow(endFrame, window: window)
+            let visibleFrameIntersects = intersectsWindow(visibleFrameEvidence, window: window)
+
+            switch name {
+            case UIResponder.keyboardWillShowNotification:
+                guard endIntersects else {
                     return
                 }
 
                 scopedWindow = window
                 presence.receive(.willShow)
             case UIResponder.keyboardDidShowNotification:
-                guard scopedWindow === window,
-                      intersectsWindow(
-                          notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-                          window: window,
-                      )
+                guard (scopedWindow === window && endIntersects)
+                    || (isReplayingPendingNotification && visibleFrameIntersects && endIntersects)
                 else {
                     return
                 }
 
+                if scopedWindow !== window {
+                    scopedWindow = window
+                    presence.receive(.willShow)
+                }
                 presence.receive(.didShow)
             case UIResponder.keyboardWillChangeFrameNotification:
-                let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-                let beginFrame = notification.userInfo?[UIResponder.keyboardFrameBeginUserInfoKey] as? CGRect
-                let intersects = intersectsWindow(endFrame, window: window)
-                    || intersectsWindow(beginFrame, window: window)
-                guard intersects else {
+                guard beginIntersects || endIntersects || visibleFrameIntersects else {
                     return
                 }
 
                 scopedWindow = window
                 presence.receive(.willChangeFrame(intersectsBrowserWindow: true))
             case UIResponder.keyboardDidChangeFrameNotification:
-                let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-                let belongsToWindow = scopedWindow === window
-                    || notificationFrameBelongsToWindow(notification, window: window, includingBeginFrame: true)
-                guard let endFrame, belongsToWindow else {
-                    return
-                }
-
-                let intersects = intersectsWindow(endFrame, window: window)
-                presence.receive(.didChangeFrame(intersectsBrowserWindow: intersects))
-                scopedWindow = intersects ? window : nil
-            case UIResponder.keyboardWillHideNotification:
-                guard scopedWindow === window,
-                      notificationFrameBelongsToWindow(notification, window: window, includingBeginFrame: true)
+                guard endFrame != nil,
+                      scopedWindow === window || beginIntersects || endIntersects || visibleFrameIntersects
                 else {
                     return
                 }
 
+                presence.receive(.didChangeFrame(intersectsBrowserWindow: endIntersects))
+                scopedWindow = endIntersects ? window : nil
+            case UIResponder.keyboardWillHideNotification:
+                guard scopedWindow === window || beginIntersects || endIntersects || visibleFrameIntersects else {
+                    return
+                }
+
+                if !presence.isPresent {
+                    presence.receive(.willShow)
+                }
+                scopedWindow = window
                 presence.receive(.willHide)
             case UIResponder.keyboardDidHideNotification:
-                guard scopedWindow === window,
-                      notificationFrameBelongsToWindow(notification, window: window, includingBeginFrame: true)
-                else {
+                guard scopedWindow === window || beginIntersects || endIntersects || visibleFrameIntersects else {
                     return
                 }
 
@@ -532,45 +731,10 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
             }
         }
 
-        private func isLocalNotification(_ notification: Notification, for window: UIWindow) -> Bool {
-            if let localValue = notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? NSNumber,
-               !localValue.boolValue {
-                return false
-            }
-
-            if let sourceWindow = notification.object as? UIWindow {
-                guard sourceWindow.screen === window.screen else {
-                    return false
-                }
-
-                if let sourceScene = sourceWindow.windowScene,
-                   let targetScene = window.windowScene,
-                   sourceScene !== targetScene {
-                    return false
-                }
-            } else if let sourceScreen = notification.object as? UIScreen,
-                      sourceScreen !== window.screen {
-                return false
-            }
-
-            return true
-        }
-
-        private func notificationFrameBelongsToWindow(
-            _ notification: Notification,
-            window: UIWindow,
-            includingBeginFrame: Bool,
-        ) -> Bool {
-            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-            let beginFrame = includingBeginFrame
-                ? notification.userInfo?[UIResponder.keyboardFrameBeginUserInfoKey] as? CGRect
-                : nil
-            guard endFrame != nil || beginFrame != nil else {
-                return scopedWindow === window
-            }
-
-            return intersectsWindow(endFrame, window: window)
-                || intersectsWindow(beginFrame, window: window)
+        private func clearKeyboardState() {
+            scopedWindow = nil
+            pendingKeyboardNotification = nil
+            presence.receive(.didHide)
         }
 
         private func intersectsWindow(_ screenFrame: CGRect?, window: UIWindow) -> Bool {

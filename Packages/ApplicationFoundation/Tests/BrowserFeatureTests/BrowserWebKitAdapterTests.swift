@@ -810,6 +810,7 @@ struct BrowserWebKitAdapterTests {
 
     @Test("UIKit and SwiftUI scroll lifecycle values map to explicit Browser adapter states")
     func refreshLifecycleAdaptersMapFrameworkStates() {
+        #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .possible) == .possible)
         #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .began) == .began)
         #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .changed) == .changed)
         #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .ended) == .ended)
@@ -824,25 +825,12 @@ struct BrowserWebKitAdapterTests {
 
     @Test("Keyboard notification presence is injectable and scoped by local frame")
     func keyboardNotificationObserverUsesInjectedCenterAndWindowFrame() {
-        let presence = BrowserSoftwareKeyboardPresence()
-        let notificationCenter = NotificationCenter()
-        let coordinator = BrowserSoftwareKeyboardPresenceObserver.Coordinator(
-            presence: presence,
-            notificationCenter: notificationCenter,
-        )
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
-        let hostingController = UIViewController()
-        window.rootViewController = hostingController
-        window.makeKeyAndVisible()
-        hostingController.view.frame = window.bounds
-        let anchor = UIView(frame: hostingController.view.bounds)
-        hostingController.view.addSubview(anchor)
-        coordinator.attach(anchor)
-        defer {
-            coordinator.stopObserving()
-            window.isHidden = true
-            window.rootViewController = nil
-        }
+        let fixture = KeyboardPresenceObserverTestFixture()
+        let presence = fixture.presence
+        let notificationCenter = fixture.notificationCenter
+        let window = fixture.window
+        fixture.installAnchor()
+        defer { fixture.tearDown() }
 
         let localKeyboardFrame = window.convert(
             CGRect(x: 0, y: 400, width: 320, height: 240),
@@ -909,17 +897,6 @@ struct BrowserWebKitAdapterTests {
         )
         #expect(presence.isPresent == false)
 
-        let arbitrator = BrowserRefreshGestureArbitrator()
-        let surfaceID = BrowserRefreshSurfaceID()
-        arbitrator.mount(surfaceID)
-        let eligibleInput = BrowserRefreshGestureInput(
-            isInteractiveDismissalEnabled: true,
-            isSoftwareKeyboardPresent: presence.isPresent,
-        )
-        arbitrator.receiveWebKitPanState(.began, on: surfaceID, input: eligibleInput)
-        arbitrator.receiveWebKitPanState(.ended, on: surfaceID, input: eligibleInput)
-        #expect(arbitrator.consumeRefresh(on: surfaceID))
-
         let repositionedKeyboardFrame = window.convert(
             CGRect(x: 24, y: 365, width: 272, height: 255),
             to: window.screen.coordinateSpace,
@@ -975,6 +952,170 @@ struct BrowserWebKitAdapterTests {
         #expect(presence.isPresent == false)
     }
 
+    @Test("Keyboard will-show is reconciled when the Browser anchor enters its window")
+    func keyboardObserverReplaysWillShowAfterAnchorEntersWindow() {
+        let fixture = KeyboardPresenceObserverTestFixture()
+        defer { fixture.tearDown() }
+
+        let keyboardFrame = fixture.screenFrame(
+            CGRect(x: 0, y: 400, width: 320, height: 240),
+        )
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            endFrame: keyboardFrame,
+            object: fixture.window.screen,
+        )
+        #expect(!fixture.presence.isPresent)
+
+        fixture.installAnchor()
+        #expect(fixture.presence.isPresent)
+    }
+
+    @Test("Pre-window frame changes reconcile their final Browser-window intersection")
+    func keyboardObserverReconcilesPreWindowFrameChanges() {
+        let changingFixture = KeyboardPresenceObserverTestFixture()
+        defer { changingFixture.tearDown() }
+
+        let inWindowFrame = changingFixture.screenFrame(
+            CGRect(x: 0, y: 400, width: 320, height: 240),
+        )
+        let outsideFrame = inWindowFrame.offsetBy(dx: changingFixture.window.screen.bounds.width, dy: 0)
+        changingFixture.postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            endFrame: inWindowFrame,
+        )
+        changingFixture.postKeyboardNotification(
+            UIResponder.keyboardWillChangeFrameNotification,
+            beginFrame: inWindowFrame,
+            endFrame: outsideFrame,
+        )
+        changingFixture.installAnchor()
+        #expect(changingFixture.presence.isPresent)
+
+        changingFixture.postKeyboardNotification(
+            UIResponder.keyboardDidChangeFrameNotification,
+            beginFrame: inWindowFrame,
+            endFrame: outsideFrame,
+        )
+        #expect(!changingFixture.presence.isPresent)
+
+        let completedFixture = KeyboardPresenceObserverTestFixture()
+        defer { completedFixture.tearDown() }
+        let completedInWindowFrame = completedFixture.screenFrame(
+            CGRect(x: 0, y: 400, width: 320, height: 240),
+        )
+        let completedOutsideFrame = completedInWindowFrame.offsetBy(
+            dx: completedFixture.window.screen.bounds.width,
+            dy: 0,
+        )
+        completedFixture.postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            endFrame: completedInWindowFrame,
+        )
+        completedFixture.postKeyboardNotification(
+            UIResponder.keyboardWillChangeFrameNotification,
+            beginFrame: completedInWindowFrame,
+            endFrame: completedOutsideFrame,
+        )
+        completedFixture.postKeyboardNotification(
+            UIResponder.keyboardDidChangeFrameNotification,
+            beginFrame: completedInWindowFrame,
+            endFrame: completedOutsideFrame,
+        )
+        completedFixture.installAnchor()
+        #expect(!completedFixture.presence.isPresent)
+
+        let offscreenFixture = KeyboardPresenceObserverTestFixture()
+        defer { offscreenFixture.tearDown() }
+        let offscreenFrame = offscreenFixture.screenFrame(
+            CGRect(x: offscreenFixture.window.screen.bounds.width, y: 400, width: 320, height: 240),
+        )
+        offscreenFixture.postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            endFrame: offscreenFrame,
+        )
+        offscreenFixture.installAnchor()
+        #expect(!offscreenFixture.presence.isPresent)
+    }
+
+    @Test("Keyboard observer clears stale state on teardown and window replacement")
+    func keyboardObserverClearsStateOnTeardownAndWindowReplacement() {
+        let fixture = KeyboardPresenceObserverTestFixture()
+        defer { fixture.tearDown() }
+
+        let keyboardFrame = fixture.screenFrame(
+            CGRect(x: 0, y: 400, width: 320, height: 240),
+        )
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            endFrame: keyboardFrame,
+        )
+        fixture.coordinator.stopObserving()
+        fixture.coordinator.attach(fixture.anchor)
+        fixture.installAnchor()
+        #expect(!fixture.presence.isPresent)
+
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            endFrame: keyboardFrame,
+        )
+        #expect(fixture.presence.isPresent)
+        fixture.anchor.removeFromSuperview()
+        #expect(!fixture.presence.isPresent)
+
+        let replacementWindow = UIWindow(frame: fixture.window.bounds)
+        let replacementController = UIViewController()
+        replacementWindow.rootViewController = replacementController
+        replacementWindow.makeKeyAndVisible()
+        replacementController.view.frame = replacementWindow.bounds
+        replacementController.view.addSubview(fixture.anchor)
+        #expect(!fixture.presence.isPresent)
+
+        fixture.anchor.removeFromSuperview()
+        replacementWindow.isHidden = true
+        replacementWindow.rootViewController = nil
+    }
+
+    @Test("A reconciled off-window keyboard frame makes the next Browser pull eligible")
+    func refreshEligibilityUsesReconciledKeyboardPresence() {
+        let fixture = KeyboardPresenceObserverTestFixture()
+        defer { fixture.tearDown() }
+        fixture.installAnchor()
+
+        let inWindowFrame = fixture.screenFrame(
+            CGRect(x: 0, y: 400, width: 320, height: 240),
+        )
+        let outsideFrame = inWindowFrame.offsetBy(dx: fixture.window.screen.bounds.width, dy: 0)
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            endFrame: inWindowFrame,
+        )
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardWillChangeFrameNotification,
+            beginFrame: inWindowFrame,
+            endFrame: outsideFrame,
+        )
+        #expect(fixture.presence.isPresent)
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardDidChangeFrameNotification,
+            beginFrame: inWindowFrame,
+            endFrame: outsideFrame,
+        )
+        #expect(!fixture.presence.isPresent)
+
+        let arbitrator = BrowserRefreshGestureArbitrator()
+        let surfaceID = BrowserRefreshSurfaceID()
+        arbitrator.mount(surfaceID)
+        let input = BrowserRefreshGestureInput(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: fixture.presence.isPresent,
+        )
+        arbitrator.receiveWebKitPanState(.began, on: surfaceID, input: input)
+        arbitrator.receiveWebKitPanState(.ended, on: surfaceID, input: input)
+        #expect(arbitrator.consumeRefresh(on: surfaceID))
+        #expect(!arbitrator.consumeRefresh(on: surfaceID))
+    }
+
     @Test("Suppressed WebKit refreshes still end the control without dispatching")
     func suppressedWebKitRefreshEndsControlWithoutDispatch() throws {
         let tabID = BrowserTabID()
@@ -1020,6 +1161,8 @@ struct BrowserWebKitAdapterTests {
     func mountedWebKitRefreshArbitrationPreservesScrollAndControlLifecycle() throws {
         let tabID = BrowserTabID()
         let webView = WKWebView(frame: .zero)
+        let panGestureRecognizer = webView.scrollView.panGestureRecognizer
+        let originalPanDelegate = panGestureRecognizer.delegate
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
         let arbitrator = BrowserRefreshGestureArbitrator()
         let keyboardPresence = BrowserSoftwareKeyboardPresence()
@@ -1055,8 +1198,7 @@ struct BrowserWebKitAdapterTests {
         let coordinator = try #require(
             refreshControl.allTargets.compactMap { $0.base as? BrowserWebView.Coordinator }.first,
         )
-        let panGestureRecognizer = mountedWebView.scrollView.panGestureRecognizer
-        let originalPanDelegate = panGestureRecognizer.delegate
+        #expect(mountedWebView.scrollView.panGestureRecognizer === panGestureRecognizer)
         #expect(mountedWebView.scrollView.keyboardDismissMode == .interactive)
         #expect(mountedWebView.scrollView.isScrollEnabled)
         #expect(refreshControl.allTargets.count == 1)
@@ -1112,6 +1254,38 @@ struct BrowserWebKitAdapterTests {
 
         bridge.receiveNativeScrollPhase(.interacting)
         bridge.receiveNativeScrollPhase(.idle)
+        bridge.refresh()
+        bridge.refresh()
+        #expect(refreshCount == 1)
+    }
+
+    @Test("Native programmatic animation cancels active touch and preserves completed pull")
+    func nativeAnimatingPreservesOnlyCompletedRefreshDecisions() {
+        let arbitrator = BrowserRefreshGestureArbitrator()
+        let surfaceID = BrowserRefreshSurfaceID()
+        arbitrator.mount(surfaceID)
+        var refreshCount = 0
+        let bridge = BrowserErrorRefreshBridge(
+            onRefresh: { refreshCount += 1 },
+            refreshGestureArbitrator: arbitrator,
+            surfaceID: surfaceID,
+            keyboardInput: { .init(isInteractiveDismissalEnabled: true, isSoftwareKeyboardPresent: false) },
+        )
+
+        bridge.receiveNativeScrollPhase(.animating)
+        bridge.refresh()
+        #expect(refreshCount == 0)
+
+        bridge.receiveNativeScrollPhase(.tracking)
+        bridge.receiveNativeScrollPhase(.interacting)
+        bridge.receiveNativeScrollPhase(.animating)
+        bridge.refresh()
+        #expect(refreshCount == 0)
+
+        bridge.receiveNativeScrollPhase(.tracking)
+        bridge.receiveNativeScrollPhase(.interacting)
+        bridge.receiveNativeScrollPhase(.decelerating)
+        bridge.receiveNativeScrollPhase(.animating)
         bridge.refresh()
         bridge.refresh()
         #expect(refreshCount == 1)
@@ -1464,6 +1638,92 @@ struct BrowserWebKitAdapterTests {
 ///
 /// Swift package test bundles have no `UIApplication` to dispatch `UIControl.sendActions`, so
 /// the event is delivered directly to the targets registered for `.valueChanged`.
+@MainActor
+private final class KeyboardPresenceObserverAnchorView: UIView {
+    var onWindowChange: (() -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onWindowChange?()
+    }
+}
+
+@MainActor
+private final class KeyboardPresenceObserverTestFixture {
+    let notificationCenter: NotificationCenter
+    let presence: BrowserSoftwareKeyboardPresence
+    let coordinator: BrowserSoftwareKeyboardPresenceObserver.Coordinator
+    let window: UIWindow
+    let hostingController: UIViewController
+    let anchor: KeyboardPresenceObserverAnchorView
+
+    init() {
+        let notificationCenter = NotificationCenter()
+        let presence = BrowserSoftwareKeyboardPresence()
+        let coordinator = BrowserSoftwareKeyboardPresenceObserver.Coordinator(
+            presence: presence,
+            notificationCenter: notificationCenter,
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let hostingController = UIViewController()
+        let anchor = KeyboardPresenceObserverAnchorView()
+
+        self.notificationCenter = notificationCenter
+        self.presence = presence
+        self.coordinator = coordinator
+        self.window = window
+        self.hostingController = hostingController
+        self.anchor = anchor
+
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        hostingController.view.frame = window.bounds
+        anchor.backgroundColor = .clear
+        anchor.isUserInteractionEnabled = false
+        anchor.onWindowChange = { [weak coordinator, weak anchor] in
+            guard let coordinator, let anchor else {
+                return
+            }
+
+            coordinator.attach(anchor)
+        }
+        coordinator.attach(anchor)
+    }
+
+    func installAnchor() {
+        hostingController.view.addSubview(anchor)
+        hostingController.view.layoutIfNeeded()
+    }
+
+    func screenFrame(_ frameInWindow: CGRect) -> CGRect {
+        window.convert(frameInWindow, to: window.screen.coordinateSpace)
+    }
+
+    func postKeyboardNotification(
+        _ name: Notification.Name,
+        isLocal: Bool = true,
+        beginFrame: CGRect? = nil,
+        endFrame: CGRect,
+        object: Any? = nil,
+    ) {
+        var userInfo: [AnyHashable: Any] = [
+            UIResponder.keyboardIsLocalUserInfoKey: NSNumber(value: isLocal),
+            UIResponder.keyboardFrameEndUserInfoKey: endFrame,
+        ]
+        if let beginFrame {
+            userInfo[UIResponder.keyboardFrameBeginUserInfoKey] = beginFrame
+        }
+        notificationCenter.post(name: name, object: object, userInfo: userInfo)
+    }
+
+    func tearDown() {
+        anchor.removeFromSuperview()
+        coordinator.stopObserving()
+        window.isHidden = true
+        window.rootViewController = nil
+    }
+}
+
 @MainActor
 private func deliverValueChanged(to control: UIControl) -> Int {
     let action = #selector(BrowserWebView.Coordinator.refreshControlValueChanged(_:))
