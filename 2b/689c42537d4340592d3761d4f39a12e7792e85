@@ -1,0 +1,21 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserRefreshGestureArbitration.swift
+  s_0cda03fb0b8cad::t_a571a3e1b8d384 613,683
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserWebKitAdapterTests.swift
+  s_0cda03fb0b8cad::t_304b10799e9016 974-1028
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2b689c42537d4340592d3761d4f39a12e7792e85",
+  "prompts": {},
+  "sessions": {
+    "s_0cda03fb0b8cad": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d377-5707-7033-83b3-d35b2c9c5650",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
