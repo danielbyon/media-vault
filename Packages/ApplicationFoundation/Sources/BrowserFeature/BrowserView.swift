@@ -32,6 +32,10 @@ public struct BrowserView: View {
     private var nativePreviewCaptureController = BrowserNativePreviewCaptureController()
     @State
     private var webKitReadinessCoordinator = BrowserWebKitReadinessCoordinator()
+    @State
+    private var refreshGestureArbitrator = BrowserRefreshGestureArbitrator()
+    @State
+    private var softwareKeyboardPresence = BrowserSoftwareKeyboardPresence()
     @StateObject
     private var tabTransitionUIKitCoordinator = BrowserTabTransitionUIKitCoordinator()
     @StateObject
@@ -124,6 +128,7 @@ public struct BrowserView: View {
                 chromeAtTop: horizontalSizeClass == .regular,
             )
         }
+        .background(softwareKeyboardPresenceObserver)
         .background(Color(uiColor: .systemBackground))
         .onChange(of: store.focusedField, initial: true) { _, value in
             focusedField = value == BrowserFocusedField.none ? nil : value
@@ -353,6 +358,13 @@ extension BrowserView {
         )
     }
 
+    private var softwareKeyboardPresenceObserver: some View {
+        BrowserSoftwareKeyboardPresenceObserver(presence: softwareKeyboardPresence)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
     private var chromeLayoutPlaceholder: some View {
         Color.clear
             .frame(height: chromeReservedHeight)
@@ -417,15 +429,20 @@ extension BrowserView {
                     transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
                     readinessContext: webKitReadinessContext(for: tab),
                     readinessCoordinator: webKitReadinessCoordinator,
+                    refreshGestureArbitrator: refreshGestureArbitrator,
+                    softwareKeyboardPresence: softwareKeyboardPresence,
                 )
                 .accessibilityLabel("Web page")
             case let .error(error):
-                nativeSurface(errorView(error, terminated: false))
+                nativeSurface(errorView(error, terminated: false).id(BrowserErrorSurfaceIdentity(
+                    tabID: tab.id,
+                    allowsRefresh: true,
+                )))
             case .terminated:
                 nativeSurface(errorView(
                     .pageCouldNotLoad(tab.metadata.committedURL ?? URL(filePath: "/terminated-web-content")),
                     terminated: true,
-                ))
+                ).id(BrowserErrorSurfaceIdentity(tabID: tab.id, allowsRefresh: false)))
             }
         }
     }
@@ -680,6 +697,9 @@ extension BrowserView {
                 : "The page could not be reached.",
             actionTitle: terminated ? "Reload" : "Try Again",
             allowsRefresh: !terminated,
+            refreshGestureArbitrator: refreshGestureArbitrator,
+            softwareKeyboardPresence: softwareKeyboardPresence,
+            isInteractiveDismissalEnabled: store.presentation == .browsing,
             onRefresh: { store.send(.pullToRefresh) },
             onRetry: { store.send(.retryTapped) },
         )
@@ -761,17 +781,55 @@ extension BrowserTabPreviewPlaceholder {
     }
 }
 
+/// Distinguishes native error refresh surfaces as selected tabs or refresh eligibility changes.
+private struct BrowserErrorSurfaceIdentity: Hashable {
+    let tabID: BrowserTabID
+    let allowsRefresh: Bool
+}
+
 /// Bridges the native refresh interaction on the app-owned error surface to a Sendable-free view action.
 @MainActor
 final class BrowserErrorRefreshBridge {
     private let onRefresh: () -> Void
+    private let refreshGestureArbitrator: BrowserRefreshGestureArbitrator?
+    private let surfaceID: BrowserRefreshSurfaceID?
+    private let keyboardInput: () -> BrowserRefreshGestureInput
 
-    init(onRefresh: @escaping () -> Void) {
+    init(
+        onRefresh: @escaping () -> Void,
+        refreshGestureArbitrator: BrowserRefreshGestureArbitrator? = nil,
+        surfaceID: BrowserRefreshSurfaceID? = nil,
+        keyboardInput: @escaping () -> BrowserRefreshGestureInput = {
+            .init(isInteractiveDismissalEnabled: false, isSoftwareKeyboardPresent: false)
+        },
+    ) {
         self.onRefresh = onRefresh
+        self.refreshGestureArbitrator = refreshGestureArbitrator
+        self.surfaceID = surfaceID
+        self.keyboardInput = keyboardInput
     }
 
     func refresh() {
+        if let refreshGestureArbitrator {
+            guard let surfaceID,
+                  refreshGestureArbitrator.consumeRefresh(on: surfaceID)
+            else {
+                return
+            }
+        }
         onRefresh()
+    }
+
+    func receiveNativeScrollPhase(_ phase: BrowserRefreshNativeScrollPhase) {
+        guard let refreshGestureArbitrator, let surfaceID else {
+            return
+        }
+
+        refreshGestureArbitrator.receiveNativeScrollPhase(
+            phase,
+            on: surfaceID,
+            input: keyboardInput(),
+        )
     }
 }
 
@@ -782,14 +840,22 @@ private struct BrowserErrorSurface: View {
     private let description: String
     private let actionTitle: String
     private let allowsRefresh: Bool
-    private let bridge: BrowserErrorRefreshBridge
+    private let refreshGestureArbitrator: BrowserRefreshGestureArbitrator
+    private let softwareKeyboardPresence: BrowserSoftwareKeyboardPresence
+    private let isInteractiveDismissalEnabled: Bool
+    private let onRefresh: () -> Void
     private let onRetry: () -> Void
+    @State
+    private var refreshSurfaceID = BrowserRefreshSurfaceID()
 
     init(
         title: String,
         description: String,
         actionTitle: String,
         allowsRefresh: Bool,
+        refreshGestureArbitrator: BrowserRefreshGestureArbitrator,
+        softwareKeyboardPresence: BrowserSoftwareKeyboardPresence,
+        isInteractiveDismissalEnabled: Bool,
         onRefresh: @escaping () -> Void,
         onRetry: @escaping () -> Void,
     ) {
@@ -797,18 +863,39 @@ private struct BrowserErrorSurface: View {
         self.description = description
         self.actionTitle = actionTitle
         self.allowsRefresh = allowsRefresh
-        bridge = BrowserErrorRefreshBridge(onRefresh: onRefresh)
+        self.refreshGestureArbitrator = refreshGestureArbitrator
+        self.softwareKeyboardPresence = softwareKeyboardPresence
+        self.isInteractiveDismissalEnabled = isInteractiveDismissalEnabled
+        self.onRefresh = onRefresh
         self.onRetry = onRetry
     }
 
+    private var refreshBridge: BrowserErrorRefreshBridge {
+        BrowserErrorRefreshBridge(
+            onRefresh: onRefresh,
+            refreshGestureArbitrator: refreshGestureArbitrator,
+            surfaceID: refreshSurfaceID,
+            keyboardInput: {
+                .init(
+                    isInteractiveDismissalEnabled: isInteractiveDismissalEnabled,
+                    isSoftwareKeyboardPresent: softwareKeyboardPresence.isPresent,
+                )
+            },
+        )
+    }
+
     var body: some View {
-        if allowsRefresh {
-            content.refreshable {
-                bridge.refresh()
+        Group {
+            if allowsRefresh {
+                content.refreshable {
+                    refreshBridge.refresh()
+                }
+            } else {
+                content
             }
-        } else {
-            content
         }
+        .onAppear { refreshGestureArbitrator.mount(refreshSurfaceID) }
+        .onDisappear { refreshGestureArbitrator.unmount(refreshSurfaceID) }
     }
 
     private var content: some View {
@@ -823,6 +910,9 @@ private struct BrowserErrorSurface: View {
             }
             .frame(maxWidth: .infinity)
             .frame(minHeight: 320)
+        }
+        .onScrollPhaseChange { _, phase in
+            refreshBridge.receiveNativeScrollPhase(BrowserRefreshNativeScrollPhase(scrollPhase: phase))
         }
     }
 }
