@@ -597,6 +597,26 @@ struct BrowserTabTests {
         #expect(adapter.persistedPosition == first)
     }
 
+    @Test("A readiness retry preserves an observed transition position when invalidated")
+    func tabOverviewScrollAdapterPreservesObservedPositionAcrossReadinessRetries() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first])
+        let transitionToken = 85
+
+        #expect(adapter.requestTransitionTarget(second, transitionToken: transitionToken) == .requested)
+        #expect(adapter.updateLivePosition(second))
+        #expect(adapter.requestTransitionTarget(second, transitionToken: transitionToken) == .requested)
+
+        adapter.invalidateTransitionRequest(for: transitionToken)
+        adapter.restore(with: first, liveTabIDs: [first, second, third])
+
+        #expect(adapter.transitionDrivenPosition == nil)
+        #expect(adapter.livePosition == second)
+        #expect(adapter.scrollPositionBindingValue == second)
+        #expect(adapter.commit() == nil)
+        #expect(adapter.persistedPosition == first)
+    }
+
     @Test("A fully visible selected card does not trigger transition repositioning")
     func tabOverviewScrollAdapterKeepsFullyVisibleTransitionDestination() {
         let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)

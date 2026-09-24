@@ -240,10 +240,18 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
 
         cancelStableFallback()
         pendingPosition = nil
+        let wasObserved =
+            if case let .some(.active(request)) = transitionOwnership,
+            request.token == transitionToken,
+            request.position == position {
+                request.wasObserved
+            } else {
+                false
+            }
         transitionOwnership = .active(TransitionRequest(
             token: transitionToken,
             position: position,
-            wasObserved: false,
+            wasObserved: wasObserved,
         ))
         programmaticTargetEcho = position
         return .requested
