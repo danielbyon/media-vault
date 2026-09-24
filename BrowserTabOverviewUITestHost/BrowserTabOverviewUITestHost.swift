@@ -26,6 +26,8 @@ private struct BrowserTabOverviewUITestHostView: View {
     private let transitionRegistry: BrowserTabTransitionSurfaceRegistry
     @StateObject
     private var scrollPosition: BrowserTabOverviewScrollPosition
+    @StateObject
+    private var scrollVisibility = BrowserTabOverviewScrollVisibility()
     @State
     private var committedPositionCount = 0
     @AccessibilityFocusState
@@ -70,6 +72,7 @@ private struct BrowserTabOverviewUITestHostView: View {
                 onCommitScrollPosition: commitScrollPosition,
                 onExitOverview: handleOverviewExit,
                 scrollPosition: scrollPosition,
+                scrollVisibility: scrollVisibility,
             )
         }
         .onChange(of: store.state.tabOverviewScrollPosition) { _, _ in

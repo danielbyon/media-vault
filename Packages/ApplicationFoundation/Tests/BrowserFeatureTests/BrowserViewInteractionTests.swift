@@ -641,7 +641,7 @@ struct BrowserViewInteractionTests {
             direction: .toBrowsing,
             tabID: tab.id,
             reduceMotion: false,
-            destinationRequiresReadiness: false,
+            destinationReadiness: .init(requiresReadySurface: false),
             onPresentationChange: {
                 store.send(.tabCardSelected(tab.id))
                 hostingController.view.layoutIfNeeded()
@@ -828,7 +828,7 @@ struct BrowserViewInteractionTests {
                 direction: .toBrowsing,
                 tabID: nextID,
                 reduceMotion: false,
-                destinationRequiresReadiness: true,
+                destinationReadiness: .init(requiresReadySurface: true),
                 onPresentationChange: {
                     store.send(.tabCardSelected(nextID))
                     hostingController.view.layoutIfNeeded()
@@ -1011,6 +1011,374 @@ struct BrowserViewInteractionTests {
 
         window.isHidden = true
         window.rootViewController = nil
+    }
+
+    @Test("Offscreen selected cards become settled transition destinations in compact and regular layouts")
+    func mountedOffscreenSelectedCardsBecomeUsableTransitionDestinations() async throws {
+        let tabIDs = try (0 ..< 24).map { index in
+            let uuid = try #require(
+                UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", 11_000 + index)),
+            )
+            return BrowserTabID(uuid)
+        }
+        let layouts: [
+            (sizeClass: UserInterfaceSizeClass, width: CGFloat, height: CGFloat, selected: Int, anchor: Int)
+        ] =
+            [
+                (.compact, 390, 844, 8, 0),
+                (.regular, 1_194, 834, 0, 12),
+            ]
+
+        for layout in layouts {
+            let selectedTabID = tabIDs[layout.selected]
+            let anchor = tabIDs[layout.anchor]
+            var initialState = BrowserFeature.State(
+                tabs: tabIDs.map { .startPage(id: $0) },
+                selectedTabID: selectedTabID,
+            )
+            initialState.tabOverviewScrollPosition = anchor
+            let store = Store(initialState: initialState) {
+                BrowserFeature()
+            }
+            let scrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: anchor)
+            var executions: [BrowserTabTransitionExecution] = []
+            var animators: [UIViewPropertyAnimator] = []
+            let coordinator = BrowserTabTransitionUIKitCoordinator(
+                diagnostics: .init(
+                    onExecution: { executions.append($0) },
+                    onAnimatorCreated: { animators.append($0) },
+                ),
+            )
+            var transitionState = BrowserTabTransitionViewState()
+            let bindings = BrowserTabTransitionPresentationBindings(
+                state: Binding(
+                    get: { transitionState },
+                    set: { transitionState = $0 },
+                ),
+            )
+            let hostingController = UIHostingController(
+                rootView: BrowserView(
+                    store: store,
+                    transitionCoordinator: coordinator,
+                    scrollPosition: scrollPosition,
+                )
+                .environment(\.horizontalSizeClass, layout.sizeClass),
+            )
+            let window = mount(
+                hostingController,
+                size: CGSize(width: layout.width, height: layout.height),
+            )
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+            let rootView = try #require(hostingController.view)
+
+            scrollPosition.prepareForOverviewTransition()
+            let transitionToken = coordinator.nextTransitionToken()
+            var aborted = false
+            var presentationAfterRequest: BrowserPresentation?
+            var presentationAtAbort: BrowserPresentation?
+            var destinationRequests: [BrowserTabTransitionDestinationPreparation] = []
+            var destinationCardMountedAtAbort = false
+            var destinationCardReadyAtAbort = false
+            var destinationGeometryAtAbort = "Unavailable"
+            BrowserTabTransitionPresentationCoordinator.begin(
+                coordinator: coordinator,
+                selectedTabID: selectedTabID,
+                bindings: bindings,
+                direction: .toOverview,
+                tabID: selectedTabID,
+                reduceMotion: false,
+                transitionToken: transitionToken,
+                onDestinationPreparation: {
+                    let request = scrollPosition.prepareTransitionTarget(
+                        selectedTabID,
+                        transitionToken: transitionToken,
+                    )
+                    destinationRequests.append(request)
+                    return request
+                },
+                onTransitionInvalidated: { token, direction in
+                    guard direction == .toOverview else {
+                        return
+                    }
+
+                    scrollPosition.invalidateTransitionRequest(for: token)
+                },
+                onPresentationChange: {
+                    store.send(.showTabOverviewTapped)
+                    presentationAfterRequest = store.presentation
+                    rootView.layoutIfNeeded()
+                },
+                onPresentationUnavailable: {
+                    aborted = true
+                    presentationAtAbort = store.presentation
+                    let role = BrowserTabTransitionSurfaceRole.card(selectedTabID)
+                    let destinationCard = coordinator.surfaceRegistry.view(for: role)
+                    destinationCardMountedAtAbort = destinationCard != nil
+                    destinationCardReadyAtAbort = coordinator.surfaceRegistry.isReady(for: role)
+                    let scrollDescriptions = allViews(in: rootView)
+                        .compactMap { $0 as? UIScrollView }
+                        .map { scrollView in
+                            let frame = scrollView.convert(scrollView.bounds, to: rootView)
+                            return [
+                                "frame=\(frame)",
+                                "offset=\(scrollView.contentOffset)",
+                                "contentSize=\(scrollView.contentSize)",
+                                "enabled=\(scrollView.isScrollEnabled)",
+                            ].joined(separator: ", ")
+                        }
+                    if let destinationCard {
+                        let cardFrame = destinationCard.convert(destinationCard.bounds, to: rootView)
+                        destinationGeometryAtAbort = [
+                            "card=\(cardFrame)",
+                            "superview=\(String(describing: destinationCard.superview))",
+                            "scrolls=\(scrollDescriptions)",
+                            "target=\(String(describing: scrollPosition.livePosition))",
+                            "phase=\(scrollPosition.scrollPhase)",
+                        ].joined(separator: "; ")
+                    }
+                    store.send(.tabCardSelected(selectedTabID))
+                },
+            )
+
+            for _ in 0 ..< BrowserTabTransitionPresentationCoordinator.overviewDestinationWaitDisplayTurnBudget
+                where coordinator.isActive && !executions.contains(.geometry) {
+                rootView.layoutIfNeeded()
+                await waitForDisplayTurn()
+            }
+            #expect(presentationAfterRequest == .tabOverview)
+            #expect(destinationRequests.contains(.awaitingReadiness))
+            #expect(destinationRequests.contains(.alreadyUsable))
+            if aborted {
+                #expect(presentationAtAbort == .tabOverview)
+                #expect(destinationCardMountedAtAbort)
+                #expect(destinationCardReadyAtAbort, "\(destinationGeometryAtAbort)")
+            }
+            #expect(!aborted)
+            #expect(executions.contains(.geometry))
+            #expect(scrollPosition.transitionDrivenPosition == selectedTabID)
+            #expect(scrollPosition.isDestinationUsable(selectedTabID))
+            #expect(store.state.tabOverviewScrollPosition == anchor)
+            guard !aborted else {
+                window.isHidden = true
+                window.rootViewController = nil
+                continue
+            }
+
+            let scrollView = try #require(
+                await waitForTabOverviewScrollView(in: hostingController),
+            )
+            let selectedCard = try #require(
+                coordinator.surfaceRegistry.view(for: .card(selectedTabID)),
+            )
+            let selectedCardFrame = selectedCard.convert(selectedCard.bounds, to: rootView)
+            let visibleFrame = scrollView.convert(scrollView.bounds, to: rootView)
+            #expect(visibleFrame.insetBy(dx: -1, dy: -1).contains(selectedCardFrame))
+            #expect(scrollView.isScrollEnabled)
+            #expect(scrollView.isUserInteractionEnabled)
+
+            let animator = try #require(animators.first)
+            animator.stopAnimation(false)
+            animator.finishAnimation(at: .end)
+            for _ in 0 ..< 20 where coordinator.isActive {
+                await waitForDisplayTurn()
+            }
+
+            #expect(!coordinator.isActive)
+            #expect(transitionState.latchedGeometry == nil)
+            #expect(scrollPosition.commit() == nil)
+            BrowserView.commitTabOverviewScrollPositionForInactiveScene(
+                .inactive,
+                store: store,
+                adapter: scrollPosition,
+            )
+            #expect(store.state.tabOverviewScrollPosition == anchor)
+
+            let userTarget = tabIDs[(layout.selected + 1) % tabIDs.count]
+            scrollPosition.updateScrollPhase(.tracking)
+            #expect(scrollPosition.updateLivePosition(userTarget))
+            scrollPosition.updateScrollPhase(.interacting)
+            BrowserView.commitTabOverviewScrollPositionForInactiveScene(
+                .inactive,
+                store: store,
+                adapter: scrollPosition,
+            )
+            #expect(store.state.tabOverviewScrollPosition == userTarget)
+        }
+    }
+
+    @Test("A mounted BrowserView observes a replacement injected scroll adapter")
+    func mountedBrowserViewUsesReplacementScrollPosition() async throws {
+        let firstID = BrowserTabID()
+        let secondID = BrowserTabID()
+        var initialState = BrowserFeature.State(
+            tabs: [.startPage(id: firstID), .startPage(id: secondID)],
+            selectedTabID: firstID,
+            presentation: .tabOverview,
+        )
+        initialState.tabOverviewScrollPosition = firstID
+        let store = Store(initialState: initialState) {
+            BrowserFeature()
+        }
+        let originalScrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: firstID)
+        let replacementScrollPosition = BrowserTabOverviewScrollPosition()
+        let coordinator = BrowserTabTransitionUIKitCoordinator()
+        let hostingController = UIHostingController(
+            rootView: BrowserView(
+                store: store,
+                transitionCoordinator: coordinator,
+                scrollPosition: originalScrollPosition,
+            ),
+        )
+        let window = mount(hostingController, size: CGSize(width: 390, height: 844))
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        let rootView = try #require(hostingController.view)
+
+        for _ in 0 ..< 8 {
+            rootView.layoutIfNeeded()
+            await waitForDisplayTurn()
+        }
+        #expect(originalScrollPosition.persistedPosition == firstID)
+
+        hostingController.rootView = BrowserView(
+            store: store,
+            transitionCoordinator: coordinator,
+            scrollPosition: replacementScrollPosition,
+        )
+        rootView.layoutIfNeeded()
+        store.send(.tabOverviewScrollChanged(secondID))
+
+        for _ in 0 ..< 8 {
+            rootView.layoutIfNeeded()
+            await waitForDisplayTurn()
+        }
+
+        #expect(store.state.tabOverviewScrollPosition == secondID)
+        #expect(replacementScrollPosition.persistedPosition == secondID)
+        #expect(originalScrollPosition.persistedPosition == firstID)
+    }
+
+    @Test("Canceling a mounted overview handoff releases its pending scroll target")
+    func mountedOverviewCancellationReleasesPendingScrollTarget() async throws {
+        let tabIDs = try (0 ..< 24).map { index in
+            let uuid = try #require(
+                UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", 12_000 + index)),
+            )
+            return BrowserTabID(uuid)
+        }
+        let selectedTabID = tabIDs[8]
+        let persistedAnchor = tabIDs[0]
+        var initialState = BrowserFeature.State(
+            tabs: tabIDs.map { .startPage(id: $0) },
+            selectedTabID: selectedTabID,
+        )
+        initialState.tabOverviewScrollPosition = persistedAnchor
+        let store = Store(initialState: initialState) {
+            BrowserFeature()
+        }
+        let scrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: persistedAnchor)
+        let coordinator = BrowserTabTransitionUIKitCoordinator()
+        var transitionState = BrowserTabTransitionViewState()
+        let bindings = BrowserTabTransitionPresentationBindings(
+            state: Binding(
+                get: { transitionState },
+                set: { transitionState = $0 },
+            ),
+        )
+        let hostingController = UIHostingController(
+            rootView: BrowserView(
+                store: store,
+                transitionCoordinator: coordinator,
+                scrollPosition: scrollPosition,
+            ).environment(\.horizontalSizeClass, .compact),
+        )
+        let window = mount(hostingController, size: CGSize(width: 390, height: 844))
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        let rootView = try #require(hostingController.view)
+        let transitionToken = coordinator.nextTransitionToken()
+
+        BrowserTabTransitionPresentationCoordinator.begin(
+            coordinator: coordinator,
+            selectedTabID: selectedTabID,
+            bindings: bindings,
+            direction: .toOverview,
+            tabID: selectedTabID,
+            reduceMotion: false,
+            transitionToken: transitionToken,
+            onDestinationPreparation: {
+                scrollPosition.prepareTransitionTarget(
+                    selectedTabID,
+                    transitionToken: transitionToken,
+                )
+            },
+            onTransitionInvalidated: { token, direction in
+                guard direction == .toOverview else {
+                    return
+                }
+
+                scrollPosition.invalidateTransitionRequest(for: token)
+            },
+            onPresentationChange: {
+                store.send(.showTabOverviewTapped)
+            },
+            onPresentationUnavailable: {
+                store.send(.tabCardSelected(selectedTabID))
+            },
+        )
+
+        for _ in 0 ..< BrowserTabTransitionPresentationCoordinator.overviewDestinationWaitDisplayTurnBudget
+            where coordinator.isActive && scrollPosition.transitionDrivenPosition == nil {
+            rootView.layoutIfNeeded()
+            await waitForDisplayTurn()
+        }
+        #expect(scrollPosition.transitionDrivenPosition == selectedTabID)
+        #expect(store.state.tabOverviewScrollPosition == persistedAnchor)
+        let overviewScrollView = try #require(
+            await waitForTabOverviewScrollView(in: hostingController),
+        )
+        rootView.layoutIfNeeded()
+        await waitForDisplayTurn()
+        let contentOffsetAtCancellation = overviewScrollView.contentOffset.y
+        let staleBindingRevision = scrollPosition.scrollBindingRevision
+        scrollPosition.updateScrollPhase(.animating)
+        _ = scrollPosition.updateLivePosition(
+            selectedTabID,
+            bindingRevision: staleBindingRevision,
+        )
+        #expect(scrollPosition.scrollPositionBindingValue == selectedTabID)
+
+        NotificationCenter.default.post(
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+        )
+        for _ in 0 ..< 8 {
+            rootView.layoutIfNeeded()
+            await waitForDisplayTurn()
+        }
+
+        #expect(!coordinator.isActive)
+        #expect(scrollPosition.transitionDrivenPosition == nil)
+        #expect(scrollPosition.scrollPositionBindingValue == selectedTabID)
+        #expect(!scrollPosition.updateLivePosition(
+            selectedTabID,
+            bindingRevision: staleBindingRevision,
+        ))
+        #expect(!scrollPosition.updateLivePosition(
+            selectedTabID,
+            bindingRevision: scrollPosition.scrollBindingRevision,
+        ))
+        #expect(scrollPosition.scrollPositionBindingValue == selectedTabID)
+        #expect(scrollPosition.commit() == nil)
+        #expect(store.state.tabOverviewScrollPosition == persistedAnchor)
+        #expect(abs(overviewScrollView.contentOffset.y - contentOffsetAtCancellation) < 1)
     }
 
     @Test("Mounted Tab Overview restores its logical anchor across transitions and layouts")

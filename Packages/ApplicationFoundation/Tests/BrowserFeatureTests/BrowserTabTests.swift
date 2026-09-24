@@ -528,6 +528,210 @@ struct BrowserTabTests {
         #expect(adapter.commit() == nil)
     }
 
+    @Test("A transition target survives restoration and commits again after user scrolling")
+    func tabOverviewScrollAdapterKeepsTransitionTargetNonPersistableUntilUserScroll() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        let liveTabIDs: Set<BrowserTabID> = [first, second, third]
+        adapter.updateFullyVisibleTargetIDs([first])
+
+        #expect(adapter.requestTransitionTarget(second) == .requested)
+        #expect(adapter.livePosition == first)
+        #expect(adapter.scrollPositionBindingValue == second)
+
+        adapter.restore(with: first, liveTabIDs: liveTabIDs)
+        #expect(adapter.livePosition == first)
+        #expect(adapter.scrollPositionBindingValue == second)
+        #expect(adapter.commit() == nil)
+
+        adapter.updateScrollPhase(.tracking)
+        #expect(adapter.updateLivePosition(third))
+        adapter.updateScrollPhase(.interacting)
+        #expect(adapter.commit() == third)
+    }
+
+    @Test("Invalidating an unobserved transition target rejects delayed binding writes")
+    func tabOverviewScrollAdapterInvalidatesPendingTransitionRequest() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first])
+        let staleBindingRevision = adapter.scrollBindingRevision
+        let transitionToken = 83
+
+        #expect(adapter.requestTransitionTarget(second, transitionToken: transitionToken) == .requested)
+        #expect(adapter.scrollPositionBindingValue == second)
+
+        adapter.invalidateTransitionRequest(for: transitionToken)
+
+        #expect(adapter.transitionDrivenPosition == nil)
+        #expect(adapter.scrollPositionBindingValue == nil)
+        #expect(adapter.persistedPosition == first)
+        #expect(adapter.commit() == nil)
+        #expect(!adapter.updateLivePosition(second, bindingRevision: staleBindingRevision))
+        #expect(!adapter.updateLivePosition(second, bindingRevision: adapter.scrollBindingRevision))
+        #expect(adapter.livePosition == first)
+
+        adapter.updateScrollPhase(.tracking)
+        #expect(adapter.updateLivePosition(third, bindingRevision: adapter.scrollBindingRevision))
+        adapter.updateScrollPhase(.interacting)
+        #expect(adapter.commit() == third)
+        #expect(adapter.synchronize(with: third, liveTabIDs: [first, second, third]))
+        #expect(adapter.persistedPosition == third)
+    }
+
+    @Test("Invalidating an observed transition target keeps the viewport without persisting it")
+    func tabOverviewScrollAdapterKeepsObservedTransitionPositionAfterInvalidation() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first])
+        let transitionToken = 84
+
+        #expect(adapter.requestTransitionTarget(second, transitionToken: transitionToken) == .requested)
+        #expect(adapter.updateLivePosition(second))
+        #expect(adapter.livePosition == second)
+
+        adapter.invalidateTransitionRequest(for: transitionToken)
+        adapter.restore(with: first, liveTabIDs: [first, second, third])
+
+        #expect(adapter.transitionDrivenPosition == nil)
+        #expect(adapter.livePosition == second)
+        #expect(adapter.scrollPositionBindingValue == second)
+        #expect(adapter.commit() == nil)
+        #expect(adapter.persistedPosition == first)
+    }
+
+    @Test("A readiness retry preserves an observed transition position when invalidated")
+    func tabOverviewScrollAdapterPreservesObservedPositionAcrossReadinessRetries() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first])
+        let transitionToken = 85
+
+        #expect(adapter.requestTransitionTarget(second, transitionToken: transitionToken) == .requested)
+        #expect(adapter.updateLivePosition(second))
+        #expect(adapter.requestTransitionTarget(second, transitionToken: transitionToken) == .requested)
+
+        adapter.invalidateTransitionRequest(for: transitionToken)
+        adapter.restore(with: first, liveTabIDs: [first, second, third])
+
+        #expect(adapter.transitionDrivenPosition == nil)
+        #expect(adapter.livePosition == second)
+        #expect(adapter.scrollPositionBindingValue == second)
+        #expect(adapter.commit() == nil)
+        #expect(adapter.persistedPosition == first)
+    }
+
+    @Test("A fully visible selected card does not trigger transition repositioning")
+    func tabOverviewScrollAdapterKeepsFullyVisibleTransitionDestination() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first, second])
+
+        #expect(adapter.requestTransitionTarget(second) == .alreadyUsable)
+        #expect(adapter.transitionDrivenPosition == nil)
+        #expect(adapter.livePosition == first)
+        #expect(adapter.scrollPositionBindingValue == first)
+        #expect(adapter.commit() == nil)
+    }
+
+    @Test("Transition repositioning waits for the overview's first visibility report")
+    func tabOverviewScrollAdapterWaitsForVisibilityBeforeTransitionRepositioning() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+
+        #expect(adapter.requestTransitionTarget(second) == .awaitingReadiness)
+        #expect(adapter.livePosition == first)
+
+        adapter.updateFullyVisibleTargetIDs([])
+        #expect(adapter.requestTransitionTarget(second) == .awaitingReadiness)
+        #expect(adapter.livePosition == first)
+
+        adapter.updateFullyVisibleTargetIDs([first])
+        #expect(adapter.requestTransitionTarget(second) == .requested)
+        #expect(adapter.livePosition == first)
+        #expect(adapter.scrollPositionBindingValue == second)
+    }
+
+    @Test("Restoration preserves a fresh overview visibility report for destination discovery")
+    func tabOverviewScrollAdapterPreservesFreshVisibilityAcrossRestore() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first])
+        adapter.updatePersistedTargetVisibility(true)
+
+        adapter.restore(with: first, liveTabIDs: [first, second, third])
+
+        #expect(adapter.isPersistedTargetFullyVisible)
+        #expect(adapter.requestTransitionTarget(second) == .requested)
+        #expect(adapter.livePosition == first)
+        #expect(adapter.scrollPositionBindingValue == second)
+        #expect(adapter.transitionDrivenPosition == second)
+        #expect(adapter.commit() == nil)
+    }
+
+    @Test("A new overview transition discards the previous transition-only target")
+    func tabOverviewScrollAdapterDiscardsPreviousTransitionTarget() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first])
+        #expect(adapter.requestTransitionTarget(second) == .requested)
+
+        adapter.prepareForOverviewTransition()
+
+        #expect(adapter.transitionDrivenPosition == nil)
+        #expect(adapter.livePosition == first)
+        adapter.restore(with: first, liveTabIDs: [first, second, third])
+        #expect(adapter.commit() == nil)
+    }
+
+    @Test("Preparing a new overview handoff invalidates cached and stale visibility geometry")
+    func tabOverviewScrollAdapterInvalidatesStaleVisibilityGeometry() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        let visibility = BrowserTabOverviewScrollVisibility()
+        let initialRevision = visibility.revision
+        let initialViewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let initiallyVisibleCard = CGRect(x: 10, y: 10, width: 50, height: 50)
+        visibility.updateViewportFrame(initialViewport, revision: initialRevision)
+        visibility.updateCardFrame(initiallyVisibleCard, for: first, revision: initialRevision)
+        adapter.updateFullyVisibleTargetIDs(visibility.fullyVisibleTargetIDs)
+
+        #expect(adapter.isDestinationUsable(first))
+
+        BrowserView.prepareTabOverviewScrollForTransition(adapter: adapter, visibility: visibility)
+
+        let currentRevision = visibility.revision
+        #expect(currentRevision != initialRevision)
+        #expect(!adapter.isDestinationUsable(first))
+        #expect(adapter.requestTransitionTarget(first) == .awaitingReadiness)
+
+        visibility.updateViewportFrame(initialViewport, revision: initialRevision)
+        visibility.updateCardFrame(initiallyVisibleCard, for: first, revision: initialRevision)
+        adapter.updateFullyVisibleTargetIDs(visibility.fullyVisibleTargetIDs)
+
+        #expect(!adapter.isDestinationUsable(first))
+        #expect(adapter.requestTransitionTarget(first) == .awaitingReadiness)
+
+        visibility.updateViewportFrame(
+            CGRect(x: 200, y: 0, width: 100, height: 100),
+            revision: currentRevision,
+        )
+        visibility.updateCardFrame(
+            CGRect(x: 210, y: 10, width: 50, height: 50),
+            for: second,
+            revision: currentRevision,
+        )
+        adapter.updateFullyVisibleTargetIDs(visibility.fullyVisibleTargetIDs)
+
+        #expect(adapter.requestTransitionTarget(first) == .requested)
+        #expect(!adapter.isDestinationUsable(first))
+    }
+
+    @Test("A visible but unsettled card is not a usable transition destination")
+    func tabOverviewScrollAdapterWaitsForVisibleDestinationToSettle() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first, second])
+        adapter.updateScrollPhase(.animating)
+
+        #expect(adapter.requestTransitionTarget(second) == .awaitingReadiness)
+        #expect(adapter.livePosition == first)
+
+        adapter.updateScrollPhase(.idle)
+        #expect(adapter.requestTransitionTarget(second) == .alreadyUsable)
+        #expect(adapter.livePosition == first)
+    }
+
     @Test("A new animating target remains eligible after restoration echo handling")
     func tabOverviewScrollAdapterAcceptsNewTargetAfterRestorationEcho() {
         let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)

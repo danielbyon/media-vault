@@ -42,8 +42,10 @@ final class BrowserTabTransitionSurfaceRegistry {
 
     private var entries: [BrowserTabTransitionSurfaceRole: Entry] = [:]
 
-    /// Called whenever a boundary mounts, unmounts, or lays out again.
+    /// Called when registration or UIKit boundary layout may change destination geometry.
     var onChange: (() -> Void)?
+    /// Called when destination layout changes without changing a registered boundary.
+    var onDestinationLayoutChange: (() -> Void)?
     /// Direct seam for lifecycle and visual-readiness ordering assertions.
     var onEvent: ((BrowserTabTransitionEvent) -> Void)?
 
@@ -115,6 +117,11 @@ final class BrowserTabTransitionSurfaceRegistry {
 
         entries.removeValue(forKey: role)
         onChange?()
+    }
+
+    /// Reports changed layout evidence without publishing a surface lifecycle change.
+    func notifyLayoutChanged() {
+        onDestinationLayoutChange?()
     }
 
     /// Returns the current UIKit view for a role.
@@ -194,6 +201,7 @@ final class BrowserTabTransitionSurfaceRegistry {
 struct BrowserTabTransitionSurfaceHost<Content: View>: UIViewControllerRepresentable {
     let role: BrowserTabTransitionSurfaceRole
     let registry: BrowserTabTransitionSurfaceRegistry
+    var isReady = true
     @ViewBuilder
     let content: Content
 
@@ -201,6 +209,7 @@ struct BrowserTabTransitionSurfaceHost<Content: View>: UIViewControllerRepresent
         BrowserTabTransitionSurfaceHostController(
             role: role,
             registry: registry,
+            isReady: isReady,
             content: content,
         )
     }
@@ -209,7 +218,7 @@ struct BrowserTabTransitionSurfaceHost<Content: View>: UIViewControllerRepresent
         _ uiViewController: BrowserTabTransitionSurfaceHostController<Content>,
         context _: Context,
     ) {
-        uiViewController.update(content: content)
+        uiViewController.update(content: content, isReady: isReady)
     }
 
     static func dismantleUIViewController(
@@ -226,14 +235,17 @@ final class BrowserTabTransitionSurfaceHostController<Content: View>: UIViewCont
     private let role: BrowserTabTransitionSurfaceRole
     private let registry: BrowserTabTransitionSurfaceRegistry
     private var hostingController: UIHostingController<Content>?
+    private var isReady: Bool
 
     init(
         role: BrowserTabTransitionSurfaceRole,
         registry: BrowserTabTransitionSurfaceRegistry,
+        isReady: Bool,
         content: Content,
     ) {
         self.role = role
         self.registry = registry
+        self.isReady = isReady
         hostingController = UIHostingController(rootView: content)
         super.init(nibName: nil, bundle: nil)
     }
@@ -264,17 +276,18 @@ final class BrowserTabTransitionSurfaceHostController<Content: View>: UIViewCont
             hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         hostingController.didMove(toParent: self)
-        registry.register(view, for: role)
+        registry.register(view, for: role, isReady: isReady)
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        registry.register(view, for: role)
+        registry.register(view, for: role, isReady: isReady)
     }
 
-    func update(content: Content) {
+    func update(content: Content, isReady: Bool) {
+        self.isReady = isReady
         hostingController?.rootView = content
-        registry.register(view, for: role)
+        registry.register(view, for: role, isReady: isReady)
     }
 
     func detach() {
