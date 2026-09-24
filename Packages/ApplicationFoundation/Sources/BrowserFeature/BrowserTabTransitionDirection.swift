@@ -28,6 +28,16 @@ enum BrowserTabTransitionDirection: Equatable, Sendable {
     case toBrowsing
 }
 
+/// Reports whether a transition destination can be used or needs additional preparation.
+enum BrowserTabTransitionDestinationPreparation: Equatable, Sendable {
+    /// A local request was issued to establish an authoritative destination.
+    case requested
+    /// The mounted destination is already usable without repositioning.
+    case alreadyUsable
+    /// The destination is not ready to use yet.
+    case awaitingReadiness
+}
+
 /// The exact UIKit surface boundary participating in a tab transition.
 enum BrowserTabTransitionSurfaceRole: Hashable, Sendable {
     /// The selected page viewport, excluding Browser chrome and the tab bar.

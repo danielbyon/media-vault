@@ -25,10 +25,11 @@ final class BrowserTabTransitionSession {
     var direction: BrowserTabTransitionDirection
     var tabID: BrowserTabID
     var reduceMotion: Bool
-    var destinationRequiresReadiness: Bool
+    var destinationReadiness: BrowserTabTransitionDestinationReadinessPolicy
     var completion: (() -> Void)?
     var destinationReveal: (() -> Void)?
     var presentationUnavailable: (() -> Void)?
+    var transitionInvalidated: ((Int, BrowserTabTransitionDirection) -> Void)?
     var ownsVisibleSurface: Bool
     var frozenSurface: UIView?
     weak var liveSurface: UIView?
@@ -40,7 +41,7 @@ final class BrowserTabTransitionSession {
     var originalMasksToBounds: Bool?
     var animator: UIViewPropertyAnimator?
     var destinationWaitProbe: BrowserTabTransitionDisplayTurnProbe?
-    var destinationWaitTurnsRemaining = 0
+    var destinationWaitTurnsRemaining: Int
     var generation = 0
     var destinationRole: BrowserTabTransitionSurfaceRole?
     var destinationFrame: CGRect?
@@ -51,20 +52,30 @@ final class BrowserTabTransitionSession {
         direction: BrowserTabTransitionDirection,
         tabID: BrowserTabID,
         reduceMotion: Bool,
-        destinationRequiresReadiness: Bool,
+        destinationReadiness: BrowserTabTransitionDestinationReadinessPolicy,
         completion: @escaping () -> Void,
         presentationUnavailable: @escaping () -> Void,
         destinationReveal: @escaping () -> Void,
+        transitionInvalidated: ((Int, BrowserTabTransitionDirection) -> Void)?,
     ) {
         self.token = token
         self.direction = direction
         self.tabID = tabID
         self.reduceMotion = reduceMotion
-        self.destinationRequiresReadiness = destinationRequiresReadiness
+        self.destinationReadiness = destinationReadiness
+        destinationWaitTurnsRemaining = destinationReadiness.displayTurnBudget
         self.completion = completion
         self.presentationUnavailable = presentationUnavailable
         self.destinationReveal = destinationReveal
+        self.transitionInvalidated = transitionInvalidated
         ownsVisibleSurface = false
+    }
+
+    /// Releases clients from the current token before that token is ended or replaced.
+    func invalidateTransitionOwnership() {
+        let callback = transitionInvalidated
+        transitionInvalidated = nil
+        callback?(token, direction)
     }
 
     func retarget(
@@ -72,19 +83,23 @@ final class BrowserTabTransitionSession {
         direction: BrowserTabTransitionDirection,
         tabID: BrowserTabID,
         reduceMotion: Bool,
-        destinationRequiresReadiness: Bool,
+        destinationReadiness: BrowserTabTransitionDestinationReadinessPolicy,
         completion: @escaping () -> Void,
         presentationUnavailable: @escaping () -> Void,
         destinationReveal: @escaping () -> Void,
+        transitionInvalidated: ((Int, BrowserTabTransitionDirection) -> Void)?,
     ) {
+        invalidateTransitionOwnership()
         self.token = token
         self.direction = direction
         self.tabID = tabID
         self.reduceMotion = reduceMotion
-        self.destinationRequiresReadiness = destinationRequiresReadiness
+        self.destinationReadiness = destinationReadiness
+        destinationWaitTurnsRemaining = destinationReadiness.displayTurnBudget
         self.completion = completion
         self.presentationUnavailable = presentationUnavailable
         self.destinationReveal = destinationReveal
+        self.transitionInvalidated = transitionInvalidated
         destinationRole = nil
         destinationFrame = nil
         ownsVisibleSurface = false
@@ -134,6 +149,9 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
         registry.onChange = { [weak self] in
             self?.surfaceChanged()
         }
+        registry.onDestinationLayoutChange = { [weak self] in
+            self?.destinationLayoutChanged()
+        }
         registry.onEvent = { [weak self] event in
             guard let self else {
                 return
@@ -154,6 +172,7 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
 
     /// Ends the single session and invalidates every completion that still captures it.
     func endSession() {
+        session?.invalidateTransitionOwnership()
         tearDownSessionResources()
         session = nil
         surfaceChangeTaskScheduled = false
@@ -253,12 +272,13 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
         direction: BrowserTabTransitionDirection,
         tabID: BrowserTabID,
         reduceMotion: Bool,
-        destinationRequiresReadiness: Bool = true,
+        destinationReadiness: BrowserTabTransitionDestinationReadinessPolicy = .init(),
         onPresentationChange: () -> Void,
         onCompletion: @escaping () -> Void,
         onPresentationUnavailable: @escaping () -> Void = {},
         onFrozenSurfaceReady: () -> Void = {},
         onDestinationVisible: @escaping () -> Void = {},
+        onTransitionInvalidated: ((Int, BrowserTabTransitionDirection) -> Void)? = nil,
     ) {
         resetPresentationOutcome()
         surfaceChangeTaskScheduled = false
@@ -276,10 +296,11 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
                 direction: direction,
                 tabID: tabID,
                 reduceMotion: reduceMotion,
-                destinationRequiresReadiness: destinationRequiresReadiness,
+                destinationReadiness: destinationReadiness,
                 completion: onCompletion,
                 presentationUnavailable: onPresentationUnavailable,
                 destinationReveal: onDestinationVisible,
+                transitionInvalidated: onTransitionInvalidated,
             )
             lifecycleRevision &+= 1
             session.frozenSurface?.alpha = 1
@@ -298,10 +319,11 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
             direction: direction,
             tabID: tabID,
             reduceMotion: reduceMotion,
-            destinationRequiresReadiness: destinationRequiresReadiness,
+            destinationReadiness: destinationReadiness,
             completion: onCompletion,
             presentationUnavailable: onPresentationUnavailable,
             destinationReveal: onDestinationVisible,
+            transitionInvalidated: onTransitionInvalidated,
         )
         lifecycleRevision &+= 1
         guard let session else {

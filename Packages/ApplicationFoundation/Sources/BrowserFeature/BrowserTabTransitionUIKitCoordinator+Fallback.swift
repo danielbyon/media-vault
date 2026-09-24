@@ -194,14 +194,14 @@ extension BrowserTabTransitionUIKitCoordinator {
     /// The clone remains visible during this bounded wait; it is never retained as a second
     /// transition lifecycle.
     func scheduleDestinationAbort() {
-        guard let session else {
+        guard let session,
+              session.destinationWaitProbe == nil
+        else {
             return
         }
 
-        cancelDestinationWait()
         let generation = session.generation
         let transitionToken = session.token
-        session.destinationWaitTurnsRemaining = 8
         let probe = BrowserTabTransitionDisplayTurnProbe { [weak self, weak session] in
             guard let self, let session,
                   self.session === session,
@@ -298,7 +298,7 @@ extension BrowserTabTransitionUIKitCoordinator {
     /// Aborts an unprovable browsing handoff without revealing a potentially blank surface.
     func handlePresentationUnavailable() {
         guard let session,
-              session.destinationRequiresReadiness,
+              session.destinationReadiness.requiresReadySurface,
               session.direction == .toBrowsing
         else {
             return

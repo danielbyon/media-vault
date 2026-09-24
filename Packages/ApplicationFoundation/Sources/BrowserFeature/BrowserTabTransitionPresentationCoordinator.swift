@@ -7,6 +7,32 @@
 
 import SwiftUI
 
+/// Keeps destination availability, bounded retries, and preparation in one session policy.
+@MainActor
+struct BrowserTabTransitionDestinationReadinessPolicy {
+    enum MountedSurfaceWaitPolicy: Equatable {
+        case cancelWhenMountedButUnready
+        case retryUntilUsable
+    }
+
+    let requiresReadySurface: Bool
+    let displayTurnBudget: Int
+    let mountedSurfaceWaitPolicy: MountedSurfaceWaitPolicy
+    var prepareDestination: (() -> Bool)?
+
+    init(
+        requiresReadySurface: Bool = true,
+        displayTurnBudget: Int = 8,
+        mountedSurfaceWaitPolicy: MountedSurfaceWaitPolicy = .cancelWhenMountedButUnready,
+        prepareDestination: (() -> Bool)? = nil,
+    ) {
+        self.requiresReadySurface = requiresReadySurface
+        self.displayTurnBudget = displayTurnBudget
+        self.mountedSurfaceWaitPolicy = mountedSurfaceWaitPolicy
+        self.prepareDestination = prepareDestination
+    }
+}
+
 /// SwiftUI's single projection of the mutable UIKit transition session.
 @MainActor
 struct BrowserTabTransitionViewState: Equatable {
@@ -35,6 +61,9 @@ struct BrowserTabTransitionPresentationBindings {
 /// alive until the transition session reports a real destination boundary.
 @MainActor
 enum BrowserTabTransitionPresentationCoordinator {
+    private static let destinationWaitDisplayTurnBudget = 8
+    static let overviewDestinationWaitDisplayTurnBudget = 32
+
     static func begin(
         coordinator: BrowserTabTransitionUIKitCoordinator,
         selectedTabID: BrowserTabID,
@@ -42,10 +71,32 @@ enum BrowserTabTransitionPresentationCoordinator {
         direction: BrowserTabTransitionDirection,
         tabID: BrowserTabID,
         reduceMotion: Bool,
+        transitionToken: Int? = nil,
+        onDestinationPreparation: (() -> BrowserTabTransitionDestinationPreparation)? = nil,
+        onTransitionInvalidated: ((Int, BrowserTabTransitionDirection) -> Void)? = nil,
         onPresentationChange: @escaping () -> Void,
         onPresentationUnavailable: @escaping () -> Void,
     ) {
+        let sessionToken = transitionToken ?? coordinator.nextTransitionToken()
+        let destinationPreparation: (() -> Bool)? =
+            if direction == .toOverview, let onDestinationPreparation {
+                {
+                    onDestinationPreparation() != .awaitingReadiness
+                }
+            } else {
+                nil
+            }
         let returnsToAlreadyMountedTab = direction == .toBrowsing && selectedTabID == tabID
+        let destinationReadiness = BrowserTabTransitionDestinationReadinessPolicy(
+            requiresReadySurface: !returnsToAlreadyMountedTab,
+            displayTurnBudget: direction == .toOverview
+                ? overviewDestinationWaitDisplayTurnBudget
+                : destinationWaitDisplayTurnBudget,
+            mountedSurfaceWaitPolicy: direction == .toOverview
+                ? .retryUntilUsable
+                : .cancelWhenMountedButUnready,
+            prepareDestination: destinationPreparation,
+        )
         let sourceRole: BrowserTabTransitionSurfaceRole = direction == .toOverview
             ? .content(tabID)
             : .card(tabID)
@@ -56,11 +107,11 @@ enum BrowserTabTransitionPresentationCoordinator {
         }
 
         coordinator.begin(
-            token: coordinator.nextTransitionToken(),
+            token: sessionToken,
             direction: direction,
             tabID: tabID,
             reduceMotion: reduceMotion,
-            destinationRequiresReadiness: !returnsToAlreadyMountedTab,
+            destinationReadiness: destinationReadiness,
             onPresentationChange: onPresentationChange,
             onCompletion: {
                 if direction == .toOverview {
@@ -79,6 +130,7 @@ enum BrowserTabTransitionPresentationCoordinator {
                     bindings.overviewVisualMounted.wrappedValue = false
                 }
             },
+            onTransitionInvalidated: onTransitionInvalidated,
         )
     }
 

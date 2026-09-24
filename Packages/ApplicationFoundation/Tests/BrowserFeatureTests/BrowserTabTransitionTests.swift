@@ -20,6 +20,20 @@ struct BrowserTabTransitionTests {
         #expect(BrowserTabTransitionSurfaceRole.content(tabID) == .content(tabID))
     }
 
+    @Test("Destination layout notifications stay separate from surface lifecycle changes")
+    func destinationLayoutNotificationDoesNotPublishSurfaceChange() {
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        var surfaceChangeCount = 0
+        var destinationLayoutChangeCount = 0
+        registry.onChange = { surfaceChangeCount += 1 }
+        registry.onDestinationLayoutChange = { destinationLayoutChangeCount += 1 }
+
+        registry.notifyLayoutChanged()
+
+        #expect(surfaceChangeCount == 0)
+        #expect(destinationLayoutChangeCount == 1)
+    }
+
     @Test("Preview revisions are equality tokens rather than ordered sequence numbers")
     func previewRevisionsUseOpaqueEquality() {
         let first = BrowserTabPreviewRevision()
@@ -612,6 +626,50 @@ struct BrowserTabTransitionTests {
             direction: .toOverview,
             tabID: harness.tabID,
             reduceMotion: false,
+            destinationReadiness: .init(mountedSurfaceWaitPolicy: .retryUntilUsable),
+            onPresentationChange: {},
+            onCompletion: { completed = true },
+            onPresentationUnavailable: { aborted = true },
+        )
+        for _ in 0 ..< 10 {
+            await harness.waitForDisplayTurns(1)
+            harness.registry.register(
+                harness.card,
+                for: .card(harness.tabID),
+                isReady: false,
+            )
+        }
+
+        #expect(completed)
+        #expect(aborted)
+        #expect(harness.coordinator.isActive == false)
+        #expect(executions.contains(.missingDestination))
+        #expect(harness.overlay.subviews.isEmpty)
+        harness.window.isHidden = true
+    }
+
+    @Test("A mounted overview card that never becomes ready falls back within the bounded wait")
+    func uikitCoordinatorAbortsWhenOverviewCardNeverBecomesReady() async {
+        var executions: [BrowserTabTransitionExecution] = []
+        let harness = BrowserTabTransitionUIKitHarness(
+            contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
+            cardFrame: CGRect(x: 60, y: 320, width: 100, height: 200),
+            diagnostics: .init(onExecution: { executions.append($0) }),
+        )
+        _ = harness.registry.setReadiness(
+            .pending,
+            view: harness.card,
+            for: .card(harness.tabID),
+        )
+        var completed = false
+        var aborted = false
+
+        harness.coordinator.begin(
+            token: 1,
+            direction: .toOverview,
+            tabID: harness.tabID,
+            reduceMotion: false,
+            destinationReadiness: .init(mountedSurfaceWaitPolicy: .retryUntilUsable),
             onPresentationChange: {},
             onCompletion: { completed = true },
             onPresentationUnavailable: { aborted = true },
@@ -622,6 +680,113 @@ struct BrowserTabTransitionTests {
         #expect(aborted)
         #expect(harness.coordinator.isActive == false)
         #expect(executions.contains(.missingDestination))
+        #expect(harness.overlay.subviews.isEmpty)
+        #expect(harness.content.transform == .identity)
+        harness.window.isHidden = true
+    }
+
+    @Test("A logical overview target receives one bounded readiness window")
+    func uikitCoordinatorBoundsWaitAfterOverviewTargetRequest() async {
+        var executions: [BrowserTabTransitionExecution] = []
+        let harness = BrowserTabTransitionUIKitHarness(
+            contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
+            cardFrame: CGRect(x: 60, y: 320, width: 100, height: 200),
+            diagnostics: .init(onExecution: { executions.append($0) }),
+        )
+        _ = harness.registry.setReadiness(
+            .pending,
+            view: harness.card,
+            for: .card(harness.tabID),
+        )
+        var targetRequests = 0
+        var aborted = false
+        let persistedAnchor = BrowserTabID()
+        let scrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: persistedAnchor)
+        scrollPosition.updateFullyVisibleTargetIDs([persistedAnchor])
+
+        harness.coordinator.begin(
+            token: 1,
+            direction: .toOverview,
+            tabID: harness.tabID,
+            reduceMotion: false,
+            destinationReadiness: .init(
+                displayTurnBudget: 32,
+                mountedSurfaceWaitPolicy: .retryUntilUsable,
+                prepareDestination: {
+                    targetRequests += 1
+                    let result = scrollPosition.prepareTransitionTarget(
+                        harness.tabID,
+                        transitionToken: 1,
+                    )
+                    return result != .awaitingReadiness
+                },
+            ),
+            onPresentationChange: {},
+            onCompletion: {},
+            onPresentationUnavailable: { aborted = true },
+            onTransitionInvalidated: { token, _ in
+                scrollPosition.invalidateTransitionRequest(for: token)
+            },
+        )
+        await harness.waitForDisplayTurns(10)
+
+        #expect(targetRequests == 1)
+        #expect(harness.coordinator.isActive)
+        #expect(!aborted)
+        #expect(scrollPosition.transitionDrivenPosition == harness.tabID)
+
+        await harness.waitForDisplayTurns(40)
+
+        #expect(!harness.coordinator.isActive)
+        #expect(aborted)
+        #expect(scrollPosition.transitionDrivenPosition == nil)
+        #expect(scrollPosition.commit() == nil)
+        #expect(scrollPosition.persistedPosition == persistedAnchor)
+        #expect(executions.contains(.missingDestination))
+        #expect(harness.overlay.subviews.isEmpty)
+        #expect(harness.content.transform == .identity)
+        harness.window.isHidden = true
+    }
+
+    @Test("A destination that becomes ready before the bounded wait animates from real geometry")
+    func uikitCoordinatorBeginsWhenOverviewCardBecomesReady() async {
+        var executions: [BrowserTabTransitionExecution] = []
+        var animator: UIViewPropertyAnimator?
+        let harness = BrowserTabTransitionUIKitHarness(
+            contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
+            cardFrame: CGRect(x: 60, y: 320, width: 100, height: 200),
+            diagnostics: .init(
+                onExecution: { executions.append($0) },
+                onAnimatorCreated: { animator = $0 },
+            ),
+        )
+        _ = harness.registry.setReadiness(
+            .pending,
+            view: harness.card,
+            for: .card(harness.tabID),
+        )
+        var completed = false
+
+        harness.coordinator.begin(
+            token: 1,
+            direction: .toOverview,
+            tabID: harness.tabID,
+            reduceMotion: false,
+            onPresentationChange: {},
+            onCompletion: { completed = true },
+        )
+        await harness.waitForDisplayTurns(2)
+        harness.registerCard()
+        await harness.waitForLayout()
+
+        #expect(executions.contains(.geometry))
+        #expect(animator != nil)
+        animator?.stopAnimation(false)
+        animator?.finishAnimation(at: .end)
+        await harness.waitForDisplayTurns(1)
+
+        #expect(completed)
+        #expect(harness.coordinator.isActive == false)
         #expect(harness.overlay.subviews.isEmpty)
         harness.window.isHidden = true
     }
@@ -770,6 +935,16 @@ struct BrowserTabTransitionTests {
             contentFrame: CGRect(x: 20, y: 70, width: 200, height: 400),
             cardFrame: CGRect(x: 60, y: 320, width: 100, height: 200),
         )
+        let persistedAnchor = BrowserTabID()
+        let scrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: persistedAnchor)
+        scrollPosition.updateFullyVisibleTargetIDs([persistedAnchor])
+        let staleBindingRevision = scrollPosition.scrollBindingRevision
+        #expect(
+            scrollPosition.requestTransitionTarget(
+                harness.tabID,
+                transitionToken: 1,
+            ) == .requested,
+        )
         var staleCompletion = false
         var currentCompletion = false
         harness.coordinator.begin(
@@ -781,6 +956,9 @@ struct BrowserTabTransitionTests {
                 harness.registerCard()
             },
             onCompletion: { staleCompletion = true },
+            onTransitionInvalidated: { token, _ in
+                scrollPosition.invalidateTransitionRequest(for: token)
+            },
         )
         await harness.waitForLayout()
         let clone = harness.overlay.subviews.first
@@ -801,7 +979,17 @@ struct BrowserTabTransitionTests {
                 harness.registerContent()
             },
             onCompletion: { currentCompletion = true },
+            onTransitionInvalidated: { token, _ in
+                scrollPosition.invalidateTransitionRequest(for: token)
+            },
         )
+        #expect(scrollPosition.transitionDrivenPosition == nil)
+        #expect(scrollPosition.commit() == nil)
+        #expect(scrollPosition.persistedPosition == persistedAnchor)
+        #expect(!scrollPosition.updateLivePosition(
+            harness.tabID,
+            bindingRevision: staleBindingRevision,
+        ))
         let retargetCenter = clone.layer.presentation()?.position ?? clone.center
         #expect(abs(retargetCenter.x - displayedCenter.x) < 8)
         #expect(abs(retargetCenter.y - displayedCenter.y) < 8)

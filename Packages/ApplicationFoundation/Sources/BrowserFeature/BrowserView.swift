@@ -34,14 +34,21 @@ public struct BrowserView: View {
     private var webKitReadinessCoordinator = BrowserWebKitReadinessCoordinator()
     @StateObject
     private var tabTransitionUIKitCoordinator = BrowserTabTransitionUIKitCoordinator()
-    @State
-    private var tabOverviewScrollPosition = BrowserTabOverviewScrollPosition()
+    @StateObject
+    private var tabOverviewScrollVisibility = BrowserTabOverviewScrollVisibility()
+    @StateObject
+    private var defaultTabOverviewScrollPosition = BrowserTabOverviewScrollPosition()
+    private let injectedTabOverviewScrollPosition: BrowserTabOverviewScrollPosition?
     @State
     private var chromeLayoutHeight: CGFloat = 0
     @State
     private var latestLayoutProbeGeometry: BrowserContentViewportGeometry?
     @State
     private var chromeOpacity: Double = 1
+
+    private var tabOverviewScrollPosition: BrowserTabOverviewScrollPosition {
+        injectedTabOverviewScrollPosition ?? defaultTabOverviewScrollPosition
+    }
 
     /// Creates browser UI bound to deterministic feature state.
     public init(store: StoreOf<BrowserFeature>) {
@@ -66,12 +73,14 @@ public struct BrowserView: View {
         store: StoreOf<BrowserFeature>,
         transitionCoordinator: BrowserTabTransitionUIKitCoordinator,
         readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
+        scrollPosition: BrowserTabOverviewScrollPosition? = nil,
     ) {
         self.init(
             store: store,
             reduceMotionOverride: nil,
             transitionCoordinator: transitionCoordinator,
             readinessCoordinator: readinessCoordinator,
+            scrollPosition: scrollPosition,
         )
     }
 
@@ -80,9 +89,11 @@ public struct BrowserView: View {
         reduceMotionOverride: Bool?,
         transitionCoordinator: BrowserTabTransitionUIKitCoordinator?,
         readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
+        scrollPosition: BrowserTabOverviewScrollPosition? = nil,
     ) {
         self.store = store
         self.reduceMotionOverride = reduceMotionOverride
+        injectedTabOverviewScrollPosition = scrollPosition
         _tabTransitionUIKitCoordinator = StateObject(wrappedValue: transitionCoordinator ?? .init())
         _webKitReadinessCoordinator = State(initialValue: readinessCoordinator ?? .init())
         _chromeOpacity = State(initialValue: store.presentation == .browsing ? 1 : 0)
@@ -448,6 +459,7 @@ extension BrowserView {
                 onCommitScrollPosition: commitTabOverviewScrollPosition,
                 onExitOverview: handleTabOverviewExit,
                 scrollPosition: tabOverviewScrollPosition,
+                scrollVisibility: tabOverviewScrollVisibility,
             )
         }
         .zIndex(1)
@@ -540,6 +552,15 @@ extension BrowserView {
         )
     }
 
+    /// Clears the previous layout snapshot before a new overview destination is discovered.
+    static func prepareTabOverviewScrollForTransition(
+        adapter: BrowserTabOverviewScrollPosition,
+        visibility: BrowserTabOverviewScrollVisibility,
+    ) {
+        visibility.reset()
+        adapter.prepareForOverviewTransition()
+    }
+
     static func commitTabOverviewScrollPositionForInactiveScene(
         _ scenePhase: ScenePhase,
         store: StoreOf<BrowserFeature>,
@@ -559,6 +580,15 @@ extension BrowserView {
               store.presentation == .browsing
         else {
             return
+        }
+
+        Self.prepareTabOverviewScrollForTransition(
+            adapter: tabOverviewScrollPosition,
+            visibility: tabOverviewScrollVisibility,
+        )
+        let cardRole = BrowserTabTransitionSurfaceRole.card(tab.id)
+        if let cardView = tabTransitionUIKitCoordinator.surfaceRegistry.view(for: cardRole) {
+            tabTransitionUIKitCoordinator.surfaceRegistry.resetReadiness(cardView, for: cardRole)
         }
 
         let nativeCapture: Data? =
@@ -588,6 +618,19 @@ extension BrowserView {
         tabID: BrowserTabID,
         action: @escaping () -> Void,
     ) {
+        let transitionToken = tabTransitionUIKitCoordinator.nextTransitionToken()
+        let destinationPreparation: (() -> BrowserTabTransitionDestinationPreparation)? =
+            if direction == .toOverview {
+                {
+                    tabOverviewScrollPosition.prepareTransitionTarget(
+                        tabID,
+                        transitionToken: transitionToken,
+                    )
+                }
+            } else {
+                nil
+            }
+
         BrowserTabTransitionPresentationCoordinator.begin(
             coordinator: tabTransitionUIKitCoordinator,
             selectedTabID: store.selectedTabID,
@@ -595,6 +638,15 @@ extension BrowserView {
             direction: direction,
             tabID: tabID,
             reduceMotion: reduceMotionEnabled,
+            transitionToken: transitionToken,
+            onDestinationPreparation: destinationPreparation,
+            onTransitionInvalidated: { token, transitionDirection in
+                guard transitionDirection == .toOverview else {
+                    return
+                }
+
+                tabOverviewScrollPosition.invalidateTransitionRequest(for: token)
+            },
             onPresentationChange: action,
             onPresentationUnavailable: {
                 switch direction {

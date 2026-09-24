@@ -56,18 +56,36 @@ final class BrowserTabOverviewScrollObservation: ObservableObject {
 
 /// Adapts live scroll targets to the reducer-owned Tab Overview restoration anchor.
 ///
-/// Only changes to the persisted anchor are published. Live target changes remain local and do not
-/// invalidate the overview's tab cards or send actions through the Browser store.
+/// The reducer-owned restoration anchor, the latest position observed from the mounted scroll view,
+/// and a token-scoped transition request remain separate. Invalidating a request preserves the
+/// current viewport without making the transition-selected card persistable; a genuine user scroll
+/// resumes ordinary anchor commits.
 @MainActor
 final class BrowserTabOverviewScrollPosition: ObservableObject {
+    private struct TransitionRequest {
+        let token: Int
+        let position: BrowserTabID
+    }
+
+    private enum TransitionOwnership {
+        case active(TransitionRequest)
+        case invalidated(TransitionRequest)
+    }
+
     private(set) var livePosition: BrowserTabID?
     @Published
     private(set) var persistedPosition: BrowserTabID?
+    @Published
+    private var transitionOwnership: TransitionOwnership?
     let scrollObservation = BrowserTabOverviewScrollObservation()
     /// Identifies the last submitted target until the reducer accepts or rejects it.
     private var pendingPosition: BrowserTabID?
     /// Identifies a reducer-owned target whose matching binding write is a programmatic echo.
     private var programmaticTargetEcho: BrowserTabID?
+    /// Rejects delayed writes from a scroll binding created before transition invalidation.
+    private(set) var scrollBindingRevision = 0
+    private var fullyVisibleTargetIDs: Set<BrowserTabID> = []
+    private var hasObservedFullyVisibleTargetIDs = false
     private var stableFallbackTask: Task<Void, Never>?
     private let sleepForStableFallback: @MainActor (Duration) async throws -> Void
 
@@ -77,6 +95,32 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
 
     var isPersistedTargetFullyVisible: Bool {
         scrollObservation.state.isPersistedTargetFullyVisible
+    }
+
+    /// Uses the active transition target, the live position, or no target after invalidation.
+    var scrollPositionBindingValue: BrowserTabID? {
+        switch transitionOwnership {
+        case let .some(.active(request)):
+            request.position
+        case .some(.invalidated):
+            // Clearing the binding releases transition ownership without restoring the saved anchor.
+            nil
+        case .none:
+            livePosition
+        }
+    }
+
+    var transitionDrivenPosition: BrowserTabID? {
+        guard case let .some(.active(request)) = transitionOwnership else {
+            return nil
+        }
+
+        return request.position
+    }
+
+    /// Reports whether the mounted overview confirms this card is fully visible and settled.
+    func isDestinationUsable(_ position: BrowserTabID) -> Bool {
+        scrollPhase == .idle && fullyVisibleTargetIDs.contains(position)
     }
 
     init(
@@ -90,10 +134,44 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
         self.sleepForStableFallback = sleepForStableFallback
     }
 
-    /// Records a non-nil target locally and reports whether its identity changed.
+    /// Records a non-nil position reported by the mounted scroll view.
     @discardableResult
-    func updateLivePosition(_ position: BrowserTabID?) -> Bool {
+    func updateLivePosition(
+        _ position: BrowserTabID?,
+        bindingRevision: Int? = nil,
+    ) -> Bool {
         guard let position else {
+            return false
+        }
+        guard bindingRevision == nil || bindingRevision == scrollBindingRevision else {
+            return false
+        }
+
+        let userScrollIsActive = scrollPhase == .tracking
+            || scrollPhase == .interacting
+            || scrollPhase == .decelerating
+
+        if userScrollIsActive, position != livePosition {
+            transitionOwnership = nil
+            programmaticTargetEcho = nil
+            livePosition = position
+            return true
+        }
+
+        if case let .some(.active(request)) = transitionOwnership,
+           position == request.position {
+            programmaticTargetEcho = nil
+            guard position != livePosition else {
+                return false
+            }
+
+            livePosition = position
+            return true
+        }
+
+        if case let .some(.invalidated(request)) = transitionOwnership,
+           position == request.position,
+           !userScrollIsActive {
             return false
         }
 
@@ -119,6 +197,82 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
         updateScrollState(phase: phase, isFullyVisible: isPersistedTargetFullyVisible)
     }
 
+    /// Stores the mounted overview's fully visible card identities for transition readiness checks.
+    func updateFullyVisibleTargetIDs(_ targetIDs: Set<BrowserTabID>) {
+        fullyVisibleTargetIDs = targetIDs
+        // An empty visibility callback can arrive before the scroll view has laid out any card.
+        // It is not enough evidence to issue a logical scroll command into that first layout.
+        hasObservedFullyVisibleTargetIDs = !targetIDs.isEmpty
+    }
+
+    /// Clears prior transition-only ownership before a new overview handoff.
+    func prepareForOverviewTransition() {
+        cancelStableFallback()
+        transitionOwnership = nil
+        livePosition = persistedPosition
+        pendingPosition = nil
+        programmaticTargetEcho = persistedPosition
+        scrollBindingRevision &+= 1
+        updateFullyVisibleTargetIDs([])
+        updatePersistedTargetVisibility(false)
+    }
+
+    /// Selects a clipped card as a local scroll target without changing the saved anchor.
+    func requestTransitionTarget(
+        _ position: BrowserTabID,
+        transitionToken: Int = 0,
+    ) -> BrowserTabTransitionDestinationPreparation {
+        guard hasObservedFullyVisibleTargetIDs else {
+            return .awaitingReadiness
+        }
+
+        if isDestinationUsable(position) {
+            return .alreadyUsable
+        }
+        guard !fullyVisibleTargetIDs.contains(position) else {
+            return .awaitingReadiness
+        }
+
+        cancelStableFallback()
+        pendingPosition = nil
+        transitionOwnership = .active(TransitionRequest(
+            token: transitionToken,
+            position: position,
+        ))
+        programmaticTargetEcho = position
+        return .requested
+    }
+
+    /// Issues a local target request and waits until mounted geometry confirms a usable card.
+    func prepareTransitionTarget(
+        _ position: BrowserTabID,
+        transitionToken: Int,
+    ) -> BrowserTabTransitionDestinationPreparation {
+        let preparation = requestTransitionTarget(position, transitionToken: transitionToken)
+        guard preparation != .alreadyUsable else {
+            return .alreadyUsable
+        }
+
+        return isDestinationUsable(position) ? .alreadyUsable : .awaitingReadiness
+    }
+
+    /// Invalidates a session-owned request without replacing the scroll view's current position.
+    func invalidateTransitionRequest(for transitionToken: Int) {
+        guard case let .some(.active(request)) = transitionOwnership,
+              request.token == transitionToken
+        else {
+            return
+        }
+
+        cancelStableFallback()
+        transitionOwnership = .invalidated(request)
+        if programmaticTargetEcho == request.position {
+            programmaticTargetEcho = nil
+        }
+        pendingPosition = nil
+        scrollBindingRevision &+= 1
+    }
+
     /// Records whether the mounted overview reports the reducer-owned anchor fully visible.
     func updatePersistedTargetVisibility(_ isFullyVisible: Bool) {
         updateScrollState(phase: scrollPhase, isFullyVisible: isFullyVisible)
@@ -139,10 +293,43 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
             || scrollPhase == .interacting
             || scrollPhase == .decelerating
 
+        if case .some(.active) = transitionOwnership {
+            if persistedPositionChanged {
+                self.persistedPosition = reducerPosition
+                updateScrollState(phase: scrollPhase, isFullyVisible: false)
+            }
+            pendingPosition = nil
+            return persistedPositionChanged
+        }
+
+        if case let .some(.invalidated(request)) = transitionOwnership {
+            let invalidatedTargetWasRemoved = !liveTabIDs.contains(request.position)
+            if invalidatedTargetWasRemoved || livePositionWasRemoved {
+                cancelStableFallback()
+                transitionOwnership = nil
+                livePosition = reducerPosition
+                programmaticTargetEcho = userDrivenScrollIsActive ? nil : reducerPosition
+                scrollBindingRevision &+= 1
+            } else if persistedPositionChanged {
+                self.persistedPosition = reducerPosition
+                updateScrollState(phase: scrollPhase, isFullyVisible: false)
+                if !reducerAcknowledgedPendingPosition {
+                    cancelStableFallback()
+                    transitionOwnership = nil
+                    livePosition = reducerPosition
+                    programmaticTargetEcho = userDrivenScrollIsActive ? nil : reducerPosition
+                    scrollBindingRevision &+= 1
+                }
+            }
+            pendingPosition = nil
+            return persistedPositionChanged
+        }
+
         if livePositionWasRemoved || (persistedPositionChanged && !reducerAcknowledgedPendingPosition) {
             cancelStableFallback()
             livePosition = reducerPosition
             programmaticTargetEcho = userDrivenScrollIsActive ? nil : reducerPosition
+            scrollBindingRevision &+= 1
         }
         if persistedPositionChanged {
             self.persistedPosition = reducerPosition
@@ -156,11 +343,36 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
     func restore(with persistedPosition: BrowserTabID?, liveTabIDs: Set<BrowserTabID>) {
         cancelStableFallback()
         let reducerPosition = persistedPosition.flatMap { liveTabIDs.contains($0) ? $0 : nil }
+        if case let .some(.active(request)) = transitionOwnership,
+           liveTabIDs.contains(request.position) {
+            self.persistedPosition = reducerPosition
+            updateScrollState(phase: scrollPhase, isFullyVisible: false)
+            pendingPosition = nil
+            return
+        }
+
+        if case let .some(.active(request)) = transitionOwnership {
+            invalidateTransitionRequest(for: request.token)
+        }
+        if case .some(.invalidated) = transitionOwnership {
+            self.persistedPosition = reducerPosition
+            updateScrollState(phase: scrollPhase, isFullyVisible: false)
+            pendingPosition = nil
+            return
+        }
+
+        // A fresh overview mount follows the reducer-owned restoration anchor. Visibility may
+        // already describe this layout, so only the transition entrypoint clears stale geometry.
         livePosition = reducerPosition
         self.persistedPosition = reducerPosition
-        updateScrollState(phase: .idle, isFullyVisible: false)
+        let restoredPersistedPositionIsFullyVisible = reducerPosition.map(fullyVisibleTargetIDs.contains) ?? false
+        updateScrollState(
+            phase: .idle,
+            isFullyVisible: restoredPersistedPositionIsFullyVisible,
+        )
         pendingPosition = nil
         programmaticTargetEcho = reducerPosition
+        scrollBindingRevision &+= 1
     }
 
     private func updateScrollState(phase: ScrollPhase, isFullyVisible: Bool) {
@@ -206,6 +418,7 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
     func commit() -> BrowserTabID? {
         cancelStableFallback()
         guard let livePosition,
+              case nil = transitionOwnership,
               livePosition != persistedPosition,
               livePosition != pendingPosition
         else {
@@ -222,9 +435,71 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
     }
 }
 
+/// Tracks mounted card bounds against the overview viewport for clipping-aware destination readiness.
 @MainActor
-private final class BrowserTabOverviewScrollVisibility {
-    var fullyVisibleTargetIDs: Set<BrowserTabID> = []
+final class BrowserTabOverviewScrollVisibility: ObservableObject {
+    @Published
+    private(set) var fullyVisibleTargetIDs: Set<BrowserTabID> = []
+    @Published
+    private(set) var revision = 0
+    private var viewportFrame: CGRect?
+    private var cardFrames: [BrowserTabID: CGRect] = [:]
+
+    /// Captures viewport geometry only when its observation belongs to the current layout revision.
+    func updateViewportFrame(_ frame: CGRect, revision: Int) {
+        guard revision == self.revision else {
+            return
+        }
+        guard viewportFrame != frame else {
+            return
+        }
+
+        viewportFrame = frame
+        updateFullyVisibleTargetIDs()
+    }
+
+    /// Captures card geometry only when its observation belongs to the current layout revision.
+    func updateCardFrame(_ frame: CGRect, for tabID: BrowserTabID, revision: Int) {
+        guard revision == self.revision else {
+            return
+        }
+        guard cardFrames[tabID] != frame else {
+            return
+        }
+
+        cardFrames[tabID] = frame
+        updateFullyVisibleTargetIDs()
+    }
+
+    /// Removes card geometry only when its disappearance belongs to the current layout revision.
+    func removeCardFrame(for tabID: BrowserTabID, revision: Int) {
+        guard revision == self.revision else {
+            return
+        }
+        guard cardFrames.removeValue(forKey: tabID) != nil else {
+            return
+        }
+
+        updateFullyVisibleTargetIDs()
+    }
+
+    func reset() {
+        viewportFrame = nil
+        cardFrames.removeAll()
+        fullyVisibleTargetIDs.removeAll()
+        revision &+= 1
+    }
+
+    private func updateFullyVisibleTargetIDs() {
+        guard let viewportFrame else {
+            fullyVisibleTargetIDs = []
+            return
+        }
+
+        fullyVisibleTargetIDs = Set(cardFrames.compactMap { tabID, frame in
+            viewportFrame.contains(frame) ? tabID : nil
+        })
+    }
 }
 
 /// Renders Tab Overview cards and their exact preview boundaries.
@@ -246,10 +521,10 @@ struct BrowserTabOverviewView: View {
     private var horizontalSizeClass
     @State
     private var tabCardDrag: BrowserTabCardDrag?
-    @State
-    private var scrollVisibility = BrowserTabOverviewScrollVisibility()
     @ObservedObject
     var scrollPosition: BrowserTabOverviewScrollPosition
+    @ObservedObject
+    var scrollVisibility: BrowserTabOverviewScrollVisibility
 
     var body: some View {
         VStack(spacing: 16) {
@@ -266,43 +541,69 @@ struct BrowserTabOverviewView: View {
     }
 
     private var tabOverviewScrollView: some View {
-        ScrollView {
+        let visibilityRevision = scrollVisibility.revision
+
+        return ScrollView {
             LazyVGrid(columns: tabOverviewColumns, spacing: 18) {
                 ForEach(store.tabs) { tab in
                     tabCard(tab)
                         .id(tab.id)
+                        .onGeometryChange(for: CGRect.self) { proxy in
+                            proxy.frame(in: .global)
+                        } action: { frame in
+                            scrollVisibility.updateCardFrame(
+                                frame,
+                                for: tab.id,
+                                revision: visibilityRevision,
+                            )
+                            updateScrollVisibility(notifyTransitionLayout: tab.id == store.selectedTabID)
+                        }
+                        .onDisappear {
+                            scrollVisibility.removeCardFrame(
+                                for: tab.id,
+                                revision: visibilityRevision,
+                            )
+                            updateScrollVisibility(notifyTransitionLayout: tab.id == store.selectedTabID)
+                        }
                 }
             }
             .scrollTargetLayout()
         }
         .scrollPosition(id: tabOverviewScrollPositionBinding)
         .accessibilityIdentifier("browser.tab-overview.scroll-view")
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .global)
+        } action: { frame in
+            scrollVisibility.updateViewportFrame(frame, revision: visibilityRevision)
+            updateScrollVisibility(notifyTransitionLayout: true)
+        }
         .onScrollPhaseChange { _, phase in
             scrollPosition.updateScrollPhase(phase)
             if phase == .idle {
                 commitScrollPosition()
             }
+            updateSelectedCardReadiness()
         }
-        .onScrollTargetVisibilityChange(idType: BrowserTabID.self, threshold: 1) { targetIDs in
-            let visibleTargetIDs = Set(targetIDs)
-            scrollVisibility.fullyVisibleTargetIDs = visibleTargetIDs
-            scrollPosition.updatePersistedTargetVisibility(
-                scrollPosition.persistedPosition.map(visibleTargetIDs.contains) ?? false,
-            )
+        .onChange(of: store.selectedTabID) { _, _ in
+            updateSelectedCardReadiness()
         }
-        .onChange(of: scrollPosition.persistedPosition, initial: true) { _, position in
+        .onChange(of: scrollPosition.persistedPosition, initial: true) { _, _ in
             scrollPosition.updatePersistedTargetVisibility(
-                position.map(scrollVisibility.fullyVisibleTargetIDs.contains) ?? false,
+                scrollPosition.persistedPosition.map(scrollVisibility.fullyVisibleTargetIDs.contains) ?? false,
             )
         }
     }
 
     /// The logical identity binding consumed by the overview's SwiftUI scroll view.
     var tabOverviewScrollPositionBinding: Binding<BrowserTabID?> {
-        Binding(
-            get: { scrollPosition.livePosition },
+        let bindingRevision = scrollPosition.scrollBindingRevision
+        return Binding(
+            get: { scrollPosition.scrollPositionBindingValue },
             set: { position in
-                guard scrollPosition.updateLivePosition(position) else {
+                guard scrollPosition.updateLivePosition(
+                    position,
+                    bindingRevision: bindingRevision,
+                ) else {
                     return
                 }
 
@@ -319,6 +620,33 @@ struct BrowserTabOverviewView: View {
         }
 
         onCommitScrollPosition(position)
+    }
+
+    private func updateSelectedCardReadiness() {
+        let selectedTabID = store.selectedTabID
+        guard let cardView = transitionRegistry.view(for: .card(selectedTabID)) else {
+            return
+        }
+
+        let readiness: BrowserTabTransitionSurfaceRegistry.Readiness =
+            scrollPosition.isDestinationUsable(selectedTabID) ? .ready : .pending
+        _ = transitionRegistry.setReadiness(
+            readiness,
+            view: cardView,
+            for: .card(selectedTabID),
+        )
+    }
+
+    private func updateScrollVisibility(notifyTransitionLayout: Bool) {
+        let fullyVisibleTargetIDs = scrollVisibility.fullyVisibleTargetIDs
+        scrollPosition.updateFullyVisibleTargetIDs(fullyVisibleTargetIDs)
+        scrollPosition.updatePersistedTargetVisibility(
+            scrollPosition.persistedPosition.map(fullyVisibleTargetIDs.contains) ?? false,
+        )
+        updateSelectedCardReadiness()
+        if notifyTransitionLayout {
+            transitionRegistry.notifyLayoutChanged()
+        }
     }
 
     private func exitOverview(with action: BrowserTabOverviewExitAction) {
@@ -418,6 +746,7 @@ struct BrowserTabOverviewView: View {
             BrowserTabTransitionSurfaceHost(
                 role: .card(tab.id),
                 registry: transitionRegistry,
+                isReady: false,
             ) {
                 tabPreviewSurface(tab)
             }

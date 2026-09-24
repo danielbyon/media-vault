@@ -50,13 +50,18 @@ extension BrowserTabTransitionUIKitCoordinator {
             }
         }
 
-        guard isActive else {
-            return
-        }
-        guard !surfaceChangeTaskScheduled else {
-            return
-        }
-        guard let scheduledSession = session else {
+        scheduleDestinationCheck()
+    }
+
+    func destinationLayoutChanged() {
+        scheduleDestinationCheck()
+    }
+
+    private func scheduleDestinationCheck() {
+        guard isActive,
+              !surfaceChangeTaskScheduled,
+              let scheduledSession = session
+        else {
             return
         }
 
@@ -91,21 +96,21 @@ extension BrowserTabTransitionUIKitCoordinator {
         guard let destinationView = registry.view(for: role),
               let destinationRect = registry.frame(for: role, in: overlay)
         else {
-            if !session.missingDestinationWasRecorded {
-                record(.missingDestination)
-                session.missingDestinationWasRecorded = true
-            }
-            scheduleDestinationAbort()
+            handleUnreadyDestination(retryMissingDestination: true)
             return
         }
-        guard !session.destinationRequiresReadiness || registry.isReady(for: role) else {
-            if !session.missingDestinationWasRecorded {
-                record(.missingDestination)
-                session.missingDestinationWasRecorded = true
-            }
-            // An attached destination that is not yet presentation-ready has a usable exact
-            // clone. Keep it visible until the readiness owner reports presentation unavailability.
-            cancelDestinationWait()
+        guard prepareDestinationIfNeeded() else {
+            handleUnreadyDestination(
+                retryMissingDestination: false,
+                prepareDestination: false,
+            )
+            return
+        }
+        guard !session.destinationReadiness.requiresReadySurface || registry.isReady(for: role) else {
+            handleUnreadyDestination(
+                retryMissingDestination: false,
+                prepareDestination: false,
+            )
             return
         }
 
@@ -141,6 +146,48 @@ extension BrowserTabTransitionUIKitCoordinator {
             record(.geometry)
             animate(to: destinationView, destinationFrame: destinationRect)
         }
+    }
+
+    /// Keeps missing destinations bounded, but does not wait for an attached unready browsing view.
+    func handleUnreadyDestination(
+        retryMissingDestination: Bool,
+        prepareDestination: Bool = true,
+    ) {
+        guard let session else {
+            return
+        }
+
+        if !session.missingDestinationWasRecorded {
+            record(.missingDestination)
+            session.missingDestinationWasRecorded = true
+        }
+        if retryMissingDestination
+            || session.destinationReadiness.mountedSurfaceWaitPolicy == .retryUntilUsable {
+            if prepareDestination {
+                _ = prepareDestinationIfNeeded()
+            }
+            scheduleDestinationAbort()
+        } else {
+            cancelDestinationWait()
+        }
+    }
+
+    /// Gives the presentation layer another chance to prepare a destination after layout changes.
+    /// The bounded display-turn probe remains responsible for ending an unready handoff.
+    @discardableResult
+    func prepareDestinationIfNeeded() -> Bool {
+        guard let session else {
+            return true
+        }
+        guard let prepareDestination = session.destinationReadiness.prepareDestination else {
+            return true
+        }
+
+        let isReady = prepareDestination()
+        if isReady {
+            session.destinationReadiness.prepareDestination = nil
+        }
+        return isReady
     }
 
     func hasMaterialAspectMismatch(_ destinationFrame: CGRect) -> Bool {
