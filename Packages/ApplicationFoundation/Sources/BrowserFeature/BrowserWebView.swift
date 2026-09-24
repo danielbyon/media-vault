@@ -94,18 +94,26 @@ public struct BrowserWebView: UIViewRepresentable {
             self.refreshControl = refreshControl
         }
 
-        /// Removes this coordinator's refresh action and returns an active control to idle.
+        /// Removes this coordinator's action and ends refreshing only while it owns the control.
         func unbindRefreshControl() {
             guard let refreshControl else {
                 return
             }
 
+            let action = #selector(Coordinator.refreshControlValueChanged(_:))
+            let ownsRefreshAction = refreshControl.actions(
+                forTarget: self,
+                forControlEvent: .valueChanged,
+            )?.contains(NSStringFromSelector(action)) == true
+
             refreshControl.removeTarget(
                 self,
-                action: #selector(Coordinator.refreshControlValueChanged(_:)),
+                action: action,
                 for: .valueChanged,
             )
-            refreshControl.endRefreshing()
+            if ownsRefreshAction {
+                refreshControl.endRefreshing()
+            }
             self.refreshControl = nil
         }
 

@@ -540,6 +540,87 @@ struct BrowserWebKitAdapterTests {
         #expect(callbackObservedIdleControl == [true, true])
     }
 
+    @Test("A late coordinator dismantle preserves its successor's active refresh")
+    func lateCoordinatorDismantlePreservesSuccessorRefresh() {
+        let tabID = BrowserTabID()
+        let webView = WKWebView(frame: .zero)
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        let registry = BrowserTabTransitionSurfaceRegistry()
+        var outgoingRefreshCount = 0
+        var successorRefreshCount = 0
+        let outgoingBridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: { outgoingRefreshCount += 1 },
+            transitionRegistry: registry,
+            adapter: adapter,
+        )
+        let successorBridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: { successorRefreshCount += 1 },
+            transitionRegistry: registry,
+            adapter: adapter,
+        )
+        let parentController = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let outgoingHostingController = UIHostingController(rootView: AnyView(outgoingBridge))
+        let successorHostingController = UIHostingController(rootView: AnyView(successorBridge))
+        window.rootViewController = parentController
+        window.makeKeyAndVisible()
+        parentController.view.frame = window.bounds
+        parentController.addChild(outgoingHostingController)
+        parentController.view.addSubview(outgoingHostingController.view)
+        outgoingHostingController.view.frame = parentController.view.bounds
+        outgoingHostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        outgoingHostingController.didMove(toParent: parentController)
+        parentController.view.layoutIfNeeded()
+        defer {
+            successorHostingController.rootView = AnyView(EmptyView())
+            successorHostingController.view.setNeedsLayout()
+            successorHostingController.view.layoutIfNeeded()
+            outgoingHostingController.rootView = AnyView(EmptyView())
+            outgoingHostingController.view.setNeedsLayout()
+            outgoingHostingController.view.layoutIfNeeded()
+            adapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        guard let refreshControl = webView.scrollView.refreshControl else {
+            #expect(Bool(false), "The mounted WebKit scroll view should own a refresh control")
+            return
+        }
+        #expect(adapter.webView(for: tabID) === webView)
+        #expect(webView.isDescendant(of: outgoingHostingController.view))
+        #expect(refreshControl.allTargets.count == 1)
+
+        parentController.addChild(successorHostingController)
+        parentController.view.addSubview(successorHostingController.view)
+        successorHostingController.view.frame = parentController.view.bounds
+        successorHostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        successorHostingController.didMove(toParent: parentController)
+        parentController.view.layoutIfNeeded()
+
+        #expect(adapter.webView(for: tabID) === webView)
+        #expect(webView.isDescendant(of: successorHostingController.view))
+        #expect(webView.isDescendant(of: outgoingHostingController.view) == false)
+        #expect(webView.scrollView.refreshControl === refreshControl)
+        #expect(refreshControl.allTargets.count == 1)
+
+        refreshControl.beginRefreshing()
+        #expect(refreshControl.isRefreshing)
+
+        outgoingHostingController.rootView = AnyView(EmptyView())
+        outgoingHostingController.view.setNeedsLayout()
+        outgoingHostingController.view.layoutIfNeeded()
+
+        #expect(refreshControl.isRefreshing)
+        #expect(refreshControl.allTargets.count == 1)
+        #expect(deliverValueChanged(to: refreshControl) == 1)
+        #expect(outgoingRefreshCount == 0)
+        #expect(successorRefreshCount == 1)
+        #expect(refreshControl.isRefreshing == false)
+    }
+
     @Test("Changing Browser tabs ends and unbinds the outgoing refresh control")
     func changingBrowserTabsCleansUpRefreshControl() {
         let firstTabID = BrowserTabID()
@@ -829,7 +910,7 @@ struct BrowserWebKitAdapterTests {
 /// the event is delivered directly to the targets registered for `.valueChanged`.
 @MainActor
 private func deliverValueChanged(to control: UIControl) -> Int {
-    let action = NSSelectorFromString("refreshControlValueChanged:")
+    let action = #selector(BrowserWebView.Coordinator.refreshControlValueChanged(_:))
     var deliveredActionCount = 0
     for target in control.allTargets {
         guard let targetObject = target.base as? NSObject,
