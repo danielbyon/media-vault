@@ -589,6 +589,7 @@ struct BrowserWebKitAdapterTests {
             #expect(Bool(false), "The mounted WebKit scroll view should own a refresh control")
             return
         }
+
         #expect(adapter.webView(for: tabID) === webView)
         #expect(webView.isDescendant(of: outgoingHostingController.view))
         #expect(refreshControl.allTargets.count == 1)
@@ -805,6 +806,561 @@ struct BrowserWebKitAdapterTests {
         bridge.refresh()
 
         #expect(action == .pullToRefresh)
+    }
+
+    @Test("UIKit and SwiftUI scroll lifecycle values map to explicit Browser adapter states")
+    func refreshLifecycleAdaptersMapFrameworkStates() {
+        #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .began) == .began)
+        #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .changed) == .changed)
+        #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .ended) == .ended)
+        #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .cancelled) == .cancelled)
+        #expect(BrowserRefreshWebKitPanState(gestureRecognizerState: .failed) == .failed)
+        #expect(BrowserRefreshNativeScrollPhase(scrollPhase: .tracking) == .tracking)
+        #expect(BrowserRefreshNativeScrollPhase(scrollPhase: .interacting) == .interacting)
+        #expect(BrowserRefreshNativeScrollPhase(scrollPhase: .decelerating) == .decelerating)
+        #expect(BrowserRefreshNativeScrollPhase(scrollPhase: .idle) == .idle)
+        #expect(BrowserRefreshNativeScrollPhase(scrollPhase: .animating) == .animating)
+    }
+
+    @Test("Keyboard notification presence is injectable and scoped by local frame")
+    func keyboardNotificationObserverUsesInjectedCenterAndWindowFrame() {
+        let presence = BrowserSoftwareKeyboardPresence()
+        let notificationCenter = NotificationCenter()
+        let coordinator = BrowserSoftwareKeyboardPresenceObserver.Coordinator(
+            presence: presence,
+            notificationCenter: notificationCenter,
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let hostingController = UIViewController()
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        hostingController.view.frame = window.bounds
+        let anchor = UIView(frame: hostingController.view.bounds)
+        hostingController.view.addSubview(anchor)
+        coordinator.attach(anchor)
+        defer {
+            coordinator.stopObserving()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let localKeyboardFrame = window.convert(
+            CGRect(x: 0, y: 400, width: 320, height: 240),
+            to: window.screen.coordinateSpace,
+        )
+        let remoteKeyboardFrame = localKeyboardFrame.offsetBy(dx: window.screen.bounds.width, dy: 0)
+        func postKeyboardNotification(
+            _ name: Notification.Name,
+            isLocal: Bool,
+            beginFrame: CGRect? = nil,
+            endFrame: CGRect,
+        ) {
+            var userInfo: [AnyHashable: Any] = [
+                UIResponder.keyboardIsLocalUserInfoKey: NSNumber(value: isLocal),
+                UIResponder.keyboardFrameEndUserInfoKey: endFrame,
+            ]
+            if let beginFrame {
+                userInfo[UIResponder.keyboardFrameBeginUserInfoKey] = beginFrame
+            }
+            notificationCenter.post(name: name, object: nil, userInfo: userInfo)
+        }
+
+        postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            isLocal: false,
+            endFrame: localKeyboardFrame,
+        )
+        #expect(presence.isPresent == false)
+
+        postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            isLocal: true,
+            endFrame: remoteKeyboardFrame,
+        )
+        #expect(presence.isPresent == false)
+
+        postKeyboardNotification(
+            UIResponder.keyboardWillShowNotification,
+            isLocal: true,
+            endFrame: localKeyboardFrame,
+        )
+        #expect(presence.isPresent)
+
+        postKeyboardNotification(
+            UIResponder.keyboardDidShowNotification,
+            isLocal: true,
+            endFrame: localKeyboardFrame,
+        )
+        #expect(presence.isPresent)
+
+        postKeyboardNotification(
+            UIResponder.keyboardWillChangeFrameNotification,
+            isLocal: true,
+            beginFrame: localKeyboardFrame,
+            endFrame: remoteKeyboardFrame,
+        )
+        #expect(presence.isPresent)
+
+        postKeyboardNotification(
+            UIResponder.keyboardDidChangeFrameNotification,
+            isLocal: true,
+            beginFrame: localKeyboardFrame,
+            endFrame: remoteKeyboardFrame,
+        )
+        #expect(presence.isPresent == false)
+
+        let arbitrator = BrowserRefreshGestureArbitrator()
+        let surfaceID = BrowserRefreshSurfaceID()
+        arbitrator.mount(surfaceID)
+        let eligibleInput = BrowserRefreshGestureInput(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: presence.isPresent,
+        )
+        arbitrator.receiveWebKitPanState(.began, on: surfaceID, input: eligibleInput)
+        arbitrator.receiveWebKitPanState(.ended, on: surfaceID, input: eligibleInput)
+        #expect(arbitrator.consumeRefresh(on: surfaceID))
+
+        let repositionedKeyboardFrame = window.convert(
+            CGRect(x: 24, y: 365, width: 272, height: 255),
+            to: window.screen.coordinateSpace,
+        )
+        postKeyboardNotification(
+            UIResponder.keyboardWillChangeFrameNotification,
+            isLocal: true,
+            beginFrame: remoteKeyboardFrame,
+            endFrame: repositionedKeyboardFrame,
+        )
+        #expect(presence.isPresent)
+
+        postKeyboardNotification(
+            UIResponder.keyboardDidChangeFrameNotification,
+            isLocal: true,
+            beginFrame: remoteKeyboardFrame,
+            endFrame: repositionedKeyboardFrame,
+        )
+        #expect(presence.isPresent)
+
+        let movedKeyboardFrame = window.convert(
+            CGRect(x: 8, y: 350, width: 290, height: 260),
+            to: window.screen.coordinateSpace,
+        )
+        postKeyboardNotification(
+            UIResponder.keyboardWillChangeFrameNotification,
+            isLocal: true,
+            beginFrame: repositionedKeyboardFrame,
+            endFrame: movedKeyboardFrame,
+        )
+        postKeyboardNotification(
+            UIResponder.keyboardDidChangeFrameNotification,
+            isLocal: true,
+            beginFrame: repositionedKeyboardFrame,
+            endFrame: movedKeyboardFrame,
+        )
+        #expect(presence.isPresent)
+
+        postKeyboardNotification(
+            UIResponder.keyboardWillHideNotification,
+            isLocal: true,
+            beginFrame: movedKeyboardFrame,
+            endFrame: .zero,
+        )
+        #expect(presence.isPresent)
+
+        postKeyboardNotification(
+            UIResponder.keyboardDidHideNotification,
+            isLocal: true,
+            beginFrame: movedKeyboardFrame,
+            endFrame: .zero,
+        )
+        #expect(presence.isPresent == false)
+    }
+
+    @Test("Suppressed WebKit refreshes still end the control without dispatching")
+    func suppressedWebKitRefreshEndsControlWithoutDispatch() throws {
+        let tabID = BrowserTabID()
+        let arbitrator = BrowserRefreshGestureArbitrator()
+        let keyboardPresence = BrowserSoftwareKeyboardPresence()
+        keyboardPresence.receive(.willShow)
+        var refreshCount = 0
+        let bridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: { refreshCount += 1 },
+            transitionRegistry: BrowserTabTransitionSurfaceRegistry(),
+            refreshGestureArbitrator: arbitrator,
+            softwareKeyboardPresence: keyboardPresence,
+        )
+        let coordinator = bridge.makeCoordinator()
+        coordinator.updateRefreshSurface(
+            tabID: tabID,
+            arbitrator: arbitrator,
+            keyboardPresence: keyboardPresence,
+            isInteractiveDismissalEnabled: true,
+        )
+        let surfaceID = try #require(coordinator.refreshSurfaceID)
+        arbitrator.receiveWebKitPanState(.began, on: surfaceID, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: keyboardPresence.isPresent,
+        ))
+        keyboardPresence.receive(.didHide)
+        arbitrator.receiveWebKitPanState(.ended, on: surfaceID, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: keyboardPresence.isPresent,
+        ))
+
+        let refreshControl = UIRefreshControl()
+        coordinator.bindRefreshControl(refreshControl)
+        refreshControl.beginRefreshing()
+        coordinator.refreshControlValueChanged(refreshControl)
+
+        #expect(refreshCount == 0)
+        #expect(refreshControl.isRefreshing == false)
+    }
+
+    @Test("Mounted WebKit keeps native scrolling and gates refresh dispatch per gesture")
+    func mountedWebKitRefreshArbitrationPreservesScrollAndControlLifecycle() throws {
+        let tabID = BrowserTabID()
+        let webView = WKWebView(frame: .zero)
+        let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
+        let arbitrator = BrowserRefreshGestureArbitrator()
+        let keyboardPresence = BrowserSoftwareKeyboardPresence()
+        let transitionRegistry = BrowserTabTransitionSurfaceRegistry()
+        var refreshCount = 0
+        let bridge = BrowserWebView(
+            tabID: tabID,
+            onRefresh: { refreshCount += 1 },
+            transitionRegistry: transitionRegistry,
+            adapter: adapter,
+            refreshGestureArbitrator: arbitrator,
+            softwareKeyboardPresence: keyboardPresence,
+        )
+        let hostingController = UIHostingController(
+            rootView: AnyView(bridge.scrollDismissesKeyboard(.interactively)),
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        hostingController.view.frame = window.bounds
+        hostingController.view.layoutIfNeeded()
+        defer {
+            hostingController.rootView = AnyView(EmptyView())
+            hostingController.view.setNeedsLayout()
+            hostingController.view.layoutIfNeeded()
+            adapter.destroyContext(for: tabID)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let mountedWebView = try #require(adapter.webView(for: tabID))
+        let refreshControl = try #require(mountedWebView.scrollView.refreshControl)
+        let coordinator = try #require(
+            refreshControl.allTargets.compactMap { $0.base as? BrowserWebView.Coordinator }.first,
+        )
+        let panGestureRecognizer = mountedWebView.scrollView.panGestureRecognizer
+        let originalPanDelegate = panGestureRecognizer.delegate
+        #expect(mountedWebView.scrollView.keyboardDismissMode == .interactive)
+        #expect(mountedWebView.scrollView.isScrollEnabled)
+        #expect(refreshControl.allTargets.count == 1)
+        #expect(panGestureRecognizer.delegate === originalPanDelegate)
+
+        keyboardPresence.receive(.willShow)
+        coordinator.receivePanGestureState(.began)
+        keyboardPresence.receive(.didHide)
+        coordinator.receivePanGestureState(.ended)
+        refreshControl.beginRefreshing()
+        #expect(deliverValueChanged(to: refreshControl) == 1)
+        #expect(refreshCount == 0)
+        #expect(refreshControl.isRefreshing == false)
+
+        coordinator.receivePanGestureState(.began)
+        coordinator.receivePanGestureState(.ended)
+        refreshControl.beginRefreshing()
+        #expect(deliverValueChanged(to: refreshControl) == 1)
+        #expect(refreshCount == 1)
+        #expect(refreshControl.isRefreshing == false)
+
+        refreshControl.beginRefreshing()
+        #expect(deliverValueChanged(to: refreshControl) == 1)
+        #expect(refreshCount == 1)
+        #expect(refreshControl.isRefreshing == false)
+    }
+
+    @Test("The native refresh bridge retains suppression through idle and consumes each pull once")
+    func nativeRefreshBridgeConsumesSuppressedAndEligibleGesturesOnce() {
+        let arbitrator = BrowserRefreshGestureArbitrator()
+        let surfaceID = BrowserRefreshSurfaceID()
+        arbitrator.mount(surfaceID)
+        let keyboardPresence = BrowserSoftwareKeyboardPresence()
+        keyboardPresence.receive(.willShow)
+        var refreshCount = 0
+        let bridge = BrowserErrorRefreshBridge(
+            onRefresh: { refreshCount += 1 },
+            refreshGestureArbitrator: arbitrator,
+            surfaceID: surfaceID,
+            keyboardInput: {
+                .init(isInteractiveDismissalEnabled: true, isSoftwareKeyboardPresent: keyboardPresence.isPresent)
+            },
+        )
+
+        bridge.receiveNativeScrollPhase(.tracking)
+        keyboardPresence.receive(.willHide)
+        keyboardPresence.receive(.didHide)
+        bridge.receiveNativeScrollPhase(.interacting)
+        bridge.receiveNativeScrollPhase(.idle)
+        bridge.refresh()
+        bridge.refresh()
+        #expect(refreshCount == 0)
+
+        bridge.receiveNativeScrollPhase(.interacting)
+        bridge.receiveNativeScrollPhase(.idle)
+        bridge.refresh()
+        bridge.refresh()
+        #expect(refreshCount == 1)
+    }
+
+    @Test("A will-show keyboard signal suppresses a drag before did-show")
+    func keyboardWillShowParticipatesBeforeDidShow() {
+        var keyboard = BrowserSoftwareKeyboardPresenceState()
+        keyboard.receive(.willShow)
+        #expect(keyboard.isPresent)
+
+        var arbitration = BrowserRefreshGestureArbitration()
+        let surface = BrowserRefreshSurfaceID()
+        arbitration.mount(surface)
+        arbitration.receiveWebKitPanState(
+            .began,
+            on: surface,
+            input: .init(isInteractiveDismissalEnabled: true, isSoftwareKeyboardPresent: keyboard.isPresent),
+        )
+        keyboard.receive(.didShow)
+        arbitration.receiveWebKitPanState(.ended, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: keyboard.isPresent,
+        ))
+
+        let shouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(shouldDispatch == false)
+    }
+
+    @Test("Keyboard and focus changes during a drag do not change its latched decision")
+    func keyboardDismissalDecisionIsLatchedForWebKitGesture() {
+        var keyboard = BrowserSoftwareKeyboardPresenceState()
+        keyboard.receive(.willShow)
+
+        var arbitration = BrowserRefreshGestureArbitration()
+        let surface = BrowserRefreshSurfaceID()
+        arbitration.mount(surface)
+        arbitration.receiveWebKitPanState(
+            .began,
+            on: surface,
+            input: .init(isInteractiveDismissalEnabled: true, isSoftwareKeyboardPresent: keyboard.isPresent),
+        )
+
+        keyboard.receive(.willHide)
+        #expect(keyboard.isPresent)
+        keyboard.receive(.didHide)
+        #expect(keyboard.isPresent == false)
+        arbitration.receiveWebKitPanState(.changed, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: keyboard.isPresent,
+        ))
+        arbitration.receiveWebKitPanState(.ended, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: keyboard.isPresent,
+        ))
+
+        let shouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(shouldDispatch == false)
+    }
+
+    @Test("Focus without a participating software keyboard leaves refresh eligible")
+    func focusWithoutSoftwareKeyboardKeepsRefreshEligible() {
+        var arbitration = BrowserRefreshGestureArbitration()
+        let surface = BrowserRefreshSurfaceID()
+        arbitration.mount(surface)
+        arbitration.receiveWebKitPanState(.began, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+        arbitration.receiveWebKitPanState(.ended, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+
+        let shouldDispatch = arbitration.consumeRefresh(on: surface)
+        let duplicateShouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(shouldDispatch)
+        #expect(duplicateShouldDispatch == false)
+    }
+
+    @Test("Cancelled and failed WebKit pans reset before the next gesture")
+    func cancelledAndFailedWebKitPansResetArbitration() {
+        for terminalState in [BrowserRefreshWebKitPanState.cancelled, .failed] {
+            var arbitration = BrowserRefreshGestureArbitration()
+            let surface = BrowserRefreshSurfaceID()
+            arbitration.mount(surface)
+            arbitration.receiveWebKitPanState(.began, on: surface, input: .init(
+                isInteractiveDismissalEnabled: true,
+                isSoftwareKeyboardPresent: true,
+            ))
+            arbitration.receiveWebKitPanState(terminalState, on: surface, input: .init(
+                isInteractiveDismissalEnabled: true,
+                isSoftwareKeyboardPresent: true,
+            ))
+            arbitration.receiveWebKitPanState(.began, on: surface, input: .init(
+                isInteractiveDismissalEnabled: true,
+                isSoftwareKeyboardPresent: false,
+            ))
+            arbitration.receiveWebKitPanState(.ended, on: surface, input: .init(
+                isInteractiveDismissalEnabled: true,
+                isSoftwareKeyboardPresent: false,
+            ))
+
+            let shouldDispatch = arbitration.consumeRefresh(on: surface)
+            #expect(shouldDispatch)
+        }
+    }
+
+    @Test("A native tracking phase that returns directly to idle resets the gesture")
+    func nativeTrackingToIdleResetsArbitration() {
+        var arbitration = BrowserRefreshGestureArbitration()
+        let surface = BrowserRefreshSurfaceID()
+        arbitration.mount(surface)
+        arbitration.receiveNativeScrollPhase(.tracking, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: true,
+        ))
+        arbitration.receiveNativeScrollPhase(.idle, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+
+        let trackingOnlyShouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(trackingOnlyShouldDispatch == false)
+        arbitration.receiveNativeScrollPhase(.interacting, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+        arbitration.receiveNativeScrollPhase(.idle, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+
+        let laterGestureShouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(laterGestureShouldDispatch)
+    }
+
+    @Test("Native tracking through interaction preserves a suppressed outcome until refresh")
+    func nativeTrackingInteractionIdleRetainsSuppressedOutcome() {
+        var arbitration = BrowserRefreshGestureArbitration()
+        let surface = BrowserRefreshSurfaceID()
+        arbitration.mount(surface)
+        arbitration.receiveNativeScrollPhase(.tracking, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: true,
+        ))
+        arbitration.receiveNativeScrollPhase(.interacting, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+        arbitration.receiveNativeScrollPhase(.idle, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+
+        let shouldDispatch = arbitration.consumeRefresh(on: surface)
+        let duplicateShouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(shouldDispatch == false)
+        #expect(duplicateShouldDispatch == false)
+    }
+
+    @Test("A later independent native gesture dispatches one eligible refresh")
+    func subsequentNativeGestureConsumesEligibleOutcomeOnce() {
+        var arbitration = BrowserRefreshGestureArbitration()
+        let surface = BrowserRefreshSurfaceID()
+        arbitration.mount(surface)
+        arbitration.receiveNativeScrollPhase(.tracking, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: true,
+        ))
+        arbitration.receiveNativeScrollPhase(.interacting, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+        arbitration.receiveNativeScrollPhase(.idle, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+        let firstGestureShouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(firstGestureShouldDispatch == false)
+
+        arbitration.receiveNativeScrollPhase(.interacting, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+        arbitration.receiveNativeScrollPhase(.decelerating, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+
+        let shouldDispatch = arbitration.consumeRefresh(on: surface)
+        let duplicateShouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(shouldDispatch)
+        #expect(duplicateShouldDispatch == false)
+    }
+
+    @Test("Native interaction starts a gesture when tracking was not emitted")
+    func nativeInteractingStartsWithoutTracking() {
+        var arbitration = BrowserRefreshGestureArbitration()
+        let surface = BrowserRefreshSurfaceID()
+        arbitration.mount(surface)
+        arbitration.receiveNativeScrollPhase(.interacting, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+        arbitration.receiveNativeScrollPhase(.idle, on: surface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+
+        let shouldDispatch = arbitration.consumeRefresh(on: surface)
+        #expect(shouldDispatch)
+    }
+
+    @Test("Replacing a refresh surface invalidates its unconsumed outcome")
+    func replacingRefreshSurfaceInvalidatesPreviousOutcome() {
+        var arbitration = BrowserRefreshGestureArbitration()
+        let outgoingSurface = BrowserRefreshSurfaceID()
+        let incomingSurface = BrowserRefreshSurfaceID()
+        arbitration.mount(outgoingSurface)
+        arbitration.receiveWebKitPanState(.began, on: outgoingSurface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: true,
+        ))
+        arbitration.receiveWebKitPanState(.ended, on: outgoingSurface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: true,
+        ))
+
+        arbitration.mount(incomingSurface)
+        arbitration.unmount(outgoingSurface)
+
+        let staleSurfaceShouldDispatch = arbitration.consumeRefresh(on: outgoingSurface)
+        let incomingSurfaceShouldDispatch = arbitration.consumeRefresh(on: incomingSurface)
+        #expect(staleSurfaceShouldDispatch == false)
+        #expect(incomingSurfaceShouldDispatch == false)
+        arbitration.receiveWebKitPanState(.began, on: incomingSurface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+        arbitration.receiveWebKitPanState(.ended, on: incomingSurface, input: .init(
+            isInteractiveDismissalEnabled: true,
+            isSoftwareKeyboardPresent: false,
+        ))
+
+        let shouldDispatch = arbitration.consumeRefresh(on: incomingSurface)
+        let duplicateShouldDispatch = arbitration.consumeRefresh(on: incomingSurface)
+        #expect(shouldDispatch)
+        #expect(duplicateShouldDispatch == false)
     }
 
     @Test("Internal cancellation is not mapped to app-owned error UI")

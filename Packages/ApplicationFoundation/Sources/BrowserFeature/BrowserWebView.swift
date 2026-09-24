@@ -22,6 +22,8 @@ public struct BrowserWebView: UIViewRepresentable {
     private let transitionRegistry: BrowserTabTransitionSurfaceRegistry?
     private let readinessContext: BrowserWebKitReadinessContext?
     private let readinessCoordinator: BrowserWebKitReadinessCoordinator
+    private let refreshGestureArbitrator: BrowserRefreshGestureArbitrator?
+    private let softwareKeyboardPresence: BrowserSoftwareKeyboardPresence?
 
     /// Creates a bridge for an adapter-owned WebKit context.
     public init(tabID: BrowserTabID, onRefresh: @escaping () -> Void) {
@@ -31,6 +33,8 @@ public struct BrowserWebView: UIViewRepresentable {
         transitionRegistry = nil
         readinessContext = nil
         readinessCoordinator = .init(adapter: adapter)
+        refreshGestureArbitrator = nil
+        softwareKeyboardPresence = nil
     }
 
     /// Creates a Browser page surface that also registers its exact transition boundary.
@@ -41,6 +45,8 @@ public struct BrowserWebView: UIViewRepresentable {
         adapter: BrowserWebKitAdapter = .shared,
         readinessContext: BrowserWebKitReadinessContext? = nil,
         readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
+        refreshGestureArbitrator: BrowserRefreshGestureArbitrator? = nil,
+        softwareKeyboardPresence: BrowserSoftwareKeyboardPresence? = nil,
     ) {
         self.tabID = tabID
         self.onRefresh = onRefresh
@@ -48,6 +54,8 @@ public struct BrowserWebView: UIViewRepresentable {
         self.transitionRegistry = transitionRegistry
         self.readinessContext = readinessContext
         self.readinessCoordinator = readinessCoordinator ?? .init(adapter: adapter)
+        self.refreshGestureArbitrator = refreshGestureArbitrator
+        self.softwareKeyboardPresence = softwareKeyboardPresence
     }
 
     /// Tracks which adapter surface is currently mounted in the UIKit container.
@@ -61,17 +69,27 @@ public struct BrowserWebView: UIViewRepresentable {
         let transitionRegistry: BrowserTabTransitionSurfaceRegistry?
         private let readinessCoordinator: BrowserWebKitReadinessCoordinator
         let adapter: BrowserWebKitAdapter
+        private var refreshGestureArbitrator: BrowserRefreshGestureArbitrator?
+        private var softwareKeyboardPresence: BrowserSoftwareKeyboardPresence?
+        private var refreshSurfaceTabID: BrowserTabID?
+        private(set) var refreshSurfaceID: BrowserRefreshSurfaceID?
+        private var isInteractiveDismissalEnabled = false
+        private weak var observedPanGestureRecognizer: UIPanGestureRecognizer?
 
         init(
             onRefresh: @escaping () -> Void,
             transitionRegistry: BrowserTabTransitionSurfaceRegistry?,
             readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
             adapter: BrowserWebKitAdapter = .shared,
+            refreshGestureArbitrator: BrowserRefreshGestureArbitrator? = nil,
+            softwareKeyboardPresence: BrowserSoftwareKeyboardPresence? = nil,
         ) {
             self.onRefresh = onRefresh
             self.transitionRegistry = transitionRegistry
             self.adapter = adapter
             self.readinessCoordinator = readinessCoordinator ?? .init(adapter: adapter)
+            self.refreshGestureArbitrator = refreshGestureArbitrator
+            self.softwareKeyboardPresence = softwareKeyboardPresence
         }
 
         func update(onRefresh: @escaping () -> Void) {
@@ -80,6 +98,89 @@ public struct BrowserWebView: UIViewRepresentable {
 
         func refresh() {
             onRefresh()
+        }
+
+        /// Assigns a new surface identity when the mounted tab or Browser owner changes.
+        func updateRefreshSurface(
+            tabID: BrowserTabID,
+            arbitrator: BrowserRefreshGestureArbitrator?,
+            keyboardPresence: BrowserSoftwareKeyboardPresence?,
+            isInteractiveDismissalEnabled: Bool,
+        ) {
+            let surfaceOwnerChanged = refreshSurfaceTabID != tabID
+                || refreshGestureArbitrator !== arbitrator
+            if surfaceOwnerChanged {
+                unmountRefreshSurface()
+                refreshGestureArbitrator = arbitrator
+                softwareKeyboardPresence = keyboardPresence
+                refreshSurfaceTabID = tabID
+                if let arbitrator {
+                    let surfaceID = BrowserRefreshSurfaceID()
+                    refreshSurfaceID = surfaceID
+                    arbitrator.mount(surfaceID)
+                }
+            } else {
+                softwareKeyboardPresence = keyboardPresence
+            }
+            self.isInteractiveDismissalEnabled = isInteractiveDismissalEnabled
+        }
+
+        /// Observes WebKit's existing pan recognizer without taking ownership of its delegate.
+        func observePanGesture(_ recognizer: UIPanGestureRecognizer) {
+            guard observedPanGestureRecognizer !== recognizer else {
+                return
+            }
+
+            unobservePanGesture()
+            recognizer.addTarget(self, action: #selector(scrollPanStateChanged(_:)))
+            observedPanGestureRecognizer = recognizer
+        }
+
+        func unobservePanGesture() {
+            if let observedPanGestureRecognizer {
+                observedPanGestureRecognizer.removeTarget(self, action: #selector(scrollPanStateChanged(_:)))
+            }
+            observedPanGestureRecognizer = nil
+        }
+
+        func unmountRefreshSurface() {
+            if let refreshSurfaceID {
+                refreshGestureArbitrator?.unmount(refreshSurfaceID)
+            }
+            refreshSurfaceID = nil
+            refreshSurfaceTabID = nil
+        }
+
+        private func inputAtGestureStart() -> BrowserRefreshGestureInput {
+            .init(
+                isInteractiveDismissalEnabled: isInteractiveDismissalEnabled,
+                isSoftwareKeyboardPresent: softwareKeyboardPresence?.isPresent == true,
+            )
+        }
+
+        private func receivePanState(
+            _ panState: BrowserRefreshWebKitPanState,
+            sampleGestureInput: Bool,
+        ) {
+            guard let refreshGestureArbitrator, let refreshSurfaceID else {
+                return
+            }
+
+            let input = sampleGestureInput
+                ? inputAtGestureStart()
+                : .init(isInteractiveDismissalEnabled: false, isSoftwareKeyboardPresent: false)
+            refreshGestureArbitrator.receiveWebKitPanState(panState, on: refreshSurfaceID, input: input)
+        }
+
+        private func shouldDispatchRefresh() -> Bool {
+            guard let refreshGestureArbitrator else {
+                return true
+            }
+            guard let refreshSurfaceID else {
+                return false
+            }
+
+            return refreshGestureArbitrator.consumeRefresh(on: refreshSurfaceID)
         }
 
         /// Replaces any Browser refresh action with one bound to this coordinator.
@@ -188,7 +289,22 @@ public struct BrowserWebView: UIViewRepresentable {
         @objc
         func refreshControlValueChanged(_ sender: UIRefreshControl) {
             sender.endRefreshing()
+            guard shouldDispatchRefresh() else {
+                return
+            }
+
             refresh()
+        }
+
+        @objc
+        private func scrollPanStateChanged(_ recognizer: UIPanGestureRecognizer) {
+            receivePanGestureState(recognizer.state)
+        }
+
+        /// Applies UIKit pan lifecycle states through the same sampling boundary as the installed target.
+        func receivePanGestureState(_ state: UIGestureRecognizer.State) {
+            let panState = BrowserRefreshWebKitPanState(gestureRecognizerState: state)
+            receivePanState(panState, sampleGestureInput: panState == .began)
         }
     }
 
@@ -199,6 +315,8 @@ public struct BrowserWebView: UIViewRepresentable {
             transitionRegistry: transitionRegistry,
             readinessCoordinator: readinessCoordinator,
             adapter: adapter,
+            refreshGestureArbitrator: refreshGestureArbitrator,
+            softwareKeyboardPresence: softwareKeyboardPresence,
         )
     }
 
@@ -212,8 +330,15 @@ public struct BrowserWebView: UIViewRepresentable {
         context.coordinator.update(
             onRefresh: onRefresh,
         )
+        context.coordinator.updateRefreshSurface(
+            tabID: tabID,
+            arbitrator: refreshGestureArbitrator,
+            keyboardPresence: softwareKeyboardPresence,
+            isInteractiveDismissalEnabled: context.environment.scrollDismissesKeyboardMode == .interactively,
+        )
         let webKitAdapter = context.coordinator.adapter
         if let previous = context.coordinator.tabID, previous != tabID {
+            context.coordinator.unobservePanGesture()
             context.coordinator.unbindRefreshControl()
             let previousWebView = webKitAdapter.webView(for: previous)
             webKitAdapter.detach(tabID: previous, from: uiView)
@@ -246,6 +371,7 @@ public struct BrowserWebView: UIViewRepresentable {
         if let refreshControl = webView.scrollView.refreshControl {
             context.coordinator.bindRefreshControl(refreshControl)
         }
+        context.coordinator.observePanGesture(webView.scrollView.panGestureRecognizer)
         webKitAdapter.attach(tabID: tabID, to: uiView)
         transitionRegistry?.report(.targetAttached(tabID))
         transitionRegistry?.register(
@@ -263,7 +389,9 @@ public struct BrowserWebView: UIViewRepresentable {
 
     /// Detaches the visual surface while leaving context lifetime under adapter control.
     public static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.unobservePanGesture()
         coordinator.unbindRefreshControl()
+        coordinator.unmountRefreshSurface()
         if let mountedTabID = coordinator.tabID {
             let webView = coordinator.adapter.webView(for: mountedTabID)
             coordinator.invalidateReadinessProbe()
