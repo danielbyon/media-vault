@@ -1,0 +1,21 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebView.swift
+  s_5f978379b79b0b::t_4c3dfd961cc3c6 97,103-108,111,114-116
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserWebKitAdapterTests.swift
+  s_5f978379b79b0b::t_47cd4bc82c76c0 543-623,913
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "892f1163e7c4f7e273f376a7a649d9d44378f119",
+  "prompts": {},
+  "sessions": {
+    "s_5f978379b79b0b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d29d-9ac1-7c21-a3e6-6ea520613bb6",
+        "model": "unknown"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
