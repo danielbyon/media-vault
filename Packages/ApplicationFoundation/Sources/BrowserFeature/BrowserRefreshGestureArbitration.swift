@@ -610,7 +610,7 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
             case UIResponder.keyboardWillShowNotification:
                 visibleFrame = endFrame
             case UIResponder.keyboardDidShowNotification:
-                break
+                visibleFrame = endFrame
             case UIResponder.keyboardWillChangeFrameNotification:
                 if visibleFrame == nil {
                     visibleFrame = beginFrame ?? endFrame
@@ -656,7 +656,6 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
                 beginFrame: pendingKeyboardNotification.beginFrame,
                 endFrame: pendingKeyboardNotification.endFrame,
                 visibleFrameEvidence: pendingKeyboardNotification.visibleFrame,
-                isReplayingPendingNotification: true,
                 window: window,
             )
         }
@@ -666,7 +665,6 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
             beginFrame: CGRect?,
             endFrame: CGRect?,
             visibleFrameEvidence: CGRect? = nil,
-            isReplayingPendingNotification: Bool = false,
             window: UIWindow,
         ) {
             let beginIntersects = intersectsWindow(beginFrame, window: window)
@@ -682,9 +680,7 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
                 scopedWindow = window
                 presence.receive(.willShow)
             case UIResponder.keyboardDidShowNotification:
-                guard (scopedWindow === window && endIntersects)
-                    || (isReplayingPendingNotification && visibleFrameIntersects && endIntersects)
-                else {
+                guard endIntersects else {
                     return
                 }
 

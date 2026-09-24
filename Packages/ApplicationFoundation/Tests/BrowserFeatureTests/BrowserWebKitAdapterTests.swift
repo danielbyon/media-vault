@@ -971,6 +971,61 @@ struct BrowserWebKitAdapterTests {
         #expect(fixture.presence.isPresent)
     }
 
+    @Test("Keyboard did-show is reconciled when the Browser anchor enters its window")
+    func keyboardObserverReplaysDidShowAfterAnchorEntersWindow() {
+        let fixture = KeyboardPresenceObserverTestFixture()
+        defer { fixture.tearDown() }
+
+        let keyboardFrame = fixture.screenFrame(
+            CGRect(x: 0, y: 400, width: 320, height: 240),
+        )
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardDidShowNotification,
+            endFrame: keyboardFrame,
+            object: fixture.window.screen,
+        )
+        #expect(!fixture.presence.isPresent)
+
+        fixture.installAnchor()
+        #expect(fixture.presence.isPresent)
+    }
+
+    @Test("Keyboard did-show establishes presence without an observed will-show")
+    func keyboardDidShowEstablishesPresenceWithoutWillShow() {
+        let fixture = KeyboardPresenceObserverTestFixture()
+        defer { fixture.tearDown() }
+        fixture.installAnchor()
+
+        let keyboardFrame = fixture.screenFrame(
+            CGRect(x: 0, y: 400, width: 320, height: 240),
+        )
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardDidShowNotification,
+            endFrame: keyboardFrame,
+            object: fixture.window.screen,
+        )
+
+        #expect(fixture.presence.isPresent)
+    }
+
+    @Test("Off-window keyboard did-show does not establish Browser presence")
+    func keyboardDidShowOutsideBrowserWindowDoesNotEstablishPresence() {
+        let fixture = KeyboardPresenceObserverTestFixture()
+        defer { fixture.tearDown() }
+        fixture.installAnchor()
+
+        let keyboardFrame = fixture.screenFrame(
+            CGRect(x: fixture.window.screen.bounds.width, y: 400, width: 320, height: 240),
+        )
+        fixture.postKeyboardNotification(
+            UIResponder.keyboardDidShowNotification,
+            endFrame: keyboardFrame,
+            object: fixture.window.screen,
+        )
+
+        #expect(!fixture.presence.isPresent)
+    }
+
     @Test("Pre-window frame changes reconcile their final Browser-window intersection")
     func keyboardObserverReconcilesPreWindowFrameChanges() {
         let changingFixture = KeyboardPresenceObserverTestFixture()
