@@ -57,6 +57,7 @@ public struct BrowserWebView: UIViewRepresentable {
         var tabID: BrowserTabID?
         private var onRefresh: () -> Void
         private var readinessContext: BrowserWebKitReadinessContext?
+        private weak var refreshControl: UIRefreshControl?
         let transitionRegistry: BrowserTabTransitionSurfaceRegistry?
         private let readinessCoordinator: BrowserWebKitReadinessCoordinator
         let adapter: BrowserWebKitAdapter
@@ -79,6 +80,33 @@ public struct BrowserWebView: UIViewRepresentable {
 
         func refresh() {
             onRefresh()
+        }
+
+        /// Replaces any Browser refresh action with one bound to this coordinator.
+        func bindRefreshControl(_ refreshControl: UIRefreshControl) {
+            if self.refreshControl !== refreshControl {
+                unbindRefreshControl()
+            }
+
+            let action = #selector(Coordinator.refreshControlValueChanged(_:))
+            refreshControl.removeTarget(nil, action: action, for: .valueChanged)
+            refreshControl.addTarget(self, action: action, for: .valueChanged)
+            self.refreshControl = refreshControl
+        }
+
+        /// Removes this coordinator's refresh action and returns an active control to idle.
+        func unbindRefreshControl() {
+            guard let refreshControl else {
+                return
+            }
+
+            refreshControl.removeTarget(
+                self,
+                action: #selector(Coordinator.refreshControlValueChanged(_:)),
+                for: .valueChanged,
+            )
+            refreshControl.endRefreshing()
+            self.refreshControl = nil
         }
 
         func invalidateReadinessProbe() {
@@ -178,6 +206,7 @@ public struct BrowserWebView: UIViewRepresentable {
         )
         let webKitAdapter = context.coordinator.adapter
         if let previous = context.coordinator.tabID, previous != tabID {
+            context.coordinator.unbindRefreshControl()
             let previousWebView = webKitAdapter.webView(for: previous)
             webKitAdapter.detach(tabID: previous, from: uiView)
             if let previousWebView {
@@ -204,12 +233,10 @@ public struct BrowserWebView: UIViewRepresentable {
         )
         if webView.scrollView.refreshControl == nil {
             let refreshControl = UIRefreshControl()
-            refreshControl.addTarget(
-                context.coordinator,
-                action: #selector(Coordinator.refreshControlValueChanged(_:)),
-                for: .valueChanged,
-            )
             webView.scrollView.refreshControl = refreshControl
+        }
+        if let refreshControl = webView.scrollView.refreshControl {
+            context.coordinator.bindRefreshControl(refreshControl)
         }
         webKitAdapter.attach(tabID: tabID, to: uiView)
         transitionRegistry?.report(.targetAttached(tabID))
@@ -228,6 +255,7 @@ public struct BrowserWebView: UIViewRepresentable {
 
     /// Detaches the visual surface while leaving context lifetime under adapter control.
     public static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.unbindRefreshControl()
         if let mountedTabID = coordinator.tabID {
             let webView = coordinator.adapter.webView(for: mountedTabID)
             coordinator.invalidateReadinessProbe()
