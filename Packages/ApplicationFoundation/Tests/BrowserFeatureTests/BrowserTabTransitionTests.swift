@@ -772,10 +772,18 @@ struct BrowserTabTransitionTests {
             direction: .toOverview,
             tabID: harness.tabID,
             reduceMotion: false,
+            destinationReadiness: .init(
+                displayTurnBudget: 8,
+                mountedSurfaceWaitPolicy: .retryUntilUsable,
+            ),
             onPresentationChange: {},
             onCompletion: { completed = true },
         )
         await harness.waitForDisplayTurns(2)
+        #expect(harness.coordinator.isActive)
+        #expect(animator == nil)
+        #expect(!executions.contains(.geometry))
+
         harness.registerCard()
         await harness.waitForLayout()
 

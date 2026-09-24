@@ -1366,7 +1366,7 @@ struct BrowserViewInteractionTests {
 
         #expect(!coordinator.isActive)
         #expect(scrollPosition.transitionDrivenPosition == nil)
-        #expect(scrollPosition.scrollPositionBindingValue == nil)
+        #expect(scrollPosition.scrollPositionBindingValue == selectedTabID)
         #expect(!scrollPosition.updateLivePosition(
             selectedTabID,
             bindingRevision: staleBindingRevision,
@@ -1375,7 +1375,7 @@ struct BrowserViewInteractionTests {
             selectedTabID,
             bindingRevision: scrollPosition.scrollBindingRevision,
         ))
-        #expect(scrollPosition.scrollPositionBindingValue == nil)
+        #expect(scrollPosition.scrollPositionBindingValue == selectedTabID)
         #expect(scrollPosition.commit() == nil)
         #expect(store.state.tabOverviewScrollPosition == persistedAnchor)
         #expect(abs(overviewScrollView.contentOffset.y - contentOffsetAtCancellation) < 1)

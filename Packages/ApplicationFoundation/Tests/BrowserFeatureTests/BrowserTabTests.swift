@@ -577,7 +577,7 @@ struct BrowserTabTests {
         #expect(adapter.persistedPosition == third)
     }
 
-    @Test("Invalidating an observed transition target releases its binding without persisting it")
+    @Test("Invalidating an observed transition target keeps the viewport without persisting it")
     func tabOverviewScrollAdapterKeepsObservedTransitionPositionAfterInvalidation() {
         let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
         adapter.updateFullyVisibleTargetIDs([first])
@@ -592,7 +592,7 @@ struct BrowserTabTests {
 
         #expect(adapter.transitionDrivenPosition == nil)
         #expect(adapter.livePosition == second)
-        #expect(adapter.scrollPositionBindingValue == nil)
+        #expect(adapter.scrollPositionBindingValue == second)
         #expect(adapter.commit() == nil)
         #expect(adapter.persistedPosition == first)
     }
@@ -603,7 +603,9 @@ struct BrowserTabTests {
         adapter.updateFullyVisibleTargetIDs([first, second])
 
         #expect(adapter.requestTransitionTarget(second) == .alreadyUsable)
+        #expect(adapter.transitionDrivenPosition == nil)
         #expect(adapter.livePosition == first)
+        #expect(adapter.scrollPositionBindingValue == first)
         #expect(adapter.commit() == nil)
     }
 

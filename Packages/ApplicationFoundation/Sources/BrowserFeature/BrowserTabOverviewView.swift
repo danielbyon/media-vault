@@ -65,6 +65,7 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
     private struct TransitionRequest {
         let token: Int
         let position: BrowserTabID
+        var wasObserved: Bool
     }
 
     private enum TransitionOwnership {
@@ -102,10 +103,12 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
         switch transitionOwnership {
         case let .some(.active(request)):
             request.position
-        case .some(.invalidated):
-            // Clearing the binding releases transition ownership without restoring the saved anchor.
+        case let .some(.invalidated(request)) where !request.wasObserved:
+            // Releasing an unobserved request with nil leaves SwiftUI's current viewport alone.
+            // Reapplying the reducer anchor here would create a compensating scroll on cancellation.
             nil
-        case .none:
+        case .some(.invalidated),
+             .none:
             livePosition
         }
     }
@@ -158,8 +161,10 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
             return true
         }
 
-        if case let .some(.active(request)) = transitionOwnership,
+        if case var .some(.active(request)) = transitionOwnership,
            position == request.position {
+            request.wasObserved = true
+            transitionOwnership = .active(request)
             programmaticTargetEcho = nil
             guard position != livePosition else {
                 return false
@@ -238,6 +243,7 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
         transitionOwnership = .active(TransitionRequest(
             token: transitionToken,
             position: position,
+            wasObserved: false,
         ))
         programmaticTargetEcho = position
         return .requested
