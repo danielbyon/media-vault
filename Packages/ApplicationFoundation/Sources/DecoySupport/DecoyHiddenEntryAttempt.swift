@@ -83,18 +83,19 @@ public struct DecoyHiddenEntryCredentialCandidate:
         self.value = value
     }
 
-    /// Gives an asynchronous operation temporary access to the candidate plaintext.
+    /// Exposes candidate plaintext only to a scoped evaluation callback.
     ///
-    /// The operation is intended to be the narrow point where plaintext is required. Its caller is
-    /// responsible for avoiding logs, persistence, serialization, or retained copies.
+    /// The callback can return only an accepted, rejected, or unavailable result, so its operation
+    /// result cannot carry the plaintext. Callers must still treat the callback's `String` as
+    /// transient and avoid retaining, logging, serializing, or persisting it.
     ///
-    /// - Parameter operation: Work that evaluates the candidate without returning or retaining it.
-    /// - Returns: The value produced by the operation.
+    /// - Parameter operation: Evaluates the plaintext and returns a normalized result.
+    /// - Returns: The accepted, rejected, or unavailable evaluation result.
     @preconcurrency
-    public func withValue<Value: Sendable>(
-        _ operation: @Sendable (String) async throws -> Value,
-    ) async rethrows -> Value {
-        try await operation(value)
+    public func evaluate(
+        _ operation: @Sendable (String) async -> Result<Bool, DecoyHiddenEntryError>,
+    ) async -> Result<Bool, DecoyHiddenEntryError> {
+        await operation(value)
     }
 
     /// A redacted representation for ordinary string interpolation and descriptions.

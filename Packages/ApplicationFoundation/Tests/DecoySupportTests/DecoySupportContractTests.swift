@@ -58,7 +58,7 @@ struct DecoySupportContractTests {
     func credentialCandidateDoesNotEscapeThroughRepresentations() async {
         let secret = "2468-credential-candidate"
         let candidate = DecoyHiddenEntryCredentialCandidate(secret)
-        let matchedInsideScope = await candidate.withValue { $0 == secret }
+        let evaluation = await candidate.evaluate { .success($0 == secret) }
         let mirror = Mirror(reflecting: candidate)
         let customDumpRepresentation = String(customDumping: candidate)
         var standardDump = ""
@@ -71,13 +71,31 @@ struct DecoySupportContractTests {
             customDumpRepresentation,
         ]
 
-        #expect(matchedInsideScope)
+        #expect(evaluation == .success(true))
         #expect(mirror.children.map { String(describing: $0.value) } == ["[REDACTED]"])
         #expect(customDumpRepresentation.contains("[REDACTED]"))
         #expect(representations.allSatisfy { !$0.contains(secret) })
         #expect(!isEncodable(candidate))
         #expect(!isDecodable(candidate))
         #expect(!isRawRepresentable(candidate))
+    }
+
+    @Test("Credential candidate evaluation returns normalized outcomes")
+    func credentialCandidateEvaluationReturnsNormalizedOutcomes() async {
+        let candidate = DecoyHiddenEntryCredentialCandidate("2468")
+        let accepted = await candidate.evaluate { value in
+            .success(value == "2468")
+        }
+        let rejected = await candidate.evaluate { _ in
+            .success(false)
+        }
+        let unavailable = await candidate.evaluate { _ in
+            .failure(.evaluationFailed)
+        }
+
+        #expect(accepted == .success(true))
+        #expect(rejected == .success(false))
+        #expect(unavailable == .failure(.evaluationFailed))
     }
 
     @Test("Credential-bearing attempts support synthesized equality")
@@ -237,14 +255,13 @@ private struct FakeDecoyHost {
             return nil
         }
 
-        let result: Result<Bool, DecoyHiddenEntryError>
-        switch attempt.intent {
-        case .authenticationRequest:
-            result = .success(true)
-        case let .credentialCandidate(candidate):
-            let isAccepted = await candidate.withValue { $0 == "2468" }
-            result = .success(isAccepted)
-        }
+        let result: Result<Bool, DecoyHiddenEntryError> =
+            switch attempt.intent {
+            case .authenticationRequest:
+                .success(true)
+            case let .credentialCandidate(candidate):
+                await candidate.evaluate { .success($0 == "2468") }
+            }
 
         return DecoyHiddenEntryCompletion(attemptID: attempt.id, result: result)
     }
