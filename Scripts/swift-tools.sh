@@ -21,6 +21,43 @@ cleanup_exit() {
 
 trap cleanup_exit EXIT
 
+# Keep this validator aligned with the standalone setup asset before extraction.
+validate_release_archive() {
+    local archive=$1
+    local member listing entry_type
+    local member_list detail_list
+
+    member_list=$(mktemp "${TMPDIR:-/tmp}/swift-tooling-tar-members.XXXXXX")
+    detail_list=$(mktemp "${TMPDIR:-/tmp}/swift-tooling-tar-details.XXXXXX")
+    if ! tar -tzf "$archive" > "$member_list" || ! tar -tvzf "$archive" > "$detail_list"; then
+        rm -f "$member_list" "$detail_list"
+        die "could not inspect release archive: $archive"
+    fi
+
+    while IFS= read -r member; do
+        case "$member" in
+            ''|./) continue ;;
+            /*|../*|*/../*|*/..|..)
+                rm -f "$member_list" "$detail_list"
+                die "release archive contains an unsafe path: $member"
+                ;;
+        esac
+    done < "$member_list"
+
+    while IFS= read -r listing; do
+        entry_type=${listing:0:1}
+        case "$entry_type" in
+            -|d) ;;
+            *)
+                rm -f "$member_list" "$detail_list"
+                die 'release archive contains a symlink, hard link, or special file'
+                ;;
+        esac
+    done < "$detail_list"
+
+    rm -f "$member_list" "$detail_list"
+}
+
 lock_value() {
     local key=$1
     awk -F= -v expected_key="$key" '$1 == expected_key { print substr($0, index($0, "=") + 1); exit }' "$lock_file"
@@ -48,83 +85,119 @@ release_asset=${release_asset:-swift-tooling.tar.gz}
 
 release_root="${SWIFT_TOOLING_RELEASE_ROOT:-$repository_root/.tools/swift-tooling/$release_version}"
 
-cached_release_files=(
-    bin/swift-tooling
-    Scripts/toolchain-lock.sh
-    toolchain.lock
-    Mintfile
-    config/swiftformat.base
-    config/swiftlint.base.yml
-)
-
-cached_release_matches_archive() {
+release_contents_match() {
     local archive=$1
-    local relative expected actual
+    local root=$2
+    local manifest_file
+    local member relative current_sha archive_sha actual_file
 
-    for relative in "${cached_release_files[@]}"; do
-        [[ -f "$release_root/$relative" && ! -L "$release_root/$relative" ]] || return 1
-        if ! expected=$(tar -xOf "$archive" "./$relative" | shasum -a 256 | awk '{print $1}'); then
+    manifest_file=$(mktemp "${TMPDIR:-/tmp}/swift-tooling-manifest.XXXXXX")
+    if ! tar -tzf "$archive" > "$manifest_file"; then
+        rm -f "$manifest_file"
+        return 1
+    fi
+
+    while IFS= read -r member; do
+        case "$member" in
+            ''|*/|./) continue ;;
+        esac
+        relative=${member#./}
+        actual_file="$root/$relative"
+        [[ -f "$actual_file" && ! -L "$actual_file" ]] || {
+            rm -f "$manifest_file"
+            return 1
+        }
+        if ! archive_sha=$(tar -xOf "$archive" "$member" | shasum -a 256 | awk '{print $1}'); then
+            rm -f "$manifest_file"
             return 1
         fi
-        actual=$(shasum -a 256 "$release_root/$relative" | awk '{print $1}')
-        [[ "$actual" = "$expected" ]] || return 1
-    done
-}
+        current_sha=$(shasum -a 256 "$actual_file" | awk '{print $1}')
+        if [[ "$archive_sha" != "$current_sha" ]]; then
+            rm -f "$manifest_file"
+            return 1
+        fi
+    done < "$manifest_file"
 
-run_setup_from_archive() {
-    local archive=$1
-    local version=$2
-    local sha256=$3
-    local asset=$4
-    local setup_script="$cleanup_root/setup-swift-tools.sh"
+    while IFS= read -r -d '' actual_file; do
+        relative=${actual_file#"$root"/}
+        [[ "$relative" = .swift-tooling-release.tar.gz ]] && continue
+        if ! grep -Fqx -- "./$relative" "$manifest_file" && ! grep -Fqx -- "$relative" "$manifest_file"; then
+            rm -f "$manifest_file"
+            return 1
+        fi
+    done < <(find "$root" -type f -print0)
 
-    [[ -f "$archive" ]] || die "release archive does not exist: $archive"
-    [[ "$(shasum -a 256 "$archive" | awk '{print $1}')" = "$sha256" ]] \
-        || die 'shared release checksum mismatch'
+    while IFS= read -r -d '' actual_file; do
+        relative=${actual_file#"$root"/}
+        [[ "$relative" = .swift-tooling-release.tar.gz ]] && continue
+        rm -f "$manifest_file"
+        return 1
+    done < <(find "$root" ! -type f ! -type d -print0)
 
-    # The archive checksum is verified before reading the canonical installer
-    # from it. The installer then performs the full archive validation and
-    # transactional consumer update.
-    tar -xOf "$archive" ./Scripts/setup-swift-tools.sh > "$setup_script"
-    chmod 0755 "$setup_script"
-    bash "$setup_script" \
-        --repository-root "$repository_root" \
-        --repository-url "$release_repository_url" \
-        --release-archive "$archive" \
-        --release-version "$version" \
-        --release-sha256 "$sha256" \
-        --release-asset "$asset"
+    rm -f "$manifest_file"
 }
 
 ensure_release() {
     local archive=${SWIFT_TOOLING_RELEASE_ARCHIVE:-}
     local cached_archive="$release_root/.swift-tooling-release.tar.gz"
+    local archive_is_cached=0
+    local archive_sha256
+    local temporary_root
     local temporary_archive
     local archive_url
 
-    if [[ -z "$archive" \
-        && -x "$release_root/bin/swift-tooling" \
-        && -f "$cached_archive" \
-        && "$(shasum -a 256 "$cached_archive" | awk '{print $1}')" = "$release_sha256" ]]; then
-        if cached_release_matches_archive "$cached_archive"; then
-            return
+    if [[ -z "${SWIFT_TOOLING_RELEASE_ARCHIVE:-}" && -f "$cached_archive" ]]; then
+        archive="$cached_archive"
+        archive_is_cached=1
+    fi
+
+    if [[ -n "$archive" ]]; then
+        [[ -f "$archive" ]] || die "release archive does not exist: $archive"
+        archive_sha256=$(shasum -a 256 "$archive" | awk '{print $1}')
+        if [[ "$archive_sha256" != "$release_sha256" ]]; then
+            if [[ "$archive_is_cached" -eq 1 ]]; then
+                archive=''
+            else
+                die 'shared release checksum mismatch'
+            fi
+        else
+            validate_release_archive "$archive"
+            if [[ -x "$release_root/bin/swift-tooling" ]] \
+                && release_contents_match "$archive" "$release_root"; then
+                return
+            fi
         fi
     fi
 
-    cleanup_root=$(mktemp -d "${TMPDIR:-/tmp}/swift-tooling-consumer.XXXXXX")
-    if [[ -z "$archive" && -f "$cached_archive" \
-        && "$(shasum -a 256 "$cached_archive" | awk '{print $1}')" = "$release_sha256" ]]; then
-        archive="$cached_archive"
-    fi
+    temporary_root=$(mktemp -d "${TMPDIR:-/tmp}/swift-tooling-consumer.XXXXXX")
+    temporary_archive="$temporary_root/release.tar.gz"
+    cleanup_root="$temporary_root"
 
-    if [[ -z "$archive" ]]; then
-        temporary_archive="$cleanup_root/release.tar.gz"
+    if [[ -n "$archive" ]]; then
+        cp "$archive" "$temporary_archive"
+    else
         archive_url="$release_repository_url/releases/download/$release_version/$release_asset"
         curl --fail --location --silent --show-error "$archive_url" --output "$temporary_archive"
-        archive="$temporary_archive"
     fi
 
-    run_setup_from_archive "$archive" "$release_version" "$release_sha256" "$release_asset"
+    [[ -f "$temporary_archive" ]] || die 'shared release archive does not exist'
+    [[ "$(shasum -a 256 "$temporary_archive" | awk '{print $1}')" = "$release_sha256" ]] \
+        || die 'shared release checksum mismatch'
+
+    local extracted_root="$temporary_root/release"
+    mkdir -p "$extracted_root"
+    validate_release_archive "$temporary_archive"
+    tar -xzf "$temporary_archive" -C "$extracted_root"
+    [[ -x "$extracted_root/bin/swift-tooling" ]] || die 'shared release is missing bin/swift-tooling'
+    [[ -f "$extracted_root/Scripts/setup-swift-tools.sh" ]] \
+        || die 'shared release is missing Scripts/setup-swift-tools.sh'
+
+    mkdir -p "$(dirname "$release_root")"
+    if [[ -e "$release_root" ]]; then
+        rm -rf "$release_root"
+    fi
+    mv "$extracted_root" "$release_root"
+    cp "$temporary_archive" "$release_root/.swift-tooling-release.tar.gz"
     cleanup_exit
 }
 
@@ -156,7 +229,13 @@ update_release() {
     curl --fail --location --silent --show-error \
         "$release_repository_url/releases/download/$latest_version/$latest_asset" \
         --output "$archive_file"
-    run_setup_from_archive "$archive_file" "$latest_version" "$latest_sha256" "$latest_asset"
+    bash "$release_root/Scripts/setup-swift-tools.sh" \
+        --repository-root "$repository_root" \
+        --repository-url "$release_repository_url" \
+        --release-archive "$archive_file" \
+        --release-version "$latest_version" \
+        --release-sha256 "$latest_sha256" \
+        --release-asset "$latest_asset"
     cleanup_exit
 }
 
@@ -272,6 +351,7 @@ case "${1:-}" in
     update)
         shift
         [[ "$#" -eq 0 ]] || die 'update does not accept positional arguments'
+        ensure_release
         update_release
         ;;
     bootstrap|format|lint|exec)
