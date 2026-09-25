@@ -62,6 +62,7 @@ let package = Package(
                 .product(name: "DependenciesMacros", package: "swift-dependencies"),
                 .product(name: "SQLiteData", package: "sqlite-data"),
                 "PersistenceSupport",
+                "DecoySupport",
             ],
         ),
         .target(
@@ -178,10 +179,16 @@ let package = Package(
             name: "CalculatorFeatureTests",
             dependencies: [
                 "CalculatorFeature",
+                "DecoySupport",
                 "FoundationTestSupport",
                 "PersistenceSupport",
+                .product(
+                    name: "ComposableArchitecture",
+                    package: "swift-composable-architecture",
+                ),
                 .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
                 .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "CustomDump", package: "swift-custom-dump"),
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
         ),
