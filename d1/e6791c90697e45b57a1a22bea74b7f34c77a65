@@ -1,0 +1,22 @@
+Packages/ApplicationFoundation/Tests/DecoySupportTests/DecoySupportContractTests.swift
+  s_db140cf32bc644::t_bb4ad25e1a6695 61,74,83-100
+  s_db140cf32bc644::t_53e46deb6dff6e 258-264
+Packages/ApplicationFoundation/Sources/DecoySupport/DecoyHiddenEntryAttempt.swift
+  s_db140cf32bc644::t_ea178c7bb95411 86,88-90,92-93,95-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d1e6791c90697e45b57a1a22bea74b7f34c77a65",
+  "prompts": {},
+  "sessions": {
+    "s_db140cf32bc644": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d747-78bf-7431-8243-2a90bd0fe85c",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
