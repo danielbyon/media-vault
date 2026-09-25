@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "AppFeature", type: .static, targets: ["AppFeature"]),
         .library(name: "CalculatorFeature", type: .static, targets: ["CalculatorFeature"]),
+        .library(name: "DecoySupport", type: .static, targets: ["DecoySupport"]),
         .library(name: "BrowserFeature", type: .static, targets: ["BrowserFeature"]),
         .library(name: "PresentationSupport", type: .static, targets: ["PresentationSupport"]),
         .library(name: "VaultFeature", type: .static, targets: ["VaultFeature"]),
@@ -89,6 +90,7 @@ let package = Package(
                 "VaultFeature",
             ],
         ),
+        .target(name: "DecoySupport"),
         .target(
             name: "VaultFeature",
             dependencies: [
@@ -148,6 +150,13 @@ let package = Package(
             name: "PresentationSupportTests",
             dependencies: [
                 "PresentationSupport",
+            ],
+        ),
+        .testTarget(
+            name: "DecoySupportTests",
+            dependencies: [
+                "DecoySupport",
+                .product(name: "CustomDump", package: "swift-custom-dump"),
             ],
         ),
         .testTarget(
