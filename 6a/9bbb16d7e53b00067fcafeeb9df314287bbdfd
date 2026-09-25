@@ -1,0 +1,25 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabCardDrag.swift
+  s_a46fab8ec974ab::t_035e2f964acccc 20-134
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabOverviewView.swift
+  s_a46fab8ec974ab::t_d47c81f4a2d9b7 537,683-708,717-721,740,744-745,752,755
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabSwipeTests.swift
+  s_a46fab8ec974ab::t_a5483404a57985 45-165
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewInteractionTests.swift
+  s_a46fab8ec974ab::t_23c38cdbc22e26 36-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6a9bbb16d7e53b00067fcafeeb9df314287bbdfd",
+  "prompts": {},
+  "sessions": {
+    "s_a46fab8ec974ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d525-5f53-7b40-995f-8658f6f4cac7",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
