@@ -695,8 +695,7 @@ struct BrowserTabOverviewView: View {
                 tabCardInteraction.endPhysicalPress(for: tab.id)
             }))
             .accessibilityAction(.default) {
-                tabCardInteraction.beginPhysicalPress(for: tab.id)
-                guard tabCardInteraction.consumeSelection(for: tab.id) else {
+                guard BrowserTabCardInteraction.consumeAccessibilitySelection(for: tab.id) else {
                     return
                 }
 

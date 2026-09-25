@@ -34,12 +34,10 @@ struct BrowserTabCardInteraction: Equatable {
     private var selectionState = SelectionState.idle
     private var physicalPressIsActive = false
 
-    /// Begins a new physical interaction at the Button's press-down boundary.
+    /// Begins a physical interaction at the Button's press-down boundary.
+    /// Repeated callbacks for the same active press do not rearm its selection state.
     mutating func beginPhysicalPress(for tabID: BrowserTabID) {
-        guard interactionTabID != tabID
-            || !physicalPressIsActive
-            || selectionState != .dragRecognized
-        else {
+        guard interactionTabID != tabID || !physicalPressIsActive else {
             return
         }
 
@@ -112,6 +110,15 @@ struct BrowserTabCardInteraction: Equatable {
 
         selectionState = .activated
         return true
+    }
+
+    /// Applies the one-shot selection rule to one independent accessibility activation.
+    ///
+    /// Accessibility actions are discrete activations, not physical press lifecycles. A local
+    /// interaction reuses the same selection rule without changing an in-progress physical press.
+    static func consumeAccessibilitySelection(for tabID: BrowserTabID) -> Bool {
+        var interaction = Self()
+        return interaction.consumeSelection(for: tabID)
     }
 }
 

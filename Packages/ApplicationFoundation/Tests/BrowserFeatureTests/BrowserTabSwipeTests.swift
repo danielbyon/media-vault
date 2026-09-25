@@ -56,6 +56,47 @@ struct BrowserTabSwipeTests {
         #expect(!duplicateActivation)
     }
 
+    @Test("A duplicate press-began callback cannot reactivate a consumed selection")
+    func duplicatePressBeganCannotReactivateConsumedSelection() {
+        let tabID = BrowserTabID()
+        var interaction = BrowserTabCardInteraction()
+
+        interaction.beginPhysicalPress(for: tabID)
+        let firstActivation = interaction.consumeSelection(for: tabID)
+
+        interaction.beginPhysicalPress(for: tabID)
+        let duplicateActivation = interaction.consumeSelection(for: tabID)
+
+        interaction.endPhysicalPress(for: tabID)
+        interaction.beginPhysicalPress(for: tabID)
+        let activationAfterNewPress = interaction.consumeSelection(for: tabID)
+
+        #expect(firstActivation)
+        #expect(!duplicateActivation)
+        #expect(activationAfterNewPress)
+    }
+
+    @Test("Independent accessibility activations do not rearm an active physical press")
+    func accessibilityActivationsRemainIndependent() {
+        let tabID = BrowserTabID()
+        var physicalInteraction = BrowserTabCardInteraction()
+
+        physicalInteraction.beginPhysicalPress(for: tabID)
+        let physicalActivation = physicalInteraction.consumeSelection(for: tabID)
+        let firstAccessibilityActivation =
+            BrowserTabCardInteraction.consumeAccessibilitySelection(for: tabID)
+        let secondAccessibilityActivation =
+            BrowserTabCardInteraction.consumeAccessibilitySelection(for: tabID)
+
+        physicalInteraction.beginPhysicalPress(for: tabID)
+        let repeatedPhysicalActivation = physicalInteraction.consumeSelection(for: tabID)
+
+        #expect(physicalActivation)
+        #expect(firstAccessibilityActivation)
+        #expect(secondAccessibilityActivation)
+        #expect(!repeatedPhysicalActivation)
+    }
+
     @Test("Button release keeps a true tap eligible until its activation runs")
     func releasedPhysicalPressActivatesOnce() {
         let tabID = BrowserTabID()
