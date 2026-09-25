@@ -17,6 +17,128 @@ struct BrowserTabCardDrag: Equatable {
     let horizontalTranslation: CGFloat
 }
 
+/// Tracks one tab-card press, its recognized drag, and its transient presentation state.
+///
+/// The press classification survives drag presentation cleanup so a completed drag cannot be
+/// reinterpreted as a Button activation. A new physical press begins a fresh interaction.
+struct BrowserTabCardInteraction: Equatable {
+    private enum SelectionState: Equatable {
+        case idle
+        case tapEligible
+        case dragRecognized
+        case activated
+    }
+
+    private(set) var drag: BrowserTabCardDrag?
+    private var interactionTabID: BrowserTabID?
+    private var selectionState = SelectionState.idle
+    private var physicalPressIsActive = false
+
+    /// Begins a physical interaction at the Button's press-down boundary.
+    /// Repeated callbacks for the same active press do not rearm its selection state.
+    mutating func beginPhysicalPress(for tabID: BrowserTabID) {
+        guard interactionTabID != tabID || !physicalPressIsActive else {
+            return
+        }
+
+        interactionTabID = tabID
+        selectionState = .tapEligible
+        physicalPressIsActive = true
+        drag = nil
+    }
+
+    /// Records Button release without making a completed drag eligible for activation again.
+    mutating func endPhysicalPress(for tabID: BrowserTabID) {
+        guard interactionTabID == tabID else {
+            return
+        }
+
+        physicalPressIsActive = false
+    }
+
+    /// Locks the first recognized drag axis and updates the card's horizontal presentation.
+    mutating func updateDrag(for tabID: BrowserTabID, translation: CGSize) {
+        let axis =
+            if let drag, drag.tabID == tabID {
+                drag.axis
+            } else {
+                BrowserTabSwipe.axis(for: translation)
+            }
+
+        interactionTabID = tabID
+        selectionState = .dragRecognized
+        physicalPressIsActive = true
+        drag = BrowserTabCardDrag(
+            tabID: tabID,
+            axis: axis,
+            horizontalTranslation: axis == .horizontal ? translation.width : 0,
+        )
+    }
+
+    /// Returns the existing close outcome for the locked drag axis, if it is horizontal.
+    func swipeOutcome(for tabID: BrowserTabID, translation: CGSize) -> BrowserTabSwipe.Outcome? {
+        guard let drag, drag.tabID == tabID else {
+            return nil
+        }
+
+        return BrowserTabSwipe.outcome(for: translation, axis: drag.axis)
+    }
+
+    /// Clears direct-manipulation presentation while retaining drag-based activation suppression.
+    mutating func finishDrag(for tabID: BrowserTabID) {
+        guard drag?.tabID == tabID else {
+            return
+        }
+
+        drag = nil
+    }
+
+    /// Allows a genuine tap once and rejects activation after any recognized drag.
+    mutating func consumeSelection(for tabID: BrowserTabID) -> Bool {
+        guard interactionTabID == tabID else {
+            guard selectionState == .idle else {
+                return false
+            }
+
+            interactionTabID = tabID
+            selectionState = .activated
+            return true
+        }
+        guard selectionState == .tapEligible else {
+            return false
+        }
+
+        selectionState = .activated
+        return true
+    }
+
+    /// Applies the one-shot selection rule to one independent accessibility activation.
+    ///
+    /// Accessibility actions are discrete activations, not physical press lifecycles. A local
+    /// interaction reuses the same selection rule without changing an in-progress physical press.
+    static func consumeAccessibilitySelection(for tabID: BrowserTabID) -> Bool {
+        var interaction = Self()
+        return interaction.consumeSelection(for: tabID)
+    }
+}
+
+/// Reports the start of a standard Button press without replacing its activation semantics.
+struct BrowserTabCardPressTrackingButtonStyle: ButtonStyle {
+    let onPressBegan: () -> Void
+    let onPressEnded: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed {
+                    onPressBegan()
+                } else {
+                    onPressEnded()
+                }
+            }
+    }
+}
+
 struct BrowserChromeHeightPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 

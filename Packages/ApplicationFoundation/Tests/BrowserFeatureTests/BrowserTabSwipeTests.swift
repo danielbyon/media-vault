@@ -42,4 +42,166 @@ struct BrowserTabSwipeTests {
         #expect(BrowserTabSwipe.outcome(for: .init(width: 80, height: 81), axis: .vertical) == nil)
         #expect(BrowserTabSwipe.outcome(for: .init(width: -80, height: 81), axis: .vertical) == nil)
     }
+
+    @Test("A physical press without a recognized drag activates only once")
+    func physicalPressActivatesOnce() {
+        let tabID = BrowserTabID()
+        var interaction = BrowserTabCardInteraction()
+
+        interaction.beginPhysicalPress(for: tabID)
+
+        let firstActivation = interaction.consumeSelection(for: tabID)
+        let duplicateActivation = interaction.consumeSelection(for: tabID)
+        #expect(firstActivation)
+        #expect(!duplicateActivation)
+    }
+
+    @Test("A duplicate press-began callback cannot reactivate a consumed selection")
+    func duplicatePressBeganCannotReactivateConsumedSelection() {
+        let tabID = BrowserTabID()
+        var interaction = BrowserTabCardInteraction()
+
+        interaction.beginPhysicalPress(for: tabID)
+        let firstActivation = interaction.consumeSelection(for: tabID)
+
+        interaction.beginPhysicalPress(for: tabID)
+        let duplicateActivation = interaction.consumeSelection(for: tabID)
+
+        interaction.endPhysicalPress(for: tabID)
+        interaction.beginPhysicalPress(for: tabID)
+        let activationAfterNewPress = interaction.consumeSelection(for: tabID)
+
+        #expect(firstActivation)
+        #expect(!duplicateActivation)
+        #expect(activationAfterNewPress)
+    }
+
+    @Test("Independent accessibility activations do not rearm an active physical press")
+    func accessibilityActivationsRemainIndependent() {
+        let tabID = BrowserTabID()
+        var physicalInteraction = BrowserTabCardInteraction()
+
+        physicalInteraction.beginPhysicalPress(for: tabID)
+        let physicalActivation = physicalInteraction.consumeSelection(for: tabID)
+        let firstAccessibilityActivation =
+            BrowserTabCardInteraction.consumeAccessibilitySelection(for: tabID)
+        let secondAccessibilityActivation =
+            BrowserTabCardInteraction.consumeAccessibilitySelection(for: tabID)
+
+        physicalInteraction.beginPhysicalPress(for: tabID)
+        let repeatedPhysicalActivation = physicalInteraction.consumeSelection(for: tabID)
+
+        #expect(physicalActivation)
+        #expect(firstAccessibilityActivation)
+        #expect(secondAccessibilityActivation)
+        #expect(!repeatedPhysicalActivation)
+    }
+
+    @Test("Button release keeps a true tap eligible until its activation runs")
+    func releasedPhysicalPressActivatesOnce() {
+        let tabID = BrowserTabID()
+        var interaction = BrowserTabCardInteraction()
+        interaction.beginPhysicalPress(for: tabID)
+        interaction.endPhysicalPress(for: tabID)
+
+        let firstActivation = interaction.consumeSelection(for: tabID)
+        let duplicateActivation = interaction.consumeSelection(for: tabID)
+        #expect(firstActivation)
+        #expect(!duplicateActivation)
+    }
+
+    @Test("Recognized horizontal swipes at 79 or 80 points cancel without activating")
+    func cancelledHorizontalSwipeNeverActivates() {
+        for width: CGFloat in [79, -79, 80, -80] {
+            let tabID = BrowserTabID()
+            var interaction = BrowserTabCardInteraction()
+            interaction.beginPhysicalPress(for: tabID)
+            interaction.updateDrag(for: tabID, translation: .init(width: width, height: 0))
+
+            #expect(interaction.swipeOutcome(for: tabID, translation: .init(width: width, height: 0)) == .cancel)
+
+            interaction.finishDrag(for: tabID)
+            interaction.endPhysicalPress(for: tabID)
+
+            #expect(interaction.drag == nil)
+            let selectedAfterCancellation = interaction.consumeSelection(for: tabID)
+            #expect(!selectedAfterCancellation)
+        }
+    }
+
+    @Test("Recognized horizontal swipes at 81 points close without activating")
+    func dismissedHorizontalSwipeNeverActivates() {
+        for width: CGFloat in [81, -81] {
+            let tabID = BrowserTabID()
+            var interaction = BrowserTabCardInteraction()
+            interaction.beginPhysicalPress(for: tabID)
+            interaction.updateDrag(for: tabID, translation: .init(width: width, height: 0))
+
+            #expect(interaction.swipeOutcome(for: tabID, translation: .init(width: width, height: 0)) == .dismiss)
+
+            interaction.finishDrag(for: tabID)
+            interaction.endPhysicalPress(for: tabID)
+
+            #expect(interaction.drag == nil)
+            let selectedAfterDismissal = interaction.consumeSelection(for: tabID)
+            #expect(!selectedAfterDismissal)
+        }
+    }
+
+    @Test("A canceled swipe does not suppress the next independent press")
+    func cancelledSwipeAllowsNextPhysicalPress() {
+        let tabID = BrowserTabID()
+        var interaction = BrowserTabCardInteraction()
+        interaction.beginPhysicalPress(for: tabID)
+        interaction.updateDrag(for: tabID, translation: .init(width: 80, height: 0))
+        interaction.finishDrag(for: tabID)
+        interaction.endPhysicalPress(for: tabID)
+
+        let selectedAfterCancellation = interaction.consumeSelection(for: tabID)
+        #expect(!selectedAfterCancellation)
+
+        interaction.beginPhysicalPress(for: tabID)
+
+        let selectedAfterNewPress = interaction.consumeSelection(for: tabID)
+        #expect(selectedAfterNewPress)
+    }
+
+    @Test("A late Button press callback cannot reclassify a recognized swipe")
+    func latePhysicalPressCallbackKeepsDragIneligible() {
+        let tabID = BrowserTabID()
+        var interaction = BrowserTabCardInteraction()
+        interaction.updateDrag(for: tabID, translation: .init(width: 80, height: 0))
+
+        interaction.beginPhysicalPress(for: tabID)
+        #expect(interaction.drag?.axis == .horizontal)
+        #expect(interaction.swipeOutcome(for: tabID, translation: .init(width: 80, height: 0)) == .cancel)
+
+        interaction.finishDrag(for: tabID)
+        interaction.endPhysicalPress(for: tabID)
+        let selectedAfterRelease = interaction.consumeSelection(for: tabID)
+        #expect(!selectedAfterRelease)
+
+        interaction.beginPhysicalPress(for: tabID)
+        let selectedAfterNextPress = interaction.consumeSelection(for: tabID)
+        #expect(selectedAfterNextPress)
+    }
+
+    @Test("A vertical-dominant drag remains non-dismissive and cannot activate the card")
+    func verticalDragDoesNotActivateOrDismiss() {
+        let tabID = BrowserTabID()
+        var interaction = BrowserTabCardInteraction()
+        interaction.beginPhysicalPress(for: tabID)
+        interaction.updateDrag(for: tabID, translation: .init(width: 80, height: 81))
+
+        #expect(interaction.drag?.axis == .vertical)
+        #expect(interaction.drag?.horizontalTranslation == 0)
+        #expect(interaction.swipeOutcome(for: tabID, translation: .init(width: 80, height: 81)) == nil)
+
+        interaction.finishDrag(for: tabID)
+        interaction.endPhysicalPress(for: tabID)
+
+        #expect(interaction.drag == nil)
+        let selectedAfterVerticalDrag = interaction.consumeSelection(for: tabID)
+        #expect(!selectedAfterVerticalDrag)
+    }
 }

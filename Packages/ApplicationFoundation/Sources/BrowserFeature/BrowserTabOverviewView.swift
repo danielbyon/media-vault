@@ -534,7 +534,7 @@ struct BrowserTabOverviewView: View {
     @Environment(\.horizontalSizeClass)
     private var horizontalSizeClass
     @State
-    private var tabCardDrag: BrowserTabCardDrag?
+    private var tabCardInteraction = BrowserTabCardInteraction()
     @ObservedObject
     var scrollPosition: BrowserTabOverviewScrollPosition
     @ObservedObject
@@ -680,9 +680,31 @@ struct BrowserTabOverviewView: View {
 
     private func tabCard(_ tab: BrowserTab) -> some View {
         ZStack(alignment: .bottomTrailing) {
-            Button { exitOverview(with: .selectTab(tab)) } label: { tabCardContent(tab) }
-                .buttonStyle(.plain)
-            Button { exitOverview(with: .closeTab(tab.id)) } label: {
+            Button {
+                guard tabCardInteraction.consumeSelection(for: tab.id) else {
+                    return
+                }
+
+                exitOverview(with: .selectTab(tab))
+            } label: {
+                tabCardContent(tab)
+            }
+            .buttonStyle(BrowserTabCardPressTrackingButtonStyle(onPressBegan: {
+                tabCardInteraction.beginPhysicalPress(for: tab.id)
+            }, onPressEnded: {
+                tabCardInteraction.endPhysicalPress(for: tab.id)
+            }))
+            .accessibilityAction(.default) {
+                guard BrowserTabCardInteraction.consumeAccessibilitySelection(for: tab.id) else {
+                    return
+                }
+
+                exitOverview(with: .selectTab(tab))
+            }
+
+            Button {
+                exitOverview(with: .closeTab(tab.id))
+            } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .frame(width: 44, height: 44)
@@ -691,7 +713,11 @@ struct BrowserTabOverviewView: View {
             .accessibilityLabel("Close \(BrowserTabPresentation.title(for: tab))")
             .padding(10)
         }
-        .offset(x: tabCardDrag?.tabID == tab.id ? tabCardDrag?.horizontalTranslation ?? 0 : 0)
+        .offset(
+            x: tabCardInteraction.drag?.tabID == tab.id
+                ? tabCardInteraction.drag?.horizontalTranslation ?? 0
+                : 0,
+        )
         .accessibilityFocused(accessibilityFocusedTabID, equals: tab.id)
         .accessibilityValue(tab.id == store.selectedTabID ? "Selected" : "")
         .accessibilityAction(named: "Close Tab") {
@@ -710,43 +736,22 @@ struct BrowserTabOverviewView: View {
     }
 
     private func updateTabCardDrag(tabID: BrowserTabID, translation: CGSize) {
-        if let tabCardDrag, tabCardDrag.tabID == tabID {
-            guard tabCardDrag.axis == .horizontal else {
-                return
-            }
-
-            self.tabCardDrag = .init(
-                tabID: tabID,
-                axis: .horizontal,
-                horizontalTranslation: translation.width,
-            )
-            return
-        }
-
-        let axis = BrowserTabSwipe.axis(for: translation)
-        tabCardDrag = .init(
-            tabID: tabID,
-            axis: axis,
-            horizontalTranslation: axis == .horizontal ? translation.width : 0,
-        )
+        tabCardInteraction.updateDrag(for: tabID, translation: translation)
     }
 
     private func finishTabCardDrag(tabID: BrowserTabID, translation: CGSize) {
-        guard let tabCardDrag, tabCardDrag.tabID == tabID else {
-            return
-        }
-        guard let outcome = BrowserTabSwipe.outcome(for: translation, axis: tabCardDrag.axis) else {
-            self.tabCardDrag = nil
+        guard let outcome = tabCardInteraction.swipeOutcome(for: tabID, translation: translation) else {
+            tabCardInteraction.finishDrag(for: tabID)
             return
         }
 
         switch outcome {
         case .cancel:
             withAnimation(tabCardSettleAnimation) {
-                self.tabCardDrag = nil
+                tabCardInteraction.finishDrag(for: tabID)
             }
         case .dismiss:
-            self.tabCardDrag = nil
+            tabCardInteraction.finishDrag(for: tabID)
             exitOverview(with: .closeTab(tabID))
         }
     }

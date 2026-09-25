@@ -33,6 +33,53 @@ struct BrowserViewInteractionTests {
         window.rootViewController = nil
     }
 
+    @Test("Mounted card surface is inside an enabled overflowing Tab Overview scroll surface")
+    func mountedCardSurfaceIsInsideEnabledOverflowingTabOverviewScrollSurface() async throws {
+        let tabIDs = (0 ..< 24).map { BrowserTabID(UUID(9_086_100 + $0)) }
+        let selectedTabID = tabIDs[0]
+        let store = Store(
+            initialState: BrowserFeature.State(
+                tabs: tabIDs.map { .startPage(id: $0) },
+                selectedTabID: selectedTabID,
+                presentation: .tabOverview,
+            ),
+        ) {
+            BrowserFeature()
+        }
+        let coordinator = BrowserTabTransitionUIKitCoordinator()
+        let hostingController = UIHostingController(
+            rootView: BrowserView(store: store, transitionCoordinator: coordinator)
+                .environment(\.horizontalSizeClass, .compact),
+        )
+        let window = mount(hostingController, size: CGSize(width: 390, height: 844))
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let scrollView = try #require(await waitForTabOverviewScrollView(in: hostingController))
+        #expect(scrollView.isScrollEnabled)
+        #expect(scrollView.panGestureRecognizer.isEnabled)
+        #expect(scrollView.contentSize.height > scrollView.bounds.height)
+        let cardSurface = try #require(coordinator.surfaceRegistry.view(for: .card(selectedTabID)))
+        #expect(cardSurface.isDescendant(of: scrollView))
+
+        let initialOffset = scrollView.contentOffset
+        let maximumVerticalOffset = scrollView.contentSize.height - scrollView.bounds.height
+        let requestedVerticalOffset = min(initialOffset.y + 100, maximumVerticalOffset)
+        #expect(requestedVerticalOffset > initialOffset.y)
+        // Programmatic movement is a structural smoke check, not a physical-pan simulation.
+        scrollView.setContentOffset(
+            CGPoint(x: initialOffset.x, y: requestedVerticalOffset),
+            animated: false,
+        )
+        await waitForDisplayTurn()
+
+        #expect(scrollView.contentOffset.y == requestedVerticalOffset)
+        #expect(store.state.presentation == .tabOverview)
+        #expect(store.state.selectedTabID == selectedTabID)
+    }
+
     @Test("Scene deactivation commits the latest overview position and cancels its fallback")
     func sceneDeactivationCommitsLatestOverviewPosition() async {
         let first = BrowserTabID(UUID(9_020))
