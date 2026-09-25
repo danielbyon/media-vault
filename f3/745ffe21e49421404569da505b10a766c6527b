@@ -1,0 +1,30 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabCardDrag.swift
+  s_a46fab8ec974ab::t_16767cf975fedd 37-38
+  s_a46fab8ec974ab::t_7b1e6cb51bef81 40,114-121
+  s_a46fab8ec974ab::t_7e4a90332a82b1 122
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabSwipeTests.swift
+  s_a46fab8ec974ab::t_22a88d19f7dbf2 61-64,66-67,69-71,77-78
+  s_a46fab8ec974ab::t_cc92054ae940e2 80-81,98-99
+  s_a46fab8ec974ab::t_7b1e6cb51bef81 59-60,65,68,72-76,79,82-97
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabOverviewView.swift
+  s_a46fab8ec974ab::t_7b1e6cb51bef81 698
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewInteractionTests.swift
+  s_a46fab8ec974ab::t_250a3aa3ee3a3a 76
+  s_a46fab8ec974ab::t_7b1e6cb51bef81 36-37,71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f3745ffe21e49421404569da505b10a766c6527b",
+  "prompts": {},
+  "sessions": {
+    "s_a46fab8ec974ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d525-5f53-7b40-995f-8658f6f4cac7",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
