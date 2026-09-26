@@ -1,0 +1,96 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserSettings.swift
+  s_bcef72034677e3::t_bdfe437de27e76 18-21
+  s_bcef72034677e3::t_caa498b9e4b2d2 8-17,22-25,36,45,52,58
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserSettingsPersistenceTests.swift
+  s_bcef72034677e3::t_b42bef575c9e6a 23-38,91,99
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebView.swift
+  s_bcef72034677e3::t_bdfe437de27e76 363
+  s_bcef72034677e3::t_33ff2c65d5edba 359-362
+  s_bcef72034677e3::t_ed743b88fc3170 25,37,48,60,355-358
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserSuggestionStateTests.swift
+  s_bcef72034677e3::t_65bf1e954e305f 282
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebKitClient.swift
+  s_bcef72034677e3::t_e2b27acc06a4ee 24
+  s_bcef72034677e3::t_df4d02e29a6370 23
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  s_bcef72034677e3::t_2719907f5606b8 21-22
+  s_bcef72034677e3::t_529b85badd2f2f 20,23,31,37,41,43-44,46-54,56-61,63-84,86,88,481-484,489,492,496-498,557-561
+  s_bcef72034677e3::t_7d6b47454ed165 32
+  s_bcef72034677e3::t_ccdad4d948c5d2 42,553-555
+  s_bcef72034677e3::t_4b5d67b5bee528 87,490
+  s_bcef72034677e3::t_bdfe437de27e76 45,55,62,85,485,556
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserProfileTests.swift
+  s_bcef72034677e3::t_5671d635679648 189,213,287,300
+  s_bcef72034677e3::t_6c78d4b729d539 91,224,362
+  s_bcef72034677e3::t_8c4f266fd1735e 94
+  s_bcef72034677e3::t_abedad1db7bb33 1-20,28-49,51,61-90,92-93,97-98,100-101,103-104,106-107,109-125,127-143,145-153,155-187,190-192,194-195,198-206,208-211,214-223,225-228,230-231,233-242,258-262,264-286,288-299,303-361,363-371
+  s_bcef72034677e3::t_dd4a5f1e3775ef 21-27,52-60
+  s_bcef72034677e3::t_05ab9ce44fea0c 126,243
+  s_bcef72034677e3::t_4d2b09d4eb09b9 50,193
+  s_bcef72034677e3::t_19b6f43bcff25b 95-96,154,188,196-197,207,212
+  s_bcef72034677e3::t_bdfe437de27e76 99,102,105,108,229,232,244,247,250,253
+  s_bcef72034677e3::t_7605aa135def5c 144,245-246,248-249,251-252,254-257,263,301-302
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserBehaviorTests.swift
+  s_bcef72034677e3::t_1e14459e4fc2a1 576,600-601,614-615
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserSettingsClient.swift
+  s_bcef72034677e3::t_419ff32e4a6592 11,67-68,84,98,105
+  s_bcef72034677e3::t_32c585c059b21e 72
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_bcef72034677e3::t_2f7072a4652d35 430
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewSnapshotTests.swift
+  s_bcef72034677e3::t_a1e23e61dab952 260
+  s_bcef72034677e3::t_05ab9ce44fea0c 243-244
+  s_bcef72034677e3::t_15d6ac46cfe0b4 252-259,261-269
+  s_bcef72034677e3::t_5faf1ec3d2ef27 270
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature.swift
+  s_bcef72034677e3::t_f381b7494f3184 151,154-155,190,231,298,414
+  s_bcef72034677e3::t_602ae289b03731 152-153,189,230,253-254
+  s_bcef72034677e3::t_3fa38553ab513d 115-130,150,156-159,188,191-192,229,232-233,291-297,409-413,415
+  s_bcef72034677e3::t_ac3f7bc0ff6515 255-256
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserSettingsView.swift
+  s_bcef72034677e3::t_bdfe437de27e76 64-68
+  s_bcef72034677e3::t_36ae4deeb2ac0c 11,21,24,28-62,69,113-131,134-139
+  s_bcef72034677e3::t_ccdad4d948c5d2 63,110
+  s_bcef72034677e3::t_0e27296e8e7253 132-133
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserWebKitAdapterTests.swift
+  s_bcef72034677e3::t_d9ccabf09ff96a 437,450-453,459,496
+  s_bcef72034677e3::t_54ed1553b0a8cd 471-491
+  s_bcef72034677e3::t_bdfe437de27e76 493,499,502
+  s_bcef72034677e3::t_f5367ce5eae493 862
+  s_bcef72034677e3::t_7a525dd0505f52 429-436,438-449,454-458,460-470,492,494-495,497-498,500-501,503-509
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebKitAdapter.swift
+  s_bcef72034677e3::t_bdfe437de27e76 162,172,327
+  s_bcef72034677e3::t_655be0581a75ec 21,28,43,57,89,99-101,157-159,167-169,283,306,316
+  s_bcef72034677e3::t_070b61af7d13f6 26-27,296,299-300,307-309,314-315,317-319,321,323-326,329-330
+  s_bcef72034677e3::t_e33cf4b68d4ad4 24-25,90,97-98,102-107,124-126,154-155,160-161,170-171,301-305
+  s_bcef72034677e3::t_daf8d94f2aa3cc 310-313
+  s_bcef72034677e3::t_bafb5be1ff75a4 320,322,328
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Helpers.swift
+  s_bcef72034677e3::t_549d38e901c9f6 639,680
+  s_bcef72034677e3::t_2719907f5606b8 646-647
+  s_bcef72034677e3::t_7e1bc74fe46f79 31-33,64-66,606-638,640-645,648-679,681-689
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewInteractionTests.swift
+  s_bcef72034677e3::t_42f58b85a14c1e 1875-1879
+  s_bcef72034677e3::t_7605aa135def5c 142-148
+  s_bcef72034677e3::t_6944e6bccc81df 559,568-571,757,772
+  s_bcef72034677e3::t_8c4f266fd1735e 240-246,1868-1872
+  s_bcef72034677e3::t_fac758cf607c69 299-305
+  s_bcef72034677e3::t_f35fe35404f125 1873-1874
+  s_bcef72034677e3::t_2d04279b206be4 1880-1881
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "71db4ed107f1918c8179c210a89dbcd6b74b31fa",
+  "prompts": {},
+  "sessions": {
+    "s_bcef72034677e3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0dd25-1c6c-7790-a559-608a9c017215",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
