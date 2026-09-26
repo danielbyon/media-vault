@@ -18,9 +18,14 @@ enum BrowserWebKitAttachmentEvent: Equatable {
 /// Main-actor registry that exclusively owns live WebKit contexts keyed by logical tab IDs.
 @MainActor
 final class BrowserWebKitAdapter: NSObject {
-    static let shared = BrowserWebKitAdapter()
+    static let shared = BrowserWebKitAdapter(requiresProfileConfiguration: true)
 
     private var contexts: [BrowserTabID: Context] = [:]
+    /// Logical IDs retired by a profile boundary cannot be recreated by delayed adapter work.
+    private var retiredTabIDs: Set<BrowserTabID> = []
+    private var browsingProfile: BrowserBrowsingProfile = .persistentPrivate
+    private var ephemeralWebsiteDataStore: WKWebsiteDataStore?
+    private var hasConfiguredProfile: Bool
     private var continuations: [UUID: AsyncStream<BrowserWebKitEvent>.Continuation] = [:]
     private var popupOpenersThisTurn: Set<BrowserTabID> = []
     private let makeTabID: () -> BrowserTabID
@@ -35,6 +40,7 @@ final class BrowserWebKitAdapter: NSObject {
     var attachmentObserver: ((BrowserWebKitAttachmentEvent) -> Void)?
 
     init(
+        requiresProfileConfiguration: Bool = false,
         makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init,
         makeWebView: @escaping @MainActor (CGRect, WKWebViewConfiguration) -> WKWebView = {
             frame,
@@ -48,6 +54,7 @@ final class BrowserWebKitAdapter: NSObject {
             webView.takeSnapshot(with: configuration, completionHandler: completion)
         },
     ) {
+        hasConfiguredProfile = !requiresProfileConfiguration
         self.makeTabID = makeTabID
         self.makeWebView = makeWebView
         self.snapshotter = snapshotter
@@ -79,10 +86,23 @@ final class BrowserWebKitAdapter: NSObject {
     /// Creates a context even for an unselected background tab and returns an existing one unchanged.
     @discardableResult
     func ensureContext(for tabID: BrowserTabID) -> WKWebView {
+        precondition(hasConfiguredProfile, "WebKit contexts require an acknowledged Browser profile")
+        precondition(!retiredTabIDs.contains(tabID), "A retired Browser tab cannot create a WebKit context")
         if let context = contexts[tabID] {
             return context.webView
         }
         return createContext(tabID: tabID, configuration: configured(WKWebViewConfiguration())).webView
+    }
+
+    /// Creates a context only while its logical tab belongs to the active Browser session.
+    func ensureActiveContext(for tabID: BrowserTabID) -> WKWebView? {
+        guard hasConfiguredProfile,
+              !retiredTabIDs.contains(tabID)
+        else {
+            return nil
+        }
+
+        return ensureContext(for: tabID)
     }
 
     /// Resolves tab-owned modal UI and releases the tab's platform context.
@@ -101,7 +121,9 @@ final class BrowserWebKitAdapter: NSObject {
 
     /// Attaches the registry-owned surface without transferring its ownership to reducer state.
     func attach(tabID: BrowserTabID, to container: UIView) {
-        let webView = ensureContext(for: tabID)
+        guard let webView = ensureActiveContext(for: tabID) else {
+            return
+        }
         guard webView.superview !== container else {
             return
         }
@@ -129,11 +151,25 @@ final class BrowserWebKitAdapter: NSObject {
     /// Executes a reducer command containing only stable identity and Sendable values.
     func execute(_ command: BrowserWebKitCommand) {
         switch command {
+        case let .configureProfile(profile, retiringTabIDs):
+            configureProfile(profile, retiringTabIDs: retiringTabIDs)
         case let .ensureContext(id):
+            guard hasConfiguredProfile,
+                  !retiredTabIDs.contains(id)
+            else {
+                return
+            }
+
             _ = ensureContext(for: id)
         case let .destroyContext(id):
             destroyContext(for: id)
         case let .load(id, url, operationID):
+            guard hasConfiguredProfile,
+                  !retiredTabIDs.contains(id)
+            else {
+                return
+            }
+
             let context = ensureContextObject(for: id)
             context.load(url, operationID: operationID)
         case let .goBack(id, operationID):
@@ -244,6 +280,7 @@ final class BrowserWebKitAdapter: NSObject {
     }
 
     private func createContext(tabID: BrowserTabID, configuration: WKWebViewConfiguration) -> Context {
+        precondition(hasConfiguredProfile, "WebKit contexts require an acknowledged Browser profile")
         let webView = makeWebView(.zero, configuration)
         webView.allowsBackForwardNavigationGestures = true
         let context = Context(tabID: tabID, webView: webView, adapter: self)
@@ -256,7 +293,40 @@ final class BrowserWebKitAdapter: NSObject {
     private func configured(_ configuration: WKWebViewConfiguration) -> WKWebViewConfiguration {
         configuration.allowsPictureInPictureMediaPlayback = false
         configuration.allowsAirPlayForMediaPlayback = false
+        configuration.websiteDataStore = websiteDataStore
         return configuration
+    }
+
+    /// Changes the app-wide WebKit profile after releasing every context from the previous profile.
+    private func configureProfile(
+        _ profile: BrowserBrowsingProfile,
+        retiringTabIDs: [BrowserTabID],
+    ) {
+        guard profile != browsingProfile || !retiringTabIDs.isEmpty else {
+            hasConfiguredProfile = true
+            return
+        }
+
+        let ownedTabIDs = Array(contexts.keys)
+        retiredTabIDs.formUnion(retiringTabIDs)
+        retiredTabIDs.formUnion(ownedTabIDs)
+        ownedTabIDs.forEach(destroyContext(for:))
+        browsingProfile = profile
+        ephemeralWebsiteDataStore = profile == .ephemeral ? WKWebsiteDataStore.nonPersistent() : nil
+        hasConfiguredProfile = true
+    }
+
+    private var websiteDataStore: WKWebsiteDataStore {
+        switch browsingProfile {
+        case .persistentPrivate:
+            return WKWebsiteDataStore.default()
+        case .ephemeral:
+            guard let ephemeralWebsiteDataStore else {
+                preconditionFailure("An Ephemeral profile must own a session website data store")
+            }
+
+            return ephemeralWebsiteDataStore
+        }
     }
 }
 

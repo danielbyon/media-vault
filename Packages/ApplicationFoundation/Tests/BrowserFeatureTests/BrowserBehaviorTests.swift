@@ -573,6 +573,7 @@ struct BrowserBehaviorTests {
 }
 
 private enum BrowserCommandRoute: Equatable {
+    case configureProfile(profile: BrowserBrowsingProfile, retiringTabIDs: [BrowserTabID])
     case ensureContext(tabID: BrowserTabID)
     case destroyContext(tabID: BrowserTabID)
     case load(tabID: BrowserTabID, url: URL)
@@ -596,7 +597,8 @@ extension BrowserWebKitCommand {
              let .reload(_, operationID),
              let .goToBackForwardEntry(_, _, operationID):
             operationID
-        case .ensureContext,
+        case .configureProfile,
+             .ensureContext,
              .destroyContext,
              .stop,
              .showBackForwardList,
@@ -609,6 +611,8 @@ extension BrowserWebKitCommand {
 
     fileprivate var route: BrowserCommandRoute {
         switch self {
+        case let .configureProfile(profile, retiringTabIDs):
+            .configureProfile(profile: profile, retiringTabIDs: retiringTabIDs)
         case let .ensureContext(tabID):
             .ensureContext(tabID: tabID)
         case let .destroyContext(tabID):

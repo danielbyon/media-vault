@@ -139,7 +139,13 @@ struct BrowserViewInteractionTests {
     func browsingDismissalScopeContainsPageAndChrome() throws {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(1)), url: url)
-        let store = Store(initialState: BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)) {
+        var initialState = BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)
+        initialState.profileConfigurationReady = true
+        BrowserWebKitAdapter.shared.execute(.configureProfile(
+            profile: .persistentPrivate,
+            retiringTabIDs: [],
+        ))
+        let store = Store(initialState: initialState) {
             BrowserFeature()
         }
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
@@ -231,11 +237,13 @@ struct BrowserViewInteractionTests {
             isReady: false,
         )
 
-        coordinator.scheduleReadinessProbe(
-            for: webView,
-            tabID: tabID,
-            readinessContext: .init(),
-        )
+        await performOnNextDisplayTurn {
+            coordinator.scheduleReadinessProbe(
+                for: webView,
+                tabID: tabID,
+                readinessContext: .init(),
+            )
+        }
         await waitForDisplayTurn()
         #expect(registry.isReady(for: .content(tabID)) == false)
         #expect(!readinessEvents.contains(.targetPresentationReady(tabID)))
@@ -288,11 +296,13 @@ struct BrowserViewInteractionTests {
             representation: .live,
             isReady: false,
         )
-        coordinator.scheduleReadinessProbe(
-            for: webView,
-            tabID: tabID,
-            readinessContext: .init(),
-        )
+        await performOnNextDisplayTurn {
+            coordinator.scheduleReadinessProbe(
+                for: webView,
+                tabID: tabID,
+                readinessContext: .init(),
+            )
+        }
 
         await waitForDisplayTurn()
         #expect(registry.isReady(for: .content(tabID)) == false)
@@ -546,6 +556,7 @@ struct BrowserViewInteractionTests {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(9_001)), url: url)
         var initialState = BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)
+        initialState.profileConfigurationReady = true
         let previewData = try solidPreviewData(red: 217, green: 74, blue: 90)
         initialState.previewState.setData(.init(
             revision: initialState.previewState.revision(for: tab.id),
@@ -554,6 +565,10 @@ struct BrowserViewInteractionTests {
         let store = Store(initialState: initialState) {
             BrowserFeature()
         }
+        BrowserWebKitAdapter.shared.execute(.configureProfile(
+            profile: .persistentPrivate,
+            retiringTabIDs: [],
+        ))
         var animator: UIViewPropertyAnimator?
         var executions: [BrowserTabTransitionExecution] = []
         var readinessEvents: [BrowserTabTransitionEvent] = []
@@ -739,6 +754,7 @@ struct BrowserViewInteractionTests {
             tabs: [first, second],
             selectedTabID: firstID,
         )
+        initialState.profileConfigurationReady = true
         let firstPreviewData = try solidPreviewData(red: 217, green: 74, blue: 90)
         let secondPreviewData = try solidPreviewData(red: 59, green: 130, blue: 246)
         initialState.previewState.setData(.init(
@@ -753,6 +769,7 @@ struct BrowserViewInteractionTests {
             BrowserFeature()
         }
         let adapter = BrowserWebKitAdapter.shared
+        adapter.execute(.configureProfile(profile: .persistentPrivate, retiringTabIDs: []))
         let firstWebView = adapter.ensureContext(for: firstID)
         let secondWebView = adapter.ensureContext(for: secondID)
         var animator: UIViewPropertyAnimator?
@@ -1846,6 +1863,20 @@ struct BrowserViewInteractionTests {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let target = DisplayLinkTarget {
                 continuation.resume()
+            }
+            let displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
+            displayLink.add(to: .main, forMode: .common)
+        }
+    }
+
+    private func performOnNextDisplayTurn(_ action: @escaping () -> Void) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let target = DisplayLinkTarget {
+                Task { @MainActor in
+                    await Task.yield()
+                    action()
+                    continuation.resume()
+                }
             }
             let displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
             displayLink.add(to: .main, forMode: .common)

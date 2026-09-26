@@ -8,7 +8,7 @@
 import ComposableArchitecture
 import SwiftUI
 
-/// Authenticated Settings → Browser preferences and Issue #39 destructive seams.
+/// Authenticated Browser preferences and the profile confirmation boundary.
 @MainActor
 @preconcurrency
 public struct BrowserSettingsView: View {
@@ -18,13 +18,55 @@ public struct BrowserSettingsView: View {
         self.store = store
     }
 
-    /// Renders persistent Issue #37 preferences and Issue #39 destructive seams.
+    /// Renders search, tab, website-data profile, and Browser reset preferences.
     public var body: some View {
         Form {
+            profileSection
             searchSection
             tabsSection
             browserDataSection
-        }.navigationTitle("Browser")
+        }
+        .navigationTitle("Browser")
+        .confirmationDialog(
+            confirmationTitle,
+            isPresented: Binding(
+                get: { store.pendingProfileChange != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        store.send(.profileChangeCancelled)
+                    }
+                },
+            ),
+            titleVisibility: .visible,
+        ) {
+            Button(confirmationActionTitle, role: isResetConfirmation ? .destructive : nil) {
+                store.send(.profileChangeConfirmed)
+            }
+            Button("Cancel", role: .cancel) {
+                store.send(.profileChangeCancelled)
+            }
+        } message: {
+            Text(confirmationMessage)
+        }
+    }
+
+    private var profileSection: some View {
+        Section("Privacy") {
+            Picker("Browsing Profile", selection: Binding(
+                get: { store.settings.browsingProfile },
+                set: { store.send(.profileChangeRequested($0)) },
+            )) {
+                ForEach(BrowserBrowsingProfile.allCases, id: \.self) { profile in
+                    Text(profile.displayName).tag(profile)
+                }
+            }
+            .disabled(!store.canCreateWebKitContext)
+            Text(
+                "Persistent-Private keeps website data between visits. Ephemeral session data is discarded when you switch profiles.",
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
     }
 
     private var searchSection: some View {
@@ -65,6 +107,34 @@ public struct BrowserSettingsView: View {
             Button("Clear History", role: .destructive) { store.send(.clearHistoryTapped(source: .settings)) }
             Button("Delete All Bookmarks", role: .destructive) { store.send(.deleteAllBookmarksTapped) }
             Button("Reset Browser Settings") { store.send(.resetSettings) }
+                .disabled(!store.canCreateWebKitContext)
         }
+    }
+
+    private var confirmationTitle: String {
+        isResetConfirmation ? "Reset Browser Settings?" : "Change Browsing Profile?"
+    }
+
+    private var confirmationActionTitle: String {
+        if isResetConfirmation {
+            "Reset and Switch"
+        } else if case let .profile(profile) = store.pendingProfileChange {
+            "Switch to \(profile.displayName)"
+        } else {
+            "Continue"
+        }
+    }
+
+    private var confirmationMessage: String {
+        if isResetConfirmation {
+            "This resets all Browser preferences and switches to Persistent-Private. Loaded History and bookmarks remain available."
+        } else {
+            "Changing profiles closes all open tabs and starts a new session. "
+                + "Persistent-Private website data remains saved. Ephemeral session data is discarded when you leave."
+        }
+    }
+
+    private var isResetConfirmation: Bool {
+        store.pendingProfileChange == .resetSettings
     }
 }

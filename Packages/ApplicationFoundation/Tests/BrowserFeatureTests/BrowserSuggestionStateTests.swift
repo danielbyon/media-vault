@@ -279,6 +279,7 @@ struct BrowserSuggestionStateTests {
     @Test("Reset settings clears provider results before rebuilding transient suggestions")
     func resetSettingsClearsProviderResults() async {
         var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        state.profileConfigurationReady = true
         state.focusedField = .startPage
         state.settings.providerSuggestionsEnabled = true
         state.omniboxDraft = "private"

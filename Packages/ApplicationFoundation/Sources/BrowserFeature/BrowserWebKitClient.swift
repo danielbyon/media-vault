@@ -20,6 +20,8 @@ public struct BrowserNavigationOperationID: Hashable, Sendable {
 
 /// Sendable commands accepted by the live main-actor WebKit adapter.
 public enum BrowserWebKitCommand: Equatable, Sendable {
+    /// Installs the global website-data profile before Browser permits WebKit-backed navigation.
+    case configureProfile(profile: BrowserBrowsingProfile, retiringTabIDs: [BrowserTabID])
     /// Creates a live context if one does not already exist.
     case ensureContext(tabID: BrowserTabID)
     /// Destroys one live context and resolves its transient UI.

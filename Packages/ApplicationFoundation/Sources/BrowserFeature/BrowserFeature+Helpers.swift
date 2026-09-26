@@ -28,6 +28,9 @@ extension BrowserFeature {
         case .empty:
             return .none
         case let .web(url):
+            guard !deferWebAction(.navigate(url), state: &state) else {
+                return .none
+            }
             guard let index = state.tabs.firstIndex(where: { $0.id == state.selectedTabID }) else {
                 return .none
             }
@@ -58,6 +61,9 @@ extension BrowserFeature {
     }
 
     func navigate(url: URL, state: inout State) -> Effect<Action> {
+        guard !deferWebAction(.navigate(url), state: &state) else {
+            return .none
+        }
         guard let index = state.tabs.firstIndex(where: { $0.id == state.selectedTabID }) else {
             return .none
         }
@@ -596,5 +602,89 @@ extension BrowserFeature {
     func persist(settings: BrowserSettings) -> Effect<Action> {
         let save = browserSettings.save
         return .run { _ in await save(settings) }
+    }
+
+    /// Holds WebKit-bound navigation until the adapter confirms the profile that owns its context.
+    @discardableResult
+    func deferWebAction(_ action: BrowserDeferredWebAction, state: inout State) -> Bool {
+        guard state.profileConfigurationRequestID != nil else {
+            return false
+        }
+
+        state.pendingWebAction = action
+        return true
+    }
+
+    /// Resumes the latest held WebKit action after profile setup has completed.
+    func resumePendingWebAction(state: inout State) -> Effect<Action> {
+        guard let pendingWebAction = state.pendingWebAction else {
+            return .none
+        }
+
+        state.pendingWebAction = nil
+        switch pendingWebAction {
+        case let .navigate(url):
+            return navigate(url: url, state: &state)
+        case let .openInNewTab(url, openerID):
+            return .send(.openInNewTab(url, openerID: openerID))
+        }
+    }
+
+    /// Resets the live tab session and waits for adapter configuration before releasing new work.
+    func beginProfileTransition(
+        to profile: BrowserBrowsingProfile,
+        resetsSettings: Bool,
+        state: inout State,
+    ) -> Effect<Action> {
+        let retiringTabIDs = state.tabs.map(\.id)
+        if resetsSettings {
+            state.settings = .init()
+        } else {
+            state.settings.browsingProfile = profile
+        }
+
+        state.profileConfigurationGeneration &+= 1
+        let requestID = state.profileConfigurationGeneration
+        state.profileConfigurationRequestID = requestID
+        state.pendingWebAction = nil
+        let startPageID = BrowserTabID(uuid())
+        state.tabs = [.startPage(id: startPageID)]
+        state.previewState.replaceWithOnlyTab(startPageID)
+        state.selectedTabID = startPageID
+        state.presentation = .browsing
+        state.tabOverviewFocusID = nil
+        state.tabOverviewScrollPosition = nil
+        state.focusedField = .none
+        state.omniboxDraft = ""
+        state.hasUnsubmittedOmniboxDraft = false
+        state.providerSuggestionValues = []
+        state.copiedLink = nil
+        state.library = nil
+        state.bookmarkEditor = nil
+        state.findDraft = nil
+        state.backForwardList = nil
+        state.javaScriptDialogTabID = nil
+        state.shareURL = nil
+        state.shareTitle = nil
+        state.destructiveConfirmation = nil
+        state.pendingNewTab = nil
+        state.rebuildSuggestions()
+
+        let execute = webKit.execute
+        let settings = state.settings
+        let save = browserSettings.save
+        let reset = browserSettings.reset
+        return .merge(
+            .cancel(id: CancelID.providerSuggestions),
+            .run { send in
+                await execute(.configureProfile(profile: profile, retiringTabIDs: retiringTabIDs))
+                if resetsSettings {
+                    await reset()
+                } else {
+                    await save(settings)
+                }
+                await send(.profileConfigurationCompleted(profile: profile, requestID: requestID))
+            },
+        )
     }
 }

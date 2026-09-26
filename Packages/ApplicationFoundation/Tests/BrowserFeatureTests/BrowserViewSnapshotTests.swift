@@ -240,11 +240,31 @@ struct BrowserViewSnapshotTests {
 
     @Test("Authenticated Browser settings show privacy disclosure and new-tab choices")
     func settings() {
-        let state = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+        var state = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+        state.profileConfigurationReady = true
         let store = Store(initialState: state) { BrowserFeature() }
         presentationSnapshot(
             NavigationStack { BrowserSettingsView(store: store) },
             named: "settings-browser-large-phone",
+            config: DeterministicTestSupport.largePhone,
+        )
+
+        var confirmationState = state
+        confirmationState.pendingProfileChange = .profile(.ephemeral)
+        let confirmationStore = Store(initialState: confirmationState) { BrowserFeature() }
+        presentationSnapshot(
+            NavigationStack { BrowserSettingsView(store: confirmationStore) },
+            named: "settings-browser-ephemeral-confirmation-large-phone",
+            config: DeterministicTestSupport.largePhone,
+        )
+
+        var resetConfirmationState = state
+        resetConfirmationState.settings.browsingProfile = .ephemeral
+        resetConfirmationState.pendingProfileChange = .resetSettings
+        let resetConfirmationStore = Store(initialState: resetConfirmationState) { BrowserFeature() }
+        presentationSnapshot(
+            NavigationStack { BrowserSettingsView(store: resetConfirmationStore) },
+            named: "settings-browser-ephemeral-reset-confirmation-large-phone",
             config: DeterministicTestSupport.largePhone,
         )
 
