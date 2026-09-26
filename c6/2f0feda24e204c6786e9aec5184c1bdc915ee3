@@ -1,0 +1,85 @@
+Packages/ApplicationFoundation/Sources/DecoySupport/DecoyHiddenEntryAttempt.swift
+  s_5153b6e532f438::t_96f4a20378438d 23-34,40-42,46-47,49,141-150
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorDecoyAdapterTests.swift
+  s_5153b6e532f438::t_b435bffd44a6b3 28-29,38-44
+  s_5153b6e532f438::t_c22ddc33bffcab 45-46
+Packages/ApplicationFoundation/Sources/AppFeature/ShippingDecoyRegistry.swift
+  s_5153b6e532f438::t_7964e43412ebde 13
+  s_5153b6e532f438::t_1c43d5bb869af7 1-8,10-12,14-17
+  s_5153b6e532f438::t_8a293127172191 9
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootFeatureTests.swift
+  s_5153b6e532f438::t_383672965fde7d 9
+  s_5153b6e532f438::t_ba41169afd29c4 350-358
+  s_5153b6e532f438::t_0f7112e5b469a3 327
+  s_5153b6e532f438::t_0f41db6521d69d 14
+  s_5153b6e532f438::t_e79ca249c45af2 109,111-114,116-149
+  s_5153b6e532f438::t_10ff43511c43bb 41-46,51-55
+  s_5153b6e532f438::t_04712f892303f8 263,303-320,324
+  s_5153b6e532f438::t_5e55476ca1d045 10,16,18,20-40,47,49-50,56,60,62-72,74-76,78-82,85,87-97,99-101,103-106,150-156,160-161,163-178,181-248,251,253-262,264-272,274-290,292-302,321-323,325-326,328-332,339-345,348-349,359-360,362-366
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureViewSnapshotTests.swift
+  s_5153b6e532f438::t_820f1fc0aa7c4f 45-48,66,74,87-91,93,97,102
+  s_5153b6e532f438::t_ba41169afd29c4 58
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootTestDecoyProbe.swift
+  s_5153b6e532f438::t_cd9eeee8581844 22-23,25,27,30-37,39-41,52,92-93
+  s_5153b6e532f438::t_3c5c28fa3f4b3b 2
+  s_5153b6e532f438::t_0f41db6521d69d 38
+  s_5153b6e532f438::t_261662c0e5775c 10,13,16-21,24,26,28-29,42-51,53-91,94-109,113,115,117-121,124,126-127
+Packages/ApplicationFoundation/Package.swift
+  s_5153b6e532f438::t_2ed6c39ec000bb 91,106,201
+AppTests/__Snapshots__/RootSurfaceSnapshotTests/rootStateSnapshot.1.txt
+  s_5153b6e532f438::t_2410cb77f3d1fd 1
+Packages/ApplicationFoundation/Sources/AppFeature/RootFeature.swift
+  s_5153b6e532f438::t_180f533e586b86 238-244
+  s_5153b6e532f438::t_8544e5e07ba4cf 39,231,256
+  s_5153b6e532f438::t_ebc8ecc1feaa3d 120,122-131
+  s_5153b6e532f438::t_ba41169afd29c4 80,82,112-116,164-165
+  s_5153b6e532f438::t_6069d5c4dbf06d 9,13,16,22-27,29,31,35-38,40-42,51-52,58,60-67,76,79,81,88,91-97,99-101,104-111,117-119,121,134-143,146-147,151-152,155-158,162-163,166-170,173-174,177-179,182,185-201,203-207,211-214,216-217,219-224,226-227,229-230,232-237,245-255,257-258,260-270,287,306,313,317-318,331
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorDecoyAdapter.swift
+  s_5153b6e532f438::t_1b2f8a809cd8d1 24,30
+AppTests/RootSurfaceSnapshotTests.swift
+  s_5153b6e532f438::t_9f08b2d09b0985 15,22-23,51-58,63,76-77
+  s_5153b6e532f438::t_f4bb305c49792d 20
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorDecoySessionFeature.swift
+  s_5153b6e532f438::t_3c5c28fa3f4b3b 2,9-10,12-13,15-19,24-33,35-36,41-45,47-50,52-57,59-69,72-86
+Packages/ApplicationFoundation/Sources/DecoySupport/DecoyDefinition.swift
+  s_5153b6e532f438::t_f5afe85832a238 14,19,30,39-40,101,115
+  s_5153b6e532f438::t_2f7882efcd4d61 27
+  s_5153b6e532f438::t_34da270e9a27e0 18,49,63,110,128
+  s_5153b6e532f438::t_ba41169afd29c4 64-65
+  s_5153b6e532f438::t_2d7ce4324bd878 1-13,15-17,20-26,28-29,31-38,41-48,50-62,66-90,92-100,102-109,111-114,116-126,129-132
+  s_5153b6e532f438::t_7cb83128d98ad5 91,127
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultFeature.swift
+  s_5153b6e532f438::t_025b5c9641f82a 114,164
+  s_5153b6e532f438::t_e7757d1824306d 9,90-92,110,165-168,170-174,366,419,423-424,430,437-446,451,453-458,462-470
+App/Application.swift
+  s_5153b6e532f438::t_280a209bf6bf7e 20
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureTests.swift
+  s_5153b6e532f438::t_77a0a8420d9678 10,207,225,227,232,289-297,299,304-307
+Packages/ApplicationFoundation/Tests/DecoySupportTests/DecoySessionCompositionTests.swift
+  s_5153b6e532f438::t_4fac20177f8449 2,8-9,12-15,17-19,21-23,28-31,33-35,37-41,44-48,50-54,57,59-65,67-69,72-78
+  s_5153b6e532f438::t_c563ce4606175b 43,49,58,66
+  s_5153b6e532f438::t_ba41169afd29c4 25-26
+  s_5153b6e532f438::t_95cc8edc69072c 16
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorViewSnapshotTests.swift
+  s_5153b6e532f438::t_523db893a9bceb 9,47-48,56-57,62-71,73-86,88-95,132-154
+  s_5153b6e532f438::t_65313b676be2ac 16,49-55,58-61,72,87
+Packages/ApplicationFoundation/Tests/DecoySupportTests/DecoySupportContractTests.swift
+  s_5153b6e532f438::t_29765853a2db4a 17,21,24-42
+  s_5153b6e532f438::t_62a61675f87e0f 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c62f0feda24e204c6786e9aec5184c1bdc915ee3",
+  "prompts": {},
+  "sessions": {
+    "s_5153b6e532f438": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0da23-5fce-7131-bdb6-e96d46cca9e8",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
