@@ -1,0 +1,22 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserChromeView.swift
+  s_85d3a320fe1b2b::t_f9914a55432863 53
+  s_85d3a320fe1b2b::t_261b601debf917 13-14
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewInteractionTests.swift
+  s_85d3a320fe1b2b::t_2193198766bf4b 31-34,175-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "643088f8c468b6a2614829ca86f7a5139b017dc4",
+  "prompts": {},
+  "sessions": {
+    "s_85d3a320fe1b2b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0dc18-9eaa-7382-888f-c5722f6a1304",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
