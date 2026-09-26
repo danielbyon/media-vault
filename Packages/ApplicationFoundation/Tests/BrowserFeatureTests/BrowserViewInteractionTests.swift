@@ -28,6 +28,10 @@ struct BrowserViewInteractionTests {
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
 
         #expect(descendants(of: hostingController.view, matching: UITextField.self).count == 1)
+        let textField = try #require(descendants(of: hostingController.view, matching: UITextField.self).first)
+        #expect(textField.autocorrectionType == .no)
+        #expect(textField.autocapitalizationType == .none)
+        #expect(textField.keyboardType == .webSearch)
 
         window.isHidden = true
         window.rootViewController = nil
@@ -168,6 +172,9 @@ struct BrowserViewInteractionTests {
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
         let textField = try #require(descendants(of: hostingController.view, matching: UITextField.self).first)
 
+        #expect(textField.autocorrectionType == .no)
+        #expect(textField.autocapitalizationType == .none)
+        #expect(textField.keyboardType == .webSearch)
         #expect(
             descendants(of: hostingController.view, matching: UIScrollView.self)
                 .contains(where: { $0.keyboardDismissMode == .interactive }),
