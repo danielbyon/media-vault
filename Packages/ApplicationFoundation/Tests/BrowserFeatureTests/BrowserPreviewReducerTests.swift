@@ -38,7 +38,7 @@ struct BrowserPreviewReducerTests {
         let url = try #require(URL(string: "https://example.com"))
         let stale = Data([1, 2, 3])
         let fresh = Data([4, 5, 6])
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: tabID, url: url)],
             selectedTabID: tabID,
         )
@@ -60,7 +60,7 @@ struct BrowserPreviewReducerTests {
     func previewResultsRequireLiveTab() async throws {
         let tabID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: tabID, url: url)],
             selectedTabID: tabID,
         )
@@ -89,7 +89,7 @@ struct BrowserPreviewReducerTests {
         let firstID = BrowserTabID()
         let secondID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: firstID, url: url), .startPage(id: secondID)],
             selectedTabID: firstID,
         )
@@ -117,7 +117,7 @@ struct BrowserPreviewReducerTests {
         let thirdID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
         let closedIDs = [firstID, secondID, thirdID]
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: firstID, url: url),
                 .web(id: secondID, url: url),
@@ -156,7 +156,7 @@ struct BrowserPreviewReducerTests {
         let closedFirstID = BrowserTabID()
         let closedSecondID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: survivorID, url: url),
                 .web(id: closedFirstID, url: url),
@@ -209,7 +209,7 @@ struct BrowserPreviewReducerTests {
         let terminatedID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        let initialState = BrowserFeature.State(
+        let initialState = BrowserFeature.State.readyForTesting(
             tabs: [
                 .startPage(id: startID),
                 .web(id: webID, url: url),
@@ -239,7 +239,7 @@ struct BrowserPreviewReducerTests {
         let tabID = BrowserTabID()
         let firstURL = try #require(URL(string: "https://first.example"))
         let secondURL = try #require(URL(string: "https://second.example"))
-        let state = BrowserFeature.State(
+        let state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: tabID, url: firstURL)],
             selectedTabID: tabID,
         )
@@ -263,7 +263,7 @@ struct BrowserPreviewReducerTests {
         let tabID = BrowserTabID()
         let firstURL = try #require(URL(string: "https://first.example"))
         let secondURL = try #require(URL(string: "https://second.example"))
-        let state = BrowserFeature.State(
+        let state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: tabID, url: firstURL)],
             selectedTabID: tabID,
         )
@@ -290,7 +290,7 @@ struct BrowserPreviewReducerTests {
         var tab = BrowserTab.web(id: tabID, url: firstURL)
         tab.metadata.committedURL = firstURL
         let store = TestStore(
-            initialState: BrowserFeature.State(
+            initialState: BrowserFeature.State.readyForTesting(
                 tabs: [tab],
                 selectedTabID: tabID,
             ),
@@ -323,7 +323,7 @@ struct BrowserPreviewReducerTests {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: tabID, url: url)
         let store = TestStore(
-            initialState: BrowserFeature.State(
+            initialState: BrowserFeature.State.readyForTesting(
                 tabs: [tab],
                 selectedTabID: tabID,
             ),
@@ -351,7 +351,7 @@ struct BrowserPreviewReducerTests {
         var tab = BrowserTab.web(id: tabID, url: firstURL)
         tab.metadata.committedURL = firstURL
         let store = TestStore(
-            initialState: BrowserFeature.State(
+            initialState: BrowserFeature.State.readyForTesting(
                 tabs: [tab],
                 selectedTabID: tabID,
             ),
@@ -395,7 +395,7 @@ struct BrowserPreviewReducerTests {
         var tab = BrowserTab.web(id: tabID, url: firstURL)
         tab.metadata.committedURL = firstURL
         let store = TestStore(
-            initialState: BrowserFeature.State(
+            initialState: BrowserFeature.State.readyForTesting(
                 tabs: [tab],
                 selectedTabID: tabID,
             ),
@@ -432,7 +432,7 @@ struct BrowserPreviewReducerTests {
         let secondURL = try #require(URL(string: "https://second.example"))
         var tab = BrowserTab.web(id: tabID, url: firstURL)
         tab.metadata.committedURL = firstURL
-        let state = BrowserFeature.State(
+        let state = BrowserFeature.State.readyForTesting(
             tabs: [tab],
             selectedTabID: tabID,
         )
@@ -465,7 +465,7 @@ struct BrowserPreviewReducerTests {
         let secondURL = try #require(URL(string: "https://second.example"))
         var tab = BrowserTab.web(id: tabID, url: firstURL)
         tab.metadata.committedURL = firstURL
-        let state = BrowserFeature.State(
+        let state = BrowserFeature.State.readyForTesting(
             tabs: [tab],
             selectedTabID: tabID,
         )
@@ -496,7 +496,7 @@ struct BrowserPreviewReducerTests {
         let tabID = BrowserTabID()
         let firstURL = try #require(URL(string: "https://first.example"))
         let secondURL = try #require(URL(string: "https://second.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: tabID, url: firstURL)],
             selectedTabID: tabID,
         )

@@ -21,7 +21,7 @@ struct BrowserViewInteractionTests {
     func browsingWebTabMountsOneOmnibox() throws {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(1)), url: url)
-        let store = Store(initialState: BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)) {
+        let store = Store(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)) {
             BrowserFeature()
         }
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
@@ -42,7 +42,7 @@ struct BrowserViewInteractionTests {
         let tabIDs = (0 ..< 24).map { BrowserTabID(UUID(9_086_100 + $0)) }
         let selectedTabID = tabIDs[0]
         let store = Store(
-            initialState: BrowserFeature.State(
+            initialState: BrowserFeature.State.readyForTesting(
                 tabs: tabIDs.map { .startPage(id: $0) },
                 selectedTabID: selectedTabID,
                 presentation: .tabOverview,
@@ -88,7 +88,7 @@ struct BrowserViewInteractionTests {
     func sceneDeactivationCommitsLatestOverviewPosition() async {
         let first = BrowserTabID(UUID(9_020))
         let second = BrowserTabID(UUID(9_021))
-        var initialState = BrowserFeature.State(
+        var initialState = BrowserFeature.State.readyForTesting(
             tabs: [.startPage(id: first), .startPage(id: second)],
             selectedTabID: first,
             presentation: .tabOverview,
@@ -139,7 +139,13 @@ struct BrowserViewInteractionTests {
     func browsingDismissalScopeContainsPageAndChrome() throws {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(1)), url: url)
-        let store = Store(initialState: BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)) {
+        var initialState = BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)
+        initialState.profileLifecycle = .ready
+        BrowserWebKitAdapter.shared.execute(.configureProfile(
+            profile: .persistentPrivate,
+            retiringTabIDs: [],
+        ))
+        let store = Store(initialState: initialState) {
             BrowserFeature()
         }
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
@@ -165,7 +171,7 @@ struct BrowserViewInteractionTests {
 
     @Test("Start Page native host receives interactive keyboard dismissal")
     func startPageNativeHostReceivesInteractiveDismissal() throws {
-        let store = Store(initialState: BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))) {
+        let store = Store(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))) {
             BrowserFeature()
         }
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
@@ -231,11 +237,13 @@ struct BrowserViewInteractionTests {
             isReady: false,
         )
 
-        coordinator.scheduleReadinessProbe(
-            for: webView,
-            tabID: tabID,
-            readinessContext: .init(),
-        )
+        await performOnNextDisplayTurn {
+            coordinator.scheduleReadinessProbe(
+                for: webView,
+                tabID: tabID,
+                readinessContext: .init(),
+            )
+        }
         await waitForDisplayTurn()
         #expect(registry.isReady(for: .content(tabID)) == false)
         #expect(!readinessEvents.contains(.targetPresentationReady(tabID)))
@@ -288,11 +296,13 @@ struct BrowserViewInteractionTests {
             representation: .live,
             isReady: false,
         )
-        coordinator.scheduleReadinessProbe(
-            for: webView,
-            tabID: tabID,
-            readinessContext: .init(),
-        )
+        await performOnNextDisplayTurn {
+            coordinator.scheduleReadinessProbe(
+                for: webView,
+                tabID: tabID,
+                readinessContext: .init(),
+            )
+        }
 
         await waitForDisplayTurn()
         #expect(registry.isReady(for: .content(tabID)) == false)
@@ -545,7 +555,8 @@ struct BrowserViewInteractionTests {
     func loadedWebKitTransitionUsesActualPageSurface() async throws {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(9_001)), url: url)
-        var initialState = BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)
+        var initialState = BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)
+        initialState.profileLifecycle = .ready
         let previewData = try solidPreviewData(red: 217, green: 74, blue: 90)
         initialState.previewState.setData(.init(
             revision: initialState.previewState.revision(for: tab.id),
@@ -554,6 +565,10 @@ struct BrowserViewInteractionTests {
         let store = Store(initialState: initialState) {
             BrowserFeature()
         }
+        BrowserWebKitAdapter.shared.execute(.configureProfile(
+            profile: .persistentPrivate,
+            retiringTabIDs: [],
+        ))
         var animator: UIViewPropertyAnimator?
         var executions: [BrowserTabTransitionExecution] = []
         var readinessEvents: [BrowserTabTransitionEvent] = []
@@ -735,10 +750,11 @@ struct BrowserViewInteractionTests {
             id: secondID,
             url: #require(URL(string: "https://second.example")),
         )
-        var initialState = BrowserFeature.State(
+        var initialState = BrowserFeature.State.readyForTesting(
             tabs: [first, second],
             selectedTabID: firstID,
         )
+        initialState.profileLifecycle = .ready
         let firstPreviewData = try solidPreviewData(red: 217, green: 74, blue: 90)
         let secondPreviewData = try solidPreviewData(red: 59, green: 130, blue: 246)
         initialState.previewState.setData(.init(
@@ -753,6 +769,7 @@ struct BrowserViewInteractionTests {
             BrowserFeature()
         }
         let adapter = BrowserWebKitAdapter.shared
+        adapter.execute(.configureProfile(profile: .persistentPrivate, retiringTabIDs: []))
         let firstWebView = adapter.ensureContext(for: firstID)
         let secondWebView = adapter.ensureContext(for: secondID)
         var animator: UIViewPropertyAnimator?
@@ -981,7 +998,7 @@ struct BrowserViewInteractionTests {
     @Test("Real compact layout drives the normal geometry handoff in both directions")
     func realLayoutTabOverviewUsesMountedContentRatio() throws {
         let tab = BrowserTab.startPage(id: BrowserTabID(UUID(1)))
-        let store = Store(initialState: BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)) {
+        let store = Store(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)) {
             BrowserFeature()
         }
         var executions: [BrowserTabTransitionExecution] = []
@@ -1086,7 +1103,7 @@ struct BrowserViewInteractionTests {
         for layout in layouts {
             let selectedTabID = tabIDs[layout.selected]
             let anchor = tabIDs[layout.anchor]
-            var initialState = BrowserFeature.State(
+            var initialState = BrowserFeature.State.readyForTesting(
                 tabs: tabIDs.map { .startPage(id: $0) },
                 selectedTabID: selectedTabID,
             )
@@ -1267,7 +1284,7 @@ struct BrowserViewInteractionTests {
     func mountedBrowserViewUsesReplacementScrollPosition() async throws {
         let firstID = BrowserTabID()
         let secondID = BrowserTabID()
-        var initialState = BrowserFeature.State(
+        var initialState = BrowserFeature.State.readyForTesting(
             tabs: [.startPage(id: firstID), .startPage(id: secondID)],
             selectedTabID: firstID,
             presentation: .tabOverview,
@@ -1327,7 +1344,7 @@ struct BrowserViewInteractionTests {
         }
         let selectedTabID = tabIDs[8]
         let persistedAnchor = tabIDs[0]
-        var initialState = BrowserFeature.State(
+        var initialState = BrowserFeature.State.readyForTesting(
             tabs: tabIDs.map { .startPage(id: $0) },
             selectedTabID: selectedTabID,
         )
@@ -1444,7 +1461,7 @@ struct BrowserViewInteractionTests {
             return BrowserTabID(uuid)
         }
         let compactAnchor = tabIDs[20]
-        var initialState = BrowserFeature.State(
+        var initialState = BrowserFeature.State.readyForTesting(
             tabs: tabIDs.map { .startPage(id: $0) },
             selectedTabID: tabIDs[0],
             presentation: .tabOverview,
@@ -1560,7 +1577,7 @@ struct BrowserViewInteractionTests {
         let firstTab = BrowserTab.startPage(id: BrowserTabID(UUID(1)))
         let secondTab = BrowserTab.startPage(id: BrowserTabID(UUID(2)))
         let store = Store(
-            initialState: BrowserFeature.State(
+            initialState: BrowserFeature.State.readyForTesting(
                 tabs: [firstTab, secondTab],
                 selectedTabID: firstTab.id,
                 presentation: .tabOverview,
@@ -1846,6 +1863,20 @@ struct BrowserViewInteractionTests {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let target = DisplayLinkTarget {
                 continuation.resume()
+            }
+            let displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
+            displayLink.add(to: .main, forMode: .common)
+        }
+    }
+
+    private func performOnNextDisplayTurn(_ action: @escaping () -> Void) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let target = DisplayLinkTarget {
+                Task { @MainActor in
+                    await Task.yield()
+                    action()
+                    continuation.resume()
+                }
             }
             let displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
             displayLink.add(to: .main, forMode: .common)

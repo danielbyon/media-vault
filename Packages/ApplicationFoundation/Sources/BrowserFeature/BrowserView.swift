@@ -427,6 +427,7 @@ extension BrowserView {
                     tabID: tab.id,
                     onRefresh: { store.send(.pullToRefresh) },
                     transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
+                    isProfileConfigurationReady: store.canCreateWebKitContext,
                     readinessContext: webKitReadinessContext(for: tab),
                     readinessCoordinator: webKitReadinessCoordinator,
                     refreshGestureArbitrator: refreshGestureArbitrator,

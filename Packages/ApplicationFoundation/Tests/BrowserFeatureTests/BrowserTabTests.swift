@@ -20,7 +20,7 @@ struct BrowserTabTests {
 
     @Test("Construction, New Tab, and close-last always settle with a Start Page")
     func neverSettlesAtZeroTabs() async {
-        var state = BrowserFeature.State(initialTabID: first)
+        var state = BrowserFeature.State.readyForTesting(initialTabID: first)
         state.settings.copiedLinkSuggestionsEnabled = false
         let store = TestStore(initialState: state) {
             BrowserFeature()
@@ -42,7 +42,7 @@ struct BrowserTabTests {
 
     @Test("Closing an active tab selects its left neighbor and preserves stable order")
     func activeNeighborSelection() async throws {
-        let state = try BrowserFeature.State(
+        let state = try BrowserFeature.State.readyForTesting(
             tabs: [
                 .startPage(id: first),
                 .web(id: second, url: #require(URL(string: "https://two.example"))),
@@ -63,7 +63,7 @@ struct BrowserTabTests {
     func startPageRootNavigation() async throws {
         let destination = try #require(URL(string: "https://example.com"))
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: first)) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: first)) {
             BrowserFeature()
         } withDependencies: {
             $0.browserWebKit.execute = { command in
@@ -109,7 +109,7 @@ struct BrowserTabTests {
     func omniboxFocusRoutesByActiveTab() async throws {
         let url = try #require(URL(string: "https://example.com/private"))
 
-        let startPageStore = TestStore(initialState: BrowserFeature.State(initialTabID: first)) {
+        let startPageStore = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: first)) {
             BrowserFeature()
         }
         await startPageStore.send(.omniboxFocused) {
@@ -119,7 +119,7 @@ struct BrowserTabTests {
 
         var webTab = BrowserTab.web(id: first, url: url)
         webTab.metadata.committedURL = url
-        let webStore = TestStore(initialState: BrowserFeature.State(
+        let webStore = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [webTab],
             selectedTabID: first,
         )) {
@@ -142,7 +142,7 @@ struct BrowserTabTests {
     func startPageReuse() async throws {
         let web = try BrowserTab.web(id: first, url: #require(URL(string: "https://one.example")))
         let start = BrowserTab.startPage(id: second)
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [web, start],
             selectedTabID: first,
         )
@@ -165,7 +165,7 @@ struct BrowserTabTests {
     @Test("Explicit Start Page creates and focuses one when none exists")
     func explicitStartPageCreation() async throws {
         let url = try #require(URL(string: "https://example.com"))
-        var state = BrowserFeature.State(initialTabID: first)
+        var state = BrowserFeature.State.readyForTesting(initialTabID: first)
         state.tabs = [.web(id: first, url: url)]
         state.settings.copiedLinkSuggestionsEnabled = false
         let store = TestStore(initialState: state) { BrowserFeature() } withDependencies: {
@@ -188,7 +188,7 @@ struct BrowserTabTests {
         let openerURL = try #require(URL(string: "https://opener.example"))
         let popupOneURL = try #require(URL(string: "https://popup-one.example"))
         let popupTwoURL = try #require(URL(string: "https://popup-two.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: opener, url: openerURL),
                 .startPage(id: unrelated),
@@ -219,7 +219,7 @@ struct BrowserTabTests {
     @Test("Selecting a Start Page card exits overview without summoning the keyboard")
     func overviewStartPageSelectionDoesNotFocus() async throws {
         let pageURL = try #require(URL(string: "https://one.example"))
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: first, url: pageURL),
                 .startPage(id: second),
@@ -240,7 +240,7 @@ struct BrowserTabTests {
         let firstURL = try #require(URL(string: "https://one.example"))
         let secondURL = try #require(URL(string: "https://two.example"))
         let thirdURL = try #require(URL(string: "https://three.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: first, url: firstURL),
                 .web(id: second, url: secondURL),
@@ -265,7 +265,7 @@ struct BrowserTabTests {
         let firstURL = try #require(URL(string: "https://one.example"))
         let secondURL = try #require(URL(string: "https://two.example"))
         let fourthURL = try #require(URL(string: "https://four.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: first, url: firstURL),
                 .web(id: second, url: secondURL),
@@ -290,7 +290,7 @@ struct BrowserTabTests {
         let firstURL = try #require(URL(string: "https://one.example"))
         let secondURL = try #require(URL(string: "https://two.example"))
         let thirdURL = try #require(URL(string: "https://three.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: first, url: firstURL),
                 .web(id: second, url: secondURL),
@@ -312,7 +312,7 @@ struct BrowserTabTests {
     @Test("Closing the final overview card focuses the newly created Start Page")
     func closingFinalOverviewCardFocusesFreshStartPage() async throws {
         let url = try #require(URL(string: "https://one.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: first, url: url)],
             selectedTabID: first,
             presentation: .tabOverview,
@@ -331,9 +331,9 @@ struct BrowserTabTests {
 
     @Test("Fresh Browser state starts without a Tab Overview scroll anchor")
     func freshStateStartsWithoutTabOverviewScrollAnchor() {
-        #expect(BrowserFeature.State(initialTabID: first).tabOverviewScrollPosition == nil)
+        #expect(BrowserFeature.State.readyForTesting(initialTabID: first).tabOverviewScrollPosition == nil)
         #expect(
-            BrowserFeature.State(
+            BrowserFeature.State.readyForTesting(
                 tabs: [.startPage(id: first), .startPage(id: second)],
                 selectedTabID: first,
             )
@@ -343,7 +343,7 @@ struct BrowserTabTests {
 
     @Test("Tab Overview scroll commits are accepted only before overview exit")
     func tabOverviewScrollCommitsAreLimitedToOverview() async {
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [.startPage(id: first), .startPage(id: second)],
             selectedTabID: first,
             presentation: .tabOverview,
@@ -369,7 +369,7 @@ struct BrowserTabTests {
 
     @Test("Live Tab Overview scroll identity stays local until commit and follows reconciliation")
     func tabOverviewScrollAdapterCommitsOnlyStableIdentity() async {
-        var initialState = BrowserFeature.State(
+        var initialState = BrowserFeature.State.readyForTesting(
             tabs: [
                 .startPage(id: first),
                 .startPage(id: second),
@@ -447,7 +447,7 @@ struct BrowserTabTests {
 
     @Test("Animating overview targets are accepted and become the reducer restoration anchor")
     func tabOverviewScrollAdapterCommitsAnimatingTargets() async {
-        let initialState = BrowserFeature.State(
+        let initialState = BrowserFeature.State.readyForTesting(
             tabs: [
                 .startPage(id: first),
                 .startPage(id: second),
@@ -793,7 +793,7 @@ struct BrowserTabTests {
 
     @Test("Tab Overview scroll anchor survives repeated browsing transitions")
     func tabOverviewScrollAnchorSurvivesRepeatedBrowsingTransitions() async {
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [
                 .startPage(id: first),
                 .startPage(id: second),
@@ -819,7 +819,7 @@ struct BrowserTabTests {
     @Test("Removing the anchored card chooses the nearest surviving logical tab")
     func removingAnchoredCardChoosesNearestSurvivingLogicalTab() async throws {
         let fourth = BrowserTabID(UUID(3))
-        var state = try BrowserFeature.State(
+        var state = try BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: first, url: #require(URL(string: "https://one.example"))),
                 .web(id: second, url: #require(URL(string: "https://two.example"))),
@@ -848,7 +848,7 @@ struct BrowserTabTests {
 
     @Test("A live scroll anchor survives unrelated tab removal")
     func liveScrollAnchorSurvivesUnrelatedTabRemoval() async throws {
-        var state = try BrowserFeature.State(
+        var state = try BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: first, url: #require(URL(string: "https://one.example"))),
                 .web(id: second, url: #require(URL(string: "https://two.example"))),
@@ -881,7 +881,7 @@ struct BrowserTabTests {
             BrowserTab.web(id: third, url: #require(URL(string: "https://three.example"))),
             BrowserTab.web(id: fourth, url: #require(URL(string: "https://four.example"))),
         ]
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: tabs,
             selectedTabID: first,
             presentation: .browsing,
@@ -898,7 +898,7 @@ struct BrowserTabTests {
         #expect(store.state.tabs.map(\.id) == [third])
         #expect(store.state.tabOverviewScrollPosition == third)
 
-        var replacementState = BrowserFeature.State(
+        var replacementState = BrowserFeature.State.readyForTesting(
             tabs: tabs,
             selectedTabID: first,
             presentation: .browsing,

@@ -16,7 +16,7 @@ struct BrowserPresentationTests {
     @Test("Each Library invocation owns fresh transient section state and blocks overview")
     func libraryPresentationLifetime() async {
         let referenceDate = Date(timeIntervalSince1970: 1_700_000_000)
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())) {
             BrowserFeature()
         } withDependencies: {
             $0.date.now = referenceDate
@@ -41,7 +41,7 @@ struct BrowserPresentationTests {
         let bookmarkID = UUID()
         let historyID = UUID()
         let referenceDate = Date(timeIntervalSince1970: 1_700_000_000)
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())) {
             BrowserFeature()
         } withDependencies: {
             $0.date.now = referenceDate
@@ -87,7 +87,7 @@ struct BrowserPresentationTests {
     func viewBookmark() async {
         let id = UUID()
         let referenceDate = Date(timeIntervalSince1970: 1_700_000_000)
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())) {
             BrowserFeature()
         } withDependencies: {
             $0.date.now = referenceDate
@@ -105,7 +105,7 @@ struct BrowserPresentationTests {
     @Test("Both Clear History entry points use one confirmed injectable operation")
     func clearHistoryRouting() async {
         let calls = LockIsolated(0)
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())) {
             BrowserFeature()
         } withDependencies: {
             $0.browserLibrary.clearHistory = { calls.withValue { $0 += 1 } }
@@ -127,7 +127,7 @@ struct BrowserPresentationTests {
     @Test("Leaving top-level Browser resigns omnibox focus and clears destructive confirmation")
     func topLevelDeselectionClearsTransientPresentation() async throws {
         let tabID = BrowserTabID()
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.startPage(id: tabID)],
             selectedTabID: tabID,
             focusedField: .startPage,
@@ -151,7 +151,7 @@ struct BrowserPresentationTests {
 
     @Test("Dismissing destructive confirmation clears reducer presentation state")
     func destructiveConfirmationDismissal() async {
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())) {
             BrowserFeature()
         }
 
@@ -165,7 +165,7 @@ struct BrowserPresentationTests {
 
     @Test("Delete All Bookmarks confirmation carries the available count")
     func deleteAllBookmarksConfirmation() async throws {
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.bookmarks = try [BrowserBookmark(
             id: UUID(),
             title: "One",
@@ -192,7 +192,7 @@ struct BrowserPresentationTests {
     @Test("Changing the new-tab preference persists through the Browser settings client")
     func newTabPreferencePersists() async {
         let saved = LockIsolated<[BrowserSettings]>([])
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())) {
             BrowserFeature()
         } withDependencies: {
             $0.browserSettings.save = { settings in saved.withValue { $0.append(settings) } }
@@ -210,7 +210,7 @@ struct BrowserPresentationTests {
     func bookmarkEditorValidationAndDuplicate() async throws {
         let id = UUID()
         let expectedURL = try #require(URL(string: "https://example.com"))
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.bookmarks = [.init(
             id: id,
             title: "Old",
@@ -251,7 +251,7 @@ struct BrowserPresentationTests {
         let tabID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [.web(id: tabID, url: url)],
             selectedTabID: tabID,
         )) { BrowserFeature() } withDependencies: {
@@ -274,7 +274,7 @@ struct BrowserPresentationTests {
         let third = BrowserTabID()
         let secondURL = try #require(URL(string: "https://two.example"))
         let thirdURL = try #require(URL(string: "https://three.example"))
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [
                 .startPage(id: first),
                 .web(id: second, url: secondURL),
@@ -299,7 +299,7 @@ struct BrowserPresentationTests {
         let first = BrowserTabID()
         let second = BrowserTabID()
         let secondURL = try #require(URL(string: "https://two.example"))
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [.startPage(id: first), .web(id: second, url: secondURL)],
             selectedTabID: first,
         )) { BrowserFeature() }

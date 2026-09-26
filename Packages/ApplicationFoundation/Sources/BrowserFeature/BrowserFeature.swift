@@ -112,6 +112,34 @@ struct BrowserPreviewState: Equatable, Sendable {
     }
 }
 
+/// A WebKit-bound action held until the adapter acknowledges the active global profile.
+enum BrowserDeferredWebAction: Equatable, Sendable {
+    /// Navigates the submitting logical tab after profile setup completes.
+    case navigate(tabID: BrowserTabID, url: URL)
+    /// Opens a related tab after profile setup completes.
+    case openInNewTab(URL, openerID: BrowserTabID?)
+}
+
+/// Owns the single startup or transition boundary for the adapter's active profile.
+enum BrowserProfileLifecycle: Equatable, Sendable {
+    /// Stored preferences have not been loaded and applied to the adapter.
+    case notStarted
+    /// The stored profile is being configured before Browser preferences become usable.
+    case initializing(requestID: UUID)
+    /// A confirmed profile change is configuring the adapter and persisting its settings.
+    case transitioning(requestID: UUID, profile: BrowserBrowsingProfile)
+    /// The adapter and reducer agree on the active profile.
+    case ready
+}
+
+/// A profile change that remains unapplied until the user confirms it.
+enum BrowserPendingProfileChange: Equatable, Sendable {
+    /// Switches all Browser tabs to the selected website-data lifetime.
+    case profile(BrowserBrowsingProfile)
+    /// Resets all Browser preferences and switches to Persistent-Private.
+    case resetSettings
+}
+
 /// Deterministic app-owned browser state and routing.
 @Reducer
 public struct BrowserFeature {
@@ -131,6 +159,12 @@ public struct BrowserFeature {
         var bookmarks: [BrowserBookmark]
         var history: [BrowserHistoryEntry]
         var settings: BrowserSettings
+        /// Serializes stored-profile initialization and confirmed profile transitions.
+        var profileLifecycle: BrowserProfileLifecycle
+        /// Latest WebKit-bound action held while the adapter configures a profile.
+        var pendingWebAction: BrowserDeferredWebAction?
+        /// Profile or reset request awaiting explicit user confirmation.
+        var pendingProfileChange: BrowserPendingProfileChange?
         var suggestions: [BrowserSuggestion]
         var providerSuggestionValues: [String]
         var copiedLink: URL?
@@ -159,6 +193,9 @@ public struct BrowserFeature {
             bookmarks = []
             history = []
             settings = .init()
+            profileLifecycle = .notStarted
+            pendingWebAction = nil
+            pendingProfileChange = nil
             suggestions = []
             providerSuggestionValues = []
             copiedLink = nil
@@ -195,6 +232,9 @@ public struct BrowserFeature {
             bookmarks = []
             history = []
             settings = .init()
+            profileLifecycle = .notStarted
+            pendingWebAction = nil
+            pendingProfileChange = nil
             suggestions = []
             providerSuggestionValues = []
             copiedLink = nil
@@ -212,6 +252,21 @@ public struct BrowserFeature {
 
         var selectedTab: BrowserTab? {
             tabs.first(where: { $0.id == selectedTabID })
+        }
+
+        var profileConfigurationRequestID: UUID? {
+            switch profileLifecycle {
+            case let .initializing(requestID),
+                 let .transitioning(requestID, _):
+                requestID
+            case .notStarted,
+                 .ready:
+                nil
+            }
+        }
+
+        var canCreateWebKitContext: Bool {
+            profileLifecycle == .ready
         }
 
         var tabCountLabel: String {
@@ -246,8 +301,18 @@ public struct BrowserFeature {
 
     /// User, dependency, and adapter events understood by the browser reducer.
     public enum Action: Equatable, Sendable {
-        /// Starts adapter observation and loads settings/library seam values.
+        /// Starts or restarts WebKit event observation and begins initialization when needed.
         case task
+        /// Loads and configures Browser settings when Settings is presented before Browser.
+        case settingsPresented
+        /// Requests an explicit confirmation before changing the global website-data profile.
+        case profileChangeRequested(BrowserBrowsingProfile)
+        /// Cancels the pending profile change without mutating Browser settings or session state.
+        case profileChangeCancelled
+        /// Applies the profile change or reset operation that the user confirmed.
+        case profileChangeConfirmed
+        /// Acknowledges adapter configuration for one startup or confirmed profile transition.
+        case profileConfigurationCompleted(profile: BrowserBrowsingProfile, requestID: UUID)
         /// Creates and selects a new native Start Page tab.
         case newTabTapped
         /// Requests confirmation before closing every tab.
@@ -358,8 +423,13 @@ public struct BrowserFeature {
         case deleteAllBookmarksTapped
         /// Performs the pending destructive operation.
         case destructiveActionConfirmed
-        /// Installs loaded browser settings and library values.
-        case loaded(settings: BrowserSettings, bookmarks: [BrowserBookmark], history: [BrowserHistoryEntry])
+        /// Installs loaded browser settings and library values after adapter profile configuration.
+        case loaded(
+            settings: BrowserSettings,
+            bookmarks: [BrowserBookmark],
+            history: [BrowserHistoryEntry],
+            profileConfigurationID: UUID,
+        )
         /// Navigates the selected logical tab to a normalized URL.
         case navigate(URL)
         /// Creates and loads a related tab beside its opener.
@@ -407,7 +477,10 @@ public struct BrowserFeature {
     @Dependency(\.browserSettings)
     var browserSettings
 
-    enum CancelID { case providerSuggestions }
+    enum CancelID {
+        case providerSuggestions
+        case webKitEvents
+    }
 
     /// Creates the browser reducer.
     public init() {}
