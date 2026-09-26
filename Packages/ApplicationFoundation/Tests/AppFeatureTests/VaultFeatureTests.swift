@@ -7,6 +7,7 @@
 
 import ComposableArchitecture
 import ConcurrencyExtras
+import DecoySupport
 import Dependencies
 import Foundation
 import Testing
@@ -203,6 +204,7 @@ struct VaultFeatureTests {
     @MainActor
     func normalAuthenticationCancelsPendingHiddenVerification() async {
         let (stream, continuation) = AsyncStream.makeStream(of: VaultCredentialVerificationResult.self)
+        let attemptID = DecoyHiddenEntryAttempt.ID(UUID())
         let store = TestStore(
             initialState: VaultFeature.State(
                 phase: .locked,
@@ -220,12 +222,14 @@ struct VaultFeatureTests {
             }
         }
 
-        await store.send(.verifyHidden("1234")) {
+        await store.send(.verifyHidden(attemptID: attemptID, candidate: .init("1234"))) {
             $0.isWorking = true
+            $0.pendingHiddenVerificationID = attemptID
         }
         await store.send(.beginAuthentication) {
             $0.phase = .authentication
             $0.isWorking = false
+            $0.pendingHiddenVerificationID = nil
         }
 
         continuation.yield(.succeeded)
@@ -282,18 +286,25 @@ struct VaultFeatureTests {
     @Test("A stale hidden completion cannot unlock normal authentication")
     @MainActor
     func staleHiddenCompletionCannotUnlockNormalAuthentication() async {
+        let pendingID = DecoyHiddenEntryAttempt.ID(UUID())
+        let staleID = DecoyHiddenEntryAttempt.ID(UUID())
+        var initialState = VaultFeature.State(
+            phase: .locked,
+            configuredKind: .pin,
+            usesHiddenEntry: true,
+        )
+        initialState.isWorking = true
+        initialState.pendingHiddenVerificationID = pendingID
         let store = TestStore(
-            initialState: VaultFeature.State(
-                phase: .authentication,
-                configuredKind: .pin,
-                usesHiddenEntry: true,
-            ),
+            initialState: initialState,
         ) {
             VaultFeature()
         }
 
-        await store.send(.hiddenVerificationCompleted(.succeeded))
-        #expect(store.state.phase == .authentication)
+        await store.send(.hiddenVerificationCompleted(staleID, .success(true)))
+        #expect(store.state.phase == .locked)
+        #expect(store.state.isWorking)
+        #expect(store.state.pendingHiddenVerificationID == pendingID)
     }
 
     @Test("A password configuration cannot enable PIN-equals entry")

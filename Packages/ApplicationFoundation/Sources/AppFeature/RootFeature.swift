@@ -5,53 +5,41 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import CalculatorFeature
 import ComposableArchitecture
+import DecoySupport
 import SwiftUI
 import VaultFeature
 
-/// The application composition root.
-///
-/// The root keeps calculator state independent from vault state. It is also the only layer that
-/// interprets the calculator's generic input seam as an optional hidden-entry interaction.
+/// The application composition root for a registered decoy and the vault lifecycle.
 @Reducer
 public struct RootFeature {
-    /// Transient state for a candidate captured before it reaches the calculator reducer.
-    @ObservableState
-    public struct HiddenEntryState: Equatable, Sendable {
-        /// The ASCII digits captured since the hidden entry gesture began.
-        public var candidate: String
-
-        /// Whether verification is in flight for the captured candidate.
-        public var isVerifying: Bool
-
-        /// Creates transient hidden-entry state.
-        public init(candidate: String = "", isVerifying: Bool = false) {
-            self.candidate = candidate
-            self.isVerifying = isVerifying
-        }
-    }
-
-    /// The state owned by the application composition root.
+    /// State owned by the application composition root.
     @ObservableState
     public struct State: Equatable, Sendable {
-        /// The calculator feature state rendered by the root view.
-        public var calculator: CalculatorFeature.State
-
         /// The vault lifecycle and authenticated shell state.
         public var vault: VaultFeature.State
 
-        /// The transient hidden-entry candidate, when capture is active.
-        public var hiddenEntry: HiddenEntryState?
+        /// The attempt currently waiting for hidden-credential evaluation.
+        public var pendingHiddenAttemptID: DecoyHiddenEntryAttempt.ID?
 
-        /// Creates root state with calculator and vault state.
+        /// The long-lived decoy surface associated with this root store.
+        @ObservationStateIgnored
+        public var decoySession: AnyDecoySession
+
+        /// Creates root state for one already-composed decoy session.
         public init(
-            calculator: CalculatorFeature.State = .init(),
+            decoySession: AnyDecoySession,
             vault: VaultFeature.State = .init(),
         ) {
-            self.calculator = calculator
             self.vault = vault
-            hiddenEntry = nil
+            self.decoySession = decoySession
+            pendingHiddenAttemptID = nil
+        }
+
+        /// Compares lifecycle and attempt state while ignoring the retained UI session reference.
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.vault == rhs.vault
+                && lhs.pendingHiddenAttemptID == rhs.pendingHiddenAttemptID
         }
     }
 
@@ -60,24 +48,24 @@ public struct RootFeature {
         /// Starts root-owned lifecycle work.
         case task
 
-        /// Forwards an already-dispatched calculator reducer action.
-        case calculator(CalculatorFeature.Action)
-
-        /// Receives a calculator surface input before reducer dispatch.
-        case calculatorInput(CalculatorInput)
+        /// Receives a normalized attempt emitted by the active decoy session.
+        case decoyAttempt(DecoyHiddenEntryAttempt)
 
         /// Forwards vault lifecycle and shell actions.
         case vault(VaultFeature.Action)
     }
 
-    /// Creates the application composition root.
-    public init() {}
+    private let definition: DecoyDefinition
 
-    /// Composes calculator, vault, and root-owned input policy.
+    /// Creates the generic host for one statically registered decoy.
+    ///
+    /// - Parameter definition: The active decoy's declared triggers and session factory.
+    public init(definition: DecoyDefinition) {
+        self.definition = definition
+    }
+
+    /// Composes vault lifecycle handling with generic decoy-attempt policy.
     public var body: some ReducerOf<Self> {
-        Scope(state: \.calculator, action: \.calculator) {
-            CalculatorFeature()
-        }
         Scope(state: \.vault, action: \.vault) {
             VaultFeature()
         }
@@ -85,164 +73,201 @@ public struct RootFeature {
             switch action {
             case .task:
                 .merge(
-                    .send(.calculator(.task)),
+                    updateTriggerConfiguration(state: state),
                     .send(.vault(.task)),
                 )
-            case let .calculatorInput(input):
-                handle(input, state: &state)
-            case let .vault(.hiddenVerificationCompleted(result)):
-                handleHiddenVerification(result, state: &state)
-            case .calculator,
-                 .vault:
-                .none
+            case let .decoyAttempt(attempt):
+                handle(attempt, state: &state)
+            case let .vault(vaultAction):
+                handleVaultAction(vaultAction, state: &state)
             }
         }
     }
 
     private func handle(
-        _ input: CalculatorInput,
+        _ attempt: DecoyHiddenEntryAttempt,
         state: inout State,
     ) -> Effect<Action> {
-        switch input {
-        case .retryPersistence:
-            guard let hiddenEntry = state.hiddenEntry else {
-                return state.vault.phase == .unavailable
-                    ? .send(.vault(.retryConfiguration))
-                    : .send(.calculator(.task))
-            }
-            guard !hiddenEntry.isVerifying else {
-                return .none
-            }
-
-            state.hiddenEntry = nil
-            return replay(
-                candidate: hiddenEntry.candidate,
-                followedBy: .calculator(.task),
-            )
-        case .longPressEquals:
-            return handleLongPress(state: &state)
-        case let .button(button):
-            return handleButton(button, state: &state)
+        let declarations = definition.declaredTriggers.filter { $0.id == attempt.triggerID }
+        guard declarations.count == 1,
+              let descriptor = declarations.first,
+              descriptor.intentKind == attempt.intent.kind
+        else {
+            return deliver(attemptID: attempt.id, result: .success(false), to: state.decoySession)
         }
-    }
 
-    private func handleLongPress(state: inout State) -> Effect<Action> {
-        let candidate = state.hiddenEntry?.candidate
-        state.hiddenEntry = nil
-        switch state.vault.phase {
-        case .unconfigured:
-            guard let candidate else {
-                return .send(.vault(.beginSetup))
-            }
-
-            return replay(candidate: candidate, followedBy: .vault(.beginSetup))
-        case .locked:
-            guard let candidate else {
-                return .send(.vault(.beginAuthentication))
-            }
-
-            return replay(candidate: candidate, followedBy: .vault(.beginAuthentication))
-        case .loading,
-             .unavailable,
-             .setup,
-             .authentication,
-             .authenticated:
-            return .none
+        let configuration = triggerConfiguration(for: state.vault)
+        guard configuration.isEnabled(attempt.triggerID) else {
+            return deliver(attemptID: attempt.id, result: .success(false), to: state.decoySession)
         }
-    }
 
-    private func handleButton(
-        _ button: CalculatorButton,
-        state: inout State,
-    ) -> Effect<Action> {
-        if let hiddenEntry = state.hiddenEntry {
-            guard !hiddenEntry.isVerifying else {
-                return .none
+        switch attempt.intent {
+        case .authenticationRequest:
+            let nextPhase: VaultFeature.Action
+            switch state.vault.phase {
+            case .unconfigured:
+                nextPhase = .beginSetup
+            case .locked:
+                nextPhase = .beginAuthentication
+            case .loading,
+                 .unavailable,
+                 .setup,
+                 .authentication,
+                 .authenticated:
+                return deliver(attemptID: attempt.id, result: .success(false), to: state.decoySession)
             }
 
-            switch button {
-            case let .digit(digit):
-                guard (0 ... 9).contains(digit) else {
-                    state.hiddenEntry = nil
-                    return replay(
-                        candidate: hiddenEntry.candidate,
-                        followedBy: .calculator(.button(button)),
-                    )
-                }
-                guard hiddenEntry.candidate.utf8.count < 12 else {
-                    state.hiddenEntry = nil
-                    return replay(candidate: hiddenEntry.candidate + "\(digit)")
-                }
-
-                state.hiddenEntry?.candidate.append("\(digit)")
-                return .none
-            case .equals:
-                state.hiddenEntry?.isVerifying = true
-                return .send(.vault(.verifyHidden(hiddenEntry.candidate)))
-            default:
-                state.hiddenEntry = nil
-                return replay(
-                    candidate: hiddenEntry.candidate,
-                    followedBy: .calculator(.button(button)),
+            let supersededAttemptID = state.pendingHiddenAttemptID
+            state.pendingHiddenAttemptID = nil
+            if let supersededAttemptID {
+                return .concatenate(
+                    .send(.vault(nextPhase)),
+                    deliver(
+                        attemptID: supersededAttemptID,
+                        result: .failure(.evaluationFailed),
+                        to: state.decoySession,
+                    ),
+                    deliver(attemptID: attempt.id, result: .success(true), to: state.decoySession),
                 )
             }
-        }
 
-        if case let .digit(digit) = button,
-           (0 ... 9).contains(digit),
-           !state.calculator.isLoading,
-           state.vault.canUseHiddenEntry {
-            state.hiddenEntry = .init(candidate: "\(digit)")
-            return .none
-        }
-
-        return .send(.calculator(.button(button)))
-    }
-
-    private func handleHiddenVerification(
-        _ result: VaultCredentialVerificationResult,
-        state: inout State,
-    ) -> Effect<Action> {
-        guard let hiddenEntry = state.hiddenEntry, hiddenEntry.isVerifying else {
-            return .none
-        }
-
-        state.hiddenEntry = nil
-        switch result {
-        case .succeeded:
-            return .none
-        case .incorrect,
-             .unavailable:
-            // Both non-success outcomes intentionally replay the complete candidate and equals
-            // action. The calculator is the decoy surface, so this preserves the ordinary-input
-            // contract even when credential storage cannot distinguish a wrong candidate.
-            return replay(
-                candidate: hiddenEntry.candidate,
-                followedBy: .calculator(.button(.equals)),
+            return .concatenate(
+                .send(.vault(nextPhase)),
+                deliver(attemptID: attempt.id, result: .success(true), to: state.decoySession),
             )
-        }
-    }
-
-    private func replay(
-        candidate: String,
-        followedBy action: Action? = nil,
-    ) -> Effect<Action> {
-        var actions = candidate.compactMap { character -> Action? in
-            guard let asciiValue = character.asciiValue, (48 ... 57).contains(asciiValue) else {
-                return nil
+        case let .credentialCandidate(candidate):
+            guard state.vault.canUseHiddenEntry,
+                  !state.vault.isWorking,
+                  state.pendingHiddenAttemptID == nil
+            else {
+                return deliver(attemptID: attempt.id, result: .success(false), to: state.decoySession)
             }
 
-            return .calculator(.button(.digit(Int(asciiValue - 48))))
+            state.pendingHiddenAttemptID = attempt.id
+            return .send(.vault(.verifyHidden(attemptID: attempt.id, candidate: candidate)))
         }
-        if let action {
-            actions.append(action)
+    }
+
+    private func handleVaultAction(
+        _ action: VaultFeature.Action,
+        state: inout State,
+    ) -> Effect<Action> {
+        var completion: DecoyHiddenEntryCompletion?
+        switch action {
+        case let .hiddenVerificationCompleted(attemptID, result):
+            guard state.pendingHiddenAttemptID == attemptID else {
+                return .none
+            }
+
+            state.pendingHiddenAttemptID = nil
+            completion = DecoyHiddenEntryCompletion(attemptID: attemptID, result: result)
+        case .beginAuthentication,
+             .beginSetup:
+            if let attemptID = state.pendingHiddenAttemptID {
+                state.pendingHiddenAttemptID = nil
+                completion = DecoyHiddenEntryCompletion(
+                    attemptID: attemptID,
+                    result: .failure(.evaluationFailed),
+                )
+            }
+        default:
+            break
         }
 
-        return actions.dropFirst().reduce(
-            actions.first.map(Effect.send) ?? .none,
-        ) { effect, action in
-            .concatenate(effect, .send(action))
+        let update = updateTriggerConfiguration(state: state)
+        guard let completion else {
+            return update
         }
+
+        return .merge(update, deliver(completion, to: state.decoySession))
+    }
+
+    private func triggerConfiguration(
+        for vault: VaultFeature.State,
+    ) -> DecoyHiddenEntryTriggerConfiguration {
+        let authenticationEntryIsValid = vault.phase == .unconfigured || vault.phase == .locked
+        let enabledTriggerIDs = Set(definition.declaredTriggers.compactMap { descriptor in
+            switch descriptor.intentKind {
+            case .authenticationRequest:
+                authenticationEntryIsValid ? descriptor.id : nil
+            case .credentialCandidate:
+                vault.canUseHiddenEntry ? descriptor.id : nil
+            }
+        })
+        return DecoyHiddenEntryTriggerConfiguration(
+            declaredTriggers: definition.declaredTriggers,
+            enabledTriggerIDs: enabledTriggerIDs,
+        )
+    }
+
+    private func updateTriggerConfiguration(state: State) -> Effect<Action> {
+        let session = state.decoySession
+        let configuration = triggerConfiguration(for: state.vault)
+        return .run { _ in
+            await session.updateTriggerConfiguration(configuration)
+        }
+    }
+
+    private func deliver(
+        attemptID: DecoyHiddenEntryAttempt.ID,
+        result: Result<Bool, DecoyHiddenEntryError>,
+        to session: AnyDecoySession,
+    ) -> Effect<Action> {
+        deliver(.init(attemptID: attemptID, result: result), to: session)
+    }
+
+    private func deliver(
+        _ completion: DecoyHiddenEntryCompletion,
+        to session: AnyDecoySession,
+    ) -> Effect<Action> {
+        .run { _ in
+            await session.deliver(completion)
+        }
+    }
+}
+
+/// Creates the active decoy session and root store once for the application lifetime.
+@MainActor
+@preconcurrency
+public enum RootComposition {
+    /// Composes the root around the shipping decoy's statically registered definition.
+    ///
+    /// - Parameter vault: The initial vault state, primarily supplied by deterministic tests.
+    /// - Returns: A root store whose decoy session remains stable across view updates.
+    public static func makeStore(vault: VaultFeature.State = .init()) -> StoreOf<RootFeature> {
+        makeStore(definition: ShippingDecoyRegistry.defaultDefinition, vault: vault)
+    }
+
+    static func makeStore(
+        definition: DecoyDefinition,
+        vault: VaultFeature.State,
+    ) -> StoreOf<RootFeature> {
+        let relay = DecoyAttemptRelay()
+        let initialConfiguration = DecoyHiddenEntryTriggerConfiguration(
+            declaredTriggers: definition.declaredTriggers,
+            enabledTriggerIDs: [],
+        )
+        let context = DecoySessionContext(
+            triggerConfiguration: initialConfiguration,
+            attemptSink: { relay.submit($0) },
+        )
+        let session = definition.makeSession(context)
+        let store = Store(
+            initialState: RootFeature.State(decoySession: session, vault: vault),
+        ) {
+            RootFeature(definition: definition)
+        }
+        relay.store = store
+        return store
+    }
+}
+
+@MainActor
+private final class DecoyAttemptRelay {
+    weak var store: StoreOf<RootFeature>?
+
+    func submit(_ attempt: DecoyHiddenEntryAttempt) {
+        store?.send(.decoyAttempt(attempt))
     }
 }
 
@@ -259,7 +284,7 @@ public struct RootView: View {
         self.store = store
     }
 
-    /// Renders the calculator decoy, credential surface, or authenticated shell.
+    /// Renders the decoy session, credential surface, or authenticated shell.
     public var body: some View {
         ZStack {
             surface
@@ -278,31 +303,19 @@ public struct RootView: View {
         case .authenticated:
             VaultShellView(store: store.scope(state: \.vault.shell, action: \.vault.shell))
         case .unavailable:
-            calculatorSurface
+            decoySurface
                 .safeAreaInset(edge: .bottom) {
                     vaultUnavailablePanel
                 }
         case .loading,
              .unconfigured,
              .locked:
-            calculatorSurface
+            decoySurface
         }
     }
 
-    private var calculatorSurface: some View {
-        CalculatorView(
-            store: store.scope(state: \.calculator, action: \.calculator),
-            presentationOverride: store.hiddenEntry.map { hiddenEntry in
-                CalculatorFeature.projectedPresentation(
-                    afterDigits: hiddenEntry.candidate,
-                    from: store.calculator,
-                )
-            },
-            inputHandler: { input in
-                store.send(.calculatorInput(input))
-            },
-            loadsPersistenceOnAppear: false,
-        )
+    private var decoySurface: some View {
+        store.decoySession.rootView
     }
 
     private var vaultUnavailablePanel: some View {
@@ -315,7 +328,7 @@ public struct RootView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("Retry vault configuration", systemImage: "arrow.clockwise") {
-                store.send(.calculatorInput(.retryPersistence))
+                store.send(.vault(.retryConfiguration))
             }
             .buttonStyle(.bordered)
         }

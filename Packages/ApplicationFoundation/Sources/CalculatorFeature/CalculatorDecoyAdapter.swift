@@ -21,11 +21,13 @@ public struct CalculatorDecoyAdapter {
     /// The stable trigger descriptor for long-pressing the equals control.
     public static let longPressEqualsTrigger = DecoyHiddenEntryTriggerDescriptor(
         id: DecoyHiddenEntryTriggerID(rawValue: "calculator.long-press-equals"),
+        intentKind: .authenticationRequest,
     )
 
     /// The stable trigger descriptor for entering a credential followed by equals.
     public static let pinEqualsTrigger = DecoyHiddenEntryTriggerDescriptor(
         id: DecoyHiddenEntryTriggerID(rawValue: "calculator.pin-equals"),
+        intentKind: .credentialCandidate,
     )
 
     /// The trigger declarations supported by the calculator decoy.

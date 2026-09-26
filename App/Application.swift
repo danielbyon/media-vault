@@ -17,9 +17,7 @@ struct Application: SwiftUI.App {
 
     /// Creates the one root store used by the application scene.
     init() {
-        store = Store(initialState: RootFeature.State()) {
-            RootFeature()
-        }
+        store = RootComposition.makeStore()
     }
 
     /// Provides the application's single window group.
