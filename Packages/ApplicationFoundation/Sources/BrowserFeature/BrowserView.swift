@@ -234,6 +234,7 @@ public struct BrowserView: View {
             cancelTabTransition()
             store.send(.previewCacheEvicted)
         }
+        .task { _ = store.send(.profileInitializationRequested) }
         .task { await store.send(.task).finish() }
         .onDisappear {
             cancelTabTransition()
@@ -427,6 +428,7 @@ extension BrowserView {
                     tabID: tab.id,
                     onRefresh: { store.send(.pullToRefresh) },
                     transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
+                    isProfileConfigurationReady: store.canCreateWebKitContext,
                     readinessContext: webKitReadinessContext(for: tab),
                     readinessCoordinator: webKitReadinessCoordinator,
                     refreshGestureArbitrator: refreshGestureArbitrator,

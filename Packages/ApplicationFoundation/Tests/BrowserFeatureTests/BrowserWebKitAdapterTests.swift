@@ -426,6 +426,87 @@ struct BrowserWebKitAdapterTests {
         #expect(webView.configuration.allowsAirPlayForMediaPlayback == false)
     }
 
+    @Test("All Ephemeral tabs share a fresh store and profile changes tear down every owned context")
+    func profileStoresShareAndRotateAcrossSessions() {
+        let adapter = BrowserWebKitAdapter()
+        let persistentID = BrowserTabID()
+        let persistent = adapter.ensureContext(for: persistentID)
+
+        #expect(persistent.configuration.websiteDataStore === WKWebsiteDataStore.default())
+
+        adapter.execute(.configureProfile(profile: .ephemeral, retiringTabIDs: [persistentID]))
+        #expect(adapter.contextCount == 0)
+        #expect(adapter.hasContext(for: persistentID) == false)
+
+        let firstEphemeralID = BrowserTabID()
+        let secondEphemeralID = BrowserTabID()
+        let firstEphemeral = adapter.ensureContext(for: firstEphemeralID)
+        let secondEphemeral = adapter.ensureContext(for: secondEphemeralID)
+        let firstSessionStore = firstEphemeral.configuration.websiteDataStore
+
+        #expect(firstSessionStore === secondEphemeral.configuration.websiteDataStore)
+        #expect(firstSessionStore !== WKWebsiteDataStore.default())
+
+        adapter.execute(.configureProfile(
+            profile: .persistentPrivate,
+            retiringTabIDs: [firstEphemeralID, secondEphemeralID],
+        ))
+        #expect(adapter.contextCount == 0)
+        let secondPersistentID = BrowserTabID()
+        let secondPersistent = adapter.ensureContext(for: secondPersistentID)
+        #expect(secondPersistent.configuration.websiteDataStore === WKWebsiteDataStore.default())
+
+        adapter.execute(.configureProfile(profile: .ephemeral, retiringTabIDs: [secondPersistentID]))
+        let nextSessionID = BrowserTabID()
+        let nextSession = adapter.ensureContext(for: nextSessionID)
+        #expect(nextSession.configuration.websiteDataStore !== firstSessionStore)
+
+        adapter.destroyContext(for: firstEphemeralID)
+        adapter.destroyContext(for: secondEphemeralID)
+        adapter.destroyContext(for: persistentID)
+        adapter.destroyContext(for: secondPersistentID)
+        adapter.destroyContext(for: nextSessionID)
+    }
+
+    @Test("Delayed commands cannot recreate a tab retired by a profile boundary")
+    func delayedCommandsCannotRecreateRetiredContexts() throws {
+        let createdStores = LockIsolated<[WKWebsiteDataStore]>([])
+        let adapter = BrowserWebKitAdapter(makeWebView: { frame, configuration in
+            createdStores.withValue { $0.append(configuration.websiteDataStore) }
+            return WKWebView(frame: frame, configuration: configuration)
+        })
+        let tabID = BrowserTabID()
+        let destination = try #require(URL(string: "https://retired.example"))
+        _ = adapter.ensureContext(for: tabID)
+
+        adapter.execute(.configureProfile(profile: .ephemeral, retiringTabIDs: [tabID]))
+        adapter.execute(.ensureContext(tabID: tabID))
+        adapter.execute(.load(tabID: tabID, url: destination, operationID: .init()))
+
+        #expect(adapter.contextCount == 0)
+        #expect(adapter.hasContext(for: tabID) == false)
+        #expect(adapter.ensureActiveContext(for: tabID) == nil)
+        #expect(createdStores.value.count == 1)
+    }
+
+    @Test("Site-created popup contexts use the current Ephemeral store")
+    func popupUsesActiveProfileStore() throws {
+        let popupID = BrowserTabID()
+        let adapter = BrowserWebKitAdapter(makeTabID: { popupID })
+        adapter.execute(.configureProfile(profile: .ephemeral, retiringTabIDs: []))
+        let openerID = BrowserTabID()
+        let opener = adapter.ensureContext(for: openerID)
+        let popup = try adapter.makePopup(
+            openerID: openerID,
+            configuration: .init(),
+            url: #require(URL(string: "https://popup.example")),
+        )
+
+        #expect(popup.configuration.websiteDataStore === opener.configuration.websiteDataStore)
+        adapter.destroyContext(for: popupID)
+        adapter.destroyContext(for: openerID)
+    }
+
     @Test("The WebKit bridge forwards pull-to-refresh without retaining reducer state")
     func pullToRefreshBridge() {
         var refreshCount = 0
@@ -778,6 +859,7 @@ struct BrowserWebKitAdapterTests {
     func webKitBridgeReceivesInteractivePolicy() {
         let tabID = BrowserTabID()
         let adapter = BrowserWebKitAdapter.shared
+        adapter.execute(.configureProfile(profile: .persistentPrivate, retiringTabIDs: []))
         let controller = UIHostingController(
             rootView: BrowserWebView(tabID: tabID, onRefresh: {})
                 .scrollDismissesKeyboard(.interactively),

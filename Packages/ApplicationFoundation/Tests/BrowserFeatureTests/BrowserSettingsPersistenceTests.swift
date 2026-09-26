@@ -20,6 +20,22 @@ struct BrowserSettingsPersistenceTests {
         #expect(await client.load() == BrowserSettings())
     }
 
+    @Test("Profile storage defaults invalid values and round-trips Ephemeral")
+    func browsingProfileDefaultsAndRoundTrips() async throws {
+        let defaults = try isolatedDefaults()
+        let client = liveClient(using: defaults)
+
+        #expect(await client.load().browsingProfile == .persistentPrivate)
+
+        await client.save(BrowserSettings(browsingProfile: .ephemeral))
+
+        #expect(defaults.string(forKey: "browser.browsingProfile") == "ephemeral")
+        #expect(await client.load().browsingProfile == .ephemeral)
+
+        defaults.set("future-profile", forKey: "browser.browsingProfile")
+        #expect(await client.load().browsingProfile == .persistentPrivate)
+    }
+
     @Test("Browser settings save and load form an isolated round trip")
     func savesAndLoadsRoundTrip() async throws {
         let defaults = try isolatedDefaults()
@@ -72,6 +88,7 @@ struct BrowserSettingsPersistenceTests {
             providerSuggestionsEnabled: true,
             copiedLinkSuggestionsEnabled: false,
             openLinksInNewTabs: .foreground,
+            browsingProfile: .ephemeral,
         ))
         await client.reset()
 
@@ -79,6 +96,7 @@ struct BrowserSettingsPersistenceTests {
         #expect(defaults.object(forKey: "browser.providerSuggestionsEnabled") == nil)
         #expect(defaults.object(forKey: "browser.copiedLinkSuggestionsEnabled") == nil)
         #expect(defaults.object(forKey: "browser.openLinksInNewTabs") == nil)
+        #expect(defaults.object(forKey: "browser.browsingProfile") == nil)
         #expect(defaults.string(forKey: "other.feature.key") == "keep")
     }
 

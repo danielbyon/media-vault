@@ -18,7 +18,7 @@ struct BrowserSuggestionStateTests {
     func providerThresholdAndDebounce() async {
         let clock = TestClock()
         let requests = LockIsolated<[String]>([])
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.focusedField = .startPage
         state.settings.providerSuggestionsEnabled = true
         let store = TestStore(initialState: state) { BrowserFeature() } withDependencies: {
@@ -49,7 +49,7 @@ struct BrowserSuggestionStateTests {
 
     @Test("Stale and failed provider responses leave current local suggestions intact")
     func staleAndFailure() async throws {
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.focusedField = .startPage
         state.settings.providerSuggestionsEnabled = true
         state.omniboxDraft = "current"
@@ -81,7 +81,7 @@ struct BrowserSuggestionStateTests {
     func lateResultsAreIgnoredWhenUnfocused() async throws {
         let bookmarkURL = try #require(URL(string: "https://current.example"))
         let copiedURL = try #require(URL(string: "https://copied.example"))
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.settings.providerSuggestionsEnabled = true
         state.omniboxDraft = "current"
         state.bookmarks = [BrowserBookmark(
@@ -111,7 +111,7 @@ struct BrowserSuggestionStateTests {
     func externalFocusLossCancelsProviderWork() async {
         let clock = TestClock()
         let requests = LockIsolated<[String]>([])
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.focusedField = .startPage
         state.settings.providerSuggestionsEnabled = true
         let store = TestStore(initialState: state) { BrowserFeature() } withDependencies: {
@@ -142,7 +142,7 @@ struct BrowserSuggestionStateTests {
     func unfocusedEditDoesNotStartSuggestions() async {
         let clock = TestClock()
         let requests = LockIsolated<[String]>([])
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.settings.copiedLinkSuggestionsEnabled = false
         state.settings.providerSuggestionsEnabled = true
         let store = TestStore(initialState: state) { BrowserFeature() } withDependencies: {
@@ -173,7 +173,7 @@ struct BrowserSuggestionStateTests {
         let clock = TestClock()
         let requests = LockIsolated<[String]>([])
         let copiedURL = try #require(URL(string: "https://copied.example"))
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.focusedField = .startPage
         state.settings.providerSuggestionsEnabled = true
         state.copiedLink = copiedURL
@@ -203,7 +203,7 @@ struct BrowserSuggestionStateTests {
         let editedDraft = "edited.example/path"
         var webTab = BrowserTab.web(id: BrowserTabID(), url: url)
         webTab.metadata.committedURL = url
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [webTab],
             selectedTabID: webTab.id,
         )) {
@@ -227,7 +227,7 @@ struct BrowserSuggestionStateTests {
     func startPageSuggestionsRebuildOnRefocus() async throws {
         let bookmarkID = UUID()
         let bookmarkURL = try #require(URL(string: "https://example.com"))
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.focusedField = .startPage
         state.settings.copiedLinkSuggestionsEnabled = false
         state.bookmarks = [BrowserBookmark(
@@ -249,7 +249,7 @@ struct BrowserSuggestionStateTests {
 
     @Test("Disabling suggestions and changing provider reject in-flight responses")
     func consentAndProviderCancellation() async {
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.focusedField = .startPage
         state.settings.providerSuggestionsEnabled = true
         state.omniboxDraft = "private"
@@ -278,7 +278,8 @@ struct BrowserSuggestionStateTests {
 
     @Test("Reset settings clears provider results before rebuilding transient suggestions")
     func resetSettingsClearsProviderResults() async {
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
+        state.profileLifecycle = .ready
         state.focusedField = .startPage
         state.settings.providerSuggestionsEnabled = true
         state.omniboxDraft = "private"
@@ -303,7 +304,7 @@ struct BrowserSuggestionStateTests {
     func clipboardPrivacy() async throws {
         let reads = LockIsolated(0)
         let copied = try #require(URL(string: "https://copied.example/private?token=secret"))
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: BrowserTabID())) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())) {
             BrowserFeature()
         } withDependencies: {
             $0.uuid = .incrementing
@@ -326,7 +327,7 @@ struct BrowserSuggestionStateTests {
 
     @Test("Empty submission retains focus and never creates history")
     func emptySubmit() async {
-        var state = BrowserFeature.State(initialTabID: BrowserTabID())
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())
         state.focusedField = .startPage
         let store = TestStore(initialState: state) { BrowserFeature() }
         await store.send(.omniboxSubmitted)

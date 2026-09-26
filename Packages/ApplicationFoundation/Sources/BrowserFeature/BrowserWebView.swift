@@ -22,6 +22,7 @@ public struct BrowserWebView: UIViewRepresentable {
     private let transitionRegistry: BrowserTabTransitionSurfaceRegistry?
     private let readinessContext: BrowserWebKitReadinessContext?
     private let readinessCoordinator: BrowserWebKitReadinessCoordinator
+    private let isProfileConfigurationReady: Bool
     private let refreshGestureArbitrator: BrowserRefreshGestureArbitrator?
     private let softwareKeyboardPresence: BrowserSoftwareKeyboardPresence?
 
@@ -33,6 +34,7 @@ public struct BrowserWebView: UIViewRepresentable {
         transitionRegistry = nil
         readinessContext = nil
         readinessCoordinator = .init(adapter: adapter)
+        isProfileConfigurationReady = true
         refreshGestureArbitrator = nil
         softwareKeyboardPresence = nil
     }
@@ -43,6 +45,7 @@ public struct BrowserWebView: UIViewRepresentable {
         onRefresh: @escaping () -> Void,
         transitionRegistry: BrowserTabTransitionSurfaceRegistry,
         adapter: BrowserWebKitAdapter = .shared,
+        isProfileConfigurationReady: Bool = true,
         readinessContext: BrowserWebKitReadinessContext? = nil,
         readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
         refreshGestureArbitrator: BrowserRefreshGestureArbitrator? = nil,
@@ -54,6 +57,7 @@ public struct BrowserWebView: UIViewRepresentable {
         self.transitionRegistry = transitionRegistry
         self.readinessContext = readinessContext
         self.readinessCoordinator = readinessCoordinator ?? .init(adapter: adapter)
+        self.isProfileConfigurationReady = isProfileConfigurationReady
         self.refreshGestureArbitrator = refreshGestureArbitrator
         self.softwareKeyboardPresence = softwareKeyboardPresence
     }
@@ -348,7 +352,15 @@ public struct BrowserWebView: UIViewRepresentable {
             context.coordinator.invalidateReadinessProbe()
         }
         context.coordinator.tabID = tabID
-        let webView = webKitAdapter.ensureContext(for: tabID)
+        guard isProfileConfigurationReady else {
+            context.coordinator.invalidateReadinessProbe()
+            return
+        }
+        guard let webView = webKitAdapter.ensureActiveContext(for: tabID) else {
+            context.coordinator.invalidateReadinessProbe()
+            return
+        }
+
         let resolvedReadinessContext = context.coordinator.resolveReadinessContext(
             readinessContext,
             for: webView,

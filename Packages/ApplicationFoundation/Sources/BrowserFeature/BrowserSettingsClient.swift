@@ -8,7 +8,7 @@
 import ComposableArchitecture
 @preconcurrency import Foundation
 
-/// Namespaced persistence dependency for the four Issue #37 Browser preferences.
+/// Namespaced persistence dependency for authenticated Browser preferences.
 struct BrowserSettingsClient: Sendable {
     var load: @Sendable () async -> BrowserSettings
     var save: @Sendable (BrowserSettings) async -> Void
@@ -64,10 +64,12 @@ actor BrowserSettingsStorage {
                 : true,
             openLinksInNewTabs: userDefaults.string(forKey: BrowserSettingsStorageKeys.openLinksInNewTabs)
                 .flatMap(BrowserOpenLinkPreference.init(rawValue:)) ?? .background,
+            browsingProfile: userDefaults.string(forKey: BrowserSettingsStorageKeys.browsingProfile)
+                .flatMap(BrowserBrowsingProfile.init(rawValue:)) ?? .persistentPrivate,
         )
     }
 
-    /// Persists all four Browser-owned preferences without touching other application keys.
+    /// Persists every Browser-owned preference without touching other application keys.
     func save(_ settings: BrowserSettings) {
         userDefaults.set(settings.searchProvider.rawValue, forKey: BrowserSettingsStorageKeys.searchProvider)
         userDefaults.set(
@@ -79,6 +81,7 @@ actor BrowserSettingsStorage {
             forKey: BrowserSettingsStorageKeys.copiedLinkSuggestionsEnabled,
         )
         userDefaults.set(settings.openLinksInNewTabs.rawValue, forKey: BrowserSettingsStorageKeys.openLinksInNewTabs)
+        userDefaults.set(settings.browsingProfile.rawValue, forKey: BrowserSettingsStorageKeys.browsingProfile)
     }
 
     /// Removes only the namespaced Browser preference keys.
@@ -92,11 +95,13 @@ private enum BrowserSettingsStorageKeys {
     static let providerSuggestionsEnabled = "browser.providerSuggestionsEnabled"
     static let copiedLinkSuggestionsEnabled = "browser.copiedLinkSuggestionsEnabled"
     static let openLinksInNewTabs = "browser.openLinksInNewTabs"
+    static let browsingProfile = "browser.browsingProfile"
 
     static let all = [
         searchProvider,
         providerSuggestionsEnabled,
         copiedLinkSuggestionsEnabled,
         openLinksInNewTabs,
+        browsingProfile,
     ]
 }

@@ -19,7 +19,7 @@ struct BrowserViewSnapshotTests {
     @Test("Fresh Start Page has no explanatory empty-state copy")
     func freshStartPage() {
         snapshot(
-            .init(initialTabID: BrowserTabID(UUID(1))),
+            .readyForTesting(initialTabID: BrowserTabID(UUID(1))),
             named: "fresh-start-page-compact-phone",
             config: DeterministicTestSupport.compactPhone,
         )
@@ -27,7 +27,7 @@ struct BrowserViewSnapshotTests {
 
     @Test("Start Page preserves bookmark tile order and fallbacks")
     func bookmarkStartPage() throws {
-        var state = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))
         let favicon = try #require(Data(base64Encoded:
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="))
         state.bookmarks = try [
@@ -57,7 +57,7 @@ struct BrowserViewSnapshotTests {
             title: "Example",
             canGoBack: true,
         )
-        let state = BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)
+        let state = BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)
 
         snapshot(
             state,
@@ -82,7 +82,7 @@ struct BrowserViewSnapshotTests {
             estimatedProgress: 0.42,
         )
         snapshot(
-            .init(tabs: [tab], selectedTabID: tab.id),
+            .readyForTesting(tabs: [tab], selectedTabID: tab.id),
             named: "loading-large-phone",
             config: DeterministicTestSupport.largePhone,
         )
@@ -93,7 +93,7 @@ struct BrowserViewSnapshotTests {
         let url = try #require(URL(string: "https://offline.example"))
         let tab = BrowserTab(id: BrowserTabID(UUID(1)), content: .error(.noInternet(url)))
         snapshot(
-            .init(tabs: [tab], selectedTabID: tab.id),
+            .readyForTesting(tabs: [tab], selectedTabID: tab.id),
             named: "error-compact-phone",
             config: DeterministicTestSupport.compactPhone,
         )
@@ -109,7 +109,7 @@ struct BrowserViewSnapshotTests {
             isLoading: true,
             estimatedProgress: 0.5,
         )
-        let state = BrowserFeature.State(
+        let state = BrowserFeature.State.readyForTesting(
             tabs: [
                 .startPage(id: BrowserTabID(UUID(1))),
                 .web(id: BrowserTabID(UUID(2)), url: url),
@@ -134,7 +134,7 @@ struct BrowserViewSnapshotTests {
             .init(id: BrowserTabID(UUID(3)), content: .error(.serverNotFound(url))),
             .init(id: BrowserTabID(UUID(4)), content: .terminated(lastCommittedURL: url)),
         ]
-        let state = BrowserFeature.State(
+        let state = BrowserFeature.State.readyForTesting(
             tabs: tabs,
             selectedTabID: tabs[0].id,
             presentation: .tabOverview,
@@ -153,7 +153,7 @@ struct BrowserViewSnapshotTests {
     func reducedMotion() throws {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(1)), url: url)
-        let store = Store(initialState: BrowserFeature.State(tabs: [tab], selectedTabID: tab.id)) {
+        let store = Store(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)) {
             BrowserFeature()
         }
         assertSnapshot(
@@ -180,7 +180,7 @@ struct BrowserViewSnapshotTests {
             )),
         ]
         for (name, editor) in states {
-            var state = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+            var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))
             state.bookmarkEditor = editor
             let store = Store(initialState: state) { BrowserFeature() }
             presentationSnapshot(
@@ -197,14 +197,14 @@ struct BrowserViewSnapshotTests {
         let bookmarkURL = try #require(URL(string: "https://bookmarks.example/private"))
         let historyURL = try #require(URL(string: "https://history.example/visited"))
 
-        var emptyState = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+        var emptyState = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))
         emptyState.library = .init(section: .bookmarks, referenceDate: referenceDate)
         librarySnapshot(emptyState, named: "library-bookmarks-empty-regular-ipad")
 
         emptyState.library = .init(section: .history, referenceDate: referenceDate)
         librarySnapshot(emptyState, named: "library-history-empty-regular-ipad")
 
-        var state = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))
         state.bookmarks = [BrowserBookmark(
             id: UUID(2),
             title: "Saved Bookmark",
@@ -240,11 +240,31 @@ struct BrowserViewSnapshotTests {
 
     @Test("Authenticated Browser settings show privacy disclosure and new-tab choices")
     func settings() {
-        let state = BrowserFeature.State(initialTabID: BrowserTabID(UUID(1)))
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))
+        state.profileLifecycle = .ready
         let store = Store(initialState: state) { BrowserFeature() }
         presentationSnapshot(
             NavigationStack { BrowserSettingsView(store: store) },
             named: "settings-browser-large-phone",
+            config: DeterministicTestSupport.largePhone,
+        )
+
+        var confirmationState = state
+        confirmationState.pendingProfileChange = .profile(.ephemeral)
+        let confirmationStore = Store(initialState: confirmationState) { BrowserFeature() }
+        presentationSnapshot(
+            NavigationStack { BrowserSettingsView(store: confirmationStore) },
+            named: "settings-browser-ephemeral-confirmation-large-phone",
+            config: DeterministicTestSupport.largePhone,
+        )
+
+        var resetConfirmationState = state
+        resetConfirmationState.settings.browsingProfile = .ephemeral
+        resetConfirmationState.pendingProfileChange = .resetSettings
+        let resetConfirmationStore = Store(initialState: resetConfirmationState) { BrowserFeature() }
+        presentationSnapshot(
+            NavigationStack { BrowserSettingsView(store: resetConfirmationStore) },
+            named: "settings-browser-ephemeral-reset-confirmation-large-phone",
             config: DeterministicTestSupport.largePhone,
         )
 

@@ -96,6 +96,7 @@ struct VaultFeatureViewSnapshotTests {
 
     private func rootView(vault: VaultFeature.State) -> some View {
         let store = withDependencies {
+            $0.uuid = .incrementing
             $0.calculatorPersistence.load = { nil }
             $0.calculatorPersistence.save = { _ in }
         } operation: {
