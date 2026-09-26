@@ -28,29 +28,7 @@ extension BrowserFeature {
         case .empty:
             return .none
         case let .web(url):
-            guard !deferWebAction(.navigate(url), state: &state) else {
-                return .none
-            }
-            guard let index = state.tabs.firstIndex(where: { $0.id == state.selectedTabID }) else {
-                return .none
-            }
-
-            let id = state.selectedTabID
-            let operationID = beginPreviewOperation(for: id, state: &state)
-            if state.tabs[index].isStartPage {
-                state.tabs[index] = .web(id: id, url: url)
-            } else {
-                state.tabs[index].content = .web(requestedURL: url)
-            }
-            let dismissalEffect = dismissPageUI(in: &state)
-            discardDraft(in: &state)
-            return .merge(
-                dismissalEffect,
-                commands([
-                    .ensureContext(tabID: id),
-                    .load(tabID: id, url: url, operationID: operationID),
-                ]),
-            )
+            return navigate(url: url, state: &state)
         case let .external(destination):
             let open = externalNavigation.open
             discardDraft(in: &state)
@@ -60,29 +38,34 @@ extension BrowserFeature {
         }
     }
 
-    func navigate(url: URL, state: inout State) -> Effect<Action> {
-        guard !deferWebAction(.navigate(url), state: &state) else {
+    func navigate(url: URL, tabID: BrowserTabID? = nil, state: inout State) -> Effect<Action> {
+        let targetTabID = tabID ?? state.selectedTabID
+        guard !deferWebAction(.navigate(tabID: targetTabID, url: url), state: &state) else {
             return .none
         }
-        guard let index = state.tabs.firstIndex(where: { $0.id == state.selectedTabID }) else {
+        guard let index = state.tabs.firstIndex(where: { $0.id == targetTabID }) else {
             return .none
         }
 
-        let id = state.selectedTabID
-        let operationID = beginPreviewOperation(for: id, state: &state)
+        let operationID = beginPreviewOperation(for: targetTabID, state: &state)
         if state.tabs[index].isStartPage {
-            state.tabs[index] = .web(id: id, url: url)
+            state.tabs[index] = .web(id: targetTabID, url: url)
         } else {
             state.tabs[index].content = .web(requestedURL: url)
         }
-        let dismissalEffect = dismissPageUI(in: &state)
-        state.library = nil
-        discardDraft(in: &state)
+        let dismissalEffect: Effect<Action>
+        if targetTabID == state.selectedTabID {
+            dismissalEffect = dismissPageUI(in: &state)
+            state.library = nil
+            discardDraft(in: &state)
+        } else {
+            dismissalEffect = .none
+        }
         return .merge(
             dismissalEffect,
             commands([
-                .ensureContext(tabID: id),
-                .load(tabID: id, url: url, operationID: operationID),
+                .ensureContext(tabID: targetTabID),
+                .load(tabID: targetTabID, url: url, operationID: operationID),
             ]),
         )
     }
@@ -607,7 +590,7 @@ extension BrowserFeature {
     /// Holds WebKit-bound navigation until the adapter confirms the profile that owns its context.
     @discardableResult
     func deferWebAction(_ action: BrowserDeferredWebAction, state: inout State) -> Bool {
-        guard state.profileConfigurationRequestID != nil else {
+        guard !state.canCreateWebKitContext else {
             return false
         }
 
@@ -623,10 +606,36 @@ extension BrowserFeature {
 
         state.pendingWebAction = nil
         switch pendingWebAction {
-        case let .navigate(url):
-            return navigate(url: url, state: &state)
+        case let .navigate(tabID, url):
+            return navigate(url: url, tabID: tabID, state: &state)
         case let .openInNewTab(url, openerID):
             return .send(.openInNewTab(url, openerID: openerID))
+        }
+    }
+
+    /// Loads the stored profile exactly once, when Browser or its Settings screen first needs it.
+    func initializeProfileIfNeeded(state: inout State) -> Effect<Action> {
+        guard case .notStarted = state.profileLifecycle else {
+            return .none
+        }
+
+        let requestID = uuid()
+        state.profileLifecycle = .initializing(requestID: requestID)
+        let loadSettings = browserSettings.load
+        let loadBookmarks = browserLibrary.loadBookmarks
+        let loadHistory = browserLibrary.loadHistory
+        let execute = webKit.execute
+        return .run { send in
+            async let bookmarks = (try? loadBookmarks()) ?? []
+            async let history = (try? loadHistory()) ?? []
+            let settings = await loadSettings()
+            await execute(.configureProfile(profile: settings.browsingProfile, retiringTabIDs: []))
+            await send(.loaded(
+                settings: settings,
+                bookmarks: bookmarks,
+                history: history,
+                profileConfigurationID: requestID,
+            ))
         }
     }
 
@@ -636,6 +645,10 @@ extension BrowserFeature {
         resetsSettings: Bool,
         state: inout State,
     ) -> Effect<Action> {
+        guard state.canCreateWebKitContext else {
+            return .none
+        }
+
         let retiringTabIDs = state.tabs.map(\.id)
         if resetsSettings {
             state.settings = .init()
@@ -643,9 +656,8 @@ extension BrowserFeature {
             state.settings.browsingProfile = profile
         }
 
-        state.profileConfigurationGeneration &+= 1
-        let requestID = state.profileConfigurationGeneration
-        state.profileConfigurationRequestID = requestID
+        let requestID = uuid()
+        state.profileLifecycle = .transitioning(requestID: requestID, profile: profile)
         state.pendingWebAction = nil
         let startPageID = BrowserTabID(uuid())
         state.tabs = [.startPage(id: startPageID)]

@@ -20,7 +20,7 @@ struct BrowserBehaviorTests {
         var tab = BrowserTab.web(id: tabID, url: url)
         tab.metadata = .init(committedURL: url, canGoBack: true, canGoForward: true)
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        let store = TestStore(initialState: BrowserFeature.State(tabs: [tab], selectedTabID: tabID)) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tabID)) {
             BrowserFeature()
         } withDependencies: {
             $0.browserWebKit.execute = { command in commands.withValue { $0.append(command) } }
@@ -62,7 +62,7 @@ struct BrowserBehaviorTests {
         let destinationURL = try #require(URL(string: "https://destination.example"))
         let tab = BrowserTab.web(id: tabID, url: initialURL)
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [tab],
             selectedTabID: tabID,
         )) { BrowserFeature() } withDependencies: {
@@ -128,7 +128,7 @@ struct BrowserBehaviorTests {
         var tab = BrowserTab.web(id: tabID, url: priorURL)
         tab.metadata = .init(committedURL: priorURL, canGoBack: true)
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        let store = TestStore(initialState: BrowserFeature.State(tabs: [tab], selectedTabID: tabID)) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tabID)) {
             BrowserFeature()
         } withDependencies: {
             $0.browserWebKit.execute = { command in commands.withValue { $0.append(command) } }
@@ -160,7 +160,7 @@ struct BrowserBehaviorTests {
         let firstID = BrowserTabID()
         let secondID = BrowserTabID()
         let url = try #require(URL(string: "https://example.com"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: firstID, url: url), .web(id: secondID, url: url)],
             selectedTabID: firstID,
         )
@@ -189,7 +189,7 @@ struct BrowserBehaviorTests {
         let url = try #require(URL(string: "https://example.com"))
         let priorURL = try #require(URL(string: "https://prior.example"))
         let entry = BrowserBackForwardEntry(title: "Prior", url: priorURL)
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [.web(id: tabID, url: url)],
             selectedTabID: tabID,
         )) { BrowserFeature() }
@@ -218,7 +218,7 @@ struct BrowserBehaviorTests {
         var second = BrowserTab.web(id: secondID, url: secondURL)
         second.metadata = .init(committedURL: secondURL, title: "Second")
         let copied = LockIsolated<URL?>(nil)
-        let store = TestStore(initialState: BrowserFeature.State(
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
             tabs: [first, second],
             selectedTabID: firstID,
             presentation: .tabOverview,
@@ -241,7 +241,7 @@ struct BrowserBehaviorTests {
     func librarySelection() async throws {
         let tabID = BrowserTabID()
         let destination = try #require(URL(string: "https://destination.example"))
-        var state = BrowserFeature.State(initialTabID: tabID)
+        var state = BrowserFeature.State.readyForTesting(initialTabID: tabID)
         state.library = .init(section: .bookmarks)
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
         let store = TestStore(initialState: state) { BrowserFeature() } withDependencies: {
@@ -265,7 +265,7 @@ struct BrowserBehaviorTests {
         let externalURL = try #require(URL(string: "mailto:person@example.com"))
         let opened = LockIsolated<[URL]>([])
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        let store = TestStore(initialState: BrowserFeature.State(initialTabID: tabID)) {
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(initialTabID: tabID)) {
             BrowserFeature()
         } withDependencies: {
             $0.browserExternalNavigation.open = { url in opened.withValue { $0.append(url) } }
@@ -289,7 +289,7 @@ struct BrowserBehaviorTests {
         let externalURL = try #require(URL(string: "mailto:person@example.com?subject=Browser"))
         let opened = LockIsolated<[URL]>([])
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        var state = BrowserFeature.State(initialTabID: tabID)
+        var state = BrowserFeature.State.readyForTesting(initialTabID: tabID)
         state.tabs[0] = .web(id: tabID, url: pageURL)
         state.settings.openLinksInNewTabs = .askEveryTime
         let store = TestStore(initialState: state) {
@@ -318,7 +318,7 @@ struct BrowserBehaviorTests {
         let openerID = BrowserTabID()
         let openerURL = try #require(URL(string: "https://page.example"))
         let destination = try #require(URL(string: "https://linked.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: openerID, url: openerURL)],
             selectedTabID: openerID,
         )
@@ -348,7 +348,7 @@ struct BrowserBehaviorTests {
         let existingRelatedURL = try #require(URL(string: "https://existing.example"))
         let navigationURL = try #require(URL(string: "https://navigated.example"))
         let destination = try #require(URL(string: "https://linked.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [
                 .web(id: openerID, url: openerURL),
                 .web(id: existingRelatedID, url: existingRelatedURL, openerID: openerID),
@@ -398,7 +398,7 @@ struct BrowserBehaviorTests {
         let openerID = BrowserTabID()
         let openerURL = try #require(URL(string: "https://page.example"))
         let destination = try #require(URL(string: "https://linked.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: openerID, url: openerURL)],
             selectedTabID: openerID,
         )
@@ -432,7 +432,7 @@ struct BrowserBehaviorTests {
         let openerID = BrowserTabID()
         let openerURL = try #require(URL(string: "https://page.example"))
         let destination = try #require(URL(string: "https://linked.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: openerID, url: openerURL)],
             selectedTabID: openerID,
         )
@@ -462,7 +462,7 @@ struct BrowserBehaviorTests {
         let openerID = BrowserTabID()
         let openerURL = try #require(URL(string: "https://page.example"))
         let destination = try #require(URL(string: "https://linked.example"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: openerID, url: openerURL)],
             selectedTabID: openerID,
         )
@@ -495,7 +495,7 @@ struct BrowserBehaviorTests {
         let copied = LockIsolated<[URL]>([])
         let commands = LockIsolated<[BrowserWebKitCommand]>([])
         let pageURL = try #require(URL(string: "https://page.example"))
-        var state = BrowserFeature.State(initialTabID: tabID)
+        var state = BrowserFeature.State.readyForTesting(initialTabID: tabID)
         state.tabs[0] = .web(id: tabID, url: pageURL)
         state.settings.openLinksInNewTabs = .foreground
         let store = TestStore(initialState: state) {
@@ -528,7 +528,7 @@ struct BrowserBehaviorTests {
         let openerID = BrowserTabID()
         let openerURL = try #require(URL(string: "https://page.example"))
         let destination = try #require(URL(string: "https://linked.example/path"))
-        var state = BrowserFeature.State(
+        var state = BrowserFeature.State.readyForTesting(
             tabs: [.web(id: openerID, url: openerURL)],
             selectedTabID: openerID,
         )

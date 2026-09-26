@@ -14,30 +14,18 @@ extension BrowserFeature {
         switch action {
         case .task:
             let events = webKit.events
-            let loadSettings = browserSettings.load
-            let loadBookmarks = browserLibrary.loadBookmarks
-            let loadHistory = browserLibrary.loadHistory
-            let execute = webKit.execute
-            state.profileConfigurationGeneration &+= 1
-            let configurationID = state.profileConfigurationGeneration
-            state.profileConfigurationRequestID = configurationID
-            return .merge(
-                .run { send in for await event in await events() {
+            let observeEvents = Effect<Action>.run { send in
+                for await event in await events() {
                     await send(.webKitEvent(event))
-                } },
-                .run { send in
-                    async let bookmarks = (try? loadBookmarks()) ?? []
-                    async let history = (try? loadHistory()) ?? []
-                    let settings = await loadSettings()
-                    await execute(.configureProfile(profile: settings.browsingProfile, retiringTabIDs: []))
-                    await send(.loaded(
-                        settings: settings,
-                        bookmarks: bookmarks,
-                        history: history,
-                        profileConfigurationID: configurationID,
-                    ))
-                },
+                }
+            }
+            .cancellable(id: CancelID.webKitEvents, cancelInFlight: true)
+            return .merge(
+                observeEvents,
+                initializeProfileIfNeeded(state: &state),
             )
+        case .settingsPresented:
+            return initializeProfileIfNeeded(state: &state)
         case let .profileChangeRequested(profile):
             guard state.canCreateWebKitContext else {
                 return .none
@@ -49,7 +37,9 @@ extension BrowserFeature {
         case .profileChangeCancelled:
             state.pendingProfileChange = nil
         case .profileChangeConfirmed:
-            guard let pendingProfileChange = state.pendingProfileChange else {
+            guard state.canCreateWebKitContext,
+                  let pendingProfileChange = state.pendingProfileChange
+            else {
                 return .none
             }
 
@@ -77,14 +67,15 @@ extension BrowserFeature {
                 )
             }
         case let .profileConfigurationCompleted(profile, requestID):
-            guard state.profileConfigurationRequestID == requestID,
+            guard case let .transitioning(activeRequestID, activeProfile) = state.profileLifecycle,
+                  activeRequestID == requestID,
+                  activeProfile == profile,
                   state.settings.browsingProfile == profile
             else {
                 return .none
             }
 
-            state.profileConfigurationRequestID = nil
-            state.profileConfigurationReady = true
+            state.profileLifecycle = .ready
             return resumePendingWebAction(state: &state)
         case .newTabTapped:
             let dismissalEffect = dismissPageUI(in: &state)
@@ -323,6 +314,10 @@ extension BrowserFeature {
             state.copiedLink = url
             state.rebuildSuggestions()
         case let .copiedLinkSuggestionsChanged(enabled):
+            guard state.canCreateWebKitContext else {
+                return .none
+            }
+
             state.settings.copiedLinkSuggestionsEnabled = enabled
             if !enabled {
                 state.copiedLink = nil
@@ -479,15 +474,16 @@ extension BrowserFeature {
                 return .send(.closeOtherTabsConfirmed(id))
             }
         case let .loaded(settings, bookmarks, history, profileConfigurationID):
-            guard state.profileConfigurationRequestID == profileConfigurationID else {
+            guard case let .initializing(requestID) = state.profileLifecycle,
+                  requestID == profileConfigurationID
+            else {
                 return .none
             }
 
             state.settings = settings
             state.bookmarks = bookmarks
             state.history = history
-            state.profileConfigurationRequestID = nil
-            state.profileConfigurationReady = true
+            state.profileLifecycle = .ready
             state.rebuildSuggestions()
             return resumePendingWebAction(state: &state)
         case let .navigate(url):
@@ -535,11 +531,19 @@ extension BrowserFeature {
             state.pendingNewTab = nil
             return .none
         case let .searchProviderChanged(provider):
+            guard state.canCreateWebKitContext else {
+                return .none
+            }
+
             state.settings.searchProvider = provider
             state.providerSuggestionValues = []
             state.rebuildSuggestions()
             return .merge(.cancel(id: CancelID.providerSuggestions), persist(settings: state.settings))
         case let .providerSuggestionsChanged(enabled):
+            guard state.canCreateWebKitContext else {
+                return .none
+            }
+
             state.settings.providerSuggestionsEnabled = enabled
             if !enabled {
                 state.providerSuggestionValues = []
@@ -547,6 +551,10 @@ extension BrowserFeature {
             }
             return .merge(.cancel(id: CancelID.providerSuggestions), persist(settings: state.settings))
         case let .openLinkPreferenceChanged(preference):
+            guard state.canCreateWebKitContext else {
+                return .none
+            }
+
             state.settings.openLinksInNewTabs = preference
             return persist(settings: state.settings)
         case .resetSettings:

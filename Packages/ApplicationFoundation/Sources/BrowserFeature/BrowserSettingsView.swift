@@ -27,6 +27,10 @@ public struct BrowserSettingsView: View {
             browserDataSection
         }
         .navigationTitle("Browser")
+        .disabled(!store.canCreateWebKitContext)
+        .task {
+            await store.send(.settingsPresented).finish()
+        }
         .confirmationDialog(
             confirmationTitle,
             isPresented: Binding(

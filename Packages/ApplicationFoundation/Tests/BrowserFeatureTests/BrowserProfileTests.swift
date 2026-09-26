@@ -7,9 +7,39 @@
 
 import ComposableArchitecture
 @preconcurrency import Foundation
+import SwiftUI
 import Testing
+import UIKit
 import WebKit
 @testable import BrowserFeature
+
+extension BrowserFeature.State {
+    /// Creates a logical Browser state whose stored profile has already been configured.
+    static func readyForTesting(initialTabID: BrowserTabID = .init()) -> Self {
+        var state = Self(initialTabID: initialTabID)
+        state.profileLifecycle = .ready
+        return state
+    }
+
+    /// Creates a tabbed Browser state whose stored profile has already been configured.
+    static func readyForTesting(
+        tabs: [BrowserTab],
+        selectedTabID: BrowserTabID,
+        presentation: BrowserPresentation = .browsing,
+        focusedField: BrowserFocusedField = .none,
+        omniboxDraft: String = "",
+    ) -> Self {
+        var state = Self(
+            tabs: tabs,
+            selectedTabID: selectedTabID,
+            presentation: presentation,
+            focusedField: focusedField,
+            omniboxDraft: omniboxDraft,
+        )
+        state.profileLifecycle = .ready
+        return state
+    }
+}
 
 @Suite("Browser profile transitions")
 @MainActor
@@ -31,6 +61,7 @@ struct BrowserProfileTests {
         let store = TestStore(initialState: BrowserFeature.State()) {
             BrowserFeature()
         } withDependencies: {
+            $0.uuid = .incrementing
             $0.browserSettings.load = { ephemeralSettings }
             $0.browserLibrary.loadBookmarks = { [] }
             $0.browserLibrary.loadHistory = { [] }
@@ -39,15 +70,14 @@ struct BrowserProfileTests {
                 events: { AsyncStream { $0.finish() } },
             )
         }
-        store.exhaustivity = .off(showSkippedAssertions: false)
-
+        store.exhaustivity = .off
         await store.send(.task)
         #expect(await gate.waitUntilStarted() == .ephemeral)
         let configurationID = try #require(store.state.profileConfigurationRequestID)
 
         await store.send(.navigate(destination))
 
-        #expect(store.state.pendingWebAction == .navigate(destination))
+        #expect(store.state.pendingWebAction == .navigate(tabID: store.state.selectedTabID, url: destination))
         #expect(store.state.selectedTab?.isStartPage == true)
         #expect(adapter.contextCount == 0)
         #expect(createdStores.value.isEmpty)
@@ -90,7 +120,7 @@ struct BrowserProfileTests {
         })
         adapter.execute(.configureProfile(profile: .ephemeral, retiringTabIDs: []))
 
-        let oldTabID = BrowserTabID(UUID(1))
+        let oldTabID = BrowserTabID(UUID(100))
         _ = adapter.ensureContext(for: oldTabID)
         let adapterOnlyTabID = BrowserTabID(UUID(4))
         _ = adapter.ensureContext(for: adapterOnlyTabID)
@@ -123,7 +153,7 @@ struct BrowserProfileTests {
             openLinksInNewTabs: .foreground,
             browsingProfile: .ephemeral,
         )
-        initialState.profileConfigurationReady = true
+        initialState.profileLifecycle = .ready
         initialState.bookmarks = [bookmark]
         initialState.history = [historyEntry]
         initialState.tabOverviewFocusID = oldTabID
@@ -190,7 +220,7 @@ struct BrowserProfileTests {
 
         #expect(await gate.waitUntilStarted() == .persistentPrivate)
         await store.send(.navigate(destination))
-        #expect(store.state.pendingWebAction == .navigate(destination))
+        #expect(store.state.pendingWebAction == .navigate(tabID: store.state.selectedTabID, url: destination))
         #expect(store.state.selectedTab?.isStartPage == true)
         #expect(adapter.hasContext(for: oldTabID))
         #expect(adapter.hasContext(for: adapterOnlyTabID))
@@ -240,7 +270,7 @@ struct BrowserProfileTests {
             openLinksInNewTabs: .foreground,
             browsingProfile: .ephemeral,
         )
-        initialState.profileConfigurationReady = true
+        initialState.profileLifecycle = .ready
         let bookmark = try BrowserBookmark(
             id: UUID(12),
             title: "Saved bookmark",
@@ -267,7 +297,7 @@ struct BrowserProfileTests {
                 events: { AsyncStream { $0.finish() } },
             )
         }
-        store.exhaustivity = .off(showSkippedAssertions: false)
+        store.exhaustivity = .off
 
         await store.send(.resetSettings)
         #expect(store.state.settings == originalSettings)
@@ -301,6 +331,278 @@ struct BrowserProfileTests {
         #expect(store.state.bookmarks == [bookmark])
         #expect(store.state.history == [historyEntry])
     }
+
+    @Test("Settings initializes the stored profile before accepting preference mutations")
+    func preferenceMutationWaitsForStoredProfile() async throws {
+        let gate = BrowserProfileConfigurationGate()
+        let adapter = BrowserWebKitAdapter(requiresProfileConfiguration: true)
+        let fixture = BrowserProfileWebKitFixture(adapter: adapter, gate: gate)
+        let persistedSettings = BrowserSettings(browsingProfile: .ephemeral)
+        let savedSettings = LockIsolated<[BrowserSettings]>([])
+        let store = TestStore(initialState: BrowserFeature.State()) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.load = { persistedSettings }
+            $0.browserSettings.save = { settings in savedSettings.withValue { $0.append(settings) } }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in await fixture.execute(command) },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.settingsPresented)
+        #expect(await gate.waitUntilStarted() == .ephemeral)
+        #expect(!store.state.canCreateWebKitContext)
+
+        await store.send(.task)
+        #expect(await gate.requestedProfiles() == [.ephemeral])
+
+        await store.send(.searchProviderChanged(.google))
+
+        #expect(store.state.settings.searchProvider == .duckDuckGo)
+        #expect(savedSettings.value.isEmpty)
+        let configurationID = try #require(store.state.profileConfigurationRequestID)
+        await gate.release()
+        await store.receive(.loaded(
+            settings: persistedSettings,
+            bookmarks: [],
+            history: [],
+            profileConfigurationID: configurationID,
+        ))
+        await store.finish()
+
+        #expect(store.state.canCreateWebKitContext)
+        #expect(store.state.settings.browsingProfile == .ephemeral)
+        await store.send(.searchProviderChanged(.google))
+        await store.finish()
+        #expect(savedSettings.value.count == 1)
+        #expect(savedSettings.value.allSatisfy { $0.browsingProfile == .ephemeral })
+    }
+
+    @Test("Mounted Browser Settings loads preferences before becoming usable")
+    func mountedSettingsInitializesStoredProfile() async {
+        let gate = BrowserProfileConfigurationGate()
+        let adapter = BrowserWebKitAdapter(requiresProfileConfiguration: true)
+        let fixture = BrowserProfileWebKitFixture(adapter: adapter, gate: gate)
+        let persistedSettings = BrowserSettings(browsingProfile: .ephemeral)
+        let store = Store(initialState: BrowserFeature.State()) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.load = { persistedSettings }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in await fixture.execute(command) },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        let readiness = BrowserSettingsReadinessObserver()
+        let controller = UIHostingController(
+            rootView: BrowserSettingsReadinessProbe(store: store, readiness: readiness),
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        #expect(await gate.waitUntilStarted() == .ephemeral)
+        #expect(store.withState { !$0.canCreateWebKitContext })
+
+        await gate.release()
+        await readiness.waitUntilReady()
+
+        #expect(store.withState { $0.canCreateWebKitContext })
+        #expect(store.withState { $0.settings.browsingProfile == .ephemeral })
+    }
+
+    @Test("A repeated Browser task cannot supersede a blocked profile transition")
+    func repeatedTaskCannotSupersedeProfileTransition() async throws {
+        let gate = BrowserProfileConfigurationGate()
+        let adapter = BrowserWebKitAdapter()
+        adapter.execute(.configureProfile(profile: .ephemeral, retiringTabIDs: []))
+        let fixture = BrowserProfileWebKitFixture(
+            adapter: adapter,
+            gate: gate,
+        )
+        let ephemeralSettings = BrowserSettings(browsingProfile: .ephemeral)
+        let savedSettings = LockIsolated<[BrowserSettings]>([])
+        var initialState = BrowserFeature.State()
+        initialState.settings = ephemeralSettings
+        initialState.profileLifecycle = .ready
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.load = { ephemeralSettings }
+            $0.browserSettings.save = { settings in savedSettings.withValue { $0.append(settings) } }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in await fixture.execute(command) },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.profileChangeRequested(.persistentPrivate))
+        await store.send(.profileChangeConfirmed)
+        let transitionID = try #require(store.state.profileConfigurationRequestID)
+        #expect(await gate.waitUntilStarted() == .persistentPrivate)
+
+        await store.send(.task)
+        #expect(store.state.profileConfigurationRequestID == transitionID)
+
+        await gate.release()
+        await store.receive(.profileConfigurationCompleted(
+            profile: .persistentPrivate,
+            requestID: transitionID,
+        ))
+        await store.finish()
+
+        #expect(store.state.settings.browsingProfile == .persistentPrivate)
+        #expect(await gate.requestedProfiles() == [.persistentPrivate])
+        #expect(savedSettings.value == [store.state.settings])
+
+        let replacementContext = adapter.ensureContext(for: store.state.selectedTabID)
+        #expect(replacementContext.configuration.websiteDataStore === WKWebsiteDataStore.default())
+        adapter.destroyContext(for: store.state.selectedTabID)
+    }
+
+    @Test("Navigation before the first Browser task waits for profile configuration")
+    func navigationBeforeInitialTaskIsDeferred() async throws {
+        let gate = BrowserProfileConfigurationGate()
+        let executedCommands = LockIsolated<[BrowserWebKitCommand]>([])
+        let persistedSettings = BrowserSettings(browsingProfile: .ephemeral)
+        let destination = try #require(URL(string: "https://before-task.example"))
+        let store = TestStore(initialState: BrowserFeature.State()) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.load = { persistedSettings }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in
+                    executedCommands.withValue { $0.append(command) }
+                    if case let .configureProfile(profile, _) = command {
+                        await gate.pause(profile)
+                    }
+                },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        store.exhaustivity = .off
+        let targetTabID = store.state.selectedTabID
+
+        await store.send(.navigate(destination))
+        await store.finish()
+
+        #expect(store.state.pendingWebAction == .navigate(tabID: targetTabID, url: destination))
+        #expect(store.state.tabs.first?.isStartPage == true)
+        #expect(executedCommands.value.isEmpty)
+
+        await store.send(.task)
+        let configurationID = try #require(store.state.profileConfigurationRequestID)
+        #expect(await gate.waitUntilStarted() == .ephemeral)
+        #expect(executedCommands.value == [
+            .configureProfile(profile: .ephemeral, retiringTabIDs: []),
+        ])
+
+        await gate.release()
+        await store.receive(.loaded(
+            settings: persistedSettings,
+            bookmarks: [],
+            history: [],
+            profileConfigurationID: configurationID,
+        ))
+        await store.finish()
+
+        #expect(executedCommands.value.first == .configureProfile(profile: .ephemeral, retiringTabIDs: []))
+        #expect(executedCommands.value.contains(.ensureContext(tabID: targetTabID)))
+        let loads = executedCommands.value.compactMap { command -> (BrowserTabID, URL)? in
+            guard case let .load(tabID: tabID, url: url, operationID: _) = command else {
+                return nil
+            }
+
+            return (tabID, url)
+        }
+        #expect(loads.count == 1)
+        #expect(loads.first?.0 == targetTabID)
+        #expect(loads.first?.1 == destination)
+    }
+
+    @Test("Deferred navigation resumes on its original tab after selection changes")
+    func deferredNavigationKeepsOriginalTab() async throws {
+        let gate = BrowserProfileConfigurationGate()
+        let executedCommands = LockIsolated<[BrowserWebKitCommand]>([])
+        let persistedSettings = BrowserSettings(browsingProfile: .ephemeral)
+        let destination = try #require(URL(string: "https://tab-a.example"))
+        let initialState = BrowserFeature.State(initialTabID: BrowserTabID(UUID(20)))
+        let originalTabID = initialState.selectedTabID
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.load = { persistedSettings }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in
+                    executedCommands.withValue { $0.append(command) }
+                    if case let .configureProfile(profile, _) = command {
+                        await gate.pause(profile)
+                    }
+                },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        let configurationID = try #require(store.state.profileConfigurationRequestID)
+        #expect(await gate.waitUntilStarted() == .ephemeral)
+        await store.send(.navigate(destination))
+        #expect(store.state.pendingWebAction == .navigate(tabID: originalTabID, url: destination))
+        await store.send(.newTabTapped)
+        let selectedTabID = store.state.selectedTabID
+        #expect(selectedTabID != originalTabID)
+        #expect(store.state.tabs.last?.isStartPage == true)
+        let backgroundDraft = "draft for tab B"
+        await store.send(.omniboxChanged(backgroundDraft))
+        #expect(store.state.focusedField == .startPage)
+
+        await gate.release()
+        await store.receive(.loaded(
+            settings: persistedSettings,
+            bookmarks: [],
+            history: [],
+            profileConfigurationID: configurationID,
+        ))
+        await store.finish()
+
+        #expect(store.state.selectedTabID == selectedTabID)
+        #expect(store.state.tabs.first(where: { $0.id == originalTabID })?.content == .web(requestedURL: destination))
+        #expect(store.state.tabs.first(where: { $0.id == selectedTabID })?.isStartPage == true)
+        #expect(store.state.omniboxDraft == backgroundDraft)
+        #expect(store.state.focusedField == .startPage)
+        let loads = executedCommands.value.compactMap { command -> (BrowserTabID, URL)? in
+            guard case let .load(tabID: tabID, url: url, operationID: _) = command else {
+                return nil
+            }
+
+            return (tabID, url)
+        }
+        #expect(loads.count == 1)
+        #expect(loads.first?.0 == originalTabID)
+        #expect(loads.first?.1 == destination)
+    }
 }
 
 private actor BrowserProfileConfigurationGate {
@@ -308,8 +610,17 @@ private actor BrowserProfileConfigurationGate {
     private var startContinuation: CheckedContinuation<BrowserBrowsingProfile, Never>?
     private var releaseContinuation: CheckedContinuation<Void, Never>?
     private var releasedBeforeSuspension = false
+    private var shouldPauseNextConfiguration = true
+    private var requestedProfileConfigurations: [BrowserBrowsingProfile] = []
 
     func pause(_ profile: BrowserBrowsingProfile) async {
+        requestedProfileConfigurations.append(profile)
+        guard shouldPauseNextConfiguration else {
+            return
+        }
+
+        shouldPauseNextConfiguration = false
+
         if let startContinuation {
             self.startContinuation = nil
             startContinuation.resume(returning: profile)
@@ -325,6 +636,10 @@ private actor BrowserProfileConfigurationGate {
                 releaseContinuation = continuation
             }
         }
+    }
+
+    func requestedProfiles() -> [BrowserBrowsingProfile] {
+        requestedProfileConfigurations
     }
 
     func waitUntilStarted() async -> BrowserBrowsingProfile {
@@ -344,6 +659,45 @@ private actor BrowserProfileConfigurationGate {
             releaseContinuation.resume()
         } else {
             releasedBeforeSuspension = true
+        }
+    }
+}
+
+@MainActor
+private final class BrowserSettingsReadinessObserver {
+    private var isReady = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilReady() async {
+        guard !isReady else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func markReady() {
+        isReady = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+@MainActor
+private struct BrowserSettingsReadinessProbe: View {
+    let store: StoreOf<BrowserFeature>
+    let readiness: BrowserSettingsReadinessObserver
+
+    var body: some View {
+        NavigationStack {
+            BrowserSettingsView(store: store)
+        }
+        .onChange(of: store.canCreateWebKitContext) { _, isReady in
+            if isReady {
+                readiness.markReady()
+            }
         }
     }
 }
