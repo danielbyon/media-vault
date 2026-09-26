@@ -10,6 +10,8 @@ import SwiftUI
 import UIKit
 
 /// Shared omnibox presentation used by the Start Page and browser chrome.
+///
+/// Literal URL and search entry should not be changed by system autocorrection.
 @MainActor
 @preconcurrency
 struct BrowserOmniboxView: View {
@@ -48,6 +50,7 @@ struct BrowserOmniboxView: View {
                     set: { store.send(.omniboxChanged($0)) },
                 ))
                 .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
                 .keyboardType(.webSearch)
                 .submitLabel(.go)
                 .focused($focusedField, equals: large ? .startPage : .chrome)
