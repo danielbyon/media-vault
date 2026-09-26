@@ -29,7 +29,7 @@ public struct BrowserSettingsView: View {
         .navigationTitle("Browser")
         .disabled(!store.canCreateWebKitContext)
         .task {
-            await store.send(.settingsPresented).finish()
+            _ = store.send(.profileInitializationRequested)
         }
         .confirmationDialog(
             confirmationTitle,

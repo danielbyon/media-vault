@@ -301,10 +301,10 @@ public struct BrowserFeature {
 
     /// User, dependency, and adapter events understood by the browser reducer.
     public enum Action: Equatable, Sendable {
-        /// Starts or restarts WebKit event observation and begins initialization when needed.
+        /// Starts or restarts Browser view-scoped WebKit event observation.
         case task
-        /// Loads and configures Browser settings when Settings is presented before Browser.
-        case settingsPresented
+        /// Requests idempotent stored settings, library, and profile initialization.
+        case profileInitializationRequested
         /// Requests an explicit confirmation before changing the global website-data profile.
         case profileChangeRequested(BrowserBrowsingProfile)
         /// Cancels the pending profile change without mutating Browser settings or session state.

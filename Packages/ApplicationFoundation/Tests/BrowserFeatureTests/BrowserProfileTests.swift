@@ -71,7 +71,7 @@ struct BrowserProfileTests {
             )
         }
         store.exhaustivity = .off
-        await store.send(.task)
+        await store.send(.profileInitializationRequested)
         #expect(await gate.waitUntilStarted() == .ephemeral)
         let configurationID = try #require(store.state.profileConfigurationRequestID)
 
@@ -354,7 +354,7 @@ struct BrowserProfileTests {
         }
         store.exhaustivity = .off
 
-        await store.send(.settingsPresented)
+        await store.send(.profileInitializationRequested)
         #expect(await gate.waitUntilStarted() == .ephemeral)
         #expect(!store.state.canCreateWebKitContext)
 
@@ -383,8 +383,8 @@ struct BrowserProfileTests {
         #expect(savedSettings.value.allSatisfy { $0.browsingProfile == .ephemeral })
     }
 
-    @Test("Mounted Browser Settings loads preferences before becoming usable")
-    func mountedSettingsInitializesStoredProfile() async {
+    @Test("Settings initialization survives dismissal and reopening")
+    func settingsInitializationSurvivesDismissalAndReopening() async {
         let gate = BrowserProfileConfigurationGate()
         let adapter = BrowserWebKitAdapter(requiresProfileConfiguration: true)
         let fixture = BrowserProfileWebKitFixture(adapter: adapter, gate: gate)
@@ -401,15 +401,15 @@ struct BrowserProfileTests {
                 events: { AsyncStream { $0.finish() } },
             )
         }
-        let readiness = BrowserSettingsReadinessObserver()
-        let controller = UIHostingController(
-            rootView: BrowserSettingsReadinessProbe(store: store, readiness: readiness),
+        let firstPresentation = BrowserSettingsReadinessObserver()
+        let firstController = UIHostingController(
+            rootView: BrowserSettingsReadinessProbe(store: store, readiness: firstPresentation),
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        window.rootViewController = controller
+        window.rootViewController = firstController
         window.makeKeyAndVisible()
-        controller.view.frame = window.bounds
-        controller.view.layoutIfNeeded()
+        firstController.view.frame = window.bounds
+        firstController.view.layoutIfNeeded()
         defer {
             window.isHidden = true
             window.rootViewController = nil
@@ -417,9 +417,25 @@ struct BrowserProfileTests {
 
         #expect(await gate.waitUntilStarted() == .ephemeral)
         #expect(store.withState { !$0.canCreateWebKitContext })
+        #expect(await gate.requestedProfiles() == [.ephemeral])
+
+        window.isHidden = true
+        window.rootViewController = nil
+        #expect(await firstPresentation.waitUntilDismissed(timeout: .seconds(1)))
+
+        let reopenedPresentation = BrowserSettingsReadinessObserver()
+        let reopenedController = UIHostingController(
+            rootView: BrowserSettingsReadinessProbe(store: store, readiness: reopenedPresentation),
+        )
+        window.rootViewController = reopenedController
+        window.isHidden = false
+        window.makeKeyAndVisible()
+        reopenedController.view.frame = window.bounds
+        reopenedController.view.layoutIfNeeded()
+        #expect(await gate.requestedProfiles() == [.ephemeral])
 
         await gate.release()
-        await readiness.waitUntilReady()
+        #expect(await reopenedPresentation.waitUntilReady(timeout: .seconds(1)))
 
         #expect(store.withState { $0.canCreateWebKitContext })
         #expect(store.withState { $0.settings.browsingProfile == .ephemeral })
@@ -457,6 +473,8 @@ struct BrowserProfileTests {
         #expect(await gate.waitUntilStarted() == .persistentPrivate)
 
         await store.send(.task)
+        #expect(store.state.profileConfigurationRequestID == transitionID)
+        await store.send(.profileInitializationRequested)
         #expect(store.state.profileConfigurationRequestID == transitionID)
 
         await gate.release()
@@ -508,7 +526,7 @@ struct BrowserProfileTests {
         #expect(store.state.tabs.first?.isStartPage == true)
         #expect(executedCommands.value.isEmpty)
 
-        await store.send(.task)
+        await store.send(.profileInitializationRequested)
         let configurationID = try #require(store.state.profileConfigurationRequestID)
         #expect(await gate.waitUntilStarted() == .ephemeral)
         #expect(executedCommands.value == [
@@ -565,7 +583,7 @@ struct BrowserProfileTests {
         }
         store.exhaustivity = .off
 
-        await store.send(.task)
+        await store.send(.profileInitializationRequested)
         let configurationID = try #require(store.state.profileConfigurationRequestID)
         #expect(await gate.waitUntilStarted() == .ephemeral)
         await store.send(.navigate(destination))
@@ -666,22 +684,72 @@ private actor BrowserProfileConfigurationGate {
 @MainActor
 private final class BrowserSettingsReadinessObserver {
     private var isReady = false
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var isDismissed = false
+    private var readinessContinuation: CheckedContinuation<Bool, Never>?
+    private var dismissalContinuation: CheckedContinuation<Bool, Never>?
+    private var readinessTimeout: Task<Void, Never>?
+    private var dismissalTimeout: Task<Void, Never>?
 
-    func waitUntilReady() async {
+    func waitUntilReady(timeout: Duration) async -> Bool {
         guard !isReady else {
-            return
+            return true
         }
 
-        await withCheckedContinuation { continuation in
-            self.continuation = continuation
+        return await withCheckedContinuation { continuation in
+            readinessContinuation = continuation
+            readinessTimeout = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch {
+                    return
+                }
+
+                self?.finishReadinessWait(result: false)
+            }
+        }
+    }
+
+    func waitUntilDismissed(timeout: Duration) async -> Bool {
+        guard !isDismissed else {
+            return true
+        }
+
+        return await withCheckedContinuation { continuation in
+            dismissalContinuation = continuation
+            dismissalTimeout = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch {
+                    return
+                }
+
+                self?.finishDismissalWait(result: false)
+            }
         }
     }
 
     func markReady() {
         isReady = true
-        continuation?.resume()
-        continuation = nil
+        finishReadinessWait(result: true)
+    }
+
+    func markDismissed() {
+        isDismissed = true
+        finishDismissalWait(result: true)
+    }
+
+    private func finishReadinessWait(result: Bool) {
+        readinessTimeout?.cancel()
+        readinessTimeout = nil
+        readinessContinuation?.resume(returning: result)
+        readinessContinuation = nil
+    }
+
+    private func finishDismissalWait(result: Bool) {
+        dismissalTimeout?.cancel()
+        dismissalTimeout = nil
+        dismissalContinuation?.resume(returning: result)
+        dismissalContinuation = nil
     }
 }
 
@@ -698,6 +766,9 @@ private struct BrowserSettingsReadinessProbe: View {
             if isReady {
                 readiness.markReady()
             }
+        }
+        .onDisappear {
+            readiness.markDismissed()
         }
     }
 }

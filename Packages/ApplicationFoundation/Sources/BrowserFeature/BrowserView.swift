@@ -234,6 +234,7 @@ public struct BrowserView: View {
             cancelTabTransition()
             store.send(.previewCacheEvicted)
         }
+        .task { _ = store.send(.profileInitializationRequested) }
         .task { await store.send(.task).finish() }
         .onDisappear {
             cancelTabTransition()

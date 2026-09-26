@@ -14,17 +14,13 @@ extension BrowserFeature {
         switch action {
         case .task:
             let events = webKit.events
-            let observeEvents = Effect<Action>.run { send in
+            return Effect<Action>.run { send in
                 for await event in await events() {
                     await send(.webKitEvent(event))
                 }
             }
             .cancellable(id: CancelID.webKitEvents, cancelInFlight: true)
-            return .merge(
-                observeEvents,
-                initializeProfileIfNeeded(state: &state),
-            )
-        case .settingsPresented:
+        case .profileInitializationRequested:
             return initializeProfileIfNeeded(state: &state)
         case let .profileChangeRequested(profile):
             guard state.canCreateWebKitContext else {
