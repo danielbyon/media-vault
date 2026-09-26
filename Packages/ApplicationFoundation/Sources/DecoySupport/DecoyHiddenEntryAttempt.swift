@@ -20,16 +20,33 @@ public struct DecoyHiddenEntryTriggerID: Hashable, Sendable {
     }
 }
 
+/// The host-policy role of a normalized hidden-entry trigger.
+///
+/// A trigger declares one intent kind so the application host can apply the corresponding policy
+/// without learning how the decoy recognizes that trigger.
+public enum DecoyHiddenEntryIntentKind: Hashable, Sendable {
+    /// Requests the application's normal setup or authentication entry point.
+    case authenticationRequest
+
+    /// Submits a transient credential candidate for evaluation by the host.
+    case credentialCandidate
+}
+
 /// A trigger declaration visible to the application host without gesture or control details.
 public struct DecoyHiddenEntryTriggerDescriptor: Hashable, Identifiable, Sendable {
     /// The stable identity shared by trigger declarations, configuration, and attempts.
     public let id: DecoyHiddenEntryTriggerID
 
+    /// The single normalized policy role assigned to this trigger.
+    public let intentKind: DecoyHiddenEntryIntentKind
+
     /// Creates a declaration for one decoy-owned hidden-entry trigger.
     ///
     /// - Parameter id: The trigger's stable identity.
-    public init(id: DecoyHiddenEntryTriggerID) {
+    /// - Parameter intentKind: The one normalized intent produced by this trigger.
+    public init(id: DecoyHiddenEntryTriggerID, intentKind: DecoyHiddenEntryIntentKind) {
         self.id = id
+        self.intentKind = intentKind
     }
 }
 
@@ -121,6 +138,16 @@ public enum DecoyHiddenEntryIntent: Equatable, Sendable {
 
     /// Submits a transient candidate for evaluation by the application host.
     case credentialCandidate(DecoyHiddenEntryCredentialCandidate)
+
+    /// The normalized policy role represented by this intent.
+    public var kind: DecoyHiddenEntryIntentKind {
+        switch self {
+        case .authenticationRequest:
+            .authenticationRequest
+        case .credentialCandidate:
+            .credentialCandidate
+        }
+    }
 }
 
 /// A UUID-backed identity supplied by the decoy that owns an attempt's lifecycle.

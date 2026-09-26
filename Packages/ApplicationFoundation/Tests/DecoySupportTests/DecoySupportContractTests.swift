@@ -14,10 +14,32 @@ import Testing
 struct DecoySupportContractTests {
     private let authenticationTrigger = DecoyHiddenEntryTriggerDescriptor(
         id: DecoyHiddenEntryTriggerID(rawValue: "authentication"),
+        intentKind: .authenticationRequest,
     )
     private let candidateTrigger = DecoyHiddenEntryTriggerDescriptor(
         id: DecoyHiddenEntryTriggerID(rawValue: "candidate"),
+        intentKind: .credentialCandidate,
     )
+
+    @Test("Trigger declarations and attempts expose the same normalized intent kind")
+    func triggerDescriptorMatchesAttemptIntentKind() throws {
+        let uuid = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000099"))
+        let authentication = DecoyHiddenEntryAttempt(
+            id: .init(uuid),
+            triggerID: authenticationTrigger.id,
+            intent: .authenticationRequest,
+        )
+        let candidate = DecoyHiddenEntryAttempt(
+            id: .init(uuid),
+            triggerID: candidateTrigger.id,
+            intent: .credentialCandidate(.init("2468")),
+        )
+
+        #expect(authenticationTrigger.intentKind == .authenticationRequest)
+        #expect(authentication.intent.kind == authenticationTrigger.intentKind)
+        #expect(candidateTrigger.intentKind == .credentialCandidate)
+        #expect(candidate.intent.kind == candidateTrigger.intentKind)
+    }
 
     @Test("Runtime trigger configuration permits only declared enabled triggers")
     func triggerConfigurationChecksCurrentSupportAndEnablement() {

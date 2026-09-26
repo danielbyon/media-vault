@@ -25,12 +25,23 @@ struct CalculatorDecoyAdapterTests {
     func triggerDescriptorsAreStable() {
         #expect(CalculatorDecoyAdapter.longPressEqualsTrigger.id.rawValue == "calculator.long-press-equals")
         #expect(CalculatorDecoyAdapter.pinEqualsTrigger.id.rawValue == "calculator.pin-equals")
+        #expect(CalculatorDecoyAdapter.longPressEqualsTrigger.intentKind == .authenticationRequest)
+        #expect(CalculatorDecoyAdapter.pinEqualsTrigger.intentKind == .credentialCandidate)
         #expect(
             CalculatorDecoyAdapter.supportedTriggers == [
                 CalculatorDecoyAdapter.longPressEqualsTrigger,
                 CalculatorDecoyAdapter.pinEqualsTrigger,
             ],
         )
+    }
+
+    @Test("The calculator publishes its build-time decoy definition")
+    func calculatorDefinitionDeclaresItsSupportedTriggers() {
+        let definition = CalculatorDecoyAdapter.definition
+
+        #expect(definition.id == "calculator")
+        #expect(definition.displayName == "Calculator")
+        #expect(definition.declaredTriggers == CalculatorDecoyAdapter.supportedTriggers)
     }
 
     @Test("Disabled triggers leave ordinary calculator input unchanged")

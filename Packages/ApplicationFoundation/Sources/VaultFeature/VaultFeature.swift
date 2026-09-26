@@ -6,6 +6,7 @@
 //
 
 import ComposableArchitecture
+import DecoySupport
 import Dependencies
 
 /// The visible lifecycle of the vault boundary.
@@ -86,6 +87,9 @@ public struct VaultFeature {
         /// Whether a credential operation is in flight.
         public var isWorking: Bool
 
+        /// The decoy attempt whose hidden candidate is currently being evaluated.
+        public var pendingHiddenVerificationID: DecoyHiddenEntryAttempt.ID?
+
         /// The authenticated navigation shell state.
         public var shell: VaultShellFeature.State
 
@@ -103,10 +107,11 @@ public struct VaultFeature {
             confirmationInput = ""
             error = nil
             isWorking = false
+            pendingHiddenVerificationID = nil
             shell = .init()
         }
 
-        /// Whether the configured credential can participate in hidden calculator entry.
+        /// Whether the configured credential can participate in hidden decoy entry.
         public var canUseHiddenEntry: Bool {
             phase == .locked && configuredKind == .pin && usesHiddenEntry
         }
@@ -156,11 +161,17 @@ public struct VaultFeature {
         /// Delivers the normal authentication result.
         case authenticationCompleted(VaultCredentialVerificationResult)
 
-        /// Verifies a transient calculator PIN-equals candidate.
-        case verifyHidden(String)
+        /// Verifies a transient decoy candidate without exposing its plaintext to host policy.
+        case verifyHidden(
+            attemptID: DecoyHiddenEntryAttempt.ID,
+            candidate: DecoyHiddenEntryCredentialCandidate,
+        )
 
-        /// Delivers the hidden candidate verification result without returning the candidate.
-        case hiddenVerificationCompleted(VaultCredentialVerificationResult)
+        /// Delivers a correlated hidden candidate result without returning the candidate.
+        case hiddenVerificationCompleted(
+            DecoyHiddenEntryAttempt.ID,
+            Result<Bool, DecoyHiddenEntryError>,
+        )
 
         /// Forwards navigation actions after authentication.
         case shell(VaultShellFeature.Action)
@@ -352,6 +363,7 @@ extension VaultFeature {
 
             state.phase = .authentication
             state.isWorking = false
+            state.pendingHiddenVerificationID = nil
             state.credentialInput = ""
             state.confirmationInput = ""
             state.error = nil
@@ -404,36 +416,58 @@ extension VaultFeature {
 
     private func handleHiddenVerification(into state: inout State, action: Action) -> Effect<Action> {
         switch action {
-        case let .verifyHidden(candidate):
+        case let .verifyHidden(attemptID, candidate):
             guard state.phase == .locked,
                   state.configuredKind == .pin,
                   state.usesHiddenEntry,
-                  !state.isWorking
+                  !state.isWorking,
+                  state.pendingHiddenVerificationID == nil
             else {
                 return .none
             }
 
             state.isWorking = true
+            state.pendingHiddenVerificationID = attemptID
             let verify = credential.verify
             return .run { send in
                 guard !Task.isCancelled else {
                     return
                 }
 
-                let result = await verify(candidate)
+                let result = await candidate.evaluate { value in
+                    switch await verify(value) {
+                    case .succeeded:
+                        .success(true)
+                    case .incorrect:
+                        .success(false)
+                    case .unavailable:
+                        .failure(.evaluationFailed)
+                    }
+                }
                 guard !Task.isCancelled else {
                     return
                 }
 
-                await send(.hiddenVerificationCompleted(result))
+                await send(.hiddenVerificationCompleted(attemptID, result))
             }
-            .cancellable(id: VaultEffectID.hiddenVerification)
-        case let .hiddenVerificationCompleted(result):
-            guard state.phase == .locked, state.isWorking else {
+            .cancellable(id: VaultEffectID.hiddenVerification, cancelInFlight: true)
+        case let .hiddenVerificationCompleted(attemptID, result):
+            guard state.phase == .locked,
+                  state.isWorking,
+                  state.pendingHiddenVerificationID == attemptID
+            else {
                 return .none
             }
 
-            completeHiddenVerification(result, state: &state)
+            state.pendingHiddenVerificationID = nil
+            switch result {
+            case .success(true):
+                completeHiddenVerification(.succeeded, state: &state)
+            case .success(false):
+                completeHiddenVerification(.incorrect, state: &state)
+            case .failure:
+                completeHiddenVerification(.unavailable, state: &state)
+            }
         default:
             return .none
         }

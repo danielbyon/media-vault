@@ -6,20 +6,21 @@
 //
 
 import AppFeature
-import CalculatorFeature
 import ComposableArchitecture
 import Dependencies
 import FoundationTestSupport
 import SnapshotTesting
 import SwiftUI
 import Testing
+import VaultFeature
 
 @MainActor
 @Suite("Root surface snapshots")
 struct RootSurfaceSnapshotTests {
-    @Test("The empty calculator state has a stable structural snapshot")
+    @Test("The root state has a stable structural snapshot")
     func rootStateSnapshot() {
-        assertSnapshot(of: RootFeature.State(), as: .dump)
+        let store = makeRootStore()
+        assertSnapshot(of: store.state, as: .dump)
     }
 
     @Test("The root surface is stable on a compact iPhone")
@@ -47,18 +48,20 @@ struct RootSurfaceSnapshotTests {
     }
 
     private func rootView() -> some View {
-        let store = withDependencies {
+        let store = makeRootStore()
+
+        return RootView(store: store)
+            .environment(\.colorScheme, .light)
+    }
+
+    private func makeRootStore() -> StoreOf<RootFeature> {
+        withDependencies {
             $0.calculatorPersistence.load = { nil }
             $0.calculatorPersistence.save = { _ in }
             $0.vaultCredential.loadConfiguration = { nil }
         } operation: {
-            Store(initialState: RootFeature.State()) {
-                RootFeature()
-            }
+            RootComposition.makeStore()
         }
-
-        return RootView(store: store)
-            .environment(\.colorScheme, .light)
     }
 }
 
@@ -70,15 +73,7 @@ extension RootFeature.State: @retroactive AnySnapshotStringConvertible {
 
     /// Returns the stable structural representation used by the root-state snapshot.
     public var snapshotDescription: String {
-        [
-            "RootFeature.State(calculator: (display: \(calculator.display.debugDescription), ",
-            "expression: \(calculator.expression.debugDescription), ",
-            "memory: \(String(describing: calculator.memory)), ",
-            "historyCount: \(calculator.history.count), ",
-            "error: \(String(describing: calculator.error)), ",
-            "persistenceError: \(String(describing: calculator.persistenceError)), ",
-            "isLoading: \(calculator.isLoading), ",
-            "isShowingResult: \(calculator.isShowingResult)))",
-        ].joined()
+        "RootFeature.State(vaultPhase: \(String(describing: vault.phase)), "
+            + "pendingHiddenAttempt: \(pendingHiddenAttemptID != nil))"
     }
 }
