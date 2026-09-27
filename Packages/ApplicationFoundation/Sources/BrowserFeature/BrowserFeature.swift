@@ -477,6 +477,8 @@ public struct BrowserFeature {
         case resetSettings
         /// Delivers the durable bytes read for one authenticated Browser-entry restoration request.
         case openTabsSessionLoaded(requestID: UUID, revision: UInt64, data: Data?)
+        /// Reports that storage could not safely inspect or read one Browser-entry session request.
+        case openTabsSessionLoadFailed(requestID: UUID, revision: UInt64)
         /// Presents the app-owned Find on Page input.
         case findPresented
         /// Changes Find on Page text and routes it to WebKit.

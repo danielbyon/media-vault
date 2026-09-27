@@ -281,6 +281,9 @@ extension BrowserFeature {
         case .omniboxFocusLost:
             return reconcileOmniboxFocusLoss(in: &state)
         case let .omniboxChanged(draft):
+            if case .restoring = state.openTabsEntryLifecycle {
+                state.openTabsEntryLifecycle = .completed
+            }
             state.omniboxDraft = draft
             state.hasUnsubmittedOmniboxDraft = true
             state.providerSuggestionValues = []
@@ -540,6 +543,17 @@ extension BrowserFeature {
                  .completed:
                 return resumedEffect
             }
+        case let .openTabsSessionLoadFailed(requestID, revision):
+            guard state.openTabsEntryLifecycle == .restoring(requestID: requestID, revision: revision),
+                  state.profileLifecycle == .ready,
+                  state.settings.browsingProfile == .persistentPrivate,
+                  state.settings.preserveOpenTabs
+            else {
+                return .none
+            }
+
+            state.openTabsEntryLifecycle = .completed
+            return .none
         case let .openTabsSessionLoaded(requestID, revision, data):
             guard state.openTabsEntryLifecycle == .restoring(requestID: requestID, revision: revision),
                   state.profileLifecycle == .ready,

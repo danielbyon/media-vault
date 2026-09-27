@@ -10,6 +10,18 @@ import CoreFoundation
 import Darwin
 import Foundation
 
+/// Describes whether storage inspection found a usable session, no session, or an unsafe read.
+enum BrowserOpenTabsSessionLoadOutcome: Equatable, Sendable {
+    /// The persistence domain and legacy location were inspected successfully and contain no session.
+    case missing
+
+    /// A committed or recoverable session was read after its storage protections were verified.
+    case loaded(Data)
+
+    /// Filesystem, protection, or recovery errors prevented a safe read decision.
+    case failed
+}
+
 /// Synchronously orders one persistence domain before its effects can run out of order.
 final class BrowserPersistenceRevisionGate: @unchecked Sendable {
     static let shared = BrowserPersistenceRevisionGate()
@@ -277,7 +289,7 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
     }
 }
 
-/// Dedicated Browser-owned session persistence with revision ordering and backup exclusion.
+/// Dedicated Browser-owned session persistence with revision ordering and private file protection.
 actor BrowserOpenTabsSessionStorage {
     private enum TransactionArtifactKind: String {
         case pending
@@ -293,14 +305,14 @@ actor BrowserOpenTabsSessionStorage {
     }
 
     private enum StorageError: Error {
-        case backupExclusionNotVerified
+        case storageProtectionNotVerified
         case recoveryUnavailable
     }
 
     nonisolated let directoryURL: URL
     nonisolated let fileURL: URL
     private let revisionGate: BrowserPersistenceRevisionGate
-    private let applyAndVerifyBackupExclusion: @Sendable (URL) throws -> Bool
+    private let applyAndVerifyStorageProtection: @Sendable (URL) throws -> Bool
     private let legacyDirectoryURL: URL?
     private var newestRevision: UInt64 = 0
 
@@ -308,46 +320,53 @@ actor BrowserOpenTabsSessionStorage {
         directoryURL: URL,
         legacyDirectoryURL: URL? = nil,
         revisionGate: BrowserPersistenceRevisionGate = BrowserPersistenceRevisionGate(),
-        applyAndVerifyBackupExclusion: @escaping @Sendable (URL) throws -> Bool =
-            BrowserOpenTabsSessionStorage.applyAndVerifyBackupExclusion,
+        applyAndVerifyStorageProtection: @escaping @Sendable (URL) throws -> Bool =
+            BrowserOpenTabsSessionStorage.applyAndVerifyStorageProtection,
     ) {
         self.directoryURL = directoryURL
         fileURL = directoryURL.appendingPathComponent("open-tabs.json", isDirectory: false)
         self.legacyDirectoryURL = legacyDirectoryURL
         self.revisionGate = revisionGate
-        self.applyAndVerifyBackupExclusion = applyAndVerifyBackupExclusion
+        self.applyAndVerifyStorageProtection = applyAndVerifyStorageProtection
     }
 
-    /// Applies and reads back the no-backup resource value for one session-storage URL.
-    nonisolated static func applyAndVerifyBackupExclusion(_ url: URL) throws -> Bool {
+    /// Applies and verifies complete Data Protection and backup exclusion for one storage URL.
+    nonisolated static func applyAndVerifyStorageProtection(_ url: URL) throws -> Bool {
+        let fileManager = FileManager.default
+        try fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.complete],
+            ofItemAtPath: url.path,
+        )
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var mutableURL = url
         try mutableURL.setResourceValues(values)
-        return try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true
+
+        let storedValues = try url.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        let storedAttributes = try fileManager.attributesOfItem(atPath: url.path)
+        return storedValues.isExcludedFromBackup == true
+            && storedAttributes[.protectionKey] as? FileProtectionType == .complete
     }
 
-    /// Reads the current committed snapshot after reconciling any interrupted transaction.
-    func load() -> Data? {
-        let fileManager = FileManager.default
+    /// Reads the current committed snapshot after checking storage access and recovering transactions.
+    func load() -> BrowserOpenTabsSessionLoadOutcome {
         do {
-            if fileManager.fileExists(atPath: directoryURL.path) {
-                try ensureBackupExclusion(for: directoryURL)
+            if try itemExists(at: directoryURL) {
+                try ensureStorageProtection(for: directoryURL)
                 if let recoverableData = try reconcileInterruptedTransactions() {
-                    return recoverableData
+                    return .loaded(recoverableData)
                 }
 
-                if fileManager.fileExists(atPath: fileURL.path) {
-                    let data = try readExcludedData(at: fileURL)
+                if try itemExists(at: fileURL) {
+                    let data = try readProtectedData(at: fileURL)
                     removeLegacySessionFiles()
-                    return data
+                    return .loaded(data)
                 }
             }
+            return try loadLegacySession()
         } catch {
-            return nil
+            return .failed
         }
-
-        return loadLegacySession()
     }
 
     /// Commits a prepared session atomically and records enough state to recover after interruption.
@@ -366,7 +385,7 @@ actor BrowserOpenTabsSessionStorage {
             let fileManager = FileManager.default
             do {
                 try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-                try ensureBackupExclusion(for: directoryURL)
+                try ensureStorageProtection(for: directoryURL)
                 guard try reconcileInterruptedTransactions() == nil else {
                     throw StorageError.recoveryUnavailable
                 }
@@ -409,21 +428,21 @@ actor BrowserOpenTabsSessionStorage {
 
         do {
             try data.write(to: pendingURL, options: .atomic)
-            try ensureBackupExclusion(for: pendingURL)
+            try ensureStorageProtection(for: pendingURL)
 
-            if fileManager.fileExists(atPath: fileURL.path) {
+            if try itemExists(at: fileURL) {
                 try fileManager.copyItem(at: fileURL, to: previousURL)
                 hasPreviousSession = true
-                try ensureBackupExclusion(for: previousURL)
+                try ensureStorageProtection(for: previousURL)
             }
 
             try Data().write(to: transactionURL, options: .atomic)
-            try ensureBackupExclusion(for: transactionURL)
+            try ensureStorageProtection(for: transactionURL)
 
             try Self.atomicallyReplace(stagingFileAt: pendingURL, destinationFileAt: fileURL)
             didPromoteCandidate = true
-            try ensureBackupExclusion(for: directoryURL)
-            try ensureBackupExclusion(for: fileURL)
+            try ensureStorageProtection(for: directoryURL)
+            try ensureStorageProtection(for: fileURL)
 
             // Removing the marker commits the candidate. Until then, recovery prefers previous.
             try fileManager.removeItem(at: transactionURL)
@@ -479,18 +498,19 @@ actor BrowserOpenTabsSessionStorage {
     /// Restores a copied previous snapshot without consuming the only recovery file.
     private func restoreCommittedSnapshot(from previousURL: URL, transactionID: String) throws {
         let fileManager = FileManager.default
-        try ensureBackupExclusion(for: previousURL)
+        try ensureStorageProtection(for: directoryURL)
+        try ensureStorageProtection(for: previousURL)
         let recoveryURL = artifactURL(.recovery, id: transactionID)
-        if fileManager.fileExists(atPath: recoveryURL.path) {
+        if try itemExists(at: recoveryURL) {
             try fileManager.removeItem(at: recoveryURL)
         }
         try fileManager.copyItem(at: previousURL, to: recoveryURL)
 
         do {
-            try ensureBackupExclusion(for: recoveryURL)
+            try ensureStorageProtection(for: recoveryURL)
             try Self.atomicallyReplace(stagingFileAt: recoveryURL, destinationFileAt: fileURL)
-            try ensureBackupExclusion(for: directoryURL)
-            try ensureBackupExclusion(for: fileURL)
+            try ensureStorageProtection(for: directoryURL)
+            try ensureStorageProtection(for: fileURL)
         } catch {
             try? fileManager.removeItem(at: recoveryURL)
             throw error
@@ -502,7 +522,7 @@ actor BrowserOpenTabsSessionStorage {
         let fileManager = FileManager.default
         let artifacts = try transactionArtifacts(in: directoryURL)
         let markers = artifacts.filter { $0.kind == .transaction }
-        let hasCurrentSession = fileManager.fileExists(atPath: fileURL.path)
+        let hasCurrentSession = try itemExists(at: fileURL)
 
         if let marker = markers.first {
             let previous = artifacts.first(where: { $0.kind == .previous && $0.id == marker.id })
@@ -511,7 +531,7 @@ actor BrowserOpenTabsSessionStorage {
                 do {
                     try restoreCommittedSnapshot(from: previous.url, transactionID: marker.id)
                 } catch {
-                    return try? readExcludedData(at: previous.url)
+                    return try readProtectedData(at: previous.url)
                 }
             } else if hasCurrentSession {
                 // Without a previous snapshot, the marked current file is only a candidate.
@@ -523,60 +543,133 @@ actor BrowserOpenTabsSessionStorage {
             do {
                 try restoreCommittedSnapshot(from: previous.url, transactionID: previous.id)
             } catch {
-                return try? readExcludedData(at: previous.url)
+                return try readProtectedData(at: previous.url)
             }
         }
 
-        let currentExists = fileManager.fileExists(atPath: fileURL.path)
+        let currentExists = try itemExists(at: fileURL)
         if currentExists {
-            try ensureBackupExclusion(for: fileURL)
+            try ensureStorageProtection(for: fileURL)
         }
         removeObsoleteSessionFiles()
         return nil
     }
 
-    private func loadLegacySession() -> Data? {
+    private func loadLegacySession() throws -> BrowserOpenTabsSessionLoadOutcome {
         guard let legacyDirectoryURL,
               legacyDirectoryURL.standardizedFileURL != directoryURL.standardizedFileURL
         else {
-            return nil
+            return .missing
+        }
+        guard try itemExists(at: legacyDirectoryURL) else {
+            return .missing
         }
 
         let legacyFileURL = legacyDirectoryURL.appendingPathComponent("open-tabs.json", isDirectory: false)
+        let artifacts = try transactionArtifacts(in: legacyDirectoryURL)
+        let currentExists = try itemExists(at: legacyFileURL)
+        try protectLegacySessionFiles(artifacts, currentFileURL: legacyFileURL, currentExists: currentExists)
+        return try legacySessionOutcome(
+            artifacts: artifacts,
+            currentFileURL: legacyFileURL,
+            currentExists: currentExists,
+        )
+    }
+
+    /// Verifies legacy files before they can be read and discards files that remain unsafe.
+    private func protectLegacySessionFiles(
+        _ artifacts: [TransactionArtifact],
+        currentFileURL: URL,
+        currentExists: Bool,
+    ) throws {
         let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: legacyFileURL.path) {
+        var protectionFailure: (any Error)?
+        for artifact in artifacts {
             do {
-                let data = try readExcludedData(at: legacyFileURL)
-                removeLegacySessionFiles(removeCommittedSession: false)
-                return data
+                try ensureStorageProtection(for: artifact.url)
             } catch {
-                return nil
+                // Do not retain a legacy URL artifact whose protection could not be established.
+                try? fileManager.removeItem(at: artifact.url)
+                protectionFailure = error
             }
         }
 
-        guard let previous = try? transactionArtifacts(in: legacyDirectoryURL)
-            .first(where: { $0.kind == .previous })
-        else {
-            removeLegacySessionFiles(removeCommittedSession: false)
-            return nil
+        if currentExists {
+            do {
+                try ensureStorageProtection(for: currentFileURL)
+            } catch {
+                // Do not leave an unsafe legacy URL file behind after protection could not be established.
+                try? fileManager.removeItem(at: currentFileURL)
+                protectionFailure = error
+            }
         }
-
-        return try? readExcludedData(at: previous.url)
-    }
-
-    private func ensureBackupExclusion(for url: URL) throws {
-        guard try applyAndVerifyBackupExclusion(url) else {
-            throw StorageError.backupExclusionNotVerified
+        if let protectionFailure {
+            throw protectionFailure
         }
     }
 
-    private func readExcludedData(at url: URL) throws -> Data {
-        try ensureBackupExclusion(for: url)
+    /// Chooses the committed legacy snapshot after its storage protections have been established.
+    private func legacySessionOutcome(
+        artifacts: [TransactionArtifact],
+        currentFileURL: URL,
+        currentExists: Bool,
+    ) throws -> BrowserOpenTabsSessionLoadOutcome {
+        let transaction = artifacts.first(where: { $0.kind == .transaction })
+        let previous = transaction.flatMap { marker in
+            artifacts.first(where: { $0.kind == .previous && $0.id == marker.id })
+        } ?? artifacts.first(where: { $0.kind == .previous })
+
+        if transaction != nil {
+            guard let previous else {
+                removeLegacySessionFiles()
+                return .missing
+            }
+
+            return try .loaded(readProtectedData(at: previous.url))
+        }
+
+        if currentExists {
+            return try .loaded(readProtectedData(at: currentFileURL))
+        }
+
+        if let previous {
+            return try .loaded(readProtectedData(at: previous.url))
+        }
+
+        removeLegacySessionFiles(removeCommittedSession: false)
+        return .missing
+    }
+
+    private func ensureStorageProtection(for url: URL) throws {
+        guard try applyAndVerifyStorageProtection(url) else {
+            throw StorageError.storageProtectionNotVerified
+        }
+    }
+
+    private func readProtectedData(at url: URL) throws -> Data {
+        try ensureStorageProtection(for: url)
         return try Data(contentsOf: url)
     }
 
+    private func itemExists(at url: URL) throws -> Bool {
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            return true
+        } catch {
+            let fileError = error as NSError
+            if fileError.domain == NSCocoaErrorDomain,
+               fileError.code == CocoaError.fileReadNoSuchFile.rawValue {
+                return false
+            }
+            if fileError.domain == NSPOSIXErrorDomain, fileError.code == 2 {
+                return false
+            }
+            throw error
+        }
+    }
+
     private func transactionArtifacts(in directory: URL) throws -> [TransactionArtifact] {
-        guard FileManager.default.fileExists(atPath: directory.path) else {
+        guard try itemExists(at: directory) else {
             return []
         }
 
@@ -712,7 +805,7 @@ extension BrowserOpenTabsSessionStorage {
 
 /// Reducer-facing boundary for loading, replacing, invalidating, or purging the Browser tab session.
 struct BrowserOpenTabsSessionClient: Sendable {
-    var load: @Sendable () async -> Data?
+    var load: @Sendable () async -> BrowserOpenTabsSessionLoadOutcome
     var save: @Sendable (BrowserOpenTabsSession, UInt64) async -> Void
     var purge: @Sendable (UInt64) async -> Void
     var advance: @Sendable (UInt64) async -> Void
@@ -723,7 +816,7 @@ extension BrowserOpenTabsSessionClient: DependencyKey {
     static var liveValue: Self {
         let storage = BrowserOpenTabsSessionStorage.live
         return Self(
-            load: { await storage?.load() },
+            load: { await storage?.load() ?? .failed },
             save: { session, revision in await storage?.save(session, revision: revision) },
             purge: { revision in await storage?.purge(revision: revision) },
             advance: { revision in await storage?.advance(revision: revision) },
@@ -732,7 +825,7 @@ extension BrowserOpenTabsSessionClient: DependencyKey {
     }
 
     static let testValue = Self(
-        load: { nil },
+        load: { .missing },
         save: { _, _ in },
         purge: { _ in },
         advance: { _ in },

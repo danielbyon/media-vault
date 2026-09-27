@@ -145,7 +145,7 @@ struct BrowserOpenTabsSessionTests {
             .temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = BrowserOpenTabsSessionStorage(directoryURL: directory)
+        let storage = makeStorage(directory: directory)
         let firstURL = try #require(URL(string: "https://first.example"))
         let committedBeforePurge = BrowserOpenTabsSession(
             selectedPosition: 0,
@@ -160,7 +160,7 @@ struct BrowserOpenTabsSessionTests {
         await storage.purge(revision: 5)
         await storage.save(stale, revision: 4)
 
-        #expect(await storage.load() == nil)
+        #expect(await storage.load() == .missing)
 
         let newer = try BrowserOpenTabsSession(
             selectedPosition: 0,
@@ -170,7 +170,7 @@ struct BrowserOpenTabsSessionTests {
         await storage.save(stale, revision: 5)
         await storage.purge(revision: 5)
 
-        let savedData = try #require(await storage.load())
+        let savedData = try #require(await readLoadedSessionData(from: storage))
         #expect(BrowserOpenTabsSession.decode(savedData) == newer)
     }
 
@@ -186,8 +186,8 @@ struct BrowserOpenTabsSessionTests {
         try write(stale, to: transactionArtifact("previous", id: transactionID, in: directory))
         try Data().write(to: transactionArtifact("recovery", id: transactionID, in: directory))
 
-        let storage = BrowserOpenTabsSessionStorage(directoryURL: directory)
-        let loadedData = try #require(await storage.load())
+        let storage = makeStorage(directory: directory)
+        let loadedData = try #require(await readLoadedSessionData(from: storage))
 
         #expect(BrowserOpenTabsSession.decode(loadedData) == committed)
         #expect(try Set(fileNames(in: directory)) == ["open-tabs.json"])
@@ -207,8 +207,8 @@ struct BrowserOpenTabsSessionTests {
             to: transactionArtifact("transaction", id: transactionID, in: directory),
         )
 
-        let storage = BrowserOpenTabsSessionStorage(directoryURL: directory)
-        let loadedData = try #require(await storage.load())
+        let storage = makeStorage(directory: directory)
+        let loadedData = try #require(await readLoadedSessionData(from: storage))
 
         #expect(BrowserOpenTabsSession.decode(loadedData) == committed)
         #expect(try Set(fileNames(in: directory)) == ["open-tabs.json"])
@@ -226,9 +226,9 @@ struct BrowserOpenTabsSessionTests {
             to: transactionArtifact("transaction", id: transactionID, in: directory),
         )
 
-        let storage = BrowserOpenTabsSessionStorage(directoryURL: directory)
+        let storage = makeStorage(directory: directory)
 
-        #expect(await storage.load() == nil)
+        #expect(await storage.load() == .missing)
         #expect(try fileNames(in: directory).isEmpty)
     }
 
@@ -244,7 +244,7 @@ struct BrowserOpenTabsSessionTests {
         try Data().write(to: transactionArtifact("transaction", id: transactionID, in: directory))
         try Data().write(to: transactionArtifact("recovery", id: transactionID, in: directory))
 
-        let storage = BrowserOpenTabsSessionStorage(directoryURL: directory)
+        let storage = makeStorage(directory: directory)
         await storage.purge(revision: 1)
 
         #expect(!FileManager.default.fileExists(atPath: directory.path))
@@ -264,7 +264,7 @@ struct BrowserOpenTabsSessionTests {
             to: transactionArtifact("transaction", id: transactionID, in: directory),
         )
 
-        let storage = BrowserOpenTabsSessionStorage(directoryURL: directory)
+        let storage = makeStorage(directory: directory)
         await storage.purge(revision: 2)
 
         let remainingNames = FileManager.default.fileExists(atPath: directory.path)
@@ -291,18 +291,15 @@ struct BrowserOpenTabsSessionTests {
         let oldSession = try session("https://legacy-session.example")
         let newSession = try session("https://dedicated-session.example")
         try write(oldSession, to: legacySessionURL)
-        let storage = BrowserOpenTabsSessionStorage(
-            directoryURL: sessionDirectory,
-            legacyDirectoryURL: browserDirectory,
-        )
+        let storage = makeStorage(directory: sessionDirectory, legacyDirectoryURL: browserDirectory)
 
-        let loadedData = try #require(await storage.load())
+        let loadedData = try #require(await readLoadedSessionData(from: storage))
         #expect(BrowserOpenTabsSession.decode(loadedData) == oldSession)
         #expect(FileManager.default.fileExists(atPath: legacySessionURL.path))
 
         await storage.save(newSession, revision: 1)
 
-        let savedData = try #require(await storage.load())
+        let savedData = try #require(await readLoadedSessionData(from: storage))
         #expect(BrowserOpenTabsSession.decode(savedData) == newSession)
         #expect(!FileManager.default.fileExists(atPath: legacySessionURL.path))
     }
@@ -321,10 +318,7 @@ struct BrowserOpenTabsSessionTests {
         try write(saved, to: transactionArtifact("previous", id: transactionID, in: browserDirectory))
         try Data().write(to: transactionArtifact("transaction", id: transactionID, in: browserDirectory))
         try Data("keep".utf8).write(to: unrelatedFileURL)
-        let storage = BrowserOpenTabsSessionStorage(
-            directoryURL: sessionDirectory,
-            legacyDirectoryURL: browserDirectory,
-        )
+        let storage = makeStorage(directory: sessionDirectory, legacyDirectoryURL: browserDirectory)
 
         await storage.purge(revision: 1)
 
@@ -355,20 +349,12 @@ struct BrowserOpenTabsSessionTests {
             .temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let primaryExclusionCount = LockIsolated(0)
-        let failPrimaryExclusionOnCall = LockIsolated<Int?>(nil)
-        let storage = BrowserOpenTabsSessionStorage(directoryURL: directory) { url in
-            if url.lastPathComponent == "open-tabs.json" {
-                let call = primaryExclusionCount.withValue { count in
-                    count += 1
-                    return count
-                }
-                if failPrimaryExclusionOnCall.value == call {
-                    failPrimaryExclusionOnCall.withValue { $0 = nil }
-                    return false
-                }
+        let shouldFailPendingProtection = LockIsolated(false)
+        let storage = makeStorage(directory: directory) { url in
+            if shouldFailPendingProtection.value, url.lastPathComponent.hasSuffix(".pending") {
+                return false
             }
-            return try BrowserOpenTabsSessionStorage.applyAndVerifyBackupExclusion(url)
+            return try Self.applyTestStorageProtection(url)
         }
         let firstURL = try #require(URL(string: "https://committed.example"))
         let replacementURL = try #require(URL(string: "https://replacement.example"))
@@ -382,12 +368,13 @@ struct BrowserOpenTabsSessionTests {
         )
 
         await storage.save(committed, revision: 1)
-        primaryExclusionCount.withValue { $0 = 0 }
-        failPrimaryExclusionOnCall.withValue { $0 = 2 }
+        shouldFailPendingProtection.withValue { $0 = true }
         await storage.save(replacement, revision: 2)
+        shouldFailPendingProtection.withValue { $0 = false }
 
-        let savedData = try #require(await storage.load())
+        let savedData = try #require(await readLoadedSessionData(from: storage))
         #expect(BrowserOpenTabsSession.decode(savedData) == committed)
+        #expect(try Set(fileNames(in: directory)) == ["open-tabs.json"])
     }
 
     @Test("Synchronous revision reservation rejects effects launched with older state")
@@ -406,13 +393,17 @@ struct BrowserOpenTabsSessionTests {
         #expect(!staleOperation.value)
     }
 
-    @Test("Successful atomic writes are excluded from device backups")
+    @Test("Successful atomic writes protect their directory and file and stay excluded from backups")
     func sessionFileIsExcludedFromBackup() async throws {
         let directory = FileManager.default
             .temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = BrowserOpenTabsSessionStorage(directoryURL: directory)
+        let protectedNames = LockIsolated<Set<String>>([])
+        let storage = makeStorage(directory: directory) { url in
+            protectedNames.withValue { $0.insert(url.lastPathComponent) }
+            return try Self.applyTestStorageProtection(url)
+        }
         let url = try #require(URL(string: "https://private.example"))
         let session = BrowserOpenTabsSession(
             selectedPosition: 0,
@@ -425,6 +416,114 @@ struct BrowserOpenTabsSessionTests {
         let directoryValues = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
         #expect(fileValues.isExcludedFromBackup == true)
         #expect(directoryValues.isExcludedFromBackup == true)
+        #expect(protectedNames.value.contains(directory.lastPathComponent))
+        #expect(protectedNames.value.contains("open-tabs.json"))
+    }
+
+    @Test("Session reads distinguish confirmed absence from an unsafe storage boundary")
+    func loadDistinguishesMissingFromProtectionFailure() async throws {
+        let directory = try temporarySessionDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let missingStorage = makeStorage(directory: directory)
+        #expect(await missingStorage.load() == .missing)
+
+        let persisted = try session("https://protected.example")
+        try write(persisted, to: missingStorage.fileURL)
+        let unreadableStorage = makeStorage(directory: directory) { _ in false }
+
+        #expect(await unreadableStorage.load() == .failed)
+        #expect(FileManager.default.fileExists(atPath: missingStorage.fileURL.path))
+    }
+
+    @Test("Every URL-bearing transaction artifact is protected before recovery")
+    func protectsTransactionArtifactsBeforeRecovery() async throws {
+        let directory = try temporarySessionDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let protectedNames = LockIsolated<Set<String>>([])
+        let storage = makeStorage(directory: directory) { url in
+            protectedNames.withValue { $0.insert(url.lastPathComponent) }
+            return try Self.applyTestStorageProtection(url)
+        }
+        let committed = try session("https://last-committed.example")
+        let initial = try session("https://initial.example")
+        await storage.save(initial, revision: 1)
+        await storage.save(committed, revision: 2)
+
+        let transactionID = "00000000-0000-0000-0000-000000000009"
+        let uncommitted = try session("https://uncommitted.example")
+        try write(uncommitted, to: storage.fileURL)
+        try write(uncommitted, to: transactionArtifact("pending", id: transactionID, in: directory))
+        try write(committed, to: transactionArtifact("previous", id: transactionID, in: directory))
+        try Data("promoting".utf8).write(
+            to: transactionArtifact("transaction", id: transactionID, in: directory),
+        )
+
+        let result = await storage.load()
+
+        switch result {
+        case let .loaded(data):
+            #expect(BrowserOpenTabsSession.decode(data) == committed)
+        case .missing:
+            Issue.record("Transaction recovery reported no session despite a committed previous snapshot.")
+        case .failed:
+            Issue.record("Transaction recovery could not safely read the committed previous snapshot.")
+        }
+        #expect(protectedNames.value.contains(directory.lastPathComponent))
+        #expect(protectedNames.value.contains("open-tabs.json"))
+        #expect(protectedNames.value.contains(where: { $0.hasSuffix(".pending") }))
+        #expect(protectedNames.value.contains(where: { $0.hasSuffix(".previous") }))
+        #expect(protectedNames.value.contains(where: { $0.hasSuffix(".transaction") }))
+        #expect(protectedNames.value.contains(where: { $0.hasSuffix(".recovery") }))
+    }
+
+    @Test("A failed protection read leaves the durable session intact for a later safe read")
+    func failedProtectionAttemptIsNonDestructive() async throws {
+        let directory = try temporarySessionDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let failCurrentProtection = LockIsolated(false)
+        let storage = makeStorage(directory: directory) { url in
+            if failCurrentProtection.value, url.lastPathComponent == "open-tabs.json" {
+                return false
+            }
+            return try Self.applyTestStorageProtection(url)
+        }
+        let committed = try session("https://recoverable.example")
+        await storage.save(committed, revision: 1)
+        failCurrentProtection.withValue { $0 = true }
+
+        #expect(await storage.load() == .failed)
+        #expect(FileManager.default.fileExists(atPath: storage.fileURL.path))
+
+        failCurrentProtection.withValue { $0 = false }
+        let retryOutcome = await storage.load()
+        switch retryOutcome {
+        case let .loaded(data):
+            #expect(BrowserOpenTabsSession.decode(data) == committed)
+        case .missing:
+            Issue.record("A protection failure discarded the committed session before the later safe read.")
+        case .failed:
+            Issue.record("The later safe read failed after the protection adapter recovered.")
+        }
+    }
+
+    @Test("A missing or failed storage read does not reinterpret a present recovery snapshot as absent")
+    func failedRecoveryInspectionIsNotMissing() async throws {
+        let directory = try temporarySessionDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transactionID = "00000000-0000-0000-0000-000000000010"
+        let committed = try session("https://recovery.example")
+        try write(committed, to: transactionArtifact("previous", id: transactionID, in: directory))
+        try Data("promoting".utf8).write(
+            to: transactionArtifact("transaction", id: transactionID, in: directory),
+        )
+        let storage = makeStorage(directory: directory) { url in
+            if url.lastPathComponent.hasSuffix(".previous") {
+                return false
+            }
+            return try Self.applyTestStorageProtection(url)
+        }
+
+        #expect(await storage.load() == .failed)
     }
 
     private func temporarySessionDirectory() throws -> URL {
@@ -456,5 +555,39 @@ struct BrowserOpenTabsSessionTests {
 
     private func fileNames(in directory: URL) throws -> [String] {
         try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+    }
+
+    private func readLoadedSessionData(from storage: BrowserOpenTabsSessionStorage) async -> Data? {
+        guard case let .loaded(data) = await storage.load() else {
+            return nil
+        }
+
+        return data
+    }
+
+    private func makeStorage(
+        directory: URL,
+        legacyDirectoryURL: URL? = nil,
+        applyAndVerifyStorageProtection: @escaping @Sendable (URL) throws -> Bool = {
+            try Self.applyTestStorageProtection($0)
+        },
+    ) -> BrowserOpenTabsSessionStorage {
+        BrowserOpenTabsSessionStorage(
+            directoryURL: directory,
+            legacyDirectoryURL: legacyDirectoryURL,
+            applyAndVerifyStorageProtection: applyAndVerifyStorageProtection,
+        )
+    }
+
+    /// Applies the real backup flag while modeling complete protection at the injected storage boundary.
+    ///
+    /// Simulator filesystems may not expose the protection attribute after setting it, so tests use this
+    /// deterministic adapter to exercise storage ordering and verify that every URL-bearing path is covered.
+    private nonisolated static func applyTestStorageProtection(_ url: URL) throws -> Bool {
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutableURL = url
+        try mutableURL.setResourceValues(values)
+        return try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true
     }
 }

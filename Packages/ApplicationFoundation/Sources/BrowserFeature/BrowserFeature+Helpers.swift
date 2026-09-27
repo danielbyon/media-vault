@@ -692,8 +692,14 @@ extension BrowserFeature {
         state.openTabsEntryLifecycle = .restoring(requestID: requestID, revision: revision)
         let load = browserOpenTabsSession.load
         return .run { send in
-            let data = await load()
-            await send(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: data))
+            switch await load() {
+            case .missing:
+                await send(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: nil))
+            case let .loaded(data):
+                await send(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: data))
+            case .failed:
+                await send(.openTabsSessionLoadFailed(requestID: requestID, revision: revision))
+            }
         }
     }
 

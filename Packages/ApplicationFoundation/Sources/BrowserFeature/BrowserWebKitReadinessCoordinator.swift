@@ -28,11 +28,17 @@ struct BrowserWebKitReadinessContext: Equatable {
 @MainActor
 final class BrowserWebKitReadinessCoordinator {
     private let adapter: BrowserWebKitAdapter
+    private let automaticallyAdvancesDisplayTurns: Bool
     private var readinessProbe: BrowserWebKitReadinessProbe?
     private var readinessProbeGeneration = 0
 
-    init(adapter: BrowserWebKitAdapter = .shared) {
+    /// Creates a coordinator that uses display-link turns unless a deterministic test driver is requested.
+    init(
+        adapter: BrowserWebKitAdapter = .shared,
+        automaticallyAdvancesDisplayTurns: Bool = true,
+    ) {
         self.adapter = adapter
+        self.automaticallyAdvancesDisplayTurns = automaticallyAdvancesDisplayTurns
     }
 
     func context(navigationOperationID: BrowserNavigationOperationID? = nil) -> BrowserWebKitReadinessContext {
@@ -43,6 +49,15 @@ final class BrowserWebKitReadinessCoordinator {
         readinessProbeGeneration &+= 1
         readinessProbe?.invalidate()
         readinessProbe = nil
+    }
+
+    /// Advances the active probe once when automatic display-link advancement is disabled.
+    func advanceReadinessTurnForTesting() {
+        guard !automaticallyAdvancesDisplayTurns else {
+            return
+        }
+
+        readinessProbe?.advanceReadinessTurnForTesting()
     }
 
     private func ownsReadinessProbe(generation: Int) -> Bool {
@@ -80,6 +95,7 @@ final class BrowserWebKitReadinessCoordinator {
         let probe = BrowserWebKitReadinessProbe(
             webView: webView,
             readinessContext: readinessContext,
+            automaticallyAdvancesDisplayTurns: automaticallyAdvancesDisplayTurns,
             isAdapterOwned: { [weak webView, adapter] in
                 guard let webView else {
                     return false

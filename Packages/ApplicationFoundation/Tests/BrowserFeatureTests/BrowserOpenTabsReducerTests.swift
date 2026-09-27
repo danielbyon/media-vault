@@ -36,7 +36,7 @@ struct BrowserOpenTabsReducerTests {
             )
             $0.browserOpenTabsSession.load = {
                 loadCount.withValue { $0 += 1 }
-                return nil
+                return .missing
             }
         }
         store.exhaustivity = .off
@@ -60,7 +60,7 @@ struct BrowserOpenTabsReducerTests {
     @Test("Browser restoration request identity uses the injected UUID dependency")
     func restorationRequestUsesInjectedUUID() async {
         let requestID = UUID(9_494)
-        let sessionLoad = AsyncStream<Data?>.makeStream()
+        let sessionLoad = AsyncStream<BrowserOpenTabsSessionLoadOutcome>.makeStream()
         var initialState = BrowserFeature.State()
         initialState.profileLifecycle = .ready
         let store = TestStore(initialState: initialState) {
@@ -68,20 +68,161 @@ struct BrowserOpenTabsReducerTests {
         } withDependencies: {
             $0.uuid = .constant(requestID)
             $0.browserOpenTabsSession.load = {
-                for await data in sessionLoad.stream {
-                    return data
+                for await outcome in sessionLoad.stream {
+                    return outcome
                 }
-                return nil
+                return .failed
             }
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.browserEntered)
         #expect(store.state.openTabsEntryLifecycle == .restoring(requestID: requestID, revision: 0))
-        sessionLoad.continuation.yield(nil)
+        sessionLoad.continuation.yield(.missing)
         await store.receive(.openTabsSessionLoaded(requestID: requestID, revision: 0, data: nil))
         await store.finish()
         #expect(store.state.openTabsEntryLifecycle == .completed)
+    }
+
+    @Test("A confirmed missing session seeds the current logical Browser workspace")
+    func missingSessionSeedsCurrentWorkspace() async throws {
+        let firstURL = try #require(URL(string: "https://current.example/first"))
+        let selectedURL = try #require(URL(string: "https://current.example/selected"))
+        let firstID = BrowserTabID()
+        let selectedID = BrowserTabID()
+        let initialTabs = [
+            BrowserTab.startPage(id: firstID),
+            BrowserTab.web(id: selectedID, url: selectedURL),
+        ]
+        let savedSessions = LockIsolated<[BrowserOpenTabsSession]>([])
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
+            tabs: initialTabs,
+            selectedTabID: selectedID,
+        )) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserOpenTabsSession.load = { .missing }
+            $0.browserOpenTabsSession.save = { session, _ in
+                savedSessions.withValue { $0.append(session) }
+            }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.browserEntered)
+        let (requestID, revision) = try #require(restorationRequest(in: store.state))
+        await store.receive(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: nil))
+        await store.finish()
+
+        #expect(store.state.tabs == initialTabs)
+        #expect(store.state.selectedTabID == selectedID)
+        #expect(savedSessions.value == [BrowserOpenTabsSession.project(from: initialTabs, selectedTabID: selectedID)])
+    }
+
+    @Test("A failed session read completes entry without overwriting until a logical mutation")
+    func failedSessionReadDoesNotBlockEntryOrOverwrite() async throws {
+        let currentURL = try #require(URL(string: "https://current.example"))
+        let selectedID = BrowserTabID()
+        let initialTabs = [BrowserTab.web(id: selectedID, url: currentURL)]
+        let savedSessions = LockIsolated<[BrowserOpenTabsSession]>([])
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let store = TestStore(initialState: BrowserFeature.State.readyForTesting(
+            tabs: initialTabs,
+            selectedTabID: selectedID,
+        )) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserOpenTabsSession.load = { .failed }
+            $0.browserOpenTabsSession.save = { session, _ in
+                savedSessions.withValue { $0.append(session) }
+            }
+            $0.browserClipboard.readHTTPURL = { nil }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in commands.withValue { $0.append(command) } },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.browserEntered)
+        let (requestID, revision) = try #require(restorationRequest(in: store.state))
+        await store.receive(.openTabsSessionLoadFailed(requestID: requestID, revision: revision))
+        await store.finish()
+
+        #expect(store.state.openTabsEntryLifecycle == .completed)
+        #expect(store.state.tabs == initialTabs)
+        #expect(savedSessions.value.isEmpty)
+        #expect(commands.value.isEmpty)
+
+        await store.send(.newTabTapped)
+        await store.finish()
+
+        #expect(store.state.tabs.count == 2)
+        #expect(savedSessions.value.count == 1)
+        #expect(savedSessions.value.first?.entries == [
+            .init(position: 0, kind: .web(currentURL)),
+            .init(position: 1, kind: .startPage),
+        ])
+    }
+
+    @Test("An omnibox edit supersedes a pending restoration response")
+    func omniboxEditWinsOverDelayedRestoration() async throws {
+        let restoredURL = try #require(URL(string: "https://saved.example"))
+        let data = try BrowserOpenTabsSession(
+            selectedPosition: 0,
+            entries: [.init(position: 0, kind: .web(restoredURL))],
+        ).encoded()
+        let load = AsyncStream<BrowserOpenTabsSessionLoadOutcome>.makeStream()
+        let commands = LockIsolated<[BrowserWebKitCommand]>([])
+        let savedSessions = LockIsolated<[BrowserOpenTabsSession]>([])
+        var initialState = BrowserFeature.State.readyForTesting()
+        initialState.settings.copiedLinkSuggestionsEnabled = false
+        let initialTabs = initialState.tabs
+        let initialSelectedTabID = initialState.selectedTabID
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserOpenTabsSession.load = {
+                for await outcome in load.stream {
+                    return outcome
+                }
+                return .failed
+            }
+            $0.browserOpenTabsSession.save = { session, _ in
+                savedSessions.withValue { $0.append(session) }
+            }
+            $0.browserClipboard.readHTTPURL = { nil }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in commands.withValue { $0.append(command) } },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.browserEntered)
+        let (requestID, revision) = try #require(restorationRequest(in: store.state))
+        await store.send(.omniboxFocused)
+        #expect(store.state.focusedField == .startPage)
+        await store.send(.omniboxChanged("unsubmitted draft"))
+
+        #expect(store.state.omniboxDraft == "unsubmitted draft")
+        #expect(store.state.hasUnsubmittedOmniboxDraft)
+        #expect(store.state.openTabsEntryLifecycle == .completed)
+
+        load.continuation.yield(.loaded(data))
+        load.continuation.finish()
+        await store.receive(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: data))
+        await store.finish()
+
+        #expect(store.state.tabs == initialTabs)
+        #expect(store.state.selectedTabID == initialSelectedTabID)
+        #expect(store.state.omniboxDraft == "unsubmitted draft")
+        #expect(store.state.focusedField == .startPage)
+        #expect(store.state.hasUnsubmittedOmniboxDraft)
+        #expect(savedSessions.value.isEmpty)
+        #expect(commands.value.isEmpty)
     }
 
     @Test("Browser entry before profile readiness defers restoration until settings are ready")
@@ -111,7 +252,7 @@ struct BrowserOpenTabsReducerTests {
             )
             $0.browserOpenTabsSession.load = {
                 loadCount.withValue { $0 += 1 }
-                return data
+                return .loaded(data)
             }
         }
         store.exhaustivity = .off
@@ -167,7 +308,7 @@ struct BrowserOpenTabsReducerTests {
             BrowserFeature()
         } withDependencies: {
             $0.uuid = .incrementing
-            $0.browserOpenTabsSession.load = { data }
+            $0.browserOpenTabsSession.load = { .loaded(data) }
             $0.browserOpenTabsSession.save = { session, _ in
                 savedSessions.withValue { $0.append(session) }
             }
@@ -214,7 +355,7 @@ struct BrowserOpenTabsReducerTests {
                 execute: { command in commands.withValue { $0.append(command) } },
                 events: { AsyncStream { $0.finish() } },
             )
-            $0.browserOpenTabsSession.load = { data }
+            $0.browserOpenTabsSession.load = { .loaded(data) }
             $0.browserOpenTabsSession.save = { session, _ in saves.withValue { $0.append(session) } }
         }
         store.exhaustivity = .off
@@ -272,7 +413,7 @@ struct BrowserOpenTabsReducerTests {
             $0.browserSettings.save = { _ in }
             $0.browserOpenTabsSession.load = {
                 loadCount.withValue { $0 += 1 }
-                return nil
+                return .missing
             }
             $0.browserOpenTabsSession.save = { session, revision in
                 operations.withValue { $0.append(.save(revision, session)) }
@@ -377,7 +518,7 @@ struct BrowserOpenTabsReducerTests {
             )
             $0.browserOpenTabsSession.load = {
                 loadCount.withValue { $0 += 1 }
-                return nil
+                return .missing
             }
             $0.browserOpenTabsSession.purge = { revision in
                 operations.withValue { $0.append(.purge(revision)) }
@@ -514,7 +655,7 @@ struct BrowserOpenTabsReducerTests {
                 execute: { _ in },
                 events: { AsyncStream { $0.finish() } },
             )
-            $0.browserOpenTabsSession.load = { nil }
+            $0.browserOpenTabsSession.load = { .missing }
             $0.browserOpenTabsSession.save = { session, _ in
                 persistedData.withValue { $0 = try? session.encoded() }
             }
@@ -550,7 +691,7 @@ struct BrowserOpenTabsReducerTests {
                 execute: { _ in },
                 events: { AsyncStream { $0.finish() } },
             )
-            $0.browserOpenTabsSession.load = { savedData }
+            $0.browserOpenTabsSession.load = { .loaded(savedData) }
         }
         reconstructedStore.exhaustivity = .off
 

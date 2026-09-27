@@ -198,7 +198,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
@@ -231,19 +234,19 @@ struct BrowserViewInteractionTests {
             isReady: false,
         )
 
-        await performOnNextDisplayTurn {
-            coordinator.scheduleReadinessProbe(
-                for: webView,
-                tabID: tabID,
-                readinessContext: .init(),
-            )
-        }
-        await waitForDisplayTurn()
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: .init(),
+        )
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
         #expect(!readinessEvents.contains(.targetPresentationReady(tabID)))
 
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)))
+        #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
         #expect(!readinessEvents.contains(.targetPresentationUnavailable(tabID)))
     }
@@ -258,7 +261,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
@@ -290,15 +296,13 @@ struct BrowserViewInteractionTests {
             representation: .live,
             isReady: false,
         )
-        await performOnNextDisplayTurn {
-            coordinator.scheduleReadinessProbe(
-                for: webView,
-                tabID: tabID,
-                readinessContext: .init(),
-            )
-        }
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: .init(),
+        )
 
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
 
         let behindCover = UIView(frame: webView.bounds)
@@ -328,16 +332,18 @@ struct BrowserViewInteractionTests {
         webView.layoutIfNeeded()
         #expect(BrowserWebKitPresentationGuard.hasOpaqueCover(in: webView))
 
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
         #expect(readinessEvents.count(where: { $0 == .targetPresentationBlocked(tabID) }) == 1)
 
         cover.removeFromSuperview()
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
 
         #expect(registry.isReady(for: .content(tabID)))
+        #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
     }
 
@@ -351,7 +357,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
@@ -390,7 +399,7 @@ struct BrowserViewInteractionTests {
         )
 
         for _ in 0 ..< 3 {
-            await waitForDisplayTurn()
+            readinessCoordinator.advanceReadinessTurnForTesting()
         }
         #expect(registry.isReady(for: .content(tabID)) == false)
         #expect(!readinessEvents.contains(.targetPresentationReady(tabID)))
@@ -400,23 +409,28 @@ struct BrowserViewInteractionTests {
             tabID: tabID,
             readinessContext: .init(),
         )
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
 
         #expect(registry.isReady(for: .content(tabID)))
+        #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
     }
 
     @Test("A WebView with the wrong adapter identity becomes unavailable")
-    func wrongAdapterIdentityBecomesUnavailable() async {
+    func wrongAdapterIdentityBecomesUnavailable() {
         let tabID = BrowserTabID(UUID(9_011))
         let rootViewController = UIViewController()
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let ownedWebView = WKWebView(frame: rootViewController.view.bounds)
         let foreignWebView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in ownedWebView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         var results: [BrowserWebKitReadinessResult] = []
         _ = adapter.ensureContext(for: tabID)
         rootViewController.view.addSubview(foreignWebView)
@@ -435,9 +449,10 @@ struct BrowserViewInteractionTests {
             onResult: { results.append($0) },
             onPresentationBlocked: {},
         )
-        for _ in 0 ..< 200 where results.isEmpty {
-            await waitForDisplayTurn()
+        for _ in 0 ..< BrowserWebKitReadinessProbe.maximumReadinessTurns {
+            readinessCoordinator.advanceReadinessTurnForTesting()
         }
+        readinessCoordinator.advanceReadinessTurnForTesting()
 
         #expect(results.count == 1)
         if case .unavailable? = results.first {
@@ -492,7 +507,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         var results: [BrowserWebKitReadinessResult] = []
         _ = adapter.ensureContext(for: tabID)
         rootViewController.view.addSubview(webView)
@@ -520,9 +538,11 @@ struct BrowserViewInteractionTests {
             onResult: { results.append($0) },
             onPresentationBlocked: {},
         )
+        readinessCoordinator.advanceReadinessTurnForTesting()
+        #expect(results.isEmpty)
         readinessCoordinator.invalidate()
-        for _ in 0 ..< 30 {
-            await waitForDisplayTurn()
+        for _ in 0 ..< 3 {
+            readinessCoordinator.advanceReadinessTurnForTesting()
         }
         #expect(results.isEmpty)
 
@@ -533,10 +553,12 @@ struct BrowserViewInteractionTests {
             onResult: { results.append($0) },
             onPresentationBlocked: {},
         )
-        for _ in 0 ..< 30 where results.isEmpty {
-            await waitForDisplayTurn()
-        }
+        readinessCoordinator.advanceReadinessTurnForTesting()
+        #expect(results.isEmpty)
+        readinessCoordinator.advanceReadinessTurnForTesting()
 
+        #expect(results.count == 1)
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(results.count == 1)
         if case .ready? = results.first {
             // Expected terminal result.
@@ -1854,20 +1876,6 @@ struct BrowserViewInteractionTests {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let target = DisplayLinkTarget {
                 continuation.resume()
-            }
-            let displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
-            displayLink.add(to: .main, forMode: .common)
-        }
-    }
-
-    private func performOnNextDisplayTurn(_ action: @escaping () -> Void) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let target = DisplayLinkTarget {
-                Task { @MainActor in
-                    await Task.yield()
-                    action()
-                    continuation.resume()
-                }
             }
             let displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
             displayLink.add(to: .main, forMode: .common)

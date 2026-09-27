@@ -399,7 +399,7 @@ struct BrowserProfileTests {
             $0.browserLibrary.loadHistory = { [] }
             $0.browserOpenTabsSession.load = {
                 sessionLoadCount.withValue { $0 += 1 }
-                return nil
+                return .missing
             }
             $0.browserWebKit = BrowserWebKitClient(
                 execute: { command in await fixture.execute(command) },
@@ -465,7 +465,7 @@ struct BrowserProfileTests {
             $0.uuid = .incrementing
             $0.browserOpenTabsSession.load = {
                 loadCount.withValue { $0 += 1 }
-                return data
+                return .loaded(data)
             }
             $0.browserWebKit = BrowserWebKitClient(
                 execute: { command in commands.withValue { $0.append(command) } },
