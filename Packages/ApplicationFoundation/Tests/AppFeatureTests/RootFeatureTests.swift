@@ -5,11 +5,14 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CalculatorFeature
 import ComposableArchitecture
 import ConcurrencyExtras
 import DecoySupport
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 import VaultFeature
 @testable import AppFeature
 
@@ -55,6 +58,51 @@ struct RootFeatureTests {
             }
             #expect(decoy.probe.sessionFactoryCount == 1)
         }
+    }
+
+    @Test("The Browser surface is mounted only after authentication and Browser entry")
+    @MainActor
+    func browserSurfaceRespectsTheVaultCompositionBoundary() async throws {
+        let suiteName = "RootFeatureTests.BrowserBoundary.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(false, forKey: "browser.preserveOpenTabs")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let gatedPhases = [
+            VaultFeature.State(phase: .loading),
+            VaultFeature.State(phase: .unconfigured),
+            VaultFeature.State(phase: .locked, configuredKind: .password),
+            VaultFeature.State(phase: .setup),
+            VaultFeature.State(phase: .authentication, configuredKind: .password),
+        ]
+        for vault in gatedPhases {
+            let store = compositionStore(vault: vault, defaults: defaults)
+            let (controller, window) = mountRootView(store)
+            await settle(controller)
+
+            #expect(!hasBrowserOmnibox(in: controller.view))
+
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        var authenticatedShell = VaultFeature.State(phase: .authenticated)
+        authenticatedShell.shell.selectedTab = .collections
+        let beforeBrowserEntry = compositionStore(vault: authenticatedShell, defaults: defaults)
+        let (shellController, shellWindow) = mountRootView(beforeBrowserEntry)
+        await settle(shellController)
+        #expect(!hasBrowserOmnibox(in: shellController.view))
+        shellWindow.isHidden = true
+        shellWindow.rootViewController = nil
+
+        authenticatedShell.shell.selectedTab = .browser
+        let browserEntry = compositionStore(vault: authenticatedShell, defaults: defaults)
+        let (browserController, browserWindow) = mountRootView(browserEntry)
+        await settle(browserController)
+        #expect(hasBrowserOmnibox(in: browserController.view))
+        browserWindow.isHidden = true
+        browserWindow.rootViewController = nil
     }
 
     @Test("A declared alternate-decoy authentication request opens setup and is accepted immediately")
@@ -364,5 +412,52 @@ struct RootFeatureTests {
         #expect(decoy.probe.completions == [
             DecoyHiddenEntryCompletion(attemptID: attempt.id, result: expectedCompletion),
         ])
+    }
+
+    @MainActor
+    private func compositionStore(
+        vault: VaultFeature.State,
+        defaults: UserDefaults,
+    ) -> StoreOf<RootFeature> {
+        withDependencies {
+            $0.defaultAppStorage = defaults
+            $0.uuid = .incrementing
+            $0.vaultCredential.loadConfiguration = { nil }
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in }
+        } operation: {
+            RootComposition.makeStore(vault: vault)
+        }
+    }
+
+    @MainActor
+    private func mountRootView(_ store: StoreOf<RootFeature>) -> (UIHostingController<RootView>, UIWindow) {
+        let controller = UIHostingController(rootView: RootView(store: store))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        return (controller, window)
+    }
+
+    @MainActor
+    private func settle(_ controller: UIViewController) async {
+        for _ in 0 ..< 8 {
+            await Task.yield()
+            controller.view.layoutIfNeeded()
+        }
+    }
+
+    @MainActor
+    private func hasBrowserOmnibox(in root: UIView) -> Bool {
+        allViews(in: root)
+            .compactMap { $0 as? UITextField }
+            .contains { $0.placeholder == "Search or enter website" }
+    }
+
+    @MainActor
+    private func allViews(in root: UIView) -> [UIView] {
+        root.subviews.flatMap { [$0] + allViews(in: $0) }
     }
 }

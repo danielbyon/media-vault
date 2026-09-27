@@ -21,9 +21,10 @@ struct BrowserViewInteractionTests {
     func browsingWebTabMountsOneOmnibox() throws {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(1)), url: url)
-        let store = Store(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: BrowserFeature.State.readyForTesting(
+            tabs: [tab],
+            selectedTabID: tab.id,
+        ))
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
 
@@ -41,15 +42,13 @@ struct BrowserViewInteractionTests {
     func mountedCardSurfaceIsInsideEnabledOverflowingTabOverviewScrollSurface() async throws {
         let tabIDs = (0 ..< 24).map { BrowserTabID(UUID(9_086_100 + $0)) }
         let selectedTabID = tabIDs[0]
-        let store = Store(
+        let store = makeBrowserViewStore(
             initialState: BrowserFeature.State.readyForTesting(
                 tabs: tabIDs.map { .startPage(id: $0) },
                 selectedTabID: selectedTabID,
                 presentation: .tabOverview,
             ),
-        ) {
-            BrowserFeature()
-        }
+        )
         let coordinator = BrowserTabTransitionUIKitCoordinator()
         let hostingController = UIHostingController(
             rootView: BrowserView(store: store, transitionCoordinator: coordinator)
@@ -94,9 +93,7 @@ struct BrowserViewInteractionTests {
             presentation: .tabOverview,
         )
         initialState.tabOverviewScrollPosition = first
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let clock = TestClock()
         let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first) { duration in
             try await clock.sleep(for: duration)
@@ -145,9 +142,7 @@ struct BrowserViewInteractionTests {
             profile: .persistentPrivate,
             retiringTabIDs: [],
         ))
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
 
@@ -171,9 +166,8 @@ struct BrowserViewInteractionTests {
 
     @Test("Start Page native host receives interactive keyboard dismissal")
     func startPageNativeHostReceivesInteractiveDismissal() throws {
-        let store = Store(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: BrowserFeature.State
+            .readyForTesting(initialTabID: BrowserTabID(UUID(1))))
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
         let textField = try #require(descendants(of: hostingController.view, matching: UITextField.self).first)
@@ -562,9 +556,7 @@ struct BrowserViewInteractionTests {
             revision: initialState.previewState.revision(for: tab.id),
             pngData: previewData,
         ), for: tab.id)
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         BrowserWebKitAdapter.shared.execute(.configureProfile(
             profile: .persistentPrivate,
             retiringTabIDs: [],
@@ -765,9 +757,7 @@ struct BrowserViewInteractionTests {
             revision: initialState.previewState.revision(for: secondID),
             pngData: secondPreviewData,
         ), for: secondID)
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let adapter = BrowserWebKitAdapter.shared
         adapter.execute(.configureProfile(profile: .persistentPrivate, retiringTabIDs: []))
         let firstWebView = adapter.ensureContext(for: firstID)
@@ -998,9 +988,10 @@ struct BrowserViewInteractionTests {
     @Test("Real compact layout drives the normal geometry handoff in both directions")
     func realLayoutTabOverviewUsesMountedContentRatio() throws {
         let tab = BrowserTab.startPage(id: BrowserTabID(UUID(1)))
-        let store = Store(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: BrowserFeature.State.readyForTesting(
+            tabs: [tab],
+            selectedTabID: tab.id,
+        ))
         var executions: [BrowserTabTransitionExecution] = []
         var animators: [UIViewPropertyAnimator] = []
         let coordinator = BrowserTabTransitionUIKitCoordinator(
@@ -1108,9 +1099,7 @@ struct BrowserViewInteractionTests {
                 selectedTabID: selectedTabID,
             )
             initialState.tabOverviewScrollPosition = anchor
-            let store = Store(initialState: initialState) {
-                BrowserFeature()
-            }
+            let store = makeBrowserViewStore(initialState: initialState)
             let scrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: anchor)
             var executions: [BrowserTabTransitionExecution] = []
             var animators: [UIViewPropertyAnimator] = []
@@ -1290,9 +1279,7 @@ struct BrowserViewInteractionTests {
             presentation: .tabOverview,
         )
         initialState.tabOverviewScrollPosition = firstID
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let originalScrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: firstID)
         let replacementScrollPosition = BrowserTabOverviewScrollPosition()
         let coordinator = BrowserTabTransitionUIKitCoordinator()
@@ -1349,9 +1336,7 @@ struct BrowserViewInteractionTests {
             selectedTabID: selectedTabID,
         )
         initialState.tabOverviewScrollPosition = persistedAnchor
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let scrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: persistedAnchor)
         let coordinator = BrowserTabTransitionUIKitCoordinator()
         var transitionState = BrowserTabTransitionViewState()
@@ -1467,9 +1452,7 @@ struct BrowserViewInteractionTests {
             presentation: .tabOverview,
         )
         initialState.tabOverviewScrollPosition = compactAnchor
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let compactController = UIHostingController(
             rootView: BrowserView(store: store)
                 .environment(\.horizontalSizeClass, .compact),
@@ -1576,15 +1559,13 @@ struct BrowserViewInteractionTests {
     func settledOverviewResizesEveryCardFromTheCurrentProbe() {
         let firstTab = BrowserTab.startPage(id: BrowserTabID(UUID(1)))
         let secondTab = BrowserTab.startPage(id: BrowserTabID(UUID(2)))
-        let store = Store(
+        let store = makeBrowserViewStore(
             initialState: BrowserFeature.State.readyForTesting(
                 tabs: [firstTab, secondTab],
                 selectedTabID: firstTab.id,
                 presentation: .tabOverview,
             ),
-        ) {
-            BrowserFeature()
-        }
+        )
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 700))
 
@@ -1627,6 +1608,16 @@ struct BrowserViewInteractionTests {
 
         window.isHidden = true
         window.rootViewController = nil
+    }
+
+    private func makeBrowserViewStore(initialState: BrowserFeature.State) -> StoreOf<BrowserFeature> {
+        var initialState = initialState
+        initialState.settings.preserveOpenTabs = false
+        return withDependencies {
+            $0.uuid = .incrementing
+        } operation: {
+            Store(initialState: initialState) { BrowserFeature() }
+        }
     }
 
     private func mount(_ controller: UIViewController, size: CGSize) -> UIWindow {

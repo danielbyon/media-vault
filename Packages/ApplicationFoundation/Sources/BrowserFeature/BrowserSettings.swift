@@ -41,6 +41,8 @@ public struct BrowserSettings: Equatable, Sendable {
     var searchProvider: BrowserSearchProvider
     var providerSuggestionsEnabled: Bool
     var copiedLinkSuggestionsEnabled: Bool
+    /// Whether the logical Persistent-Private tab workspace is reopened after Browser entry.
+    var preserveOpenTabs: Bool
     var openLinksInNewTabs: BrowserOpenLinkPreference
     var browsingProfile: BrowserBrowsingProfile
 
@@ -48,12 +50,14 @@ public struct BrowserSettings: Equatable, Sendable {
         searchProvider: BrowserSearchProvider = .duckDuckGo,
         providerSuggestionsEnabled: Bool = false,
         copiedLinkSuggestionsEnabled: Bool = true,
+        preserveOpenTabs: Bool = true,
         openLinksInNewTabs: BrowserOpenLinkPreference = .background,
         browsingProfile: BrowserBrowsingProfile = .persistentPrivate,
     ) {
         self.searchProvider = searchProvider
         self.providerSuggestionsEnabled = providerSuggestionsEnabled
         self.copiedLinkSuggestionsEnabled = copiedLinkSuggestionsEnabled
+        self.preserveOpenTabs = preserveOpenTabs
         self.openLinksInNewTabs = openLinksInNewTabs
         self.browsingProfile = browsingProfile
     }

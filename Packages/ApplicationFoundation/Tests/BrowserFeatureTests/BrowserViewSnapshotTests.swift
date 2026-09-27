@@ -139,7 +139,7 @@ struct BrowserViewSnapshotTests {
             selectedTabID: tabs[0].id,
             presentation: .tabOverview,
         )
-        let store = Store(initialState: state) { BrowserFeature() }
+        let store = makeBrowserViewStore(initialState: state)
         assertSnapshot(
             of: BrowserView(store: store)
                 .environment(\.colorScheme, .light)
@@ -153,9 +153,9 @@ struct BrowserViewSnapshotTests {
     func reducedMotion() throws {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(1)), url: url)
-        let store = Store(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(
+            initialState: .readyForTesting(tabs: [tab], selectedTabID: tab.id),
+        )
         assertSnapshot(
             of: BrowserView(store: store, reduceMotionOverride: true)
                 .environment(\.colorScheme, .light),
@@ -279,7 +279,7 @@ struct BrowserViewSnapshotTests {
     }
 
     private func snapshot(_ state: BrowserFeature.State, named name: String, config: ViewImageConfig) {
-        let store = Store(initialState: state) { BrowserFeature() }
+        let store = makeBrowserViewStore(initialState: state)
         assertSnapshot(
             of: BrowserView(store: store).environment(\.colorScheme, .light),
             as: .image(layout: .device(config: config)),
@@ -306,6 +306,16 @@ struct BrowserViewSnapshotTests {
             as: .image(layout: .device(config: config)),
             named: name,
         )
+    }
+
+    private func makeBrowserViewStore(initialState: BrowserFeature.State) -> StoreOf<BrowserFeature> {
+        var initialState = initialState
+        initialState.settings.preserveOpenTabs = false
+        return withDependencies {
+            $0.uuid = .incrementing
+        } operation: {
+            Store(initialState: initialState) { BrowserFeature() }
+        }
     }
 }
 

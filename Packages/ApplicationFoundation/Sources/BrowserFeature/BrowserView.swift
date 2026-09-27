@@ -234,7 +234,7 @@ public struct BrowserView: View {
             cancelTabTransition()
             store.send(.previewCacheEvicted)
         }
-        .task { _ = store.send(.profileInitializationRequested) }
+        .task { initializeBrowserLifecycle() }
         .task { await store.send(.task).finish() }
         .onDisappear {
             cancelTabTransition()
@@ -302,6 +302,11 @@ public struct BrowserView: View {
 }
 
 extension BrowserView {
+    private func initializeBrowserLifecycle() {
+        _ = store.send(.browserEntered)
+        _ = store.send(.profileInitializationRequested)
+    }
+
     private var libraryPresentationBinding: Binding<Bool> {
         Binding(
             get: { store.library != nil },

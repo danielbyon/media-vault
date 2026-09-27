@@ -132,6 +132,15 @@ enum BrowserProfileLifecycle: Equatable, Sendable {
     case ready
 }
 
+/// One-shot restoration boundary owned by Browser state rather than SwiftUI task ordering.
+enum BrowserOpenTabsEntryLifecycle: Equatable, Sendable {
+    case notEntered
+    case waitingForProfile
+    case restoring(requestID: UUID, revision: UInt64)
+    case persistWhenProfileReady
+    case completed
+}
+
 /// A profile change that remains unapplied until the user confirms it.
 enum BrowserPendingProfileChange: Equatable, Sendable {
     /// Switches all Browser tabs to the selected website-data lifetime.
@@ -161,6 +170,14 @@ public struct BrowserFeature {
         var settings: BrowserSettings
         /// Serializes stored-profile initialization and confirmed profile transitions.
         var profileLifecycle: BrowserProfileLifecycle
+        /// Browser entry and session restoration are independent from profile initialization.
+        var openTabsEntryLifecycle: BrowserOpenTabsEntryLifecycle
+        /// Orders session writes before their effects reach the session storage actor.
+        var openTabsRevision: UInt64
+        /// Orders Browser preference writes independently from logical tab-session persistence.
+        var settingsRevision: UInt64
+        /// URLs for background restored web tabs that have not been selected for their one-time load.
+        var lazyRestoredWebTabURLs: [BrowserTabID: URL]
         /// Latest WebKit-bound action held while the adapter configures a profile.
         var pendingWebAction: BrowserDeferredWebAction?
         /// Profile or reset request awaiting explicit user confirmation.
@@ -194,6 +211,10 @@ public struct BrowserFeature {
             history = []
             settings = .init()
             profileLifecycle = .notStarted
+            openTabsEntryLifecycle = .notEntered
+            openTabsRevision = 0
+            settingsRevision = 0
+            lazyRestoredWebTabURLs = [:]
             pendingWebAction = nil
             pendingProfileChange = nil
             suggestions = []
@@ -233,6 +254,10 @@ public struct BrowserFeature {
             history = []
             settings = .init()
             profileLifecycle = .notStarted
+            openTabsEntryLifecycle = .notEntered
+            openTabsRevision = 0
+            settingsRevision = 0
+            lazyRestoredWebTabURLs = [:]
             pendingWebAction = nil
             pendingProfileChange = nil
             suggestions = []
@@ -303,6 +328,8 @@ public struct BrowserFeature {
     public enum Action: Equatable, Sendable {
         /// Starts or restarts Browser view-scoped WebKit event observation.
         case task
+        /// Marks entry into the authenticated Browser surface exactly once per reducer state.
+        case browserEntered
         /// Requests idempotent stored settings, library, and profile initialization.
         case profileInitializationRequested
         /// Requests an explicit confirmation before changing the global website-data profile.
@@ -444,8 +471,12 @@ public struct BrowserFeature {
         case providerSuggestionsChanged(Bool)
         /// Changes and persists foreground/background related-tab behavior.
         case openLinkPreferenceChanged(BrowserOpenLinkPreference)
+        /// Changes whether the Persistent-Private logical tab workspace is preserved.
+        case preserveOpenTabsChanged(Bool)
         /// Restores all Issue #37 settings defaults.
         case resetSettings
+        /// Delivers the durable bytes read for one authenticated Browser-entry restoration request.
+        case openTabsSessionLoaded(requestID: UUID, revision: UInt64, data: Data?)
         /// Presents the app-owned Find on Page input.
         case findPresented
         /// Changes Find on Page text and routes it to WebKit.
@@ -476,6 +507,8 @@ public struct BrowserFeature {
     var browserLibrary
     @Dependency(\.browserSettings)
     var browserSettings
+    @Dependency(\.browserOpenTabsSession)
+    var browserOpenTabsSession
 
     enum CancelID {
         case providerSuggestions
@@ -487,6 +520,22 @@ public struct BrowserFeature {
 
     /// Composes browser state transitions and dependency effects.
     public var body: some ReducerOf<Self> {
-        Reduce { state, action in coreReduce(into: &state, action: action) }
+        Reduce { state, action in
+            let previousSession = BrowserOpenTabsSession.project(from: state.tabs, selectedTabID: state.selectedTabID)
+            let effect = coreReduce(into: &state, action: action)
+            guard case .openTabsSessionLoaded = action else {
+                let currentSession = BrowserOpenTabsSession.project(
+                    from: state.tabs,
+                    selectedTabID: state.selectedTabID,
+                )
+                guard previousSession != currentSession else {
+                    return effect
+                }
+
+                return .merge(effect, persistOpenTabsAfterLogicalMutation(state: &state))
+            }
+
+            return effect
+        }
     }
 }

@@ -150,6 +150,7 @@ extension BrowserFeature {
         let wasOverview = state.presentation == .tabOverview
         let priorOverviewFocusID = state.tabOverviewFocusID
         state.previewState.removeTab(tabID)
+        state.lazyRestoredWebTabURLs.removeValue(forKey: tabID)
         let dismissalEffect: Effect<Action> =
             if wasSelected {
                 dismissPageUI(in: &state)
@@ -187,7 +188,23 @@ extension BrowserFeature {
         } else {
             state.tabOverviewFocusID = nil
         }
-        return .merge(dismissalEffect, command(.destroyContext(tabID: tabID)))
+        let lazyURL = wasSelected ? state.lazyRestoredWebTabURLs.removeValue(forKey: state.selectedTabID) : nil
+        let restoreEffect = lazyURL.map { navigate(url: $0, tabID: state.selectedTabID, state: &state) } ?? .none
+        return .merge(dismissalEffect, command(.destroyContext(tabID: tabID)), restoreEffect)
+    }
+
+    /// Selects a tab and consumes its pending restored URL before issuing its one-time WebKit load.
+    func selectTab(_ tabID: BrowserTabID, state: inout State) -> Effect<Action> {
+        let dismissalEffect = dismissPageUI(in: &state)
+        state.selectedTabID = tabID
+        state.presentation = .browsing
+        state.tabOverviewFocusID = nil
+        discardDraft(in: &state)
+        guard let url = state.lazyRestoredWebTabURLs.removeValue(forKey: tabID) else {
+            return dismissalEffect
+        }
+
+        return .merge(dismissalEffect, navigate(url: url, tabID: tabID, state: &state))
     }
 
     func handle(event: BrowserWebKitEvent, state: inout State) -> Effect<Action> {
@@ -207,6 +224,7 @@ extension BrowserFeature {
                 state.selectedTabID = tabID
             }
         case let .navigationStarted(tabID):
+            state.lazyRestoredWebTabURLs.removeValue(forKey: tabID)
             invalidatePreview(for: tabID, state: &state, operation: nil)
         case let .metadata(tabID, metadata, correlation):
             handleMetadata(
@@ -582,9 +600,130 @@ extension BrowserFeature {
         return .run { send in await send(.clipboardChecked(read())) }
     }
 
-    func persist(settings: BrowserSettings) -> Effect<Action> {
+    func persist(settings: BrowserSettings, revision: UInt64) -> Effect<Action> {
+        let saveRevisioned = browserSettings.saveRevisioned
         let save = browserSettings.save
-        return .run { _ in await save(settings) }
+        return .run { _ in
+            if let saveRevisioned {
+                await saveRevisioned(settings, revision)
+            } else {
+                await save(settings)
+            }
+        }
+    }
+
+    /// Reserves the Browser-preference order separately from open-tab session persistence.
+    @discardableResult
+    func advanceSettingsRevision(state: inout State) -> UInt64 {
+        state.settingsRevision = browserSettings.reserveRevision(state.settingsRevision)
+        return state.settingsRevision
+    }
+
+    /// Advances the tab-session order before any session effect can be scheduled.
+    @discardableResult
+    func advanceOpenTabsRevision(state: inout State) -> UInt64 {
+        state.openTabsRevision = browserOpenTabsSession.reserveRevision(state.openTabsRevision)
+        return state.openTabsRevision
+    }
+
+    /// Schedules the current logical tab projection with its already assigned revision.
+    func saveOpenTabsSession(state: State, revision: UInt64) -> Effect<Action> {
+        let session = BrowserOpenTabsSession.project(from: state.tabs, selectedTabID: state.selectedTabID)
+        let save = browserOpenTabsSession.save
+        return .run { _ in await save(session, revision) }
+    }
+
+    /// Schedules a Browser-session purge that also invalidates every older save.
+    func purgeOpenTabsSession(revision: UInt64) -> Effect<Action> {
+        let purge = browserOpenTabsSession.purge
+        return .run { _ in await purge(revision) }
+    }
+
+    /// Invalidates older saves while keeping the durable session available for a later Browser entry.
+    func advanceOpenTabsSessionStorage(revision: UInt64) -> Effect<Action> {
+        let advance = browserOpenTabsSession.advance
+        return .run { _ in await advance(revision) }
+    }
+
+    /// Saves logical mutations only after the authenticated Browser has been entered.
+    func persistOpenTabsAfterLogicalMutation(state: inout State) -> Effect<Action> {
+        switch state.openTabsEntryLifecycle {
+        case .notEntered:
+            return .none
+        case .waitingForProfile:
+            state.openTabsEntryLifecycle = .persistWhenProfileReady
+            return .none
+        case .persistWhenProfileReady:
+            return .none
+        case .restoring:
+            state.openTabsEntryLifecycle = .completed
+        case .completed:
+            break
+        }
+
+        guard state.canCreateWebKitContext,
+              state.settings.browsingProfile == .persistentPrivate,
+              state.settings.preserveOpenTabs
+        else {
+            return .none
+        }
+
+        let revision = advanceOpenTabsRevision(state: &state)
+        return saveOpenTabsSession(state: state, revision: revision)
+    }
+
+    /// Starts the one-shot session read after Browser entry and stored-profile readiness.
+    func beginOpenTabsRestoration(state: inout State) -> Effect<Action> {
+        guard state.openTabsEntryLifecycle == .waitingForProfile else {
+            return .none
+        }
+        guard state.canCreateWebKitContext else {
+            return .none
+        }
+        guard state.settings.browsingProfile == .persistentPrivate,
+              state.settings.preserveOpenTabs
+        else {
+            state.openTabsEntryLifecycle = .completed
+            return .none
+        }
+
+        let requestID = uuid()
+        let revision = state.openTabsRevision
+        state.openTabsEntryLifecycle = .restoring(requestID: requestID, revision: revision)
+        let load = browserOpenTabsSession.load
+        return .run { send in
+            let data = await load()
+            await send(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: data))
+        }
+    }
+
+    /// Replaces the current logical tabs from a decoded session and navigates only its selected web tab.
+    func restoreOpenTabsSession(_ session: BrowserOpenTabsSession?, state: inout State) -> Effect<Action> {
+        let uuidGenerator = uuid
+        let makeUUID: @Sendable () -> UUID = { uuidGenerator() }
+        let restoration = session?.restore(uuid: makeUUID) ?? .freshStartPage(uuid: makeUUID)
+        state.tabs = restoration.tabs
+        state.selectedTabID = restoration.selectedTabID
+        state.previewState = .init(tabIDs: restoration.tabs.map(\.id))
+        state.lazyRestoredWebTabURLs = restoration.lazyWebTabURLs
+        state.presentation = .browsing
+        state.tabOverviewFocusID = nil
+        state.tabOverviewScrollPosition = nil
+        state.focusedField = .none
+        state.omniboxDraft = ""
+        state.hasUnsubmittedOmniboxDraft = false
+        state.findDraft = nil
+        state.backForwardList = nil
+        state.javaScriptDialogTabID = nil
+        state.shareURL = nil
+        state.shareTitle = nil
+        state.rebuildSuggestions()
+
+        guard let selectedURL = restoration.selectedURL else {
+            return .none
+        }
+
+        return navigate(url: selectedURL, tabID: restoration.selectedTabID, state: &state)
     }
 
     /// Holds WebKit-bound navigation until the adapter confirms the profile that owns its context.
@@ -650,6 +789,13 @@ extension BrowserFeature {
         }
 
         let retiringTabIDs = state.tabs.map(\.id)
+        let revision = advanceOpenTabsRevision(state: &state)
+        let settingsRevision = advanceSettingsRevision(state: &state)
+        let purgeSession = purgeOpenTabsSession(revision: revision)
+        if state.openTabsEntryLifecycle != .notEntered {
+            state.openTabsEntryLifecycle = .completed
+        }
+        state.lazyRestoredWebTabURLs = [:]
         if resetsSettings {
             state.settings = .init()
         } else {
@@ -684,16 +830,27 @@ extension BrowserFeature {
 
         let execute = webKit.execute
         let settings = state.settings
+        let saveRevisioned = browserSettings.saveRevisioned
         let save = browserSettings.save
+        let resetRevisioned = browserSettings.resetRevisioned
         let reset = browserSettings.reset
         return .merge(
             .cancel(id: CancelID.providerSuggestions),
+            purgeSession,
             .run { send in
                 await execute(.configureProfile(profile: profile, retiringTabIDs: retiringTabIDs))
                 if resetsSettings {
-                    await reset()
+                    if let resetRevisioned {
+                        await resetRevisioned(settingsRevision)
+                    } else {
+                        await reset()
+                    }
                 } else {
-                    await save(settings)
+                    if let saveRevisioned {
+                        await saveRevisioned(settings, settingsRevision)
+                    } else {
+                        await save(settings)
+                    }
                 }
                 await send(.profileConfigurationCompleted(profile: profile, requestID: requestID))
             },

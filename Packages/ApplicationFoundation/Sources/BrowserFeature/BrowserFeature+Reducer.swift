@@ -20,6 +20,13 @@ extension BrowserFeature {
                 }
             }
             .cancellable(id: CancelID.webKitEvents, cancelInFlight: true)
+        case .browserEntered:
+            guard state.openTabsEntryLifecycle == .notEntered else {
+                return .none
+            }
+
+            state.openTabsEntryLifecycle = .waitingForProfile
+            return beginOpenTabsRestoration(state: &state)
         case .profileInitializationRequested:
             return initializeProfileIfNeeded(state: &state)
         case let .profileChangeRequested(profile):
@@ -52,14 +59,36 @@ extension BrowserFeature {
                     return beginProfileTransition(to: .persistentPrivate, resetsSettings: true, state: &state)
                 }
 
+                let wasPreservingOpenTabs = state.settings.preserveOpenTabs
                 state.settings = .init()
                 state.providerSuggestionValues = []
                 state.copiedLink = nil
                 state.rebuildSuggestions()
+                let settingsRevision = advanceSettingsRevision(state: &state)
+                let sessionRevision = advanceOpenTabsRevision(state: &state)
+                let resetRevisioned = browserSettings.resetRevisioned
                 let reset = browserSettings.reset
+                let resetEffect = Effect<Action>.run { _ in
+                    if let resetRevisioned {
+                        await resetRevisioned(settingsRevision)
+                    } else {
+                        await reset()
+                    }
+                }
+                let sessionEffect: Effect<Action>
+                if wasPreservingOpenTabs, state.openTabsEntryLifecycle == .notEntered {
+                    sessionEffect = advanceOpenTabsSessionStorage(revision: sessionRevision)
+                } else if wasPreservingOpenTabs,
+                          case .restoring = state.openTabsEntryLifecycle {
+                    sessionEffect = advanceOpenTabsSessionStorage(revision: sessionRevision)
+                } else {
+                    state.openTabsEntryLifecycle = .completed
+                    sessionEffect = saveOpenTabsSession(state: state, revision: sessionRevision)
+                }
                 return .merge(
                     .cancel(id: CancelID.providerSuggestions),
-                    .run { _ in await reset() },
+                    resetEffect,
+                    sessionEffect,
                 )
             }
         case let .profileConfigurationCompleted(profile, requestID):
@@ -72,7 +101,13 @@ extension BrowserFeature {
             }
 
             state.profileLifecycle = .ready
-            return resumePendingWebAction(state: &state)
+            let resumedEffect = resumePendingWebAction(state: &state)
+            guard profile == .persistentPrivate, state.settings.preserveOpenTabs else {
+                return resumedEffect
+            }
+
+            let revision = advanceOpenTabsRevision(state: &state)
+            return .merge(resumedEffect, saveOpenTabsSession(state: state, revision: revision))
         case .newTabTapped:
             let dismissalEffect = dismissPageUI(in: &state)
             let id = BrowserTabID(uuid())
@@ -94,12 +129,7 @@ extension BrowserFeature {
                 return .none
             }
 
-            let dismissalEffect = dismissPageUI(in: &state)
-            state.selectedTabID = id
-            state.presentation = .browsing
-            state.tabOverviewFocusID = nil
-            discardDraft(in: &state)
-            return dismissalEffect
+            return selectTab(id, state: &state)
         case let .closeTab(id):
             return close(tabID: id, state: &state)
         case .closeAllTapped:
@@ -118,6 +148,7 @@ extension BrowserFeature {
             mutateTabsPreservingTabOverviewScrollPosition(state: &state) { state in
                 state.tabs = [.startPage(id: id)]
                 state.previewState.replaceWithOnlyTab(id)
+                state.lazyRestoredWebTabURLs = [:]
                 state.selectedTabID = id
                 state.presentation = .browsing
                 state.tabOverviewFocusID = nil
@@ -148,12 +179,15 @@ extension BrowserFeature {
             mutateTabsPreservingTabOverviewScrollPosition(state: &state) { state in
                 state.previewState.keepOnlyTab(id)
                 state.tabs = [tab]
+                state.lazyRestoredWebTabURLs = state.lazyRestoredWebTabURLs.filter { $0.key == id }
                 state.selectedTabID = id
                 state.presentation = .browsing
                 state.tabOverviewFocusID = nil
             }
             discardDraft(in: &state)
-            return .merge(dismissalEffect, commands(closedIDs.map { .destroyContext(tabID: $0) }))
+            let lazyURL = state.lazyRestoredWebTabURLs.removeValue(forKey: id)
+            let restoreEffect = lazyURL.map { navigate(url: $0, tabID: id, state: &state) } ?? .none
+            return .merge(dismissalEffect, commands(closedIDs.map { .destroyContext(tabID: $0) }), restoreEffect)
         case .showStartPageTapped:
             let dismissalEffect = dismissPageUI(in: &state)
             if let existing = state.tabs.first(where: \.isStartPage) {
@@ -206,12 +240,7 @@ extension BrowserFeature {
                 return .none
             }
 
-            let dismissalEffect = dismissPageUI(in: &state)
-            state.selectedTabID = id
-            state.presentation = .browsing
-            state.tabOverviewFocusID = nil
-            discardDraft(in: &state)
-            return dismissalEffect
+            return selectTab(id, state: &state)
         case let .tabOverviewFocusChanged(id):
             guard state.presentation == .tabOverview else {
                 return .none
@@ -319,7 +348,11 @@ extension BrowserFeature {
                 state.copiedLink = nil
                 state.rebuildSuggestions()
             }
-            return persist(settings: state.settings)
+            let revision = advanceSettingsRevision(state: &state)
+            return .merge(
+                .cancel(id: CancelID.providerSuggestions),
+                persist(settings: state.settings, revision: revision),
+            )
         case let .libraryPresented(section):
             state.pendingNewTab = nil
             if state.library == nil {
@@ -481,7 +514,53 @@ extension BrowserFeature {
             state.history = history
             state.profileLifecycle = .ready
             state.rebuildSuggestions()
-            return resumePendingWebAction(state: &state)
+            let hadPendingWebAction = state.pendingWebAction != nil
+            let resumedEffect = resumePendingWebAction(state: &state)
+            if settings.browsingProfile == .ephemeral || !settings.preserveOpenTabs {
+                let revision = advanceOpenTabsRevision(state: &state)
+                if state.openTabsEntryLifecycle != .notEntered {
+                    state.openTabsEntryLifecycle = .completed
+                }
+                return .merge(resumedEffect, purgeOpenTabsSession(revision: revision))
+            }
+
+            switch state.openTabsEntryLifecycle {
+            case .waitingForProfile where !hadPendingWebAction:
+                return .merge(resumedEffect, beginOpenTabsRestoration(state: &state))
+            case .waitingForProfile where hadPendingWebAction:
+                state.openTabsEntryLifecycle = .completed
+                return resumedEffect
+            case .persistWhenProfileReady:
+                state.openTabsEntryLifecycle = .completed
+                let revision = advanceOpenTabsRevision(state: &state)
+                return .merge(resumedEffect, saveOpenTabsSession(state: state, revision: revision))
+            case .notEntered,
+                 .waitingForProfile,
+                 .restoring,
+                 .completed:
+                return resumedEffect
+            }
+        case let .openTabsSessionLoaded(requestID, revision, data):
+            guard state.openTabsEntryLifecycle == .restoring(requestID: requestID, revision: revision),
+                  state.profileLifecycle == .ready,
+                  state.settings.browsingProfile == .persistentPrivate,
+                  state.settings.preserveOpenTabs
+            else {
+                return .none
+            }
+
+            state.openTabsEntryLifecycle = .completed
+            guard let data else {
+                let revision = advanceOpenTabsRevision(state: &state)
+                return saveOpenTabsSession(state: state, revision: revision)
+            }
+            guard let session = BrowserOpenTabsSession.decode(data) else {
+                let restoreEffect = restoreOpenTabsSession(nil, state: &state)
+                let revision = advanceOpenTabsRevision(state: &state)
+                return .merge(restoreEffect, saveOpenTabsSession(state: state, revision: revision))
+            }
+
+            return restoreOpenTabsSession(session, state: &state)
         case let .navigate(url):
             return navigate(url: url, state: &state)
         case let .openInNewTab(url, openerID):
@@ -534,7 +613,11 @@ extension BrowserFeature {
             state.settings.searchProvider = provider
             state.providerSuggestionValues = []
             state.rebuildSuggestions()
-            return .merge(.cancel(id: CancelID.providerSuggestions), persist(settings: state.settings))
+            let revision = advanceSettingsRevision(state: &state)
+            return .merge(
+                .cancel(id: CancelID.providerSuggestions),
+                persist(settings: state.settings, revision: revision),
+            )
         case let .providerSuggestionsChanged(enabled):
             guard state.canCreateWebKitContext else {
                 return .none
@@ -545,14 +628,42 @@ extension BrowserFeature {
                 state.providerSuggestionValues = []
                 state.rebuildSuggestions()
             }
-            return .merge(.cancel(id: CancelID.providerSuggestions), persist(settings: state.settings))
+            let revision = advanceSettingsRevision(state: &state)
+            return .merge(
+                .cancel(id: CancelID.providerSuggestions),
+                persist(settings: state.settings, revision: revision),
+            )
         case let .openLinkPreferenceChanged(preference):
             guard state.canCreateWebKitContext else {
                 return .none
             }
 
             state.settings.openLinksInNewTabs = preference
-            return persist(settings: state.settings)
+            let revision = advanceSettingsRevision(state: &state)
+            return persist(settings: state.settings, revision: revision)
+        case let .preserveOpenTabsChanged(enabled):
+            guard state.canCreateWebKitContext,
+                  state.settings.preserveOpenTabs != enabled
+            else {
+                return .none
+            }
+
+            state.settings.preserveOpenTabs = enabled
+            let settingsRevision = advanceSettingsRevision(state: &state)
+            let sessionRevision = advanceOpenTabsRevision(state: &state)
+            let saveSettings = persist(settings: state.settings, revision: settingsRevision)
+            guard enabled else {
+                state.openTabsEntryLifecycle = .completed
+                return .merge(saveSettings, purgeOpenTabsSession(revision: sessionRevision))
+            }
+            guard state.settings.browsingProfile == .persistentPrivate else {
+                return saveSettings
+            }
+
+            // Enabling preservation snapshots this live session. A later Browser entry in the same
+            // process must keep the current tabs instead of reloading the durable copy over them.
+            state.openTabsEntryLifecycle = .completed
+            return .merge(saveSettings, saveOpenTabsSession(state: state, revision: sessionRevision))
         case .resetSettings:
             guard state.canCreateWebKitContext else {
                 return .none
@@ -563,14 +674,36 @@ extension BrowserFeature {
                 return .none
             }
 
+            let wasPreservingOpenTabs = state.settings.preserveOpenTabs
             state.settings = .init()
             state.providerSuggestionValues = []
             state.copiedLink = nil
             state.rebuildSuggestions()
+            let settingsRevision = advanceSettingsRevision(state: &state)
+            let sessionRevision = advanceOpenTabsRevision(state: &state)
+            let resetRevisioned = browserSettings.resetRevisioned
             let reset = browserSettings.reset
+            let resetEffect = Effect<Action>.run { _ in
+                if let resetRevisioned {
+                    await resetRevisioned(settingsRevision)
+                } else {
+                    await reset()
+                }
+            }
+            let sessionEffect: Effect<Action>
+            if wasPreservingOpenTabs, state.openTabsEntryLifecycle == .notEntered {
+                sessionEffect = advanceOpenTabsSessionStorage(revision: sessionRevision)
+            } else if wasPreservingOpenTabs,
+                      case .restoring = state.openTabsEntryLifecycle {
+                sessionEffect = advanceOpenTabsSessionStorage(revision: sessionRevision)
+            } else {
+                state.openTabsEntryLifecycle = .completed
+                sessionEffect = saveOpenTabsSession(state: state, revision: sessionRevision)
+            }
             return .merge(
                 .cancel(id: CancelID.providerSuggestions),
-                .run { _ in await reset() },
+                resetEffect,
+                sessionEffect,
             )
         case .findPresented:
             guard case .web = state.selectedTab?.content else {
