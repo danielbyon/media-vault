@@ -200,10 +200,12 @@ struct BrowserPresentationTests {
 
         await store.send(.openLinkPreferenceChanged(.askEveryTime)) {
             $0.settings.openLinksInNewTabs = .askEveryTime
+            $0.settingsRevision = 1
         }
         await store.finish()
 
         #expect(saved.value.last?.openLinksInNewTabs == .askEveryTime)
+        #expect(store.state.openTabsRevision == 0)
     }
 
     @Test("Bookmark editor validates addresses and duplicate URLs update stable identity in place")

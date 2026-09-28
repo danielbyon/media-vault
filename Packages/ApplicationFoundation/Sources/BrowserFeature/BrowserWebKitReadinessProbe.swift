@@ -20,15 +20,17 @@ enum BrowserWebKitReadinessResult {
 /// `WKNavigationDelegate.didCommit` means WebKit is beginning to update the main frame and
 /// `didFinish` means navigation completed. Neither public callback certifies that an out-of-process
 /// WebKit page pixel has been presented onscreen. This probe therefore checks lifecycle state and
-/// requires two stable display opportunities without claiming pixel verification.
+/// requires two stable display opportunities without claiming pixel verification. Production
+/// advances from a display link; tests can disable that driver and advance the same logic directly.
 @MainActor
 final class BrowserWebKitReadinessProbe: NSObject {
     /// The display-turn barrier is a presentation grace period, not visual evidence.
     private static let requiredStableDisplayTurns = 2
-    private static let maximumReadinessTurns = 180
+    static let maximumReadinessTurns = 180
 
     private weak var webView: WKWebView?
     private let readinessContext: BrowserWebKitReadinessContext?
+    private let automaticallyAdvancesDisplayTurns: Bool
     private let isAdapterOwned: () -> Bool
     private let hasCommittedDocument: () -> Bool
     private let onResult: (BrowserWebKitReadinessResult) -> Void
@@ -36,11 +38,14 @@ final class BrowserWebKitReadinessProbe: NSObject {
     private var readinessTurnsRemaining = 0
     private var stableDisplayTurns = 0
     private var didReportPresentationBlocked = false
+    private var hasStarted = false
+    private var isActive = false
     private var displayLink: CADisplayLink?
 
     init(
         webView: WKWebView,
         readinessContext: BrowserWebKitReadinessContext?,
+        automaticallyAdvancesDisplayTurns: Bool = true,
         isAdapterOwned: @escaping () -> Bool,
         hasCommittedDocument: @escaping () -> Bool,
         onResult: @escaping (BrowserWebKitReadinessResult) -> Void,
@@ -48,6 +53,7 @@ final class BrowserWebKitReadinessProbe: NSObject {
     ) {
         self.webView = webView
         self.readinessContext = readinessContext
+        self.automaticallyAdvancesDisplayTurns = automaticallyAdvancesDisplayTurns
         self.isAdapterOwned = isAdapterOwned
         self.hasCommittedDocument = hasCommittedDocument
         self.onResult = onResult
@@ -56,9 +62,19 @@ final class BrowserWebKitReadinessProbe: NSObject {
     }
 
     func start() {
+        guard !hasStarted else {
+            return
+        }
+
+        hasStarted = true
+        isActive = true
         readinessTurnsRemaining = Self.maximumReadinessTurns
         stableDisplayTurns = 0
         didReportPresentationBlocked = false
+
+        guard automaticallyAdvancesDisplayTurns else {
+            return
+        }
 
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
         displayLink = link
@@ -68,6 +84,16 @@ final class BrowserWebKitReadinessProbe: NSObject {
     func invalidate() {
         displayLink?.invalidate()
         displayLink = nil
+        isActive = false
+    }
+
+    /// Advances one readiness turn only when automatic display-link driving is disabled.
+    func advanceReadinessTurnForTesting() {
+        guard !automaticallyAdvancesDisplayTurns else {
+            return
+        }
+
+        advanceReadinessTurn()
     }
 
     func matches(webView: WKWebView, readinessContext: BrowserWebKitReadinessContext?) -> Bool {
@@ -77,6 +103,13 @@ final class BrowserWebKitReadinessProbe: NSObject {
 
     @objc
     private func tick(_: CADisplayLink) {
+        advanceReadinessTurn()
+    }
+
+    private func advanceReadinessTurn() {
+        guard isActive else {
+            return
+        }
         guard consumeReadinessTurn() else {
             becomeUnavailable()
             return
@@ -140,7 +173,7 @@ final class BrowserWebKitReadinessProbe: NSObject {
     }
 
     private func becomeUnavailable() {
-        guard displayLink != nil else {
+        guard isActive else {
             return
         }
 

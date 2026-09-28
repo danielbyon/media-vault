@@ -21,9 +21,10 @@ struct BrowserViewInteractionTests {
     func browsingWebTabMountsOneOmnibox() throws {
         let url = try #require(URL(string: "https://example.com"))
         let tab = BrowserTab.web(id: BrowserTabID(UUID(1)), url: url)
-        let store = Store(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: BrowserFeature.State.readyForTesting(
+            tabs: [tab],
+            selectedTabID: tab.id,
+        ))
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
 
@@ -41,15 +42,13 @@ struct BrowserViewInteractionTests {
     func mountedCardSurfaceIsInsideEnabledOverflowingTabOverviewScrollSurface() async throws {
         let tabIDs = (0 ..< 24).map { BrowserTabID(UUID(9_086_100 + $0)) }
         let selectedTabID = tabIDs[0]
-        let store = Store(
+        let store = makeBrowserViewStore(
             initialState: BrowserFeature.State.readyForTesting(
                 tabs: tabIDs.map { .startPage(id: $0) },
                 selectedTabID: selectedTabID,
                 presentation: .tabOverview,
             ),
-        ) {
-            BrowserFeature()
-        }
+        )
         let coordinator = BrowserTabTransitionUIKitCoordinator()
         let hostingController = UIHostingController(
             rootView: BrowserView(store: store, transitionCoordinator: coordinator)
@@ -94,9 +93,7 @@ struct BrowserViewInteractionTests {
             presentation: .tabOverview,
         )
         initialState.tabOverviewScrollPosition = first
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let clock = TestClock()
         let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first) { duration in
             try await clock.sleep(for: duration)
@@ -145,9 +142,7 @@ struct BrowserViewInteractionTests {
             profile: .persistentPrivate,
             retiringTabIDs: [],
         ))
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
 
@@ -171,9 +166,8 @@ struct BrowserViewInteractionTests {
 
     @Test("Start Page native host receives interactive keyboard dismissal")
     func startPageNativeHostReceivesInteractiveDismissal() throws {
-        let store = Store(initialState: BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: BrowserFeature.State
+            .readyForTesting(initialTabID: BrowserTabID(UUID(1))))
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
         let textField = try #require(descendants(of: hostingController.view, matching: UITextField.self).first)
@@ -204,7 +198,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
@@ -237,19 +234,19 @@ struct BrowserViewInteractionTests {
             isReady: false,
         )
 
-        await performOnNextDisplayTurn {
-            coordinator.scheduleReadinessProbe(
-                for: webView,
-                tabID: tabID,
-                readinessContext: .init(),
-            )
-        }
-        await waitForDisplayTurn()
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: .init(),
+        )
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
         #expect(!readinessEvents.contains(.targetPresentationReady(tabID)))
 
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)))
+        #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
         #expect(!readinessEvents.contains(.targetPresentationUnavailable(tabID)))
     }
@@ -264,7 +261,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
@@ -296,15 +296,13 @@ struct BrowserViewInteractionTests {
             representation: .live,
             isReady: false,
         )
-        await performOnNextDisplayTurn {
-            coordinator.scheduleReadinessProbe(
-                for: webView,
-                tabID: tabID,
-                readinessContext: .init(),
-            )
-        }
+        coordinator.scheduleReadinessProbe(
+            for: webView,
+            tabID: tabID,
+            readinessContext: .init(),
+        )
 
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
 
         let behindCover = UIView(frame: webView.bounds)
@@ -334,16 +332,18 @@ struct BrowserViewInteractionTests {
         webView.layoutIfNeeded()
         #expect(BrowserWebKitPresentationGuard.hasOpaqueCover(in: webView))
 
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
         #expect(readinessEvents.count(where: { $0 == .targetPresentationBlocked(tabID) }) == 1)
 
         cover.removeFromSuperview()
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
 
         #expect(registry.isReady(for: .content(tabID)))
+        #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
     }
 
@@ -357,7 +357,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         let coordinator = BrowserWebView.Coordinator(
             onRefresh: {},
             transitionRegistry: registry,
@@ -396,7 +399,7 @@ struct BrowserViewInteractionTests {
         )
 
         for _ in 0 ..< 3 {
-            await waitForDisplayTurn()
+            readinessCoordinator.advanceReadinessTurnForTesting()
         }
         #expect(registry.isReady(for: .content(tabID)) == false)
         #expect(!readinessEvents.contains(.targetPresentationReady(tabID)))
@@ -406,23 +409,28 @@ struct BrowserViewInteractionTests {
             tabID: tabID,
             readinessContext: .init(),
         )
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(registry.isReady(for: .content(tabID)) == false)
-        await waitForDisplayTurn()
+        readinessCoordinator.advanceReadinessTurnForTesting()
 
         #expect(registry.isReady(for: .content(tabID)))
+        #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(readinessEvents.count(where: { $0 == .targetPresentationReady(tabID) }) == 1)
     }
 
     @Test("A WebView with the wrong adapter identity becomes unavailable")
-    func wrongAdapterIdentityBecomesUnavailable() async {
+    func wrongAdapterIdentityBecomesUnavailable() {
         let tabID = BrowserTabID(UUID(9_011))
         let rootViewController = UIViewController()
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let ownedWebView = WKWebView(frame: rootViewController.view.bounds)
         let foreignWebView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in ownedWebView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         var results: [BrowserWebKitReadinessResult] = []
         _ = adapter.ensureContext(for: tabID)
         rootViewController.view.addSubview(foreignWebView)
@@ -441,9 +449,10 @@ struct BrowserViewInteractionTests {
             onResult: { results.append($0) },
             onPresentationBlocked: {},
         )
-        for _ in 0 ..< 200 where results.isEmpty {
-            await waitForDisplayTurn()
+        for _ in 0 ..< BrowserWebKitReadinessProbe.maximumReadinessTurns {
+            readinessCoordinator.advanceReadinessTurnForTesting()
         }
+        readinessCoordinator.advanceReadinessTurnForTesting()
 
         #expect(results.count == 1)
         if case .unavailable? = results.first {
@@ -498,7 +507,10 @@ struct BrowserViewInteractionTests {
         let window = mount(rootViewController, size: CGSize(width: 390, height: 700))
         let webView = WKWebView(frame: rootViewController.view.bounds)
         let adapter = BrowserWebKitAdapter(makeWebView: { _, _ in webView })
-        let readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+        let readinessCoordinator = BrowserWebKitReadinessCoordinator(
+            adapter: adapter,
+            automaticallyAdvancesDisplayTurns: false,
+        )
         var results: [BrowserWebKitReadinessResult] = []
         _ = adapter.ensureContext(for: tabID)
         rootViewController.view.addSubview(webView)
@@ -526,9 +538,11 @@ struct BrowserViewInteractionTests {
             onResult: { results.append($0) },
             onPresentationBlocked: {},
         )
+        readinessCoordinator.advanceReadinessTurnForTesting()
+        #expect(results.isEmpty)
         readinessCoordinator.invalidate()
-        for _ in 0 ..< 30 {
-            await waitForDisplayTurn()
+        for _ in 0 ..< 3 {
+            readinessCoordinator.advanceReadinessTurnForTesting()
         }
         #expect(results.isEmpty)
 
@@ -539,10 +553,12 @@ struct BrowserViewInteractionTests {
             onResult: { results.append($0) },
             onPresentationBlocked: {},
         )
-        for _ in 0 ..< 30 where results.isEmpty {
-            await waitForDisplayTurn()
-        }
+        readinessCoordinator.advanceReadinessTurnForTesting()
+        #expect(results.isEmpty)
+        readinessCoordinator.advanceReadinessTurnForTesting()
 
+        #expect(results.count == 1)
+        readinessCoordinator.advanceReadinessTurnForTesting()
         #expect(results.count == 1)
         if case .ready? = results.first {
             // Expected terminal result.
@@ -562,9 +578,7 @@ struct BrowserViewInteractionTests {
             revision: initialState.previewState.revision(for: tab.id),
             pngData: previewData,
         ), for: tab.id)
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         BrowserWebKitAdapter.shared.execute(.configureProfile(
             profile: .persistentPrivate,
             retiringTabIDs: [],
@@ -765,9 +779,7 @@ struct BrowserViewInteractionTests {
             revision: initialState.previewState.revision(for: secondID),
             pngData: secondPreviewData,
         ), for: secondID)
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let adapter = BrowserWebKitAdapter.shared
         adapter.execute(.configureProfile(profile: .persistentPrivate, retiringTabIDs: []))
         let firstWebView = adapter.ensureContext(for: firstID)
@@ -998,9 +1010,10 @@ struct BrowserViewInteractionTests {
     @Test("Real compact layout drives the normal geometry handoff in both directions")
     func realLayoutTabOverviewUsesMountedContentRatio() throws {
         let tab = BrowserTab.startPage(id: BrowserTabID(UUID(1)))
-        let store = Store(initialState: BrowserFeature.State.readyForTesting(tabs: [tab], selectedTabID: tab.id)) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: BrowserFeature.State.readyForTesting(
+            tabs: [tab],
+            selectedTabID: tab.id,
+        ))
         var executions: [BrowserTabTransitionExecution] = []
         var animators: [UIViewPropertyAnimator] = []
         let coordinator = BrowserTabTransitionUIKitCoordinator(
@@ -1108,9 +1121,7 @@ struct BrowserViewInteractionTests {
                 selectedTabID: selectedTabID,
             )
             initialState.tabOverviewScrollPosition = anchor
-            let store = Store(initialState: initialState) {
-                BrowserFeature()
-            }
+            let store = makeBrowserViewStore(initialState: initialState)
             let scrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: anchor)
             var executions: [BrowserTabTransitionExecution] = []
             var animators: [UIViewPropertyAnimator] = []
@@ -1290,9 +1301,7 @@ struct BrowserViewInteractionTests {
             presentation: .tabOverview,
         )
         initialState.tabOverviewScrollPosition = firstID
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let originalScrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: firstID)
         let replacementScrollPosition = BrowserTabOverviewScrollPosition()
         let coordinator = BrowserTabTransitionUIKitCoordinator()
@@ -1349,9 +1358,7 @@ struct BrowserViewInteractionTests {
             selectedTabID: selectedTabID,
         )
         initialState.tabOverviewScrollPosition = persistedAnchor
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let scrollPosition = BrowserTabOverviewScrollPosition(persistedPosition: persistedAnchor)
         let coordinator = BrowserTabTransitionUIKitCoordinator()
         var transitionState = BrowserTabTransitionViewState()
@@ -1467,9 +1474,7 @@ struct BrowserViewInteractionTests {
             presentation: .tabOverview,
         )
         initialState.tabOverviewScrollPosition = compactAnchor
-        let store = Store(initialState: initialState) {
-            BrowserFeature()
-        }
+        let store = makeBrowserViewStore(initialState: initialState)
         let compactController = UIHostingController(
             rootView: BrowserView(store: store)
                 .environment(\.horizontalSizeClass, .compact),
@@ -1576,15 +1581,13 @@ struct BrowserViewInteractionTests {
     func settledOverviewResizesEveryCardFromTheCurrentProbe() {
         let firstTab = BrowserTab.startPage(id: BrowserTabID(UUID(1)))
         let secondTab = BrowserTab.startPage(id: BrowserTabID(UUID(2)))
-        let store = Store(
+        let store = makeBrowserViewStore(
             initialState: BrowserFeature.State.readyForTesting(
                 tabs: [firstTab, secondTab],
                 selectedTabID: firstTab.id,
                 presentation: .tabOverview,
             ),
-        ) {
-            BrowserFeature()
-        }
+        )
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 700))
 
@@ -1627,6 +1630,16 @@ struct BrowserViewInteractionTests {
 
         window.isHidden = true
         window.rootViewController = nil
+    }
+
+    private func makeBrowserViewStore(initialState: BrowserFeature.State) -> StoreOf<BrowserFeature> {
+        var initialState = initialState
+        initialState.settings.preserveOpenTabs = false
+        return withDependencies {
+            $0.uuid = .incrementing
+        } operation: {
+            Store(initialState: initialState) { BrowserFeature() }
+        }
     }
 
     private func mount(_ controller: UIViewController, size: CGSize) -> UIWindow {
@@ -1863,20 +1876,6 @@ struct BrowserViewInteractionTests {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let target = DisplayLinkTarget {
                 continuation.resume()
-            }
-            let displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
-            displayLink.add(to: .main, forMode: .common)
-        }
-    }
-
-    private func performOnNextDisplayTurn(_ action: @escaping () -> Void) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let target = DisplayLinkTarget {
-                Task { @MainActor in
-                    await Task.yield()
-                    action()
-                    continuation.resume()
-                }
             }
             let displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
             displayLink.add(to: .main, forMode: .common)

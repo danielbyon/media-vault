@@ -18,6 +18,44 @@ struct BrowserSettingsPersistenceTests {
         let client = liveClient(using: defaults)
 
         #expect(await client.load() == BrowserSettings())
+        #expect(await client.load().preserveOpenTabs)
+    }
+
+    @Test("Preserve Open Tabs defaults on for absent and invalid values")
+    func preserveOpenTabsDefaultsToEnabled() async throws {
+        let defaults = try isolatedDefaults()
+        let client = liveClient(using: defaults)
+
+        #expect(await client.load().preserveOpenTabs)
+
+        defaults.set("false", forKey: "browser.preserveOpenTabs")
+        #expect(await client.load().preserveOpenTabs)
+
+        defaults.set(0, forKey: "browser.preserveOpenTabs")
+        #expect(await client.load().preserveOpenTabs)
+
+        defaults.set(1, forKey: "browser.preserveOpenTabs")
+        #expect(await client.load().preserveOpenTabs)
+
+        defaults.set(true, forKey: "browser.preserveOpenTabs")
+        #expect(await client.load().preserveOpenTabs)
+
+        defaults.set(false, forKey: "browser.preserveOpenTabs")
+        #expect(await client.load().preserveOpenTabs == false)
+    }
+
+    @Test("Preserve Open Tabs persists and reset restores its default")
+    func preserveOpenTabsRoundTripAndReset() async throws {
+        let defaults = try isolatedDefaults()
+        let client = liveClient(using: defaults)
+
+        await client.save(BrowserSettings(preserveOpenTabs: false))
+        #expect(defaults.object(forKey: "browser.preserveOpenTabs") as? Bool == false)
+        #expect(await client.load().preserveOpenTabs == false)
+
+        await client.reset()
+        #expect(defaults.object(forKey: "browser.preserveOpenTabs") == nil)
+        #expect(await client.load().preserveOpenTabs)
     }
 
     @Test("Profile storage defaults invalid values and round-trips Ephemeral")
@@ -134,6 +172,20 @@ struct BrowserSettingsPersistenceTests {
 
         let settings = await storage.load()
         #expect(settings.searchProvider == .bing)
+    }
+
+    @Test("Newer settings revisions reject delayed saves and resets")
+    func staleSettingsWritesCannotUndoNewerPreferences() async throws {
+        let defaults = try isolatedDefaults()
+        let storage = BrowserSettingsStorage(userDefaults: defaults)
+
+        await storage.save(BrowserSettings(preserveOpenTabs: true), revision: 3)
+        await storage.save(BrowserSettings(preserveOpenTabs: false), revision: 2)
+        #expect(await storage.load().preserveOpenTabs)
+
+        await storage.reset(revision: 4)
+        await storage.save(BrowserSettings(preserveOpenTabs: false), revision: 3)
+        #expect(await storage.load().preserveOpenTabs)
     }
 
     @Test("Ask Every Time decodes through the existing Browser preference key")

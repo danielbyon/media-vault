@@ -91,6 +91,15 @@ public struct BrowserSettingsView: View {
 
     private var tabsSection: some View {
         Section("Tabs") {
+            Toggle("Preserve Open Tabs", isOn: Binding(
+                get: { store.settings.preserveOpenTabs },
+                set: { store.send(.preserveOpenTabsChanged($0)) },
+            ))
+            Text(
+                "Only Persistent-Private tabs are preserved. Web pages reopen at their saved URLs; page state is not saved.",
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
             Toggle("Copied-Link Suggestions", isOn: Binding(
                 get: { store.settings.copiedLinkSuggestionsEnabled },
                 set: { store.send(.copiedLinkSuggestionsChanged($0)) },
