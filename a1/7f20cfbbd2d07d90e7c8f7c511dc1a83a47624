@@ -1,0 +1,38 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature.swift
+  s_d64207dfb6015d::t_bd2e06ed2992c9 527,544,551-554
+  s_d64207dfb6015d::t_c0be4d7b4f68c2 528-543
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserOpenTabsSession.swift
+  s_d64207dfb6015d::t_6c77febbc2f7fc 60-71,163,166-173,177,214,217
+  s_d64207dfb6015d::t_3da1e6c446c72d 162
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature+Reducer.swift
+  s_d64207dfb6015d::t_c0be4d7b4f68c2 571
+  s_d64207dfb6015d::t_14c341422e2256 572-577
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserOpenTabsSessionTests.swift
+  s_d64207dfb6015d::t_cd0c635c8379bb 62-66,68,75-85
+  s_d64207dfb6015d::t_2d1302da770b4a 193,211,232,316,322,395,484,520,567-570,572
+  s_d64207dfb6015d::t_c0be4d7b4f68c2 67,571
+  s_d64207dfb6015d::t_89a6d3fcce3a68 86-87,573-574
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserOpenTabsReducerTests.swift
+  s_d64207dfb6015d::t_7f55e2c9288e32 380-385
+  s_d64207dfb6015d::t_c0be4d7b4f68c2 975
+  s_d64207dfb6015d::t_4fd05c02a184cb 503-558,977
+  s_d64207dfb6015d::t_601002d9b7722a 228-379,386-395
+  s_d64207dfb6015d::t_6e3702c50fc672 901,971-974,976
+  s_d64207dfb6015d::t_d9cc8d647b654b 978
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a17f20cfbbd2d07d90e7c8f7c511dc1a83a47624",
+  "prompts": {},
+  "sessions": {
+    "s_d64207dfb6015d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0df95-7ee2-70b1-9a0f-da3f8636d670",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
