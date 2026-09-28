@@ -524,13 +524,34 @@ public struct BrowserFeature {
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             let previousSession = BrowserOpenTabsSession.project(from: state.tabs, selectedTabID: state.selectedTabID)
+            let previousTabIDs = state.tabs.map(\.id)
+            let wasRestoring =
+                switch state.openTabsEntryLifecycle {
+                case .restoring:
+                    true
+                default:
+                    false
+                }
+            let isExplicitTabClosingAction =
+                switch action {
+                case .closeTab(_),
+                     .closeAllConfirmed,
+                     .closeOtherTabsConfirmed:
+                    true
+                default:
+                    false
+                }
+
             let effect = coreReduce(into: &state, action: action)
             guard case .openTabsSessionLoaded = action else {
                 let currentSession = BrowserOpenTabsSession.project(
                     from: state.tabs,
                     selectedTabID: state.selectedTabID,
                 )
-                guard previousSession != currentSession else {
+                let closedTabDuringPendingRestoration = wasRestoring
+                    && isExplicitTabClosingAction
+                    && previousTabIDs != state.tabs.map(\.id)
+                guard previousSession != currentSession || closedTabDuringPendingRestoration else {
                     return effect
                 }
 

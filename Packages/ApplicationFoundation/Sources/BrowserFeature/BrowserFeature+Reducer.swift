@@ -568,13 +568,17 @@ extension BrowserFeature {
                 let revision = advanceOpenTabsRevision(state: &state)
                 return saveOpenTabsSession(state: state, revision: revision)
             }
-            guard let session = BrowserOpenTabsSession.decode(data) else {
+
+            switch BrowserOpenTabsSession.decode(data) {
+            case let .decoded(session):
+                return restoreOpenTabsSession(session, state: &state)
+            case .unsupportedVersion:
+                return .none
+            case .invalid:
                 let restoreEffect = restoreOpenTabsSession(nil, state: &state)
                 let revision = advanceOpenTabsRevision(state: &state)
                 return .merge(restoreEffect, saveOpenTabsSession(state: state, revision: revision))
             }
-
-            return restoreOpenTabsSession(session, state: &state)
         case let .navigate(url):
             return navigate(url: url, state: &state)
         case let .openInNewTab(url, openerID):

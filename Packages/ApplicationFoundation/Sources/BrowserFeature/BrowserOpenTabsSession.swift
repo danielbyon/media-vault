@@ -57,6 +57,18 @@ final class BrowserPersistenceRevisionGate: @unchecked Sendable {
     }
 }
 
+/// Outcomes from decoding a persisted Browser tab session envelope.
+enum BrowserOpenTabsSessionDecodeResult: Equatable, Sendable {
+    /// A current-version session was decoded, salvaging valid entries independently.
+    case decoded(BrowserOpenTabsSession)
+
+    /// The data is not a usable representation of the current session format.
+    case invalid
+
+    /// The envelope is readable but was written using a different schema version.
+    case unsupportedVersion
+}
+
 /// Versioned, privacy-minimal description of the logical Browser tabs that can be reopened.
 struct BrowserOpenTabsSession: Equatable, Sendable {
     static let currentVersion = 1
@@ -147,16 +159,22 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
         ))
     }
 
-    /// Decodes a valid v1 envelope and drops malformed entries independently.
-    static func decode(_ data: Data) -> Self? {
+    /// Decodes v1 entries independently and distinguishes invalid data from unsupported schemas.
+    static func decode(_ data: Data) -> BrowserOpenTabsSessionDecodeResult {
         guard let object = try? JSONSerialization.jsonObject(with: data),
               let envelope = object as? [String: Any],
-              integer(envelope["version"]) == currentVersion,
-              let selectedPosition = integer(envelope["selectedPosition"]),
+              let version = integer(envelope["version"])
+        else {
+            return .invalid
+        }
+        guard version == currentVersion else {
+            return .unsupportedVersion
+        }
+        guard let selectedPosition = integer(envelope["selectedPosition"]),
               selectedPosition >= 0,
               let rawEntries = envelope["entries"] as? [Any]
         else {
-            return nil
+            return .invalid
         }
 
         var seenPositions: Set<Int> = []
@@ -193,10 +211,10 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
         .sorted { $0.position < $1.position }
 
         guard !entries.isEmpty else {
-            return nil
+            return .invalid
         }
 
-        return Self(selectedPosition: selectedPosition, entries: entries)
+        return .decoded(Self(selectedPosition: selectedPosition, entries: entries))
     }
 
     /// Reconstructs ordinary tabs with fresh identities and marks unselected web tabs for lazy loading.

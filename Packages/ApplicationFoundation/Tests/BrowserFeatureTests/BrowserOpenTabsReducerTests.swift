@@ -225,6 +225,174 @@ struct BrowserOpenTabsReducerTests {
         #expect(commands.value.isEmpty)
     }
 
+    @Test("Closing the sole Start Page supersedes pending restoration and persists its replacement")
+    func closingSoleStartPageSupersedesPendingRestoration() async throws {
+        let restoredURL = try #require(URL(string: "https://saved.example"))
+        let data = try BrowserOpenTabsSession(
+            selectedPosition: 0,
+            entries: [.init(position: 0, kind: .web(restoredURL))],
+        ).encoded()
+        let load = AsyncStream<BrowserOpenTabsSessionLoadOutcome>.makeStream()
+        let savedSessions = LockIsolated<[BrowserOpenTabsSession]>([])
+        let initialState = BrowserFeature.State.readyForTesting()
+        let originalTabID = initialState.selectedTabID
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserOpenTabsSession.load = {
+                for await outcome in load.stream {
+                    return outcome
+                }
+                return .failed
+            }
+            $0.browserOpenTabsSession.save = { session, _ in
+                savedSessions.withValue { $0.append(session) }
+            }
+            $0.browserClipboard.readHTTPURL = { nil }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.browserEntered)
+        let (requestID, revision) = try #require(restorationRequest(in: store.state))
+
+        await store.send(.closeTab(originalTabID))
+
+        let replacementTabID = store.state.selectedTabID
+        let expectedSession = BrowserOpenTabsSession.project(
+            from: store.state.tabs,
+            selectedTabID: replacementTabID,
+        )
+        #expect(replacementTabID != originalTabID)
+        #expect(expectedSession.entries == [.init(position: 0, kind: .startPage)])
+        #expect(store.state.openTabsEntryLifecycle == .completed)
+        #expect(savedSessions.value == [expectedSession])
+
+        load.continuation.yield(.loaded(data))
+        load.continuation.finish()
+        await store.receive(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: data))
+        await store.finish()
+
+        #expect(store.state.tabs == [.startPage(id: replacementTabID)])
+        #expect(store.state.selectedTabID == replacementTabID)
+        #expect(savedSessions.value == [expectedSession])
+    }
+
+    @Test("Close All supersedes pending restoration when the projection is already one Start Page")
+    func closeAllStartPageSupersedesPendingRestoration() async throws {
+        let restoredURL = try #require(URL(string: "https://saved.example"))
+        let data = try BrowserOpenTabsSession(
+            selectedPosition: 0,
+            entries: [.init(position: 0, kind: .web(restoredURL))],
+        ).encoded()
+        let load = AsyncStream<BrowserOpenTabsSessionLoadOutcome>.makeStream()
+        let savedSessions = LockIsolated<[BrowserOpenTabsSession]>([])
+        let initialState = BrowserFeature.State.readyForTesting()
+        let originalTabID = initialState.selectedTabID
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserOpenTabsSession.load = {
+                for await outcome in load.stream {
+                    return outcome
+                }
+                return .failed
+            }
+            $0.browserOpenTabsSession.save = { session, _ in
+                savedSessions.withValue { $0.append(session) }
+            }
+            $0.browserClipboard.readHTTPURL = { nil }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.browserEntered)
+        let (requestID, revision) = try #require(restorationRequest(in: store.state))
+
+        await store.send(.closeAllConfirmed)
+
+        let replacementTabID = store.state.selectedTabID
+        let expectedSession = BrowserOpenTabsSession.project(
+            from: store.state.tabs,
+            selectedTabID: replacementTabID,
+        )
+        #expect(replacementTabID != originalTabID)
+        #expect(expectedSession.entries == [.init(position: 0, kind: .startPage)])
+        #expect(store.state.openTabsEntryLifecycle == .completed)
+        #expect(savedSessions.value == [expectedSession])
+
+        load.continuation.yield(.loaded(data))
+        load.continuation.finish()
+        await store.receive(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: data))
+        await store.finish()
+
+        #expect(store.state.tabs == [.startPage(id: replacementTabID)])
+        #expect(store.state.selectedTabID == replacementTabID)
+        #expect(savedSessions.value == [expectedSession])
+    }
+
+    @Test("A close that changes the session projection saves once while restoration is pending")
+    func closeWithChangedProjectionSavesOnceDuringRestoration() async throws {
+        let savedURL = try #require(URL(string: "https://saved.example"))
+        let data = try BrowserOpenTabsSession(
+            selectedPosition: 1,
+            entries: [
+                .init(position: 0, kind: .startPage),
+                .init(position: 1, kind: .web(savedURL)),
+            ],
+        ).encoded()
+        let load = AsyncStream<BrowserOpenTabsSessionLoadOutcome>.makeStream()
+        let operations = LockIsolated<[RecordedSessionOperation]>([])
+        let startPageID = BrowserTabID()
+        let webTabID = BrowserTabID()
+        let initialState = BrowserFeature.State.readyForTesting(
+            tabs: [.startPage(id: startPageID), .web(id: webTabID, url: savedURL)],
+            selectedTabID: webTabID,
+        )
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserOpenTabsSession.load = {
+                for await outcome in load.stream {
+                    return outcome
+                }
+                return .failed
+            }
+            $0.browserOpenTabsSession.save = { session, revision in
+                operations.withValue { $0.append(.save(revision, session)) }
+            }
+            $0.browserClipboard.readHTTPURL = { nil }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.browserEntered)
+        let (requestID, revision) = try #require(restorationRequest(in: store.state))
+        await store.send(.closeTab(webTabID))
+
+        let expectedSession = BrowserOpenTabsSession.project(
+            from: store.state.tabs,
+            selectedTabID: store.state.selectedTabID,
+        )
+        #expect(store.state.tabs == [.startPage(id: startPageID)])
+        #expect(store.state.openTabsEntryLifecycle == .completed)
+        #expect(operations.value.count == 1)
+        if let operation = operations.value.first,
+           case let .save(_, savedSession) = operation {
+            #expect(savedSession == expectedSession)
+        } else {
+            Issue.record("The close should produce one session save.")
+        }
+
+        load.continuation.yield(.loaded(data))
+        load.continuation.finish()
+        await store.receive(.openTabsSessionLoaded(requestID: requestID, revision: revision, data: data))
+        await store.finish()
+
+        #expect(store.state.tabs == [.startPage(id: startPageID)])
+        #expect(operations.value.count == 1)
+    }
+
     @Test("Browser entry before profile readiness defers restoration until settings are ready")
     func entryBeforeReadinessRestoresAfterProfileLoad() async throws {
         let savedURL = try #require(URL(string: "https://restored.example/page"))
@@ -330,6 +498,62 @@ struct BrowserOpenTabsReducerTests {
         #expect(store.state.selectedTabID == store.state.tabs[0].id)
         #expect(savedSessions.value.last?.entries == [.init(position: 0, kind: .startPage)])
         #expect(commands.value.isEmpty)
+    }
+
+    @Test("Browser entry preserves an unsupported session until a supported logical mutation")
+    func unsupportedSessionVersionIsPreservedUntilLogicalMutation() async throws {
+        let futureData = Data(
+            "{\"version\":\(BrowserOpenTabsSession.currentVersion + 1),\"futureWorkspace\":true}".utf8,
+        )
+        let durableData = LockIsolated<Data?>(futureData)
+        let savedSessions = LockIsolated<[BrowserOpenTabsSession]>([])
+        var initialState = BrowserFeature.State.readyForTesting()
+        initialState.settings.copiedLinkSuggestionsEnabled = false
+        let initialTabs = initialState.tabs
+        let initialSelectedTabID = initialState.selectedTabID
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserOpenTabsSession.load = {
+                .loaded(durableData.value ?? futureData)
+            }
+            $0.browserOpenTabsSession.save = { session, _ in
+                savedSessions.withValue { $0.append(session) }
+                if let encoded = try? session.encoded() {
+                    durableData.withValue { $0 = encoded }
+                }
+            }
+            $0.browserClipboard.readHTTPURL = { nil }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.browserEntered)
+        let (requestID, revision) = try #require(restorationRequest(in: store.state))
+        await store.receive(.openTabsSessionLoaded(
+            requestID: requestID,
+            revision: revision,
+            data: futureData,
+        ))
+        await store.finish()
+
+        #expect(store.state.openTabsEntryLifecycle == .completed)
+        #expect(store.state.tabs == initialTabs)
+        #expect(store.state.selectedTabID == initialSelectedTabID)
+        #expect(savedSessions.value.isEmpty)
+        #expect(durableData.value == futureData)
+
+        await store.send(.newTabTapped)
+        await store.finish()
+
+        #expect(savedSessions.value.count == 1)
+        #expect(savedSessions.value == [BrowserOpenTabsSession.project(
+            from: store.state.tabs,
+            selectedTabID: store.state.selectedTabID,
+        )])
+        let savedData = try #require(durableData.value)
+        let savedEnvelope = try #require(JSONSerialization.jsonObject(with: savedData) as? [String: Any])
+        #expect(savedEnvelope["version"] as? Int == BrowserOpenTabsSession.currentVersion)
     }
 
     @Test("Restored Start Pages stay native and background web tabs load once when selected")
@@ -674,7 +898,7 @@ struct BrowserOpenTabsReducerTests {
         await originalStore.finish()
 
         let savedData = try #require(persistedData.value)
-        let savedSession = try #require(BrowserOpenTabsSession.decode(savedData))
+        let savedSession = try #require(decodedSession(savedData))
         #expect(savedSession.entries == [
             .init(position: 0, kind: .startPage),
             .init(position: 1, kind: .startPage),
@@ -742,6 +966,14 @@ struct BrowserOpenTabsReducerTests {
         #expect(clearCount.value == 1)
         #expect(store.state.tabs == [.web(id: id, url: url)])
         #expect(operations.value.isEmpty)
+    }
+
+    private func decodedSession(_ data: Data) -> BrowserOpenTabsSession? {
+        guard case let .decoded(session) = BrowserOpenTabsSession.decode(data) else {
+            return nil
+        }
+
+        return session
     }
 
     private func restorationRequest(in state: BrowserFeature.State) -> (UUID, UInt64)? {

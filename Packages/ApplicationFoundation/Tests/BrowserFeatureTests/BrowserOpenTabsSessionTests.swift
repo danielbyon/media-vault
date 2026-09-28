@@ -59,11 +59,30 @@ struct BrowserOpenTabsSessionTests {
             """#.utf8,
         )
 
-        let session = try #require(BrowserOpenTabsSession.decode(data))
+        let session: BrowserOpenTabsSession
+        guard case let .decoded(decoded) = BrowserOpenTabsSession.decode(data) else {
+            Issue.record("The current-version envelope should salvage its valid entries.")
+            return
+        }
+
+        session = decoded
 
         #expect(session.entries.map(\.position) == [0, 4])
         #expect(session.selectedEntryPosition == 0)
         #expect(try session.entries[1].kind == .web(#require(URL(string: "https://four.example"))))
+    }
+
+    @Test("Decoder distinguishes unsupported versions from malformed current envelopes")
+    func decoderDistinguishesUnsupportedVersion() {
+        let unsupported = Data(
+            "{\"version\":\(BrowserOpenTabsSession.currentVersion + 1),\"futureWorkspace\":[]}".utf8,
+        )
+        let malformedCurrent = Data(
+            "{\"version\":\(BrowserOpenTabsSession.currentVersion),\"selectedPosition\":0,\"entries\":[]}".utf8,
+        )
+
+        #expect(BrowserOpenTabsSession.decode(unsupported) == .unsupportedVersion)
+        #expect(BrowserOpenTabsSession.decode(malformedCurrent) == .invalid)
     }
 
     @Test("Restoration creates fresh ordinary tabs and tracks background web URLs")
@@ -171,7 +190,7 @@ struct BrowserOpenTabsSessionTests {
         await storage.purge(revision: 5)
 
         let savedData = try #require(await readLoadedSessionData(from: storage))
-        #expect(BrowserOpenTabsSession.decode(savedData) == newer)
+        #expect(decodedSession(savedData) == newer)
     }
 
     @Test("A committed current session wins over stale transaction artifacts")
@@ -189,7 +208,7 @@ struct BrowserOpenTabsSessionTests {
         let storage = makeStorage(directory: directory)
         let loadedData = try #require(await readLoadedSessionData(from: storage))
 
-        #expect(BrowserOpenTabsSession.decode(loadedData) == committed)
+        #expect(decodedSession(loadedData) == committed)
         #expect(try Set(fileNames(in: directory)) == ["open-tabs.json"])
     }
 
@@ -210,7 +229,7 @@ struct BrowserOpenTabsSessionTests {
         let storage = makeStorage(directory: directory)
         let loadedData = try #require(await readLoadedSessionData(from: storage))
 
-        #expect(BrowserOpenTabsSession.decode(loadedData) == committed)
+        #expect(decodedSession(loadedData) == committed)
         #expect(try Set(fileNames(in: directory)) == ["open-tabs.json"])
     }
 
@@ -294,13 +313,13 @@ struct BrowserOpenTabsSessionTests {
         let storage = makeStorage(directory: sessionDirectory, legacyDirectoryURL: browserDirectory)
 
         let loadedData = try #require(await readLoadedSessionData(from: storage))
-        #expect(BrowserOpenTabsSession.decode(loadedData) == oldSession)
+        #expect(decodedSession(loadedData) == oldSession)
         #expect(FileManager.default.fileExists(atPath: legacySessionURL.path))
 
         await storage.save(newSession, revision: 1)
 
         let savedData = try #require(await readLoadedSessionData(from: storage))
-        #expect(BrowserOpenTabsSession.decode(savedData) == newSession)
+        #expect(decodedSession(savedData) == newSession)
         #expect(!FileManager.default.fileExists(atPath: legacySessionURL.path))
     }
 
@@ -373,7 +392,7 @@ struct BrowserOpenTabsSessionTests {
         shouldFailPendingProtection.withValue { $0 = false }
 
         let savedData = try #require(await readLoadedSessionData(from: storage))
-        #expect(BrowserOpenTabsSession.decode(savedData) == committed)
+        #expect(decodedSession(savedData) == committed)
         #expect(try Set(fileNames(in: directory)) == ["open-tabs.json"])
     }
 
@@ -462,7 +481,7 @@ struct BrowserOpenTabsSessionTests {
 
         switch result {
         case let .loaded(data):
-            #expect(BrowserOpenTabsSession.decode(data) == committed)
+            #expect(decodedSession(data) == committed)
         case .missing:
             Issue.record("Transaction recovery reported no session despite a committed previous snapshot.")
         case .failed:
@@ -498,7 +517,7 @@ struct BrowserOpenTabsSessionTests {
         let retryOutcome = await storage.load()
         switch retryOutcome {
         case let .loaded(data):
-            #expect(BrowserOpenTabsSession.decode(data) == committed)
+            #expect(decodedSession(data) == committed)
         case .missing:
             Issue.record("A protection failure discarded the committed session before the later safe read.")
         case .failed:
@@ -543,6 +562,14 @@ struct BrowserOpenTabsSessionTests {
             selectedPosition: 0,
             entries: [.init(position: 0, kind: .web(url))],
         )
+    }
+
+    private func decodedSession(_ data: Data) -> BrowserOpenTabsSession? {
+        guard case let .decoded(session) = BrowserOpenTabsSession.decode(data) else {
+            return nil
+        }
+
+        return session
     }
 
     private func write(_ session: BrowserOpenTabsSession, to url: URL) throws {
