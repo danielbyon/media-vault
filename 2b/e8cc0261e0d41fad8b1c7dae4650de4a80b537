@@ -1,0 +1,37 @@
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_9623cf750975a5 106,108,112,114
+  s_6e45b70b7be182::t_41d2bd6d88d4a0 82
+  s_6e45b70b7be182::t_4a789d8874aff2 104-105
+  s_6e45b70b7be182::t_c21fc25fd81b14 86-88,97-103
+  s_6e45b70b7be182::t_b037c3fbb111ee 107,109-111,113,115
+  s_6e45b70b7be182::t_ea5ab4be2e983d 128
+  s_6e45b70b7be182::t_62954d51930985 116
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_6a9895dbedaf9c 505-513,515-518,567-570,572-575,577-579,582
+  s_6e45b70b7be182::t_d398c53be3f6e8 486,532-533,539,547-548
+  s_6e45b70b7be182::t_e58bbf72fcb407 571,576,581
+  s_6e45b70b7be182::t_ea5ab4be2e983d 2-3,5,87,141,152,163,177,186,192,230,241,260,272,278,321,332,357,394,399,407,427,431-433,438-450,453,456-475,477-481,483,487-489,491-493,499,501,503-504,519-522,525,527,534-538,540-546,549-551,553,614,624,630,633,644
+  s_6e45b70b7be182::t_f2fecf0054e558 497-498
+  s_6e45b70b7be182::t_b30014d3c99be7 500,502,523-524,526,528-530
+  s_6e45b70b7be182::t_498cdad9884ec2 514
+  s_6e45b70b7be182::t_328ad9746757d5 236-237,295-301
+  s_6e45b70b7be182::t_0d8daaa35b9fdb 495,559-566,583-590
+  s_6e45b70b7be182::t_17fdb89ecc3a95 281,494,496,531,555-556
+  s_6e45b70b7be182::t_809914c265793b 484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2be8cc0261e0d41fad8b1c7dae4650de4a80b537",
+  "prompts": {},
+  "sessions": {
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
