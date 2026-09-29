@@ -79,6 +79,13 @@ struct CalculatorFeatureTests {
         #expect(try CalculatorEngine(roundingScale: 0).evaluate("2^2") == "4")
     }
 
+    @Test("Negative integral powers keep intermediates above display precision")
+    func negativeIntegralPowersPreserveIntermediatePrecision() throws {
+        #expect(try CalculatorEngine().evaluate("0.00000000001^-1") == "100000000000")
+        #expect(try CalculatorEngine(roundingScale: 0).evaluate("0.00000000001^-1") == "100000000000")
+        #expect(try CalculatorEngine(roundingScale: 4).evaluate("3^-2") == "0.1111")
+    }
+
     @Test("Integral powers preserve Decimal precision")
     func integralPowersPreserveDecimalPrecision() throws {
         #expect(try CalculatorEngine().evaluate("123456789^2") == "15241578750190521")

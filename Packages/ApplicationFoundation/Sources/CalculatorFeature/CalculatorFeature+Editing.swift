@@ -86,6 +86,9 @@ extension CalculatorFeature {
         case .e:
             return applyConstant("e", to: &state)
         case .toggleAngleMode:
+            if state.isShowingResult {
+                state.expression = state.display
+            }
             state.angleMode = state.angleMode == .degrees ? .radians : .degrees
             return true
         case .equals:

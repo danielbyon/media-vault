@@ -452,17 +452,20 @@ public struct CalculatorEngine: Sendable {
 
             let remainder = remaining - integralHalf * 2
             if remainder != 0 {
-                result = try rounded(multiplying: result, factor)
+                result = try unrounded(NSDecimalMultiply, result, factor)
             }
 
             remaining = integralHalf
             if remaining > 0 {
-                factor = try rounded(multiplying: factor, factor)
+                factor = try unrounded(NSDecimalMultiply, factor, factor)
             }
         }
 
         if exponentIsNegative {
-            return try rounded(dividing: 1, result)
+            guard result != 0 else {
+                throw CalculatorError.divisionByZero
+            }
+            return try rounded(unrounded(NSDecimalDivide, 1, result))
         }
         return try rounded(result)
     }
@@ -484,6 +487,20 @@ public struct CalculatorEngine: Sendable {
             _ lhs: Decimal,
             _ rhs: Decimal,
         ) throws -> Decimal {
+            try rounded(unrounded(operation, lhs, rhs))
+        }
+
+        /// Performs checked Decimal arithmetic without applying calculator display rounding.
+        private func unrounded(
+            _ operation: (
+                UnsafeMutablePointer<Decimal>,
+                UnsafePointer<Decimal>,
+                UnsafePointer<Decimal>,
+                Decimal.RoundingMode,
+            ) -> Decimal.CalculationError,
+            _ lhs: Decimal,
+            _ rhs: Decimal,
+        ) throws -> Decimal {
             var result = Decimal()
             var left = lhs
             var right = rhs
@@ -491,7 +508,7 @@ public struct CalculatorEngine: Sendable {
             guard error == .noError else {
                 throw CalculatorError.overflow
             }
-            return try rounded(result)
+            return result
         }
 
         private mutating func consume(_ token: String) -> Bool {

@@ -73,6 +73,57 @@ struct CalculatorAngleModeEvaluationTests {
         }
     }
 
+    @Test("Changing angle mode freezes a completed pasted result before continuing")
+    func changingAngleModeFreezesPastedResult() async throws {
+        var initialState = try radiansState(expression: "", display: "0")
+        initialState.angleMode = .degrees
+        let store = makeStore(with: initialState)
+
+        await store.send(.pasted("sin(30)")) {
+            $0.display = "0.5"
+            $0.expression = "sin(30)"
+            $0.isShowingResult = true
+            $0.history = [
+                CalculatorHistoryEntry(
+                    id: self.entryID,
+                    expression: "sin(30)",
+                    result: "0.5",
+                    date: self.fixedDate,
+                ),
+            ]
+        }
+
+        await store.send(.button(.toggleAngleMode)) {
+            $0.expression = "0.5"
+            $0.angleMode = .radians
+        }
+
+        await store.send(.button(.add)) {
+            $0.expression = "0.5+"
+            $0.isShowingResult = false
+        }
+
+        await store.send(.button(.digit(1))) {
+            $0.display = "1"
+            $0.expression = "0.5+1"
+        }
+
+        await store.send(.button(.equals)) {
+            $0.display = "1.5"
+            $0.expression = "1.5"
+            $0.isShowingResult = true
+            $0.history.insert(
+                CalculatorHistoryEntry(
+                    id: self.entryID,
+                    expression: "0.5+1",
+                    result: "1.5",
+                    date: self.fixedDate,
+                ),
+                at: 0,
+            )
+        }
+    }
+
     private func makeStore(with state: CalculatorFeature.State) -> TestStoreOf<CalculatorFeature> {
         TestStore(initialState: state) {
             CalculatorFeature()
