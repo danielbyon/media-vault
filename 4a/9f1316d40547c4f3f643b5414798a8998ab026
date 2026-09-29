@@ -1,0 +1,46 @@
+App.xcodeproj/project.pbxproj
+  s_6e45b70b7be182::t_87238891ad1169 21-22,39,68,161,228,363,641-644
+  s_6e45b70b7be182::t_c61d4096b594c5 645
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorScientificEditingTests.swift
+  s_6e45b70b7be182::t_f721ddb51736ec 133-180
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorView.swift
+  s_6e45b70b7be182::t_af7961b95779eb 216,218-220
+  s_6e45b70b7be182::t_a319eb51751a4c 17-18,92,212,217
+  s_6e45b70b7be182::t_db4fa4ab4751b3 124-128
+  s_6e45b70b7be182::t_9736bd58947c3f 225,235-239,254,258,267,276-280,291
+  s_6e45b70b7be182::t_49f606de5e042c 23,93,133-134,150
+  s_6e45b70b7be182::t_07f8babeb8e27f 221-222
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_f721ddb51736ec 72-79,102
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature+Editing.swift
+  s_6e45b70b7be182::t_a319eb51751a4c 344-350
+BrowserTabOverviewUITestHost/BrowserTabOverviewUITestHost.swift
+  s_6e45b70b7be182::t_f721ddb51736ec 8,17-24,29-37
+  s_6e45b70b7be182::t_3392e16fd3fdb8 38-39
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_a319eb51751a4c 318-320,325-330,340-373
+  s_6e45b70b7be182::t_8819f9ceaba975 374
+BrowserTabOverviewUITests/CalculatorHardwareKeyboardUITests.swift
+  s_6e45b70b7be182::t_6df67828088633 8,14-17,34
+  s_6e45b70b7be182::t_d29c32c8e4b2d4 13
+  s_6e45b70b7be182::t_404727d5136dfb 24,27,32,36-37,40,44
+  s_6e45b70b7be182::t_b4c6fa6c19ced0 30-31,33,38-39,41-43,45,47
+  s_6e45b70b7be182::t_f721ddb51736ec 1-7,9-12,18-21,23,26,28-29,35,46,48-52
+  s_6e45b70b7be182::t_877875ea69994d 22,25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4a9f1316d40547c4f3f643b5414798a8998ab026",
+  "prompts": {},
+  "sessions": {
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
