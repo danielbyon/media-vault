@@ -74,6 +74,11 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("4^0.5") == "2")
     }
 
+    @Test("Integral power control does not use the display rounding scale")
+    func integralPowerControlIgnoresDisplayRoundingScale() throws {
+        #expect(try CalculatorEngine(roundingScale: 0).evaluate("2^2") == "4")
+    }
+
     @Test("Integral powers preserve Decimal precision")
     func integralPowersPreserveDecimalPrecision() throws {
         #expect(try CalculatorEngine().evaluate("123456789^2") == "15241578750190521")
@@ -84,6 +89,7 @@ struct CalculatorFeatureTests {
         let engine = CalculatorEngine()
 
         #expect(try engine.evaluate("sin(90)", angleMode: .degrees) == "1")
+        #expect(try engine.evaluate("sin(3600000000000090)", angleMode: .degrees) == "1")
         #expect(try engine.evaluate("sin(π/2)", angleMode: .radians) == "1")
         #expect(try engine.evaluate("asin(1)", angleMode: .degrees) == "90")
         #expect(try engine.evaluate("asin(1)", angleMode: .radians) == "1.5707963268")
@@ -96,6 +102,8 @@ struct CalculatorFeatureTests {
         #expect(throws: CalculatorError.domainError) { try engine.evaluate("sqrt(-1)") }
         #expect(throws: CalculatorError.domainError) { try engine.evaluate("ln(0)") }
         #expect(throws: CalculatorError.domainError) { try engine.evaluate("asin(2)") }
+        #expect(throws: CalculatorError.domainError) { try engine.evaluate("asin(1.00000000000000001)") }
+        #expect(throws: CalculatorError.domainError) { try engine.evaluate("acos(-1.00000000000000001)") }
         #expect(throws: CalculatorError.domainError) { try engine.evaluate("0^0") }
         #expect(throws: CalculatorError.domainError) { try engine.evaluate("(-2)^0.5") }
         #expect(throws: CalculatorError.divisionByZero) { try engine.evaluate("0^-1") }

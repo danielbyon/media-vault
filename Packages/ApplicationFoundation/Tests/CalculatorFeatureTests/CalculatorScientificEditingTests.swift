@@ -136,14 +136,18 @@ struct CalculatorScientificEditingTests {
 
         #expect(CalculatorFeature().apply(.sign, to: &square))
         #expect(square.expression == "-square(3)")
+        #expect(square.display == "-square(3)")
         #expect(CalculatorFeature().apply(.sign, to: &square))
         #expect(square.expression == "square(3)")
+        #expect(square.display == "square(3)")
 
         var cosine = state(expression: "2+cos(3)")
         #expect(CalculatorFeature().apply(.sign, to: &cosine))
         #expect(cosine.expression == "2+-cos(3)")
+        #expect(cosine.display == "-cos(3)")
         #expect(CalculatorFeature().apply(.sign, to: &cosine))
         #expect(cosine.expression == "2+cos(3)")
+        #expect(cosine.display == "cos(3)")
 
         var completedResult = state(expression: "9", display: "9", isShowingResult: true)
         #expect(CalculatorFeature().apply(.sign, to: &completedResult))
@@ -158,14 +162,18 @@ struct CalculatorScientificEditingTests {
 
         #expect(CalculatorFeature().apply(.sign, to: &nested))
         #expect(nested.expression == "2+-sqrt(square(3))")
+        #expect(nested.display == "-sqrt(square(3))")
         #expect(CalculatorFeature().apply(.sign, to: &nested))
         #expect(nested.expression == "2+sqrt(square(3))")
+        #expect(nested.display == "sqrt(square(3))")
 
         var parenthesized = state(expression: "2+(3+4)")
         #expect(CalculatorFeature().apply(.sign, to: &parenthesized))
         #expect(parenthesized.expression == "2+-(3+4)")
+        #expect(parenthesized.display == "-(3+4)")
         #expect(CalculatorFeature().apply(.sign, to: &parenthesized))
         #expect(parenthesized.expression == "2+(3+4)")
+        #expect(parenthesized.display == "(3+4)")
     }
 
     @Test("Sign keeps ordinary numeric operand behavior")

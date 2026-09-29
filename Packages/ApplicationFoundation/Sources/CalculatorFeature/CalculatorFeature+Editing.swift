@@ -354,7 +354,9 @@ extension CalculatorFeature {
         } else {
             state.expression = replaceCurrentToken(in: state.expression, with: "-" + token)
         }
-        state.display = currentToken(in: state.expression)
+        state.display = currentOperandRange(in: state.expression)
+            .map { String(state.expression[$0]) }
+            ?? currentToken(in: state.expression)
         if state.display.isEmpty {
             state.display = "0"
         }

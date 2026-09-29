@@ -124,9 +124,20 @@ public struct CalculatorEngine: Sendable {
                 return try parseUnary()
             }
             if consume("−") || consume("-") {
-                return try rounded(subtracting: 0, parseUnary())
+                return try negateExactly(parseUnary())
             }
             return try parsePower()
+        }
+
+        private func negateExactly(_ value: Decimal) throws -> Decimal {
+            var zero: Decimal = 0
+            var value = value
+            var result = Decimal()
+            let error = NSDecimalSubtract(&result, &zero, &value, .plain)
+            guard error == .noError else {
+                throw CalculatorError.overflow
+            }
+            return result
         }
 
         /// Parses exponentiation recursively on its right side so chained powers associate right.
@@ -213,27 +224,33 @@ public struct CalculatorEngine: Sendable {
         }
 
         private mutating func apply(_ function: Function, to argument: Decimal) throws -> Decimal {
+            switch function {
+            case .arcSine, .arcCosine:
+                guard argument >= -1, argument <= 1 else {
+                    throw CalculatorError.domainError
+                }
+            default:
+                break
+            }
+
             let value = NSDecimalNumber(decimal: argument).doubleValue
             switch function {
             case .sine:
-                return try decimal(Foundation.sin(radians(from: value)))
+                let input = try trigonometricArgument(from: argument)
+                return try decimal(Foundation.sin(radians(from: input)))
             case .cosine:
-                return try decimal(Foundation.cos(radians(from: value)))
+                let input = try trigonometricArgument(from: argument)
+                return try decimal(Foundation.cos(radians(from: input)))
             case .tangent:
-                let angle = radians(from: value)
-                guard !isTangentPole(value) else {
+                let input = try trigonometricArgument(from: argument)
+                let angle = radians(from: input)
+                guard !isTangentPole(input) else {
                     throw CalculatorError.domainError
                 }
                 return try decimal(Foundation.tan(angle))
             case .arcSine:
-                guard (-1 ... 1).contains(value) else {
-                    throw CalculatorError.domainError
-                }
                 return try decimal(angleMode.fromRadians(Foundation.asin(value)))
             case .arcCosine:
-                guard (-1 ... 1).contains(value) else {
-                    throw CalculatorError.domainError
-                }
                 return try decimal(angleMode.fromRadians(Foundation.acos(value)))
             case .arcTangent:
                 return try decimal(angleMode.fromRadians(Foundation.atan(value)))
@@ -261,6 +278,44 @@ public struct CalculatorEngine: Sendable {
 
         private func radians(from value: Double) -> Double {
             angleMode == .degrees ? value * .pi / 180 : value
+        }
+
+        /// Reduces degree inputs before Double conversion so large angles retain their phase.
+        private func trigonometricArgument(from value: Decimal) throws -> Double {
+            guard angleMode == .degrees else {
+                return NSDecimalNumber(decimal: value).doubleValue
+            }
+
+            return NSDecimalNumber(decimal: try reducedDegrees(from: value)).doubleValue
+        }
+
+        /// Reduces whole-degree digits modulo 360 while preserving the fractional digits.
+        private func reducedDegrees(from value: Decimal) throws -> Decimal {
+            var value = value
+            let text = NSDecimalString(&value, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.first == "-"
+            let unsignedText = isNegative ? String(text.dropFirst()) : text
+            let components = unsignedText.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
+                throw CalculatorError.overflow
+            }
+
+            var integerRemainder = 0
+            for digit in components.first ?? "0" {
+                guard let value = digit.wholeNumberValue else {
+                    throw CalculatorError.overflow
+                }
+                integerRemainder = (integerRemainder * 10 + value) % 360
+            }
+
+            let fraction = components.count == 2 ? String(components[1]) : ""
+            let sign = isNegative ? "-" : ""
+            let reducedText = sign + String(integerRemainder)
+                + (fraction.isEmpty ? "" : "." + fraction)
+            guard let reduced = Decimal(string: reducedText, locale: Locale(identifier: "en_US_POSIX")) else {
+                throw CalculatorError.overflow
+            }
+            return reduced
         }
 
         /// Uses a 1e-9-unit angular tolerance to account for Double rounding near a pole.
@@ -347,15 +402,13 @@ public struct CalculatorEngine: Sendable {
         var result: Decimal = 1
 
         while remaining > 0 {
-            let half = try rounded(dividing: remaining, 2)
+            // Exponent bookkeeping must stay independent of the configured result scale.
+            let half = remaining / 2
             var integralHalf = Decimal()
             var halfToRound = half
             NSDecimalRound(&integralHalf, &halfToRound, 0, .down)
 
-            let remainder = try rounded(
-                subtracting: remaining,
-                rounded(multiplying: integralHalf, 2),
-            )
+            let remainder = remaining - integralHalf * 2
             if remainder != 0 {
                 result = try rounded(multiplying: result, factor)
             }
