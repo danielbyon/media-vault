@@ -1,0 +1,76 @@
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorScientificEditingTests.swift
+  s_6e45b70b7be182::t_5b5ebbe250ba40 66-106,108-132
+  s_6e45b70b7be182::t_7f3b126514bece 1-65,143-156
+  s_6e45b70b7be182::t_19800ab3ae0bba 107
+  s_6e45b70b7be182::t_5571c874560c10 133-142
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorPersistenceTests.swift
+  s_6e45b70b7be182::t_5571c874560c10 67
+  s_6e45b70b7be182::t_e2d54beae126e9 40-66,68
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature+Editing.swift
+  s_6e45b70b7be182::t_bb632da2201445 52-53,62-90,112-114,321,373,440,442
+  s_6e45b70b7be182::t_cbd315b2f9410f 163-282,594
+  s_6e45b70b7be182::t_efdc188e06dba4 124-128,145-150
+  s_6e45b70b7be182::t_3e42eb29d8b6a4 115,550-559
+  s_6e45b70b7be182::t_20d666d83e54f8 116
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorInput.swift
+  s_6e45b70b7be182::t_3de3daf8369b12 10-12,25
+  s_6e45b70b7be182::t_1268c8273eb839 46-55
+  s_6e45b70b7be182::t_29b9d2fa2caa0b 23-24,26-45,56-58
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_0feb7511aff6e5 2-3,5,10,14,16-17,22-36,51-64,68,70,73,106,111,113,120-141,165-183,215-258,262-265,267-276,278-279,281-289,292-296,318-347,365-366,368-386,391,399-402
+  s_6e45b70b7be182::t_d157db93311f54 266
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature+Reducer.swift
+  s_6e45b70b7be182::t_c27f1c4ffc7f4f 125
+  s_6e45b70b7be182::t_26f8871f9f491b 88
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_7f3b126514bece 73-103,107,111-112
+  s_6e45b70b7be182::t_d157db93311f54 104-106,108-110
+  s_6e45b70b7be182::t_bc7f79a9e52499 44-72
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorAngleModeEvaluationTests.swift
+  s_6e45b70b7be182::t_b96e6666ae77ed 1-103
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorAdaptiveLayoutTests.swift
+  s_6e45b70b7be182::t_5571c874560c10 19,25-30
+  s_6e45b70b7be182::t_7f3b126514bece 1-7,10-13,18,31
+  s_6e45b70b7be182::t_64f92d82108b01 9
+  s_6e45b70b7be182::t_57e17cd1218cc6 23-24
+  s_6e45b70b7be182::t_adb4bb262d03d6 8,14-17,20-22
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorSnapshot.swift
+  s_6e45b70b7be182::t_6e2b0c0995f235 10-32,53-55,64,71,78,87-97,147-149,165-205
+  s_6e45b70b7be182::t_f47beccf689b1f 206
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorViewSnapshotTests.swift
+  s_6e45b70b7be182::t_e4153f34f649c7 107
+  s_6e45b70b7be182::t_6dbde4dc7abd26 21,24,29,32,37,40,48,53,58,63,81,136-139,150,166-169,177
+  s_6e45b70b7be182::t_b0e6b78c3d2285 30-31,33-36,38-39,41-44
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorKeyboardInputTests.swift
+  s_6e45b70b7be182::t_7f3b126514bece 1-35
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorView.swift
+  s_6e45b70b7be182::t_d29dce95eb77c6 20,73,81,180,385
+  s_6e45b70b7be182::t_20435de7550422 177-179,381-384
+  s_6e45b70b7be182::t_20bce5ca50e96f 74-80,82,84-86,88-90,92-95,97-98,176,188-189,191,358-362
+  s_6e45b70b7be182::t_5571c874560c10 332
+  s_6e45b70b7be182::t_c90263403095ee 222,224-225
+  s_6e45b70b7be182::t_33f60746c3dc76 164-175,181-186,190,192-221,223
+  s_6e45b70b7be182::t_7b3ba4978d3ac7 187,375-378
+  s_6e45b70b7be182::t_6682929222dc4e 226,333-357,363-374,379-380,386-388
+  s_6e45b70b7be182::t_fcae3e006ec9aa 227
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorFeature.swift
+  s_6e45b70b7be182::t_d157db93311f54 14-16
+  s_6e45b70b7be182::t_c90263403095ee 12
+  s_6e45b70b7be182::t_d4de9f39241ed9 46-48,66,81,91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fc4f9efdf022da6c224a5bed980c14278c4c0b32",
+  "prompts": {},
+  "sessions": {
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
