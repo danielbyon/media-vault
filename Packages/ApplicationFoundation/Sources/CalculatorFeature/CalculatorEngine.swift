@@ -315,20 +315,19 @@ public struct CalculatorEngine: Sendable {
             return try rounded(NSDecimalDivide, lhs, rhs)
         }
 
-        private func rounded(powering base: Decimal, _ exponent: Decimal) throws -> Decimal {
-            if base == 0, exponent == 0 {
-                throw CalculatorError.domainError
+    private func rounded(powering base: Decimal, _ exponent: Decimal) throws -> Decimal {
+        if base == 0, exponent == 0 {
+            throw CalculatorError.domainError
             }
             if base == 0, exponent < 0 {
                 throw CalculatorError.divisionByZero
             }
-            if base < 0 {
-                var integralExponent = exponent
-                var exponentToRound = exponent
-                NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
-                guard integralExponent == exponent else {
-                    throw CalculatorError.domainError
-                }
+        var integralExponent = exponent
+        var exponentToRound = exponent
+        NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
+        guard integralExponent == exponent else {
+            guard base >= 0 else {
+                throw CalculatorError.domainError
             }
 
             let result = Foundation.pow(
@@ -337,6 +336,41 @@ public struct CalculatorEngine: Sendable {
             )
             return try decimal(result)
         }
+
+        return try rounded(integralPower: base, exponent: integralExponent)
+    }
+
+    private func rounded(integralPower base: Decimal, exponent: Decimal) throws -> Decimal {
+        let exponentIsNegative = exponent < 0
+        var remaining = exponentIsNegative ? -exponent : exponent
+        var factor = base
+        var result: Decimal = 1
+
+        while remaining > 0 {
+            let half = try rounded(dividing: remaining, 2)
+            var integralHalf = Decimal()
+            var halfToRound = half
+            NSDecimalRound(&integralHalf, &halfToRound, 0, .down)
+
+            let remainder = try rounded(
+                subtracting: remaining,
+                rounded(multiplying: integralHalf, 2),
+            )
+            if remainder != 0 {
+                result = try rounded(multiplying: result, factor)
+            }
+
+            remaining = integralHalf
+            if remaining > 0 {
+                factor = try rounded(multiplying: factor, factor)
+            }
+        }
+
+        if exponentIsNegative {
+            return try rounded(dividing: 1, result)
+        }
+        return try rounded(result)
+    }
 
         private func rounded(_ value: Decimal) throws -> Decimal {
             var result = value

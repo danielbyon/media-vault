@@ -14,10 +14,13 @@ import SwiftUI
 /// The view uses flexible grid columns and a centered maximum content width. It does not inspect
 /// device models or branch on iPhone/iPad identity; later adaptive-layout work can extend this
 /// surface without changing the reducer or persistence contracts.
+/// It takes keyboard focus on appearance and restores focus after calculator input so physical
+/// keys and touch controls continue to use the same input handler.
 @MainActor
 @preconcurrency
 public struct CalculatorView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @FocusState private var focusedCalculatorButton: CalculatorButton?
     private let store: StoreOf<CalculatorFeature>
     private let presentationOverride: CalculatorPresentation?
     private let displayOverride: String?
@@ -86,9 +89,8 @@ public struct CalculatorView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(Color(uiColor: .systemBackground))
-            .onKeyPress { keyPress in
-                handleHardwareKey(keyPress)
-            }
+            .accessibilityIdentifier("calculator.keyboard-input-surface")
+            .defaultFocus($focusedCalculatorButton, .clear)
             .task {
                 guard loadsPersistenceOnAppear else {
                     return
@@ -119,12 +121,17 @@ public struct CalculatorView: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 12)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                focusedCalculatorButton = .clear
+            },
+        )
     }
 
     private var clipboardControls: some View {
         HStack(spacing: 12) {
-            Button("Copy") { inputHandler(.button(.copy)) }
-            Button("Paste") { inputHandler(.button(.paste)) }
+            Button("Copy") { sendInput(.button(.copy), focusing: .clear) }
+            Button("Paste") { sendInput(.button(.paste), focusing: .clear) }
         }
         .buttonStyle(.bordered)
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -140,7 +147,7 @@ public struct CalculatorView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Button("Retry") {
-                inputHandler(.retryPersistence)
+                sendInput(.retryPersistence, focusing: .clear)
             }
             .buttonStyle(.bordered)
         }
@@ -202,13 +209,20 @@ public struct CalculatorView: View {
         ) else {
             return .ignored
         }
-        inputHandler(.button(button))
+        sendInput(.button(button))
         return .handled
+    }
+
+    private func sendInput(_ input: CalculatorInput, focusing button: CalculatorButton? = nil) {
+        inputHandler(input)
+        if let button {
+            focusedCalculatorButton = button
+        }
     }
 
     private func scientificKeyButton(_ key: ScientificKey) -> some View {
         Button {
-            inputHandler(.button(key.button))
+            sendInput(.button(key.button), focusing: key.button)
         } label: {
             Text(key.button == .toggleAngleMode ? store.angleMode.shortName : key.title)
                 .font(.system(.subheadline, design: .rounded, weight: .medium))
@@ -218,6 +232,11 @@ public struct CalculatorView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(key.isOperator ? .orange : .blue)
+        .focusable()
+        .focused($focusedCalculatorButton, equals: key.button)
+        .onKeyPress { keyPress in
+            handleHardwareKey(keyPress)
+        }
         .accessibilityLabel(key.accessibilityLabel)
         .accessibilityValue(Text(key.button == .toggleAngleMode
             ? (store.angleMode == .degrees ? "Degrees" : "Radians")
@@ -232,11 +251,11 @@ public struct CalculatorView: View {
                 .highPriorityGesture(
                     LongPressGesture(minimumDuration: 0.75)
                         .onEnded { _ in
-                            inputHandler(.longPressEquals)
+                            sendInput(.longPressEquals, focusing: .equals)
                         },
                 )
                 .accessibilityAction(named: Text("Long press")) {
-                    inputHandler(.longPressEquals)
+                    sendInput(.longPressEquals, focusing: .equals)
                 }
         } else {
             baseKeyButton(key)
@@ -245,7 +264,7 @@ public struct CalculatorView: View {
 
     private func baseKeyButton(_ key: Key) -> some View {
         Button {
-            inputHandler(.button(key.button))
+            sendInput(.button(key.button), focusing: key.button)
         } label: {
             Text(key.title)
                 .font(.system(size: 21, weight: .medium, design: .rounded))
@@ -254,6 +273,11 @@ public struct CalculatorView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(key.isOperator ? .orange : .gray)
+        .focusable()
+        .focused($focusedCalculatorButton, equals: key.button)
+        .onKeyPress { keyPress in
+            handleHardwareKey(keyPress)
+        }
         .accessibilityLabel(key.accessibilityLabel)
     }
 
@@ -264,7 +288,7 @@ public struct CalculatorView: View {
                     .font(.headline)
                 Spacer()
                 if !store.history.isEmpty {
-                    Button("Clear") { inputHandler(.button(.clearHistory)) }
+                    Button("Clear") { sendInput(.button(.clearHistory), focusing: .clear) }
                         .font(.subheadline)
                 }
             }

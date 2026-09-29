@@ -341,11 +341,13 @@ extension CalculatorFeature {
             return true
         }
         let token = currentToken(in: state.expression)
-        guard token != ")" else {
-            return false
-        }
-
-        if token.isEmpty {
+        if let range = currentOperandRange(in: state.expression) {
+            let operand = String(state.expression[range])
+            let replacement = operand.hasPrefix("-")
+                ? String(operand.dropFirst())
+                : "-" + operand
+            state.expression.replaceSubrange(range, with: replacement)
+        } else if token.isEmpty {
             state.expression.append("-")
         } else if token.hasPrefix("-") {
             state.expression = replaceCurrentToken(in: state.expression, with: String(token.dropFirst()))

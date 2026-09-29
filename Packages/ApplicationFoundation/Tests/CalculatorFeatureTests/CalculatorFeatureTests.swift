@@ -69,6 +69,14 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("2^3^2") == "512")
         #expect(try engine.evaluate("-2^2") == "-4")
         #expect(try engine.evaluate("2^-2") == "0.25")
+        #expect(try engine.evaluate("(-2)^3") == "-8")
+        #expect(try engine.evaluate("(-2)^-2") == "0.25")
+        #expect(try engine.evaluate("4^0.5") == "2")
+    }
+
+    @Test("Integral powers preserve Decimal precision")
+    func integralPowersPreserveDecimalPrecision() throws {
+        #expect(try CalculatorEngine().evaluate("123456789^2") == "15241578750190521")
     }
 
     @Test("Inverse functions and trigonometry use the selected angle mode")
@@ -91,6 +99,7 @@ struct CalculatorFeatureTests {
         #expect(throws: CalculatorError.domainError) { try engine.evaluate("0^0") }
         #expect(throws: CalculatorError.domainError) { try engine.evaluate("(-2)^0.5") }
         #expect(throws: CalculatorError.divisionByZero) { try engine.evaluate("0^-1") }
+        #expect(throws: CalculatorError.overflow) { try engine.evaluate("10^1000") }
     }
 
     @Test("Tangent poles are detected deterministically in both angle modes")

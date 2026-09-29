@@ -130,6 +130,54 @@ struct CalculatorScientificEditingTests {
         #expect(state.expression == "π%+")
     }
 
+    @Test("Sign toggles complete scientific-function operands")
+    func signTogglesScientificFunctionOperands() {
+        var square = state(expression: "square(3)")
+
+        #expect(CalculatorFeature().apply(.sign, to: &square))
+        #expect(square.expression == "-square(3)")
+        #expect(CalculatorFeature().apply(.sign, to: &square))
+        #expect(square.expression == "square(3)")
+
+        var cosine = state(expression: "2+cos(3)")
+        #expect(CalculatorFeature().apply(.sign, to: &cosine))
+        #expect(cosine.expression == "2+-cos(3)")
+        #expect(CalculatorFeature().apply(.sign, to: &cosine))
+        #expect(cosine.expression == "2+cos(3)")
+
+        var completedResult = state(expression: "9", display: "9", isShowingResult: true)
+        #expect(CalculatorFeature().apply(.sign, to: &completedResult))
+        #expect(completedResult.expression == "-9")
+        #expect(CalculatorFeature().apply(.sign, to: &completedResult))
+        #expect(completedResult.expression == "9")
+    }
+
+    @Test("Sign toggles nested and parenthesized operands")
+    func signTogglesNestedAndParenthesizedOperands() {
+        var nested = state(expression: "2+sqrt(square(3))")
+
+        #expect(CalculatorFeature().apply(.sign, to: &nested))
+        #expect(nested.expression == "2+-sqrt(square(3))")
+        #expect(CalculatorFeature().apply(.sign, to: &nested))
+        #expect(nested.expression == "2+sqrt(square(3))")
+
+        var parenthesized = state(expression: "2+(3+4)")
+        #expect(CalculatorFeature().apply(.sign, to: &parenthesized))
+        #expect(parenthesized.expression == "2+-(3+4)")
+        #expect(CalculatorFeature().apply(.sign, to: &parenthesized))
+        #expect(parenthesized.expression == "2+(3+4)")
+    }
+
+    @Test("Sign keeps ordinary numeric operand behavior")
+    func signTogglesOrdinaryNumericOperands() {
+        var state = state(expression: "2+3")
+
+        #expect(CalculatorFeature().apply(.sign, to: &state))
+        #expect(state.expression == "2+-3")
+        #expect(CalculatorFeature().apply(.sign, to: &state))
+        #expect(state.expression == "2+3")
+    }
+
     @Test("The angle mode control switches between Degrees and Radians")
     func angleModeControlTogglesPersistedMode() {
         var state = state(expression: "")
