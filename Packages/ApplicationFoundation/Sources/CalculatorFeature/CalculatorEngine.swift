@@ -282,11 +282,14 @@ public struct CalculatorEngine: Sendable {
 
         /// Reduces degree inputs before Double conversion so large angles retain their phase.
         private func trigonometricArgument(from value: Decimal) throws -> Double {
-            guard angleMode == .degrees else {
-                return NSDecimalNumber(decimal: value).doubleValue
+            let reduced: Decimal
+            switch angleMode {
+            case .degrees:
+                reduced = try reducedDegrees(from: value)
+            case .radians:
+                reduced = try reducedRadians(from: value)
             }
-
-            return NSDecimalNumber(decimal: try reducedDegrees(from: value)).doubleValue
+            return NSDecimalNumber(decimal: reduced).doubleValue
         }
 
         /// Reduces whole-degree digits modulo 360 while preserving the fractional digits.
@@ -316,6 +319,45 @@ public struct CalculatorEngine: Sendable {
                 throw CalculatorError.overflow
             }
             return reduced
+        }
+
+
+        /// Reduces an angle modulo two pi while keeping its Decimal remainder small.
+        ///
+        /// Processing the integer digits one at a time avoids multiplying a very large
+        /// quotient by the period, which could erase the low-order phase at Decimal precision.
+        /// This control arithmetic intentionally does not use the calculator display scale.
+        private func reducedRadians(from value: Decimal) throws -> Decimal {
+            var decimalValue = value
+            let text = NSDecimalString(&decimalValue, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.first == "-"
+            let unsignedText = isNegative ? String(text.dropFirst()) : text
+            let components = unsignedText.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
+                throw CalculatorError.overflow
+            }
+
+            let period = try decimal("3.141592653589793238462643383") * 2
+            var remainder: Decimal = 0
+            for character in components.first ?? "0" {
+                guard let digit = character.wholeNumberValue else {
+                    throw CalculatorError.overflow
+                }
+                remainder = remainder * 10 + Decimal(digit)
+                while remainder >= period {
+                    remainder -= period
+                }
+            }
+
+            let fraction = components.count == 2 ? String(components[1]) : ""
+            if !fraction.isEmpty {
+                remainder += try decimal("0." + fraction)
+                if remainder >= period {
+                    remainder -= period
+                }
+            }
+
+            return isNegative ? -remainder : remainder
         }
 
         /// Uses a 1e-9-unit angular tolerance to account for Double rounding near a pole.

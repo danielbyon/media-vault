@@ -95,6 +95,17 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("asin(1)", angleMode: .radians) == "1.5707963268")
     }
 
+
+@Test("Direct Radians trigonometry reduces large angles before Double conversion")
+
+    func directRadiansTrigonometryReducesLargeAngles() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("sin(1000000000000000×π+π/2)", angleMode: .radians) == "1")
+        #expect(try engine.evaluate("cos(1000000000000001×π)", angleMode: .radians) == "-1")
+        #expect(try engine.evaluate("sin(π/2)", angleMode: .radians) == "1")
+    }
+
     @Test("Scientific functions report invalid mathematical domains")
     func scientificDomainErrorsAreExplicit() {
         let engine = CalculatorEngine()
