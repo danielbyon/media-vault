@@ -37,4 +37,33 @@ struct CalculatorPersistenceTests {
         #expect(try await secondClient.load() == nil)
         #expect(try await CalculatorFeature.State(snapshot: firstClient.load()).history == snapshot.history)
     }
+
+    @Test("A legacy calculator snapshot without angle mode decodes as Degrees")
+    func legacySnapshotDefaultsToDegrees() throws {
+        let legacyPayload = Data(
+            #"{"display":"14","expression":"14","memory":"5","history":[],"isShowingResult":false}"#.utf8,
+        )
+
+        let snapshot = try JSONDecoder().decode(CalculatorSnapshot.self, from: legacyPayload)
+        let encoded = try JSONEncoder().encode(snapshot)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+
+        #expect(snapshot.display == "14")
+        #expect(snapshot.memory == "5")
+        #expect(object["angleMode"] as? String == "degrees")
+    }
+
+    @Test("A persisted Radians mode survives a snapshot round trip")
+    func radiansModeSurvivesSnapshotRoundTrip() throws {
+        let payload = Data(
+            #"{"display":"0","expression":"","memory":null,"history":[],"isShowingResult":false,"angleMode":"radians"}"#.utf8,
+        )
+
+        let snapshot = try JSONDecoder().decode(CalculatorSnapshot.self, from: payload)
+        let encoded = try JSONEncoder().encode(snapshot)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+
+        #expect(object["angleMode"] as? String == "radians")
+        #expect(CalculatorFeature.State(snapshot: snapshot).angleMode == .radians)
+    }
 }

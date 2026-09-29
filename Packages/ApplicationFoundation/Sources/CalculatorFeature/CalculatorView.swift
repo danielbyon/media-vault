@@ -17,6 +17,7 @@ import SwiftUI
 @MainActor
 @preconcurrency
 public struct CalculatorView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     private let store: StoreOf<CalculatorFeature>
     private let presentationOverride: CalculatorPresentation?
     private let displayOverride: String?
@@ -69,27 +70,32 @@ public struct CalculatorView: View {
 
     /// Renders the display, controls, keypad, and calculation history.
     public var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                displayPanel
-                if store.persistenceError != nil {
-                    persistenceFailurePanel
+        GeometryReader { _ in
+            ScrollView {
+                VStack(spacing: 16) {
+                    displayPanel
+                    if store.persistenceError != nil {
+                        persistenceFailurePanel
+                    }
+                    clipboardControls
+                    adaptiveKeypads(forHorizontalSizeClass: horizontalSizeClass)
+                    historyPanel
                 }
-                clipboardControls
-                keypad
-                historyPanel
+                .frame(maxWidth: 520)
+                .padding(16)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: 520)
-            .padding(16)
-            .frame(maxWidth: .infinity)
-        }
-        .background(Color(uiColor: .systemBackground))
-        .task {
-            guard loadsPersistenceOnAppear else {
-                return
+            .background(Color(uiColor: .systemBackground))
+            .onKeyPress { keyPress in
+                handleHardwareKey(keyPress)
             }
+            .task {
+                guard loadsPersistenceOnAppear else {
+                    return
+                }
 
-            await store.send(.task).finish()
+                await store.send(.task).finish()
+            }
         }
     }
 
@@ -153,6 +159,70 @@ public struct CalculatorView: View {
             }
         }
         .disabled(store.isLoading)
+    }
+
+    private var scientificKeypad: some View {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(minimum: 44), spacing: 10), count: 4),
+            spacing: 10,
+        ) {
+            ForEach(ScientificKey.all, id: \.button) { key in
+                scientificKeyButton(key)
+            }
+        }
+        .disabled(store.isLoading)
+    }
+
+    @ViewBuilder
+    private func adaptiveKeypads(
+        forHorizontalSizeClass sizeClass: UserInterfaceSizeClass?,
+    ) -> some View {
+        if CalculatorAdaptiveLayout.keypadSelection(forHorizontalSizeClass: sizeClass) == .scientific {
+            HStack(alignment: .top, spacing: 12) {
+                scientificKeypad
+                    .frame(minWidth: CalculatorAdaptiveLayout.minimumKeypadWidth)
+                keypad
+                    .frame(minWidth: CalculatorAdaptiveLayout.minimumKeypadWidth)
+            }
+            .frame(minWidth: CalculatorAdaptiveLayout.minimumScientificContentWidth)
+            .frame(maxWidth: .infinity)
+        } else {
+            keypad
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func handleHardwareKey(_ keyPress: KeyPress) -> KeyPress.Result {
+        let isDelete = keyPress.key == .delete || keyPress.key == .deleteForward
+        let isEscape = keyPress.key == .escape
+        guard let button = CalculatorHardwareKeyMapper.button(
+            for: keyPress.characters,
+            isDelete: isDelete,
+            isEscape: isEscape,
+        ) else {
+            return .ignored
+        }
+        inputHandler(.button(button))
+        return .handled
+    }
+
+    private func scientificKeyButton(_ key: ScientificKey) -> some View {
+        Button {
+            inputHandler(.button(key.button))
+        } label: {
+            Text(key.button == .toggleAngleMode ? store.angleMode.shortName : key.title)
+                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .frame(minWidth: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(key.isOperator ? .orange : .blue)
+        .accessibilityLabel(key.accessibilityLabel)
+        .accessibilityValue(Text(key.button == .toggleAngleMode
+            ? (store.angleMode == .degrees ? "Degrees" : "Radians")
+            : ""))
+        .accessibilityHint(Text(key.button == .toggleAngleMode ? "Switch angle units" : ""))
     }
 
     @ViewBuilder
@@ -257,6 +327,63 @@ private struct Key {
         Key(title: "(", button: .openParenthesis, isOperator: true, accessibilityLabel: "Open parenthesis"),
         Key(title: ")", button: .closeParenthesis, isOperator: true, accessibilityLabel: "Close parenthesis"),
     ]
+}
+
+struct ScientificKey {
+    let title: String
+    let button: CalculatorButton
+    let isOperator: Bool
+    let accessibilityLabel: String
+
+    static let all: [ScientificKey] = [
+        ScientificKey(title: "sin", button: .sine, isOperator: false, accessibilityLabel: "Sine"),
+        ScientificKey(title: "cos", button: .cosine, isOperator: false, accessibilityLabel: "Cosine"),
+        ScientificKey(title: "tan", button: .tangent, isOperator: false, accessibilityLabel: "Tangent"),
+        ScientificKey(title: "sin⁻¹", button: .arcsine, isOperator: false, accessibilityLabel: "Inverse sine"),
+        ScientificKey(title: "cos⁻¹", button: .arccosine, isOperator: false, accessibilityLabel: "Inverse cosine"),
+        ScientificKey(title: "tan⁻¹", button: .arctangent, isOperator: false, accessibilityLabel: "Inverse tangent"),
+        ScientificKey(title: "ln", button: .naturalLogarithm, isOperator: false, accessibilityLabel: "Natural logarithm"),
+        ScientificKey(title: "log₁₀", button: .commonLogarithm, isOperator: false, accessibilityLabel: "Base ten logarithm"),
+        ScientificKey(title: "√", button: .squareRoot, isOperator: false, accessibilityLabel: "Square root"),
+        ScientificKey(title: "x²", button: .square, isOperator: false, accessibilityLabel: "Square"),
+        ScientificKey(title: "xʸ", button: .power, isOperator: true, accessibilityLabel: "Power"),
+        ScientificKey(title: "1/x", button: .reciprocal, isOperator: false, accessibilityLabel: "Reciprocal"),
+        ScientificKey(title: "π", button: .pi, isOperator: false, accessibilityLabel: "Pi"),
+        ScientificKey(title: "e", button: .e, isOperator: false, accessibilityLabel: "Euler's number"),
+        ScientificKey(title: "Deg", button: .toggleAngleMode, isOperator: false, accessibilityLabel: "Angle mode"),
+    ]
+}
+
+enum CalculatorAdaptiveLayout {
+    enum KeypadSelection: Equatable {
+        case basic
+        case scientific
+    }
+
+    static let minimumButtonWidth: CGFloat = 44
+    static let keySpacing: CGFloat = 10
+    static let keypadSpacing: CGFloat = 12
+    static let horizontalPadding: CGFloat = 32
+    static let columnCount = 4
+
+    static var minimumKeypadWidth: CGFloat {
+        minimumButtonWidth * CGFloat(columnCount) + keySpacing * CGFloat(columnCount - 1)
+    }
+
+    static var minimumScientificLayoutWidth: CGFloat {
+        minimumKeypadWidth * 2 + keypadSpacing + horizontalPadding
+    }
+
+    static var minimumScientificContentWidth: CGFloat {
+        minimumScientificLayoutWidth - horizontalPadding
+    }
+
+    /// Uses scientific controls for regular width and the basic keypad otherwise.
+    static func keypadSelection(
+        forHorizontalSizeClass sizeClass: UserInterfaceSizeClass?,
+    ) -> KeypadSelection {
+        sizeClass == .regular ? .scientific : .basic
+    }
 }
 
 #Preview("Calculator initial") {

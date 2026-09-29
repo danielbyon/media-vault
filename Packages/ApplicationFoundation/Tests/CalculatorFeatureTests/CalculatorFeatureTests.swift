@@ -41,4 +41,73 @@ struct CalculatorFeatureTests {
             try CalculatorEngine().evaluate("1 +")
         }
     }
+
+    @Test("The calculator evaluates scientific functions and constants")
+    func evaluatesScientificFunctionsAndConstants() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("sin(30)") == "0.5")
+        #expect(try engine.evaluate("cos(60)") == "0.5")
+        #expect(try engine.evaluate("tan(45)") == "1")
+        #expect(try engine.evaluate("asin(0.5)") == "30")
+        #expect(try engine.evaluate("acos(0.5)") == "60")
+        #expect(try engine.evaluate("atan(1)") == "45")
+        #expect(try engine.evaluate("ln(e)") == "1")
+        #expect(try engine.evaluate("log10(100)") == "2")
+        #expect(try engine.evaluate("sqrt(9)") == "3")
+        #expect(try engine.evaluate("square(3)") == "9")
+        #expect(try engine.evaluate("reciprocal(4)") == "0.25")
+        #expect(try engine.evaluate("π") == "3.1415926536")
+        #expect(try engine.evaluate("e") == "2.7182818285")
+        #expect(try engine.evaluate("2 + sin(30) × square(3)") == "6.5")
+    }
+
+    @Test("Power is right-associative and binds more tightly than unary signs")
+    func evaluatesScientificPowerPrecedence() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("2^3^2") == "512")
+        #expect(try engine.evaluate("-2^2") == "-4")
+        #expect(try engine.evaluate("2^-2") == "0.25")
+    }
+
+    @Test("Inverse functions and trigonometry use the selected angle mode")
+    func evaluatesScientificFunctionsInBothAngleModes() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("sin(90)", angleMode: .degrees) == "1")
+        #expect(try engine.evaluate("sin(π/2)", angleMode: .radians) == "1")
+        #expect(try engine.evaluate("asin(1)", angleMode: .degrees) == "90")
+        #expect(try engine.evaluate("asin(1)", angleMode: .radians) == "1.5707963268")
+    }
+
+    @Test("Scientific functions report invalid mathematical domains")
+    func scientificDomainErrorsAreExplicit() {
+        let engine = CalculatorEngine()
+
+        #expect(throws: CalculatorError.domainError) { try engine.evaluate("sqrt(-1)") }
+        #expect(throws: CalculatorError.domainError) { try engine.evaluate("ln(0)") }
+        #expect(throws: CalculatorError.domainError) { try engine.evaluate("asin(2)") }
+        #expect(throws: CalculatorError.domainError) { try engine.evaluate("0^0") }
+        #expect(throws: CalculatorError.domainError) { try engine.evaluate("(-2)^0.5") }
+        #expect(throws: CalculatorError.divisionByZero) { try engine.evaluate("0^-1") }
+    }
+
+    @Test("Tangent poles are detected deterministically in both angle modes")
+    func tangentPolesAreDomainErrors() {
+        let engine = CalculatorEngine()
+
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(90)", angleMode: .degrees)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(90.0000000001)", angleMode: .degrees)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π/2)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(1.5707963267948967)", angleMode: .radians)
+        }
+    }
 }

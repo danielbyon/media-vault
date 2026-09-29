@@ -9,11 +9,11 @@ import ComposableArchitecture
 import Dependencies
 import Foundation
 
-/// The issue #3 calculator reducer.
+/// The calculator reducer for scientific calculations, editing, memory, and history.
 ///
-/// The reducer owns calculator editing, evaluation, memory, history, clipboard actions, and the
-/// calculator-only persistence boundary. Numeric parsing is delegated to ``CalculatorEngine`` so
-/// the feature interface can grow without making the current Decimal implementation permanent.
+/// The reducer owns calculator editing, angle-mode-aware evaluation, memory, history, clipboard
+/// actions, and the calculator-only persistence boundary. Numeric parsing is delegated to
+/// ``CalculatorEngine`` so the feature interface does not depend on its Decimal implementation.
 @Reducer
 public struct CalculatorFeature {
     /// The calculator state rendered by ``CalculatorView``.
@@ -43,6 +43,9 @@ public struct CalculatorFeature {
         /// Whether the current display represents a completed calculation.
         public var isShowingResult: Bool
 
+        /// The angle unit used by trigonometric functions.
+        public var angleMode: CalculatorAngleMode
+
         /// Coordinates saves for this state instance without becoming part of observable calculator
         /// data. Keeping it in state preserves one persistence worker when reducer values are rebuilt.
         @ObservationStateIgnored
@@ -60,6 +63,7 @@ public struct CalculatorFeature {
             persistenceError = nil
             isLoading = false
             isShowingResult = snapshot?.isShowingResult ?? false
+            angleMode = snapshot?.angleMode ?? .degrees
             persistenceCoordinator = CalculatorPersistenceCoordinator()
         }
 
@@ -74,6 +78,7 @@ public struct CalculatorFeature {
                 && lhs.persistenceError == rhs.persistenceError
                 && lhs.isLoading == rhs.isLoading
                 && lhs.isShowingResult == rhs.isShowingResult
+                && lhs.angleMode == rhs.angleMode
         }
 
         var snapshot: CalculatorSnapshot {
@@ -83,6 +88,7 @@ public struct CalculatorFeature {
                 memory: memory,
                 history: history,
                 isShowingResult: isShowingResult,
+                angleMode: angleMode,
             )
         }
     }
