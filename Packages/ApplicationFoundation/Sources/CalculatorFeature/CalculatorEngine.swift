@@ -1,8 +1,8 @@
 //
-// CalculatorEngine.swift
-// MediaVault
+//  CalculatorEngine.swift
+//  MediaVault
 //
-// SPDX-License-Identifier: GPL-3.0-or-later
+//  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 import Foundation
@@ -84,6 +84,7 @@ public struct CalculatorEngine: Sendable {
             guard isAtEnd else {
                 throw CalculatorError.invalidExpression
             }
+
             return value
         }
 
@@ -137,6 +138,7 @@ public struct CalculatorEngine: Sendable {
             guard error == .noError else {
                 throw CalculatorError.overflow
             }
+
             return result
         }
 
@@ -147,6 +149,7 @@ public struct CalculatorEngine: Sendable {
             guard consume("^") else {
                 return base
             }
+
             return try rounded(powering: base, parseUnary())
         }
 
@@ -157,6 +160,7 @@ public struct CalculatorEngine: Sendable {
                 guard consume("%") else {
                     return value
                 }
+
                 value = try rounded(dividing: value, 100)
             }
         }
@@ -170,6 +174,7 @@ public struct CalculatorEngine: Sendable {
                 guard consume(")") else {
                     throw CalculatorError.invalidExpression
                 }
+
                 return value
             }
 
@@ -178,11 +183,13 @@ public struct CalculatorEngine: Sendable {
                 guard consume("(") else {
                     throw CalculatorError.invalidExpression
                 }
+
                 let argument = try parseExpression()
                 skipWhitespace()
                 guard consume(")") else {
                     throw CalculatorError.invalidExpression
                 }
+
                 return try apply(function, to: argument)
             }
 
@@ -220,15 +227,18 @@ public struct CalculatorEngine: Sendable {
             guard let number = Decimal(string: literal, locale: Locale(identifier: "en_US_POSIX")) else {
                 throw CalculatorError.invalidExpression
             }
+
             return number
         }
 
         private mutating func apply(_ function: Function, to argument: Decimal) throws -> Decimal {
             switch function {
-            case .arcSine, .arcCosine:
+            case .arcSine,
+                 .arcCosine:
                 guard argument >= -1, argument <= 1 else {
                     throw CalculatorError.domainError
                 }
+
             default:
                 break
             }
@@ -247,6 +257,7 @@ public struct CalculatorEngine: Sendable {
                 guard !isTangentPole(input) else {
                     throw CalculatorError.domainError
                 }
+
                 return try decimal(Foundation.tan(angle))
             case .arcSine:
                 return try decimal(angleMode.fromRadians(Foundation.asin(value)))
@@ -258,17 +269,16 @@ public struct CalculatorEngine: Sendable {
                 guard value > 0 else {
                     throw CalculatorError.domainError
                 }
+
                 return try decimal(Foundation.log(value))
             case .commonLogarithm:
                 guard value > 0 else {
                     throw CalculatorError.domainError
                 }
+
                 return try decimal(Foundation.log10(value))
             case .squareRoot:
-                guard value >= 0 else {
-                    throw CalculatorError.domainError
-                }
-                return try decimal(Foundation.sqrt(value))
+                return try rounded(squareRootOf: argument)
             case .square:
                 return try rounded(multiplying: argument, argument)
             case .reciprocal:
@@ -282,13 +292,13 @@ public struct CalculatorEngine: Sendable {
 
         /// Reduces degree inputs before Double conversion so large angles retain their phase.
         private func trigonometricArgument(from value: Decimal) throws -> Double {
-            let reduced: Decimal
-            switch angleMode {
-            case .degrees:
-                reduced = try reducedDegrees(from: value)
-            case .radians:
-                reduced = try reducedRadians(from: value)
-            }
+            let reduced: Decimal =
+                switch angleMode {
+                case .degrees:
+                    try reducedDegrees(from: value)
+                case .radians:
+                    try reducedRadians(from: value)
+                }
             return NSDecimalNumber(decimal: reduced).doubleValue
         }
 
@@ -308,6 +318,7 @@ public struct CalculatorEngine: Sendable {
                 guard let value = digit.wholeNumberValue else {
                     throw CalculatorError.overflow
                 }
+
                 integerRemainder = (integerRemainder * 10 + value) % 360
             }
 
@@ -318,9 +329,9 @@ public struct CalculatorEngine: Sendable {
             guard let reduced = Decimal(string: reducedText, locale: Locale(identifier: "en_US_POSIX")) else {
                 throw CalculatorError.overflow
             }
+
             return reduced
         }
-
 
         /// Reduces an angle modulo two pi while keeping its Decimal remainder small.
         ///
@@ -343,6 +354,7 @@ public struct CalculatorEngine: Sendable {
                 guard let digit = character.wholeNumberValue else {
                     throw CalculatorError.overflow
                 }
+
                 remainder = remainder * 10 + Decimal(digit)
                 while remainder >= period {
                     remainder -= period
@@ -379,10 +391,12 @@ public struct CalculatorEngine: Sendable {
             guard value.isFinite else {
                 throw CalculatorError.overflow
             }
+
             let result = Decimal(value)
             guard !result.isNaN else {
                 throw CalculatorError.overflow
             }
+
             return try rounded(result)
         }
 
@@ -390,6 +404,7 @@ public struct CalculatorEngine: Sendable {
             guard let value = Decimal(string: literal, locale: Locale(identifier: "en_US_POSIX")) else {
                 throw CalculatorError.overflow
             }
+
             return value
         }
 
@@ -409,66 +424,171 @@ public struct CalculatorEngine: Sendable {
             guard rhs != 0 else {
                 throw CalculatorError.divisionByZero
             }
+
             return try rounded(NSDecimalDivide, lhs, rhs)
         }
 
-    private func rounded(powering base: Decimal, _ exponent: Decimal) throws -> Decimal {
-        if base == 0, exponent == 0 {
-            throw CalculatorError.domainError
+        private func rounded(powering base: Decimal, _ exponent: Decimal) throws -> Decimal {
+            if base == 0, exponent == 0 {
+                throw CalculatorError.domainError
             }
             if base == 0, exponent < 0 {
                 throw CalculatorError.divisionByZero
             }
-        var integralExponent = exponent
-        var exponentToRound = exponent
-        NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
-        guard integralExponent == exponent else {
-            guard base >= 0 else {
+            var integralExponent = exponent
+            var exponentToRound = exponent
+            NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
+            guard integralExponent == exponent else {
+                guard base >= 0 else {
+                    throw CalculatorError.domainError
+                }
+
+                let result = Foundation.pow(
+                    NSDecimalNumber(decimal: base).doubleValue,
+                    NSDecimalNumber(decimal: exponent).doubleValue,
+                )
+                return try decimal(result)
+            }
+
+            return try rounded(integralPower: base, exponent: integralExponent)
+        }
+
+        private func rounded(integralPower base: Decimal, exponent: Decimal) throws -> Decimal {
+            var remaining = exponent
+            var factor = base
+            if remaining < 0 {
+                factor = try unrounded(NSDecimalDivide, 1, factor)
+                remaining = -remaining
+            }
+            var result: Decimal = 1
+
+            while remaining > 0 {
+                // Exponent bookkeeping must stay independent of the configured result scale.
+                let half = remaining / 2
+                var integralHalf = Decimal()
+                var halfToRound = half
+                NSDecimalRound(&integralHalf, &halfToRound, 0, .down)
+
+                let remainder = remaining - integralHalf * 2
+                if remainder != 0 {
+                    result = try unrounded(NSDecimalMultiply, result, factor)
+                }
+
+                remaining = integralHalf
+                if remaining > 0 {
+                    factor = try unrounded(NSDecimalMultiply, factor, factor)
+                }
+            }
+
+            return try rounded(result)
+        }
+
+        /// Computes a Decimal square root with bounded iteration and rounds only the final result.
+        private func rounded(squareRootOf value: Decimal) throws -> Decimal {
+            guard value >= 0 else {
                 throw CalculatorError.domainError
             }
-
-            let result = Foundation.pow(
-                NSDecimalNumber(decimal: base).doubleValue,
-                NSDecimalNumber(decimal: exponent).doubleValue,
-            )
-            return try decimal(result)
-        }
-
-        return try rounded(integralPower: base, exponent: integralExponent)
-    }
-
-    private func rounded(integralPower base: Decimal, exponent: Decimal) throws -> Decimal {
-        let exponentIsNegative = exponent < 0
-        var remaining = exponentIsNegative ? -exponent : exponent
-        var factor = base
-        var result: Decimal = 1
-
-        while remaining > 0 {
-            // Exponent bookkeeping must stay independent of the configured result scale.
-            let half = remaining / 2
-            var integralHalf = Decimal()
-            var halfToRound = half
-            NSDecimalRound(&integralHalf, &halfToRound, 0, .down)
-
-            let remainder = remaining - integralHalf * 2
-            if remainder != 0 {
-                result = try unrounded(NSDecimalMultiply, result, factor)
+            guard value != 0 else {
+                return 0
             }
 
-            remaining = integralHalf
-            if remaining > 0 {
-                factor = try unrounded(NSDecimalMultiply, factor, factor)
+            var estimate = try squareRootEstimate(for: value)
+
+            // This bound lets rounded Decimal estimates settle at their supported precision.
+            for _ in 0 ..< 256 {
+                let quotient = try unrounded(
+                    NSDecimalDivide,
+                    value,
+                    estimate,
+                    allowingLossOfPrecision: true,
+                )
+                var squaredQuotient = Decimal()
+                var quotientForSquaring = quotient
+                var quotientAgain = quotient
+                let squareError = NSDecimalMultiply(
+                    &squaredQuotient,
+                    &quotientForSquaring,
+                    &quotientAgain,
+                    .plain,
+                )
+                // Preserve exact perfect roots before finite-precision iteration can stall.
+                if squareError == .noError, squaredQuotient == value {
+                    return try rounded(quotient)
+                }
+
+                let sum = try unrounded(
+                    NSDecimalAdd,
+                    estimate,
+                    quotient,
+                    allowingLossOfPrecision: true,
+                )
+                let nextEstimate = try unrounded(
+                    NSDecimalDivide,
+                    sum,
+                    2,
+                    allowingLossOfPrecision: true,
+                )
+
+                if nextEstimate >= estimate {
+                    let estimateHalf = try unrounded(
+                        NSDecimalDivide,
+                        estimate,
+                        2,
+                        allowingLossOfPrecision: true,
+                    )
+                    let nextEstimateHalf = try unrounded(
+                        NSDecimalDivide,
+                        nextEstimate,
+                        2,
+                        allowingLossOfPrecision: true,
+                    )
+                    return try rounded(unrounded(
+                        NSDecimalAdd,
+                        estimateHalf,
+                        nextEstimateHalf,
+                        allowingLossOfPrecision: true,
+                    ))
+                }
+
+                estimate = nextEstimate
             }
+
+            throw CalculatorError.overflow
         }
 
-        if exponentIsNegative {
-            guard result != 0 else {
-                throw CalculatorError.divisionByZero
+        /// Starts Decimal iteration near the root to keep every intermediate representable.
+        private func squareRootEstimate(for value: Decimal) throws -> Decimal {
+            let significand = NSDecimalNumber(decimal: value.significand).stringValue
+            let digitCount = significand.filter(\.isNumber).count
+            guard digitCount > 0 else {
+                throw CalculatorError.overflow
             }
-            return try rounded(unrounded(NSDecimalDivide, 1, result))
+
+            let (coefficientOrder, coefficientOverflow) = digitCount.addingReportingOverflow(value.exponent)
+            guard !coefficientOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            let (decimalOrder, decimalOrderOverflow) = coefficientOrder.subtractingReportingOverflow(1)
+            guard !decimalOrderOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            let (halfOrder, halfOrderOverflow) = decimalOrder.addingReportingOverflow(1)
+            guard !halfOrderOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            let estimateExponent = halfOrder >= 0 ? halfOrder / 2 + halfOrder % 2 : halfOrder / 2
+            guard let estimate = Decimal(
+                string: "1e\(estimateExponent)",
+                locale: Locale(identifier: "en_US_POSIX"),
+            ) else {
+                throw CalculatorError.overflow
+            }
+
+            return estimate
         }
-        return try rounded(result)
-    }
 
         private func rounded(_ value: Decimal) throws -> Decimal {
             var result = value
@@ -491,6 +611,7 @@ public struct CalculatorEngine: Sendable {
         }
 
         /// Performs checked Decimal arithmetic without applying calculator display rounding.
+        /// - Parameter allowingLossOfPrecision: Accepts Decimal's representable approximation for iterative convergence.
         private func unrounded(
             _ operation: (
                 UnsafeMutablePointer<Decimal>,
@@ -500,14 +621,16 @@ public struct CalculatorEngine: Sendable {
             ) -> Decimal.CalculationError,
             _ lhs: Decimal,
             _ rhs: Decimal,
+            allowingLossOfPrecision: Bool = false,
         ) throws -> Decimal {
             var result = Decimal()
             var left = lhs
             var right = rhs
             let error = operation(&result, &left, &right, .plain)
-            guard error == .noError else {
+            guard error == .noError || (allowingLossOfPrecision && error == .lossOfPrecision) else {
                 throw CalculatorError.overflow
             }
+
             return result
         }
 
@@ -518,6 +641,7 @@ public struct CalculatorEngine: Sendable {
             else {
                 return false
             }
+
             index += tokenCharacters.count
             return true
         }

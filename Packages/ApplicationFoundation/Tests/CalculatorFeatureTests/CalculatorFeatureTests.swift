@@ -79,16 +79,39 @@ struct CalculatorFeatureTests {
         #expect(try CalculatorEngine(roundingScale: 0).evaluate("2^2") == "4")
     }
 
-    @Test("Negative integral powers keep intermediates above display precision")
+    @Test("Negative integral powers invert before exponentiation")
     func negativeIntegralPowersPreserveIntermediatePrecision() throws {
         #expect(try CalculatorEngine().evaluate("0.00000000001^-1") == "100000000000")
         #expect(try CalculatorEngine(roundingScale: 0).evaluate("0.00000000001^-1") == "100000000000")
+        #expect(try CalculatorEngine().evaluate("10^-98") == "0")
+        #expect(try CalculatorEngine().evaluate("10^-128") == "0")
+        #expect(try CalculatorEngine().evaluate("3^-2") == "0.1111111111")
         #expect(try CalculatorEngine(roundingScale: 4).evaluate("3^-2") == "0.1111")
     }
 
     @Test("Integral powers preserve Decimal precision")
     func integralPowersPreserveDecimalPrecision() throws {
         #expect(try CalculatorEngine().evaluate("123456789^2") == "15241578750190521")
+    }
+
+    @Test("Square roots preserve Decimal precision and display rounding")
+    func squareRootsPreserveDecimalPrecisionAndDisplayRounding() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("sqrt(81129638414606699710187514626049)") == "9007199254740993")
+        #expect(try engine.evaluate("sqrt(9)") == "3")
+        #expect(try engine.evaluate("sqrt(2)") == "1.4142135624")
+        let halfwayRoundedRoot = try engine.evaluate("sqrt(1.5241578751425088890025)")
+        #expect(halfwayRoundedRoot == "1.2345678901")
+        #expect(try engine.evaluate("sqrt(0)") == "0")
+    }
+
+    @Test("The smallest Decimal square root rounds without underflow")
+    func minimumDecimalSquareRootRoundsToZero() throws {
+        let engine = CalculatorEngine()
+        let minimumDecimal = "0." + String(repeating: "0", count: 127) + "1"
+
+        #expect(try engine.evaluate("sqrt(\(minimumDecimal))") == "0")
     }
 
     @Test("Inverse functions and trigonometry use the selected angle mode")
@@ -102,8 +125,7 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("asin(1)", angleMode: .radians) == "1.5707963268")
     }
 
-
-@Test("Direct Radians trigonometry reduces large angles before Double conversion")
+    @Test("Direct Radians trigonometry reduces large angles before Double conversion")
 
     func directRadiansTrigonometryReducesLargeAngles() throws {
         let engine = CalculatorEngine()
