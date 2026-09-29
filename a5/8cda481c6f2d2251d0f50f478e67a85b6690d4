@@ -1,0 +1,21 @@
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_dccb117b07d93a::t_c640483d846b4d 285-290,292,324-362
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_dccb117b07d93a::t_e5e03165a71389 98-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a58cda481c6f2d2251d0f50f478e67a85b6690d4",
+  "prompts": {},
+  "sessions": {
+    "s_dccb117b07d93a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67e-8b66-7a21-a090-170ef0c6e1e2",
+        "model": "unknown"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
