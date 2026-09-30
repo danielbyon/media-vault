@@ -6,6 +6,7 @@
 //
 
 import CalculatorFeature
+import Foundation
 import Testing
 
 @Suite("Calculator behavior")
@@ -115,6 +116,15 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("sqrt(1000000000000000000000000100001)") == "1000000000000000.0000000001")
     }
 
+    @Test("Large square roots do not trust rounded square equality")
+    func largeSquareRootsUseBracketedDisplayPrecision() throws {
+        #expect(
+            try CalculatorEngine().evaluate(
+                "sqrt(4000000000000000000000000000000000000000000000000000000000000000)",
+            ) == "63245553203367586639977870888654.370674",
+        )
+    }
+
     @Test("The smallest Decimal square root rounds without underflow")
     func minimumDecimalSquareRootRoundsToZero() throws {
         let engine = CalculatorEngine()
@@ -160,20 +170,30 @@ struct CalculatorFeatureTests {
     }
 
     @Test("Tangent poles are detected deterministically in both angle modes")
-    func tangentPolesAreDomainErrors() {
+    func tangentPolesUseCalculatorRepresentableAngles() throws {
         let engine = CalculatorEngine()
 
         #expect(throws: CalculatorError.domainError) {
             try engine.evaluate("tan(90)", angleMode: .degrees)
         }
         #expect(throws: CalculatorError.domainError) {
-            try engine.evaluate("tan(90.0000000001)", angleMode: .degrees)
-        }
-        #expect(throws: CalculatorError.domainError) {
             try engine.evaluate("tan(π/2)", angleMode: .radians)
         }
         #expect(throws: CalculatorError.domainError) {
-            try engine.evaluate("tan(1.5707963267948967)", angleMode: .radians)
+            try engine.evaluate("tan(1.5707963267948966192313216915)", angleMode: .radians)
         }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(3×π/2)", angleMode: .radians)
+        }
+
+        let nearPoleDegrees = try engine.evaluate("tan(89.9999999995)", angleMode: .degrees)
+        let nearPoleRadians = try engine.evaluate("tan(1.57079632675)", angleMode: .radians)
+        let floatingPointNearPoleRadians = try engine.evaluate("tan(1.5707963267948967)", angleMode: .radians)
+        let beyondPoleDegrees = try engine.evaluate("tan(90.0000000001)", angleMode: .degrees)
+        let beyondPoleMagnitude = (Decimal(string: beyondPoleDegrees) ?? 0).magnitude
+        #expect((Decimal(string: nearPoleDegrees) ?? 0) > Decimal(100_000_000_000))
+        #expect((Decimal(string: nearPoleRadians) ?? 0) > Decimal(10_000_000_000))
+        #expect((Decimal(string: floatingPointNearPoleRadians) ?? 0) > Decimal(1_000_000_000_000_000))
+        #expect(beyondPoleMagnitude > Decimal(100_000_000_000))
     }
 }

@@ -252,12 +252,12 @@ public struct CalculatorEngine: Sendable {
                 let input = try trigonometricArgument(from: argument)
                 return try decimal(Foundation.cos(radians(from: input)))
             case .tangent:
-                let input = try trigonometricArgument(from: argument)
-                let angle = radians(from: input)
-                guard !isTangentPole(input) else {
+                guard try !isTangentPole(argument) else {
                     throw CalculatorError.domainError
                 }
 
+                let input = try trigonometricArgument(from: argument)
+                let angle = radians(from: input)
                 return try decimal(Foundation.tan(angle))
             case .arcSine:
                 return try decimal(angleMode.fromRadians(Foundation.asin(value)))
@@ -339,6 +339,12 @@ public struct CalculatorEngine: Sendable {
         /// quotient by the period, which could erase the low-order phase at Decimal precision.
         /// This control arithmetic intentionally does not use the calculator display scale.
         private func reducedRadians(from value: Decimal) throws -> Decimal {
+            let period = try decimal("3.141592653589793238462643383") * 2
+            return try reducedRadians(from: value, modulo: period)
+        }
+
+        /// Reduces an angle with Decimal arithmetic and does not apply display rounding.
+        private func reducedRadians(from value: Decimal, modulo period: Decimal) throws -> Decimal {
             var decimalValue = value
             let text = NSDecimalString(&decimalValue, Locale(identifier: "en_US_POSIX"))
             let isNegative = text.first == "-"
@@ -348,7 +354,6 @@ public struct CalculatorEngine: Sendable {
                 throw CalculatorError.overflow
             }
 
-            let period = try decimal("3.141592653589793238462643383") * 2
             var remainder: Decimal = 0
             for character in components.first ?? "0" {
                 guard let digit = character.wholeNumberValue else {
@@ -372,19 +377,39 @@ public struct CalculatorEngine: Sendable {
             return isNegative ? -remainder : remainder
         }
 
-        /// Uses a 1e-9-unit angular tolerance to account for Double rounding near a pole.
-        private func isTangentPole(_ value: Double) -> Bool {
-            let reduced: Double
-            let pole: Double
+        /// Detects exact tangent poles while keeping nearby Decimal angles finite.
+        ///
+        /// The parser rounds arithmetic at the calculator's display scale, so this also recognizes
+        /// the rounded π/2 value produced by `tan(π/2)` and its periodic equivalents.
+        private func isTangentPole(_ value: Decimal) throws -> Bool {
             switch angleMode {
             case .degrees:
-                reduced = value.truncatingRemainder(dividingBy: 180)
-                pole = 90
+                var reduced = try reducedDegrees(from: value)
+                while reduced >= 180 {
+                    reduced = try unrounded(NSDecimalSubtract, reduced, 180)
+                }
+                while reduced <= -180 {
+                    reduced = try unrounded(NSDecimalAdd, reduced, 180)
+                }
+
+                let magnitude = reduced < 0 ? -reduced : reduced
+                return magnitude == 90
             case .radians:
-                reduced = value.truncatingRemainder(dividingBy: .pi)
-                pole = .pi / 2
+                let pi = try decimal("3.141592653589793238462643383")
+                let exactPole = try unrounded(NSDecimalDivide, pi, 2)
+                let calculatorPole = try rounded(dividing: pi, 2)
+                let exactRemainder = try reducedRadians(from: value, modulo: pi)
+                let calculatorRemainder = try reducedRadians(
+                    from: value,
+                    modulo: rounded(pi),
+                )
+                let exactMagnitude = exactRemainder < 0 ? -exactRemainder : exactRemainder
+                let calculatorMagnitude = calculatorRemainder < 0 ? -calculatorRemainder : calculatorRemainder
+
+                return exactMagnitude == exactPole
+                    || exactMagnitude == calculatorPole
+                    || calculatorMagnitude == calculatorPole
             }
-            return abs(abs(reduced) - pole) <= 1e-9
         }
 
         private func decimal(_ value: Double) throws -> Decimal {
@@ -493,51 +518,11 @@ public struct CalculatorEngine: Sendable {
             }
 
             let normalization = try squareRootNormalization(for: value)
-            var estimate: Decimal = 10
-
-            // Newton iteration quickly identifies exact Decimal roots when the quotient is exact.
-            for _ in 0 ..< 64 {
-                let quotient = try unrounded(
-                    NSDecimalDivide,
-                    normalization.value,
-                    estimate,
-                    allowingLossOfPrecision: true,
-                )
-                var squaredQuotient = Decimal()
-                var quotientForSquaring = quotient
-                var quotientAgain = quotient
-                let squareError = NSDecimalMultiply(
-                    &squaredQuotient,
-                    &quotientForSquaring,
-                    &quotientAgain,
-                    .plain,
-                )
-                if squareError == .noError, squaredQuotient == normalization.value {
-                    return try rounded(multiplying: quotient, normalization.scalingFactor)
-                }
-
-                let sum = try unrounded(
-                    NSDecimalAdd,
-                    estimate,
-                    quotient,
-                    allowingLossOfPrecision: true,
-                )
-                let nextEstimate = try unrounded(
-                    NSDecimalDivide,
-                    sum,
-                    2,
-                    allowingLossOfPrecision: true,
-                )
-                estimate = nextEstimate
-            }
 
             var lower: Decimal = 0
             var upper: Decimal = 10
-            let comparisonTolerance = try decimal("1e-34")
-            let negativeComparisonTolerance = -comparisonTolerance
 
-            // The normalized root lies in [1, 10), so its square is below 100. This
-            // allowance safely bounds Decimal rounding in the squared-midpoint comparison.
+            // Accept a result only when every value in the remaining root bracket rounds alike.
             for _ in 0 ..< 256 {
                 let lowerResult = try rounded(multiplying: lower, normalization.scalingFactor)
                 let upperResult = try rounded(multiplying: upper, normalization.scalingFactor)
@@ -558,74 +543,223 @@ public struct CalculatorEngine: Sendable {
                     allowingLossOfPrecision: true,
                 )
                 guard midpoint > lower, midpoint < upper else {
-                    break
+                    return try roundedRootAtPrecisionLimit(
+                        between: lowerResult,
+                        and: upperResult,
+                        scalingFactor: normalization.scalingFactor,
+                        normalizedValue: normalization.value,
+                    )
                 }
 
-                var squaredMidpoint = Decimal()
-                var midpointForSquaring = midpoint
-                var midpointAgain = midpoint
-                let squareError = NSDecimalMultiply(
-                    &squaredMidpoint,
-                    &midpointForSquaring,
-                    &midpointAgain,
-                    .plain,
-                )
-
-                if squareError == .noError {
-                    if squaredMidpoint == normalization.value {
-                        return try rounded(multiplying: midpoint, normalization.scalingFactor)
-                    }
-
-                    if squaredMidpoint < normalization.value {
-                        lower = midpoint
-                    } else {
-                        upper = midpoint
-                    }
-                } else if squareError == .lossOfPrecision {
-                    let difference = try unrounded(
-                        NSDecimalSubtract,
-                        squaredMidpoint,
-                        normalization.value,
-                        allowingLossOfPrecision: true,
-                    )
-
-                    if difference < negativeComparisonTolerance {
-                        lower = midpoint
-                    } else if difference > comparisonTolerance {
-                        upper = midpoint
-                    } else {
-                        let uncertainty = try unrounded(
-                            NSDecimalMultiply,
-                            comparisonTolerance,
-                            4,
-                            allowingLossOfPrecision: true,
-                        )
-                        let possibleLower = try unrounded(
-                            NSDecimalSubtract,
-                            midpoint,
-                            uncertainty,
-                            allowingLossOfPrecision: true,
-                        )
-                        let possibleUpper = try unrounded(
-                            NSDecimalAdd,
-                            midpoint,
-                            uncertainty,
-                            allowingLossOfPrecision: true,
-                        )
-                        lower = max(lower, possibleLower)
-                        upper = min(upper, possibleUpper)
-                    }
-                } else {
-                    throw CalculatorError.overflow
+                switch try compareSquare(of: midpoint, with: normalization.value) {
+                case .orderedAscending,
+                     .orderedSame:
+                    lower = midpoint
+                case .orderedDescending:
+                    upper = midpoint
                 }
             }
 
             let lowerResult = try rounded(multiplying: lower, normalization.scalingFactor)
             let upperResult = try rounded(multiplying: upper, normalization.scalingFactor)
             guard lowerResult == upperResult else {
+                return try roundedRootAtPrecisionLimit(
+                    between: lowerResult,
+                    and: upperResult,
+                    scalingFactor: normalization.scalingFactor,
+                    normalizedValue: normalization.value,
+                )
+            }
+
+            return lowerResult
+        }
+
+        /// Compares a bounded Decimal square exactly without rounding its product to 38 digits.
+        private func compareSquare(of candidate: Decimal, with value: Decimal) throws -> ComparisonResult {
+            let (candidateDigits, candidateScale) = try decimalDigitsAndScale(candidate)
+            return try compareSquare(of: candidateDigits, scale: candidateScale, with: value)
+        }
+
+        /// Resolves adjacent rounded results with an exact squared-midpoint comparison.
+        ///
+        /// At Decimal's precision limit, the root can remain between two adjacent output
+        /// values. Comparing the exact square of their midpoint with the normalized input proves
+        /// which result is nearest without treating a rounded Decimal product as exact.
+        private func roundedRootAtPrecisionLimit(
+            between lowerResult: Decimal,
+            and upperResult: Decimal,
+            scalingFactor: Decimal,
+            normalizedValue: Decimal,
+        ) throws -> Decimal {
+            let (lowerDigits, lowerScale) = try decimalDigitsAndScale(lowerResult)
+            let (upperDigits, upperScale) = try decimalDigitsAndScale(upperResult)
+            let commonScale = max(lowerScale, upperScale)
+            let lower = lowerDigits + Array(repeating: 0, count: commonScale - lowerScale)
+            let upper = upperDigits + Array(repeating: 0, count: commonScale - upperScale)
+
+            guard incrementingDecimalDigits(lower) == upper else {
                 throw CalculatorError.overflow
             }
-            return lowerResult
+
+            let midpointDigits = multiplyDecimalDigits(
+                addingDecimalDigits(lower, upper),
+                by: 5,
+            )
+            let midpointScale = commonScale + 1 + scalingFactor.exponent
+            guard midpointScale >= 0 else {
+                throw CalculatorError.overflow
+            }
+
+            let midpointComparison = try compareSquare(
+                of: midpointDigits,
+                scale: midpointScale,
+                with: normalizedValue,
+            )
+            return midpointComparison == .orderedDescending ? lowerResult : upperResult
+        }
+
+        private func compareSquare(
+            of candidateDigits: [Int],
+            scale candidateScale: Int,
+            with value: Decimal,
+        ) throws -> ComparisonResult {
+            let (valueDigits, valueScale) = try decimalDigitsAndScale(value)
+            let squaredDigits = multiplyDecimalDigits(candidateDigits)
+            return compareDecimalDigits(
+                squaredDigits,
+                scale: candidateScale * 2,
+                with: valueDigits,
+                scale: valueScale,
+            )
+        }
+
+        /// Adds two nonnegative base-ten integer coefficients stored most-significant digit first.
+        private func addingDecimalDigits(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+            var result: [Int] = []
+            var carry = 0
+            var lhsIndex = lhs.count - 1
+            var rhsIndex = rhs.count - 1
+            for _ in 0 ..< max(lhs.count, rhs.count) {
+                let left = lhsIndex >= 0 ? lhs[lhsIndex] : 0
+                let right = rhsIndex >= 0 ? rhs[rhsIndex] : 0
+                let sum = left + right + carry
+                result.append(sum % 10)
+                carry = sum / 10
+                lhsIndex -= 1
+                rhsIndex -= 1
+            }
+            if carry > 0 {
+                result.append(carry)
+            }
+            return result.reversed()
+        }
+
+        /// Multiplies a base-ten integer coefficient by a small positive integer.
+        private func multiplyDecimalDigits(_ digits: [Int], by multiplier: Int) -> [Int] {
+            var result: [Int] = []
+            var carry = 0
+            for digit in digits.reversed() {
+                let product = digit * multiplier + carry
+                result.append(product % 10)
+                carry = product / 10
+            }
+            while carry > 0 {
+                result.append(carry % 10)
+                carry /= 10
+            }
+            return result.reversed()
+        }
+
+        /// Increments a base-ten integer coefficient while preserving its digit order.
+        private func incrementingDecimalDigits(_ digits: [Int]) -> [Int] {
+            var result = digits
+            for index in result.indices.reversed() {
+                if result[index] < 9 {
+                    result[index] += 1
+                    return result
+                }
+                result[index] = 0
+            }
+            return [1] + result
+        }
+
+        /// Converts a positive normalized Decimal into an exact base-ten coefficient and scale.
+        private func decimalDigitsAndScale(_ value: Decimal) throws -> (digits: [Int], scale: Int) {
+            var decimalValue = value
+            let text = NSDecimalString(&decimalValue, Locale(identifier: "en_US_POSIX"))
+            let components = text.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2, !text.hasPrefix("-") else {
+                throw CalculatorError.overflow
+            }
+
+            let integerDigits = String(components[0])
+            let fractionalDigits = components.count == 2 ? String(components[1]) : ""
+            let coefficient = integerDigits + fractionalDigits
+            guard !coefficient.isEmpty, coefficient.allSatisfy(\.isNumber) else {
+                throw CalculatorError.overflow
+            }
+
+            var digits = coefficient.compactMap(\.wholeNumberValue)
+            while digits.count > 1, digits.first == 0 {
+                digits.removeFirst()
+            }
+            var scale = fractionalDigits.count
+            while scale > 0, digits.last == 0 {
+                digits.removeLast()
+                scale -= 1
+            }
+            guard digits.count <= 39 else {
+                throw CalculatorError.overflow
+            }
+
+            return (digits, scale)
+        }
+
+        /// Multiplies two bounded base-ten coefficient digit arrays.
+        private func multiplyDecimalDigits(_ digits: [Int]) -> [Int] {
+            var product = Array(repeating: 0, count: digits.count * 2)
+            for leftIndex in digits.indices {
+                for rightIndex in digits.indices {
+                    product[leftIndex + rightIndex + 1] += digits[leftIndex] * digits[rightIndex]
+                }
+            }
+
+            for index in stride(from: product.count - 1, through: 1, by: -1) {
+                product[index - 1] += product[index] / 10
+                product[index] %= 10
+            }
+
+            while product.count > 1, product.first == 0 {
+                product.removeFirst()
+            }
+            return product
+        }
+
+        /// Compares exact decimal coefficients after aligning their fractional scales.
+        private func compareDecimalDigits(
+            _ lhsDigits: [Int],
+            scale lhsScale: Int,
+            with rhsDigits: [Int],
+            scale rhsScale: Int,
+        ) -> ComparisonResult {
+            let commonScale = max(lhsScale, rhsScale)
+            var lhs = lhsDigits + Array(repeating: 0, count: commonScale - lhsScale)
+            var rhs = rhsDigits + Array(repeating: 0, count: commonScale - rhsScale)
+
+            while lhs.count > 1, lhs.first == 0 {
+                lhs.removeFirst()
+            }
+            while rhs.count > 1, rhs.first == 0 {
+                rhs.removeFirst()
+            }
+
+            if lhs.count != rhs.count {
+                return lhs.count < rhs.count ? .orderedAscending : .orderedDescending
+            }
+            for (leftDigit, rightDigit) in zip(lhs, rhs) where leftDigit != rightDigit {
+                return leftDigit < rightDigit ? .orderedAscending : .orderedDescending
+            }
+            return .orderedSame
         }
 
         /// Scales a positive Decimal so its square root lies between one and ten.

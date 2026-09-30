@@ -19,8 +19,10 @@ import SwiftUI
 @MainActor
 @preconcurrency
 public struct CalculatorView: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @FocusState private var focusedCalculatorButton: CalculatorButton?
+    @Environment(\.horizontalSizeClass)
+    private var horizontalSizeClass
+    @FocusState
+    private var focusedCalculatorControl: CalculatorFocusTarget?
     private let store: StoreOf<CalculatorFeature>
     private let presentationOverride: CalculatorPresentation?
     private let displayOverride: String?
@@ -89,8 +91,11 @@ public struct CalculatorView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(Color(uiColor: .systemBackground))
+            .onKeyPress { keyPress in
+                handleHardwareKey(keyPress)
+            }
             .accessibilityIdentifier("calculator.keyboard-input-surface")
-            .defaultFocus($focusedCalculatorButton, .clear)
+            .defaultFocus($focusedCalculatorControl, .keypad(.clear))
             .task {
                 guard loadsPersistenceOnAppear else {
                     return
@@ -123,7 +128,7 @@ public struct CalculatorView: View {
         .padding(.vertical, 12)
         .simultaneousGesture(
             TapGesture().onEnded {
-                focusedCalculatorButton = .clear
+                focusedCalculatorControl = .keypad(.clear)
             },
         )
     }
@@ -131,7 +136,11 @@ public struct CalculatorView: View {
     private var clipboardControls: some View {
         HStack(spacing: 12) {
             Button("Copy") { sendInput(.button(.copy), focusing: .clear) }
+                .focusable()
+                .focused($focusedCalculatorControl, equals: .copy)
             Button("Paste") { sendInput(.button(.paste), focusing: .clear) }
+                .focusable()
+                .focused($focusedCalculatorControl, equals: .paste)
         }
         .buttonStyle(.bordered)
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -150,6 +159,8 @@ public struct CalculatorView: View {
                 sendInput(.retryPersistence, focusing: .clear)
             }
             .buttonStyle(.bordered)
+            .focusable()
+            .focused($focusedCalculatorControl, equals: .retry)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -200,6 +211,11 @@ public struct CalculatorView: View {
     }
 
     private func handleHardwareKey(_ keyPress: KeyPress) -> KeyPress.Result {
+        let isNativeButtonActivation = [" ", "\r", "\n"].contains(keyPress.characters)
+        if focusedCalculatorControl?.isNonKeypadControl == true, isNativeButtonActivation {
+            return .ignored
+        }
+
         let isDelete = keyPress.key == .delete || keyPress.key == .deleteForward
         let isEscape = keyPress.key == .escape
         guard let button = CalculatorHardwareKeyMapper.button(
@@ -209,6 +225,7 @@ public struct CalculatorView: View {
         ) else {
             return .ignored
         }
+
         sendInput(.button(button))
         return .handled
     }
@@ -216,7 +233,7 @@ public struct CalculatorView: View {
     private func sendInput(_ input: CalculatorInput, focusing button: CalculatorButton? = nil) {
         inputHandler(input)
         if let button {
-            focusedCalculatorButton = button
+            focusedCalculatorControl = .keypad(button)
         }
     }
 
@@ -233,15 +250,12 @@ public struct CalculatorView: View {
         .buttonStyle(.borderedProminent)
         .tint(key.isOperator ? .orange : .blue)
         .focusable()
-        .focused($focusedCalculatorButton, equals: key.button)
-        .onKeyPress { keyPress in
-            handleHardwareKey(keyPress)
-        }
+        .focused($focusedCalculatorControl, equals: .keypad(key.button))
         .accessibilityLabel(key.accessibilityLabel)
         .accessibilityValue(Text(key.button == .toggleAngleMode
-            ? (store.angleMode == .degrees ? "Degrees" : "Radians")
-            : ""))
-        .accessibilityHint(Text(key.button == .toggleAngleMode ? "Switch angle units" : ""))
+                ? (store.angleMode == .degrees ? "Degrees" : "Radians")
+                : ""))
+            .accessibilityHint(Text(key.button == .toggleAngleMode ? "Switch angle units" : ""))
     }
 
     @ViewBuilder
@@ -274,10 +288,7 @@ public struct CalculatorView: View {
         .buttonStyle(.borderedProminent)
         .tint(key.isOperator ? .orange : .gray)
         .focusable()
-        .focused($focusedCalculatorButton, equals: key.button)
-        .onKeyPress { keyPress in
-            handleHardwareKey(keyPress)
-        }
+        .focused($focusedCalculatorControl, equals: .keypad(key.button))
         .accessibilityLabel(key.accessibilityLabel)
     }
 
@@ -290,6 +301,8 @@ public struct CalculatorView: View {
                 if !store.history.isEmpty {
                     Button("Clear") { sendInput(.button(.clearHistory), focusing: .clear) }
                         .font(.subheadline)
+                        .focusable()
+                        .focused($focusedCalculatorControl, equals: .clearHistory)
                 }
             }
 
@@ -314,6 +327,26 @@ public struct CalculatorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+private enum CalculatorFocusTarget: Hashable {
+    case keypad(CalculatorButton)
+    case copy
+    case paste
+    case retry
+    case clearHistory
+
+    var isNonKeypadControl: Bool {
+        switch self {
+        case .keypad:
+            false
+        case .copy,
+             .paste,
+             .retry,
+             .clearHistory:
+            true
+        }
     }
 }
 
@@ -366,8 +399,18 @@ struct ScientificKey {
         ScientificKey(title: "sin⁻¹", button: .arcsine, isOperator: false, accessibilityLabel: "Inverse sine"),
         ScientificKey(title: "cos⁻¹", button: .arccosine, isOperator: false, accessibilityLabel: "Inverse cosine"),
         ScientificKey(title: "tan⁻¹", button: .arctangent, isOperator: false, accessibilityLabel: "Inverse tangent"),
-        ScientificKey(title: "ln", button: .naturalLogarithm, isOperator: false, accessibilityLabel: "Natural logarithm"),
-        ScientificKey(title: "log₁₀", button: .commonLogarithm, isOperator: false, accessibilityLabel: "Base ten logarithm"),
+        ScientificKey(
+            title: "ln",
+            button: .naturalLogarithm,
+            isOperator: false,
+            accessibilityLabel: "Natural logarithm",
+        ),
+        ScientificKey(
+            title: "log₁₀",
+            button: .commonLogarithm,
+            isOperator: false,
+            accessibilityLabel: "Base ten logarithm",
+        ),
         ScientificKey(title: "√", button: .squareRoot, isOperator: false, accessibilityLabel: "Square root"),
         ScientificKey(title: "x²", button: .square, isOperator: false, accessibilityLabel: "Square"),
         ScientificKey(title: "xʸ", button: .power, isOperator: true, accessibilityLabel: "Power"),

@@ -48,5 +48,23 @@ final class CalculatorHardwareKeyboardUITests: XCTestCase {
             object: display,
         )
         XCTAssertEqual(XCTWaiter.wait(for: [updatedDisplay], timeout: 5), .completed)
+
+        let copyButton = app.buttons["Copy"]
+        XCTAssertTrue(copyButton.waitForExistence(timeout: 5))
+        for _ in 0 ..< 32 {
+            if copyButton.hasFocus {
+                break
+            }
+            app.typeKey(.tab, modifierFlags: .shift)
+        }
+        XCTAssertTrue(copyButton.hasFocus)
+
+        copyButton.typeText("8")
+
+        let updatedFromSiblingControl = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "278"),
+            object: display,
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [updatedFromSiblingControl], timeout: 5), .completed)
     }
 }
