@@ -1,0 +1,21 @@
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_6710d5da00e1a0 109-117
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_ed52f69d3beae1 495-496,498-499,502,515-516,531-532,534-588,592-620,623-628,631-632,655-657,661-664
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bfd9d277ffed9fa4b70c618d0b7990e60fc74044",
+  "prompts": {},
+  "sessions": {
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
