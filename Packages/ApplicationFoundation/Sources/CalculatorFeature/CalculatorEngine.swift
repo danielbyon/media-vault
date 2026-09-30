@@ -492,13 +492,14 @@ public struct CalculatorEngine: Sendable {
                 return 0
             }
 
-            var estimate = try squareRootEstimate(for: value)
+            let normalization = try squareRootNormalization(for: value)
+            var estimate: Decimal = 10
 
-            // This bound lets rounded Decimal estimates settle at their supported precision.
-            for _ in 0 ..< 256 {
+            // Newton iteration quickly identifies exact Decimal roots when the quotient is exact.
+            for _ in 0 ..< 64 {
                 let quotient = try unrounded(
                     NSDecimalDivide,
-                    value,
+                    normalization.value,
                     estimate,
                     allowingLossOfPrecision: true,
                 )
@@ -511,9 +512,8 @@ public struct CalculatorEngine: Sendable {
                     &quotientAgain,
                     .plain,
                 )
-                // Preserve exact perfect roots before finite-precision iteration can stall.
-                if squareError == .noError, squaredQuotient == value {
-                    return try rounded(quotient)
+                if squareError == .noError, squaredQuotient == normalization.value {
+                    return try rounded(multiplying: quotient, normalization.scalingFactor)
                 }
 
                 let sum = try unrounded(
@@ -528,36 +528,108 @@ public struct CalculatorEngine: Sendable {
                     2,
                     allowingLossOfPrecision: true,
                 )
-
-                if nextEstimate >= estimate {
-                    let estimateHalf = try unrounded(
-                        NSDecimalDivide,
-                        estimate,
-                        2,
-                        allowingLossOfPrecision: true,
-                    )
-                    let nextEstimateHalf = try unrounded(
-                        NSDecimalDivide,
-                        nextEstimate,
-                        2,
-                        allowingLossOfPrecision: true,
-                    )
-                    return try rounded(unrounded(
-                        NSDecimalAdd,
-                        estimateHalf,
-                        nextEstimateHalf,
-                        allowingLossOfPrecision: true,
-                    ))
-                }
-
                 estimate = nextEstimate
             }
 
-            throw CalculatorError.overflow
+            var lower: Decimal = 0
+            var upper: Decimal = 10
+            let comparisonTolerance = try decimal("1e-34")
+            let negativeComparisonTolerance = -comparisonTolerance
+
+            // The normalized root lies in [1, 10), so its square is below 100. This
+            // allowance safely bounds Decimal rounding in the squared-midpoint comparison.
+            for _ in 0 ..< 256 {
+                let lowerResult = try rounded(multiplying: lower, normalization.scalingFactor)
+                let upperResult = try rounded(multiplying: upper, normalization.scalingFactor)
+                if lowerResult == upperResult {
+                    return lowerResult
+                }
+
+                let midpointSum = try unrounded(
+                    NSDecimalAdd,
+                    lower,
+                    upper,
+                    allowingLossOfPrecision: true,
+                )
+                let midpoint = try unrounded(
+                    NSDecimalDivide,
+                    midpointSum,
+                    2,
+                    allowingLossOfPrecision: true,
+                )
+                guard midpoint > lower, midpoint < upper else {
+                    break
+                }
+
+                var squaredMidpoint = Decimal()
+                var midpointForSquaring = midpoint
+                var midpointAgain = midpoint
+                let squareError = NSDecimalMultiply(
+                    &squaredMidpoint,
+                    &midpointForSquaring,
+                    &midpointAgain,
+                    .plain,
+                )
+
+                if squareError == .noError {
+                    if squaredMidpoint == normalization.value {
+                        return try rounded(multiplying: midpoint, normalization.scalingFactor)
+                    }
+
+                    if squaredMidpoint < normalization.value {
+                        lower = midpoint
+                    } else {
+                        upper = midpoint
+                    }
+                } else if squareError == .lossOfPrecision {
+                    let difference = try unrounded(
+                        NSDecimalSubtract,
+                        squaredMidpoint,
+                        normalization.value,
+                        allowingLossOfPrecision: true,
+                    )
+
+                    if difference < negativeComparisonTolerance {
+                        lower = midpoint
+                    } else if difference > comparisonTolerance {
+                        upper = midpoint
+                    } else {
+                        let uncertainty = try unrounded(
+                            NSDecimalMultiply,
+                            comparisonTolerance,
+                            4,
+                            allowingLossOfPrecision: true,
+                        )
+                        let possibleLower = try unrounded(
+                            NSDecimalSubtract,
+                            midpoint,
+                            uncertainty,
+                            allowingLossOfPrecision: true,
+                        )
+                        let possibleUpper = try unrounded(
+                            NSDecimalAdd,
+                            midpoint,
+                            uncertainty,
+                            allowingLossOfPrecision: true,
+                        )
+                        lower = max(lower, possibleLower)
+                        upper = min(upper, possibleUpper)
+                    }
+                } else {
+                    throw CalculatorError.overflow
+                }
+            }
+
+            let lowerResult = try rounded(multiplying: lower, normalization.scalingFactor)
+            let upperResult = try rounded(multiplying: upper, normalization.scalingFactor)
+            guard lowerResult == upperResult else {
+                throw CalculatorError.overflow
+            }
+            return lowerResult
         }
 
-        /// Starts Decimal iteration near the root to keep every intermediate representable.
-        private func squareRootEstimate(for value: Decimal) throws -> Decimal {
+        /// Scales a positive Decimal so its square root lies between one and ten.
+        private func squareRootNormalization(for value: Decimal) throws -> (value: Decimal, scalingFactor: Decimal) {
             let significand = NSDecimalNumber(decimal: value.significand).stringValue
             let digitCount = significand.filter(\.isNumber).count
             guard digitCount > 0 else {
@@ -580,14 +652,16 @@ public struct CalculatorEngine: Sendable {
             }
 
             let estimateExponent = halfOrder >= 0 ? halfOrder / 2 + halfOrder % 2 : halfOrder / 2
-            guard let estimate = Decimal(
-                string: "1e\(estimateExponent)",
-                locale: Locale(identifier: "en_US_POSIX"),
-            ) else {
+            let (scaleExponent, scaleExponentOverflow) = estimateExponent.subtractingReportingOverflow(1)
+            let (squaredScaleExponent, squaredScaleExponentOverflow) = scaleExponent.multipliedReportingOverflow(by: 2)
+            guard !scaleExponentOverflow, !squaredScaleExponentOverflow else {
                 throw CalculatorError.overflow
             }
 
-            return estimate
+            let scalingFactor = try decimal("1e\(scaleExponent)")
+            let squaredScalingFactor = try decimal("1e\(squaredScaleExponent)")
+            let normalizedValue = try unrounded(NSDecimalDivide, value, squaredScalingFactor)
+            return (normalizedValue, scalingFactor)
         }
 
         private func rounded(_ value: Decimal) throws -> Decimal {

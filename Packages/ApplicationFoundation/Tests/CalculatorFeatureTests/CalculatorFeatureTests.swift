@@ -106,6 +106,15 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("sqrt(0)") == "0")
     }
 
+    @Test("Large nonsquare roots converge to the configured display precision")
+    func largeNonsquareRootsConvergeToDisplayPrecision() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("sqrt(999999999999999999999999999999)") == "1000000000000000")
+        #expect(try engine.evaluate("sqrt(1000000000000000000000000099999)") == "1000000000000000")
+        #expect(try engine.evaluate("sqrt(1000000000000000000000000100001)") == "1000000000000000.0000000001")
+    }
+
     @Test("The smallest Decimal square root rounds without underflow")
     func minimumDecimalSquareRootRoundsToZero() throws {
         let engine = CalculatorEngine()
