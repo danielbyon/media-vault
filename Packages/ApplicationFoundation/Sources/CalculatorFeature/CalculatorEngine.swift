@@ -272,13 +272,14 @@ public struct CalculatorEngine: Sendable {
             }
 
             let exponent = try parseUnary()
+            let displayedResult = try rounded(powering: base.value, exponent.value)
+            let preservesBaseAngle = exponent.semanticValue == 1
             return ParsedValue(
-                value: try rounded(powering: base.value, exponent.value),
-                semanticValue: unroundedIntegralPower(
-                    base: base.semanticValue,
-                    exponent: exponent.semanticValue,
-                ),
-                angleProvenance: nil,
+                value: displayedResult,
+                semanticValue: preservesBaseAngle
+                    ? base.semanticValue
+                    : try semanticPowering(base.semanticValue, exponent.semanticValue),
+                angleProvenance: preservesBaseAngle ? base.angleProvenance : nil,
             )
         }
 
@@ -1181,6 +1182,42 @@ public struct CalculatorEngine: Sendable {
             }
 
             return try? unrounded(integralPower: base, exponent: integralExponent)
+        }
+
+        /// Computes the semantic power without applying calculator display rounding.
+        private func semanticPowering(_ base: Decimal, _ exponent: Decimal) throws -> Decimal? {
+            if exponent == 0.5 {
+                guard base >= 0 else {
+                    throw CalculatorError.domainError
+                }
+                return try semanticSquareRoot(of: base)
+            }
+            if exponent == -0.5 {
+                guard base >= 0 else {
+                    throw CalculatorError.domainError
+                }
+                guard base != 0 else {
+                    throw CalculatorError.divisionByZero
+                }
+                let root = try semanticSquareRoot(of: base)
+                return try unrounded(NSDecimalDivide, 1, root)
+            }
+
+            var integralExponent = exponent
+            var exponentToRound = exponent
+            NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
+            if integralExponent == exponent {
+                return unroundedIntegralPower(base: base, exponent: exponent)
+            }
+
+            guard base >= 0 else {
+                throw CalculatorError.domainError
+            }
+            let result = Foundation.pow(
+                NSDecimalNumber(decimal: base).doubleValue,
+                NSDecimalNumber(decimal: exponent).doubleValue,
+            )
+            return try semanticDecimal(result)
         }
 
         /// Computes a Decimal square root with bounded iteration and rounds only the final result.

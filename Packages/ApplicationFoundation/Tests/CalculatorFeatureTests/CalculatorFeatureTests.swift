@@ -96,6 +96,30 @@ struct CalculatorFeatureTests {
         }
     }
 
+    @Test("Fractional powers retain semantic precision in enclosing functions")
+    func fractionalPowersRetainSemanticPrecision() throws {
+        let engine = CalculatorEngine()
+        let power = try engine.evaluate("tan(8099.9999999928^0.5)", angleMode: .degrees)
+        let squareRoot = try engine.evaluate("tan(sqrt(8099.9999999928))", angleMode: .degrees)
+        let negativeHalfPower = try engine.evaluate("tan(8099.9999999928^-0.5)", angleMode: .degrees)
+        let reciprocalSquareRoot = try engine.evaluate("tan(reciprocal(sqrt(8099.9999999928)))", angleMode: .degrees)
+
+        #expect(Decimal(string: power) != nil)
+        #expect(power == squareRoot)
+        #expect(negativeHalfPower == reciprocalSquareRoot)
+        #expect(try engine.evaluate("16^0.25") == "2")
+        #expect(try engine.evaluate("tan(16^0.25)") == engine.evaluate("tan(2)"))
+    }
+
+    @Test("Identity powers preserve angle provenance while other powers discard it")
+    func identityPowersPreserveAngleProvenance() throws {
+        #expect(throws: CalculatorError.domainError) {
+            try CalculatorEngine().evaluate("tan((π/2)^1)", angleMode: .radians)
+        }
+        #expect(try CalculatorEngine(roundingScale: 20).evaluate("sin((π)^1)", angleMode: .radians) == "0")
+        #expect(Decimal(string: try CalculatorEngine().evaluate("tan((π/2)^2)", angleMode: .radians)) != nil)
+    }
+
     @Test("Integral power control does not use the display rounding scale")
     func integralPowerControlIgnoresDisplayRoundingScale() throws {
         #expect(try CalculatorEngine(roundingScale: 0).evaluate("2^2") == "4")
