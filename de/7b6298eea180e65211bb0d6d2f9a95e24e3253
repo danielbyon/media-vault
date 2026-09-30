@@ -1,0 +1,55 @@
+BrowserTabOverviewUITests/CalculatorHardwareKeyboardUITests.swift
+  s_6e45b70b7be182::t_183a670f6ea83a 51-68
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorView.swift
+  s_6e45b70b7be182::t_2ed3262bee0b86 22-25,228,258,344-347,402-413
+  s_6e45b70b7be182::t_e59cac33986544 94-96,98,131,139-140,142-143,162-163,214-218,236,253,291,304-305,333-343,348-349
+  s_6e45b70b7be182::t_5bde322d7423f1 256-257
+  s_6e45b70b7be182::t_c710fd8da305bc 350-352
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_3bbf876c56136c 190-191,194-196
+  s_6e45b70b7be182::t_4b212b83d68999 193,197
+  s_6e45b70b7be182::t_976cfa95094a1f 9
+  s_6e45b70b7be182::t_e643b61ee6ed2e 183,186,188
+  s_6e45b70b7be182::t_183a670f6ea83a 119-127,173,189,192
+  s_dccb117b07d93a::t_22c9fe154e27a6 180
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_2ed3262bee0b86 555-556,573,612,714
+  s_6e45b70b7be182::t_cb2b4abedfafcd 688-689
+  s_6e45b70b7be182::t_7a8336cd38ea43 586,636,640-641,643-644,648-649,657,673
+  s_6e45b70b7be182::t_35420a5530516a 546-548,566-568,571,580-585,587-590,593-607,613-614,617-625,634-635,637-639,645-647,650-656,658-672,674-683
+  s_6e45b70b7be182::t_19925600da0e77 698,705
+  s_6e45b70b7be182::t_eed20e7219341c 396,399-411
+  s_6e45b70b7be182::t_54d2c9a19e1018 642
+  s_6e45b70b7be182::t_78ef208702bb80 710,712
+  s_6e45b70b7be182::t_15e813778914cb 255,259-260,342-347,384,387-395,398,736,748,763
+  s_6e45b70b7be182::t_7c42fd7a339452 525,557,559
+  s_6e45b70b7be182::t_b1c737f3eff6d9 549-550,569-570,591-592,608-611,615-616
+  s_6e45b70b7be182::t_816c0b3de88438 380-383
+  s_6e45b70b7be182::t_bd6addfe86b8d6 711
+  s_6e45b70b7be182::t_de94707fe2f669 552,554,558,577-579,626-633,684-687,690-697,699-704,706-709,713,715-735,737-747,749-762
+  s_6e45b70b7be182::t_b526a90e1c0f3c 764
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "de7b6298eea180e65211bb0d6d2f9a95e24e3253",
+  "prompts": {},
+  "sessions": {
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_dccb117b07d93a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67e-8b66-7a21-a090-170ef0c6e1e2",
+        "model": "unknown"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
