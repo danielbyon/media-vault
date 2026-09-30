@@ -84,7 +84,7 @@ public struct CalculatorEngine: Sendable {
             static func scalar(_ value: Decimal) -> Self {
                 Self(
                     value: value,
-                    angleProvenance: AngleProvenance(constant: value, piCoefficient: 0),
+                    angleProvenance: AngleProvenance(constant: value, piCoefficient: .zero),
                 )
             }
         }
@@ -92,7 +92,7 @@ public struct CalculatorEngine: Sendable {
         /// Tracks source expressions as `constant + coefficient × π` for exact Radian pole checks.
         private struct AngleProvenance {
             let constant: Decimal
-            let piCoefficient: Decimal
+            let piCoefficient: CalculatorExactRational
         }
 
         private let characters: [Character]
@@ -275,7 +275,7 @@ public struct CalculatorEngine: Sendable {
                 return ParsedValue(
                     value: value,
                     semanticValue: value,
-                    angleProvenance: AngleProvenance(constant: 0, piCoefficient: 1),
+                    angleProvenance: AngleProvenance(constant: 0, piCoefficient: .one),
                 )
             }
             if consume("e") {
@@ -436,35 +436,72 @@ public struct CalculatorEngine: Sendable {
             _ function: Function,
             argument: Decimal,
         ) throws -> (value: Decimal, angleProvenance: AngleProvenance?)? {
-            let piCoefficient: Decimal
+            let piCoefficient: CalculatorExactRational
             switch function {
             case .arcSine:
-                guard argument == -1 || argument == 1 else {
+                if argument == 1 {
+                    piCoefficient = .half
+                } else if argument == -1 {
+                    piCoefficient = .negativeHalf
+                } else if argument == 0.5 {
+                    piCoefficient = .oneSixth
+                } else if argument == -0.5 {
+                    piCoefficient = .negativeOneSixth
+                } else {
                     return nil
                 }
-                piCoefficient = argument == 1 ? 0.5 : -0.5
             case .arcCosine:
-                guard argument == -1 || argument == 0 || argument == 1 else {
+                if argument == -1 {
+                    piCoefficient = .one
+                } else if argument == 0 {
+                    piCoefficient = .half
+                } else if argument == 1 {
+                    piCoefficient = .zero
+                } else if argument == 0.5 {
+                    piCoefficient = .oneThird
+                } else if argument == -0.5 {
+                    piCoefficient = .twoThirds
+                } else {
                     return nil
                 }
-                piCoefficient = argument == -1 ? 1 : (argument == 0 ? 0.5 : 0)
             case .arcTangent:
-                guard argument == -1 || argument == 0 || argument == 1 else {
+                if argument == -1 {
+                    piCoefficient = .negativeOneQuarter
+                } else if argument == 0 {
+                    piCoefficient = .zero
+                } else if argument == 1 {
+                    piCoefficient = .oneQuarter
+                } else {
                     return nil
                 }
-                piCoefficient = argument / 4
             default:
                 return nil
             }
 
             switch angleMode {
             case .degrees:
-                return (try unrounded(NSDecimalMultiply, piCoefficient, 180), nil)
+                guard let degreeCoefficient = piCoefficient.multiplied(by: .integer(180)) else {
+                    throw CalculatorError.overflow
+                }
+                return (try decimal(from: degreeCoefficient), nil)
             case .radians:
                 let provenance = AngleProvenance(constant: 0, piCoefficient: piCoefficient)
                 let pi = try decimal("3.141592653589793238462643383")
-                return (try unrounded(NSDecimalMultiply, pi, piCoefficient), provenance)
+                let coefficient = try decimal(from: piCoefficient)
+                return (
+                    try unrounded(NSDecimalMultiply, pi, coefficient, allowingLossOfPrecision: true),
+                    provenance,
+                )
             }
+        }
+
+        private func decimal(from rational: CalculatorExactRational) throws -> Decimal {
+            try unrounded(
+                NSDecimalDivide,
+                Decimal(rational.numerator),
+                Decimal(rational.denominator),
+                allowingLossOfPrecision: true,
+            )
         }
 
         private func radians(from value: Double) -> Double {
@@ -577,35 +614,13 @@ public struct CalculatorEngine: Sendable {
                 return magnitude == 90
             case .radians:
                 guard let provenance = angle.angleProvenance,
-                      provenance.constant == 0,
-                      let doubledCoefficient = try? unrounded(
-                          NSDecimalMultiply,
-                          provenance.piCoefficient,
-                          2,
-                      )
+                      provenance.constant == 0
                 else {
                     return false
                 }
 
-                return isOddInteger(doubledCoefficient)
+                return provenance.piCoefficient.multiplied(by: .integer(2))?.isOddInteger == true
             }
-        }
-
-        /// Returns true only when a Decimal is exactly an odd integer.
-        private func isOddInteger(_ value: Decimal) -> Bool {
-            var integralValue = Decimal()
-            var valueToRound = value
-            NSDecimalRound(&integralValue, &valueToRound, 0, .plain)
-            guard integralValue == value,
-                  let half = try? unrounded(NSDecimalDivide, value, 2)
-            else {
-                return false
-            }
-
-            var roundedHalf = Decimal()
-            var halfToRound = half
-            NSDecimalRound(&roundedHalf, &halfToRound, 0, .plain)
-            return roundedHalf != half
         }
 
         private func unrounded(_ operation: DecimalOperation, _ lhs: Decimal?, _ rhs: Decimal?) -> Decimal? {
@@ -636,7 +651,7 @@ public struct CalculatorEngine: Sendable {
                 operation = NSDecimalAdd
             }
             guard let constant = try? unrounded(operation, lhs.constant, rhs.constant),
-                  let piCoefficient = try? unrounded(operation, lhs.piCoefficient, rhs.piCoefficient)
+                  let piCoefficient = lhs.piCoefficient.adding(rhs.piCoefficient, subtracting: subtracting)
             else {
                 return nil
             }
@@ -652,10 +667,10 @@ public struct CalculatorEngine: Sendable {
                 return nil
             }
 
-            if lhs.piCoefficient == 0 {
+            if lhs.piCoefficient.isZero {
                 return scaledAngleProvenance(rhs, by: lhs.constant)
             }
-            if rhs.piCoefficient == 0 {
+            if rhs.piCoefficient.isZero {
                 return scaledAngleProvenance(lhs, by: rhs.constant)
             }
 
@@ -668,7 +683,7 @@ public struct CalculatorEngine: Sendable {
         ) -> AngleProvenance? {
             guard let numerator,
                   let denominator,
-                  denominator.piCoefficient == 0
+                  denominator.piCoefficient.isZero
             else {
                 return nil
             }
@@ -692,8 +707,18 @@ public struct CalculatorEngine: Sendable {
                 operation = NSDecimalMultiply
             }
             guard let constant = try? unrounded(operation, provenance.constant, factor),
-                  let piCoefficient = try? unrounded(operation, provenance.piCoefficient, factor)
+                  let exactFactor = CalculatorExactRational.decimal(factor)
             else {
+                return nil
+            }
+
+            let piCoefficient: CalculatorExactRational?
+            if dividing {
+                piCoefficient = provenance.piCoefficient.divided(by: exactFactor)
+            } else {
+                piCoefficient = provenance.piCoefficient.multiplied(by: exactFactor)
+            }
+            guard let piCoefficient else {
                 return nil
             }
 
@@ -711,7 +736,7 @@ public struct CalculatorEngine: Sendable {
         private func negated(_ provenance: AngleProvenance?) -> AngleProvenance? {
             guard let provenance,
                   let constant = negated(provenance.constant),
-                  let piCoefficient = negated(provenance.piCoefficient)
+                  let piCoefficient = provenance.piCoefficient.negated()
             else {
                 return nil
             }
@@ -720,30 +745,35 @@ public struct CalculatorEngine: Sendable {
         }
 
         private func decimal(_ value: Double) throws -> Decimal {
-            guard value.isFinite else {
+            try checkedDecimal(fromFoundationValue: value, applyingDisplayRounding: true)
+        }
+
+        /// Converts a Foundation result to Decimal using a locale-independent round-trip string.
+        ///
+        /// Decimal's direct Double initializer can produce NaN for finite values near the lower
+        /// end of Decimal's exponent range, so parsing the Double's canonical representation keeps
+        /// representable scientific results while still rejecting actual range failures.
+        private func checkedDecimal(
+            fromFoundationValue value: Double,
+            applyingDisplayRounding: Bool,
+        ) throws -> Decimal {
+            guard value.isFinite,
+                  let result = Decimal(
+                      string: value.description,
+                      locale: Locale(identifier: "en_US_POSIX"),
+                  ),
+                  !result.isNaN,
+                  result != 0 || value == 0
+            else {
                 throw CalculatorError.overflow
             }
 
-            let result = Decimal(value)
-            guard !result.isNaN else {
-                throw CalculatorError.overflow
-            }
-
-            return try rounded(result)
+            return applyingDisplayRounding ? try rounded(result) : result
         }
 
         /// Converts a Foundation result to Decimal without applying display rounding.
         private func semanticDecimal(_ value: Double) throws -> Decimal {
-            guard value.isFinite else {
-                throw CalculatorError.overflow
-            }
-
-            let result = Decimal(value)
-            guard !result.isNaN else {
-                throw CalculatorError.overflow
-            }
-
-            return result
+            try checkedDecimal(fromFoundationValue: value, applyingDisplayRounding: false)
         }
 
         private func decimal(_ literal: String) throws -> Decimal {
@@ -786,6 +816,19 @@ public struct CalculatorEngine: Sendable {
             if base == 0, exponent < 0 {
                 throw CalculatorError.divisionByZero
             }
+            if exponent == 0.5 {
+                guard base >= 0 else {
+                    throw CalculatorError.domainError
+                }
+                return try rounded(squareRootOf: base)
+            }
+            if exponent == -0.5 {
+                guard base >= 0 else {
+                    throw CalculatorError.domainError
+                }
+                return try rounded(reciprocalSquareRootOf: base)
+            }
+
             var integralExponent = exponent
             var exponentToRound = exponent
             NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
@@ -802,6 +845,23 @@ public struct CalculatorEngine: Sendable {
             }
 
             return try rounded(integralPower: base, exponent: integralExponent)
+        }
+
+        /// Computes a negative half power with Decimal square root and a checked reciprocal.
+        private func rounded(reciprocalSquareRootOf value: Decimal) throws -> Decimal {
+            let normalization = try squareRootNormalization(for: value)
+            let (precisionScale, overflow) = 20.subtractingReportingOverflow(
+                normalization.scalingFactor.exponent,
+            )
+            guard !overflow else {
+                throw CalculatorError.overflow
+            }
+
+            let root = try squareRoot(
+                of: value,
+                toScale: max(roundingScale, precisionScale),
+            )
+            return try rounded(dividing: 1, root)
         }
 
         private func rounded(integralPower base: Decimal, exponent: Decimal) throws -> Decimal {

@@ -75,6 +75,27 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("4^0.5") == "2")
     }
 
+    @Test("Half powers use Decimal square-root evaluation")
+    func halfPowersPreserveDecimalSquareRootPrecision() throws {
+        let engine = CalculatorEngine()
+        let largeSquare = "81129638414606699710187514626049"
+        let largeRoot = try engine.evaluate("sqrt(\(largeSquare))")
+        let largeHalfPower = try engine.evaluate("\(largeSquare)^0.5")
+
+        #expect(largeRoot == "9007199254740993")
+        #expect(largeHalfPower == largeRoot)
+        #expect(try engine.evaluate("2^0.5") == engine.evaluate("sqrt(2)"))
+        #expect(try engine.evaluate("4^-0.5") == "0.5")
+        #expect(try engine.evaluate("0^0.5") == "0")
+        #expect(throws: CalculatorError.divisionByZero) {
+            try engine.evaluate("0^-0.5")
+        }
+        #expect(try engine.evaluate("16^0.25") == "2")
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("(-2)^-0.5")
+        }
+    }
+
     @Test("Integral power control does not use the display rounding scale")
     func integralPowerControlIgnoresDisplayRoundingScale() throws {
         #expect(try CalculatorEngine(roundingScale: 0).evaluate("2^2") == "4")
@@ -245,6 +266,63 @@ struct CalculatorFeatureTests {
         let composed = try engine.evaluate("tan(89.99999999996+0)", angleMode: .degrees)
 
         #expect(composed == direct)
+    }
+
+    @Test("Exact inverse half-angles preserve tangent pole provenance")
+    func exactInverseHalfAnglesPreserveTangentPoleProvenance() throws {
+        let engine = CalculatorEngine()
+        let inverseResults = [
+            ("asin(0.5)", "30", "0.5235987756"),
+            ("asin(-0.5)", "-30", "-0.5235987756"),
+            ("acos(0.5)", "60", "1.0471975512"),
+            ("acos(-0.5)", "120", "2.0943951024"),
+        ]
+        let poleExpressions = [
+            "tan(asin(0.5)×3)",
+            "tan(asin(-0.5)×3)",
+            "tan(-asin(0.5)×3)",
+            "tan(acos(0.5)×1.5)",
+            "tan(acos(-0.5)×0.75)",
+        ]
+
+        for (expression, degrees, radians) in inverseResults {
+            #expect(try engine.evaluate(expression, angleMode: .degrees) == degrees)
+            #expect(try engine.evaluate(expression, angleMode: .radians) == radians)
+        }
+
+        for expression in poleExpressions {
+            #expect(throws: CalculatorError.domainError) {
+                try engine.evaluate(expression, angleMode: .degrees)
+            }
+            #expect(throws: CalculatorError.domainError) {
+                try engine.evaluate(expression, angleMode: .radians)
+            }
+        }
+
+        for angleMode in [CalculatorAngleMode.degrees, .radians] {
+            let nearby = try engine.evaluate("tan(asin(0.5000001)×3)", angleMode: angleMode)
+            #expect(Decimal(string: nearby) != nil)
+        }
+
+        let largeNegativeScalar = try engine.evaluate("π×-9223372036854775808", angleMode: .radians)
+        #expect(Decimal(string: largeNegativeScalar) != nil)
+    }
+
+    @Test("Finite tiny scientific results round to zero without overflow")
+    func tinyScientificResultsConvertToDecimalBeforeDisplayRounding() throws {
+        let engine = CalculatorEngine()
+        let tiny = "0." + String(repeating: "0", count: 109) + "1"
+        let minimumDecimal = "0." + String(repeating: "0", count: 127) + "1"
+
+        #expect(try engine.evaluate("sin(\(tiny))", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("sin(-\(tiny))", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("sin(30)", angleMode: .degrees) == "0.5")
+        #expect(throws: CalculatorError.overflow) {
+            try engine.evaluate("10^1000.5")
+        }
+        #expect(throws: CalculatorError.overflow) {
+            try engine.evaluate("\(minimumDecimal)^2.1")
+        }
     }
 
     @Test("Inverse trigonometric results preserve exact tangent pole semantics")
