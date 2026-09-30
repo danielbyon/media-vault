@@ -165,6 +165,59 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("asin(1)", angleMode: .radians) == "1.5707963268")
     }
 
+    @Test("Exact quadrantal sine and cosine results remain exact at high display precision")
+    func quadrantalTrigonometryReturnsExactResults() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+        let cases = [
+            ("sin(0)", "0"),
+            ("sin(π/2)", "1"),
+            ("sin(π)", "0"),
+            ("sin(3×π/2)", "-1"),
+            ("cos(0)", "1"),
+            ("cos(π/2)", "0"),
+            ("cos(π)", "-1"),
+            ("cos(3×π/2)", "0"),
+            ("sin(-π/2)", "-1"),
+            ("cos(-π/2)", "0"),
+        ]
+
+        for (expression, expected) in cases {
+            #expect(try engine.evaluate(expression, angleMode: .radians) == expected)
+        }
+
+        let degreeCases = [
+            ("sin(0)", "0"),
+            ("sin(90)", "1"),
+            ("sin(180)", "0"),
+            ("sin(270)", "-1"),
+            ("cos(0)", "1"),
+            ("cos(90)", "0"),
+            ("cos(180)", "-1"),
+            ("cos(270)", "0"),
+        ]
+        for (expression, expected) in degreeCases {
+            #expect(try engine.evaluate(expression, angleMode: .degrees) == expected)
+        }
+        #expect(try engine.evaluate("sin(3.14159265358979323846)", angleMode: .radians) != "0")
+        #expect(try engine.evaluate("cos(1.57079632679489661923)", angleMode: .radians) != "0")
+    }
+
+    @Test("Large Decimal multiples retain exact pi-turn classification")
+    func largePiCoefficientsPreserveQuadrantalProvenance() throws {
+        let engine = CalculatorEngine()
+        let largeInteger = "9223372036854775808"
+
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×\(largeInteger)+π/2)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×-\(largeInteger)-π/2)", angleMode: .radians)
+        }
+        #expect(try engine.evaluate("sin(π×\(largeInteger))", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("cos(π×\(largeInteger)+π/2)", angleMode: .radians) == "0")
+        #expect(Decimal(string: try engine.evaluate("tan(π×\(largeInteger)+π/4)", angleMode: .radians)) != nil)
+    }
+
     @Test("Direct Radians trigonometry reduces large angles before Double conversion")
 
     func directRadiansTrigonometryReducesLargeAngles() throws {

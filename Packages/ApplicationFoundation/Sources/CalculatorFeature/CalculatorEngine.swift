@@ -84,15 +84,71 @@ public struct CalculatorEngine: Sendable {
             static func scalar(_ value: Decimal) -> Self {
                 Self(
                     value: value,
-                    angleProvenance: AngleProvenance(constant: value, piCoefficient: .zero),
+                    angleProvenance: AngleProvenance(
+                        constant: value,
+                        piCoefficient: .exactDecimal(0),
+                    ),
                 )
             }
         }
 
-        /// Tracks source expressions as `constant + coefficient × π` for exact Radian pole checks.
+        /// Tracks exact `constant + coefficient × π` expressions through Decimal arithmetic.
+        ///
+        /// The rational form preserves repeating inverse-trigonometric fractions. The Decimal
+        /// coefficient covers exact scalar magnitudes beyond Int64, while its exactness flag keeps
+        /// a rounded rational approximation from being mistaken for a quadrantal angle.
         private struct AngleProvenance {
             let constant: Decimal
-            let piCoefficient: CalculatorExactRational
+            let piCoefficient: PiCoefficient
+
+            var piCoefficientIsZero: Bool {
+                piCoefficient.isZero
+            }
+        }
+
+        /// Keeps each π coefficient's exact source and Decimal projection in one valid state.
+        private enum PiCoefficient {
+            case exactRational(CalculatorExactRational, decimal: Decimal)
+            case roundedRational(CalculatorExactRational, decimal: Decimal)
+            case exactDecimal(Decimal)
+
+            var decimalValue: Decimal {
+                switch self {
+                case let .exactRational(_, decimal), let .roundedRational(_, decimal): decimal
+                case let .exactDecimal(decimal): decimal
+                }
+            }
+
+            var exactRational: CalculatorExactRational? {
+                switch self {
+                case let .exactRational(rational, _), let .roundedRational(rational, _): rational
+                case .exactDecimal: nil
+                }
+            }
+
+            var exactDecimalValue: Decimal? {
+                switch self {
+                case let .exactRational(_, decimal), let .exactDecimal(decimal): decimal
+                case .roundedRational: nil
+                }
+            }
+
+            var isZero: Bool {
+                if let exactRational {
+                    return exactRational.isZero
+                }
+                return exactDecimalValue == 0
+            }
+
+            static func rational(
+                _ rational: CalculatorExactRational,
+                decimal: Decimal,
+                isExactDecimal: Bool,
+            ) -> Self {
+                isExactDecimal
+                    ? .exactRational(rational, decimal: decimal)
+                    : .roundedRational(rational, decimal: decimal)
+            }
         }
 
         private let characters: [Character]
@@ -275,7 +331,10 @@ public struct CalculatorEngine: Sendable {
                 return ParsedValue(
                     value: value,
                     semanticValue: value,
-                    angleProvenance: AngleProvenance(constant: 0, piCoefficient: .one),
+                    angleProvenance: AngleProvenance(
+                        constant: 0,
+                        piCoefficient: .exactRational(.one, decimal: 1),
+                    ),
                 )
             }
             if consume("e") {
@@ -334,11 +393,19 @@ public struct CalculatorEngine: Sendable {
             let result: Decimal
             switch function {
             case .sine:
-                let input = try trigonometricArgument(from: argument.value)
-                result = try decimal(Foundation.sin(radians(from: input)))
+                if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
+                    result = exactResult
+                } else {
+                    let input = try trigonometricArgument(from: argument.value)
+                    result = try decimal(Foundation.sin(radians(from: input)))
+                }
             case .cosine:
-                let input = try trigonometricArgument(from: argument.value)
-                result = try decimal(Foundation.cos(radians(from: input)))
+                if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
+                    result = exactResult
+                } else {
+                    let input = try trigonometricArgument(from: argument.value)
+                    result = try decimal(Foundation.cos(radians(from: input)))
+                }
             case .tangent:
                 guard try !isTangentPole(for: argument) else {
                     throw CalculatorError.domainError
@@ -398,9 +465,15 @@ public struct CalculatorEngine: Sendable {
             let semanticValue = argument.semanticValue
             switch function {
             case .sine:
+                if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
+                    return exactResult
+                }
                 let input = try trigonometricArgument(from: semanticValue)
                 return try semanticDecimal(Foundation.sin(radians(from: input)))
             case .cosine:
+                if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
+                    return exactResult
+                }
                 let input = try trigonometricArgument(from: semanticValue)
                 return try semanticDecimal(Foundation.cos(radians(from: input)))
             case .tangent:
@@ -485,9 +558,16 @@ public struct CalculatorEngine: Sendable {
                 }
                 return (try decimal(from: degreeCoefficient), nil)
             case .radians:
-                let provenance = AngleProvenance(constant: 0, piCoefficient: piCoefficient)
+                let (coefficient, isExactDecimal) = try decimalRepresentation(of: piCoefficient)
+                let provenance = AngleProvenance(
+                    constant: 0,
+                    piCoefficient: .rational(
+                        piCoefficient,
+                        decimal: coefficient,
+                        isExactDecimal: isExactDecimal,
+                    ),
+                )
                 let pi = try decimal("3.141592653589793238462643383")
-                let coefficient = try decimal(from: piCoefficient)
                 return (
                     try unrounded(NSDecimalMultiply, pi, coefficient, allowingLossOfPrecision: true),
                     provenance,
@@ -561,6 +641,102 @@ public struct CalculatorEngine: Sendable {
             return try reducedRadians(from: value, modulo: period)
         }
 
+        /// Returns the exact sine or cosine value when the angle is a known quadrant.
+        private func exactQuadrantalResult(for function: Function, argument: ParsedValue) throws -> Decimal? {
+            let quadrant: Int?
+            switch angleMode {
+            case .degrees:
+                quadrant = try quadrantIndex(forDegreeAngle: argument.semanticValue)
+            case .radians:
+                guard let provenance = argument.angleProvenance,
+                      provenance.constant == 0
+                else {
+                    return nil
+                }
+                quadrant = quadrantIndex(forPiCoefficient: provenance)
+            }
+
+            guard let quadrant else {
+                return nil
+            }
+
+            switch function {
+            case .sine:
+                switch quadrant {
+                case 0, 2: return 0
+                case 1: return 1
+                case 3: return -1
+                default: return nil
+                }
+            case .cosine:
+                switch quadrant {
+                case 0: return 1
+                case 1, 3: return 0
+                case 2: return -1
+                default: return nil
+                }
+            default:
+                return nil
+            }
+        }
+
+        /// Finds exact multiples of 90 degrees after reducing the semantic Decimal angle.
+        private func quadrantIndex(forDegreeAngle value: Decimal) throws -> Int? {
+            var reduced = try reducedDegrees(from: value)
+            if reduced < 0 {
+                reduced = try unrounded(NSDecimalAdd, reduced, 360)
+            }
+
+            if reduced == 0 { return 0 }
+            if reduced == 90 { return 1 }
+            if reduced == 180 { return 2 }
+            if reduced == 270 { return 3 }
+            return nil
+        }
+
+        /// Computes the quadrant modulo four without converting π coefficients through Double.
+        private func quadrantIndex(forPiCoefficient provenance: AngleProvenance) -> Int? {
+            if let exactPiCoefficient = provenance.piCoefficient.exactRational {
+                return exactPiCoefficient.halfTurnsModuloFour
+            }
+            guard let exactDecimalValue = provenance.piCoefficient.exactDecimalValue else {
+                return nil
+            }
+            return halfTurnsModuloFour(for: exactDecimalValue)
+        }
+
+        /// Determines whether a finite Decimal coefficient is an exact integer or half-integer.
+        private func halfTurnsModuloFour(for coefficient: Decimal) -> Int? {
+            var coefficient = coefficient
+            let text = NSDecimalString(&coefficient, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.first == "-"
+            let unsignedText = isNegative ? String(text.dropFirst()) : text
+            let components = unsignedText.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
+                return nil
+            }
+
+            var fraction = components.count == 2 ? String(components[1]) : ""
+            while fraction.last == "0" {
+                fraction.removeLast()
+            }
+            guard fraction.isEmpty || fraction == "5" else {
+                return nil
+            }
+
+            var integerParity = 0
+            for digit in components.first ?? "0" {
+                guard let value = digit.wholeNumberValue else {
+                    return nil
+                }
+                integerParity = (integerParity * 10 + value) % 2
+            }
+
+            let magnitude = (integerParity * 2 + (fraction == "5" ? 1 : 0)) % 4
+            let signed = isNegative ? -magnitude : magnitude
+            return (signed + 4) % 4
+        }
+
         /// Reduces an angle with Decimal arithmetic and does not apply display rounding.
         private func reducedRadians(from value: Decimal, modulo period: Decimal) throws -> Decimal {
             var decimalValue = value
@@ -619,7 +795,10 @@ public struct CalculatorEngine: Sendable {
                     return false
                 }
 
-                return provenance.piCoefficient.multiplied(by: .integer(2))?.isOddInteger == true
+                guard let quadrant = quadrantIndex(forPiCoefficient: provenance) else {
+                    return false
+                }
+                return quadrant % 2 == 1
             }
         }
 
@@ -650,13 +829,44 @@ public struct CalculatorEngine: Sendable {
             } else {
                 operation = NSDecimalAdd
             }
-            guard let constant = try? unrounded(operation, lhs.constant, rhs.constant),
-                  let piCoefficient = lhs.piCoefficient.adding(rhs.piCoefficient, subtracting: subtracting)
+            guard let constant = try? unrounded(operation, lhs.constant, rhs.constant) else {
+                return nil
+            }
+
+            if let lhsExactPiCoefficient = lhs.piCoefficient.exactRational,
+               let rhsExactPiCoefficient = rhs.piCoefficient.exactRational,
+               let exactPiCoefficient = lhsExactPiCoefficient.adding(
+                   rhsExactPiCoefficient,
+                   subtracting: subtracting,
+               ) {
+                guard let representation = try? decimalRepresentation(of: exactPiCoefficient) else {
+                    return nil
+                }
+                return AngleProvenance(
+                    constant: constant,
+                    piCoefficient: .rational(
+                        exactPiCoefficient,
+                        decimal: representation.value,
+                        isExactDecimal: representation.isExact,
+                    ),
+                )
+            }
+
+            guard let lhsCoefficient = lhs.piCoefficient.exactDecimalValue,
+                  let rhsCoefficient = rhs.piCoefficient.exactDecimalValue,
+                  let coefficient = try? unrounded(
+                      operation,
+                      lhsCoefficient,
+                      rhsCoefficient,
+                  )
             else {
                 return nil
             }
 
-            return AngleProvenance(constant: constant, piCoefficient: piCoefficient)
+            return AngleProvenance(
+                constant: constant,
+                piCoefficient: .exactDecimal(coefficient),
+            )
         }
 
         private func multipliedAngleProvenance(
@@ -667,10 +877,10 @@ public struct CalculatorEngine: Sendable {
                 return nil
             }
 
-            if lhs.piCoefficient.isZero {
+            if lhs.piCoefficientIsZero {
                 return scaledAngleProvenance(rhs, by: lhs.constant)
             }
-            if rhs.piCoefficient.isZero {
+            if rhs.piCoefficientIsZero {
                 return scaledAngleProvenance(lhs, by: rhs.constant)
             }
 
@@ -683,7 +893,7 @@ public struct CalculatorEngine: Sendable {
         ) -> AngleProvenance? {
             guard let numerator,
                   let denominator,
-                  denominator.piCoefficient.isZero
+                  denominator.piCoefficientIsZero
             else {
                 return nil
             }
@@ -706,23 +916,50 @@ public struct CalculatorEngine: Sendable {
             } else {
                 operation = NSDecimalMultiply
             }
-            guard let constant = try? unrounded(operation, provenance.constant, factor),
-                  let exactFactor = CalculatorExactRational.decimal(factor)
+            guard let constant = try? unrounded(operation, provenance.constant, factor) else {
+                return nil
+            }
+
+            let exactFactor = CalculatorExactRational.decimal(factor)
+            let exactPiCoefficient: CalculatorExactRational?
+            if let source = provenance.piCoefficient.exactRational, let exactFactor {
+                if dividing {
+                    exactPiCoefficient = source.divided(by: exactFactor)
+                } else {
+                    exactPiCoefficient = source.multiplied(by: exactFactor)
+                }
+            } else {
+                exactPiCoefficient = nil
+            }
+
+            if let exactPiCoefficient {
+                guard let representation = try? decimalRepresentation(of: exactPiCoefficient) else {
+                    return nil
+                }
+                return AngleProvenance(
+                    constant: constant,
+                    piCoefficient: .rational(
+                        exactPiCoefficient,
+                        decimal: representation.value,
+                        isExactDecimal: representation.isExact,
+                    ),
+                )
+            }
+
+            guard let sourceCoefficient = provenance.piCoefficient.exactDecimalValue,
+                  let coefficient = try? unrounded(
+                      operation,
+                      sourceCoefficient,
+                      factor,
+                  )
             else {
                 return nil
             }
 
-            let piCoefficient: CalculatorExactRational?
-            if dividing {
-                piCoefficient = provenance.piCoefficient.divided(by: exactFactor)
-            } else {
-                piCoefficient = provenance.piCoefficient.multiplied(by: exactFactor)
-            }
-            guard let piCoefficient else {
-                return nil
-            }
-
-            return AngleProvenance(constant: constant, piCoefficient: piCoefficient)
+            return AngleProvenance(
+                constant: constant,
+                piCoefficient: .exactDecimal(coefficient),
+            )
         }
 
         private func negated(_ value: Decimal?) -> Decimal? {
@@ -736,12 +973,45 @@ public struct CalculatorEngine: Sendable {
         private func negated(_ provenance: AngleProvenance?) -> AngleProvenance? {
             guard let provenance,
                   let constant = negated(provenance.constant),
-                  let piCoefficient = provenance.piCoefficient.negated()
+                  let piCoefficient = negated(provenance.piCoefficient.decimalValue)
             else {
                 return nil
             }
 
-            return AngleProvenance(constant: constant, piCoefficient: piCoefficient)
+            let exactRational = provenance.piCoefficient.exactRational?.negated()
+            let coefficientState: PiCoefficient
+            if let exactRational {
+                coefficientState = .rational(
+                    exactRational,
+                    decimal: piCoefficient,
+                    isExactDecimal: provenance.piCoefficient.exactDecimalValue != nil,
+                )
+            } else if provenance.piCoefficient.exactDecimalValue != nil {
+                coefficientState = .exactDecimal(piCoefficient)
+            } else {
+                return nil
+            }
+
+            return AngleProvenance(
+                constant: constant,
+                piCoefficient: coefficientState,
+            )
+        }
+
+        /// Converts an exact rational coefficient to Decimal while recording any finite-precision loss.
+        private func decimalRepresentation(
+            of rational: CalculatorExactRational,
+        ) throws -> (value: Decimal, isExact: Bool) {
+            do {
+                let value = try unrounded(
+                    NSDecimalDivide,
+                    Decimal(rational.numerator),
+                    Decimal(rational.denominator),
+                )
+                return (value, true)
+            } catch {
+                return (try decimal(from: rational), false)
+            }
         }
 
         private func decimal(_ value: Double) throws -> Decimal {
