@@ -180,20 +180,61 @@ struct CalculatorFeatureTests {
             try engine.evaluate("tan(π/2)", angleMode: .radians)
         }
         #expect(throws: CalculatorError.domainError) {
-            try engine.evaluate("tan(1.5707963267948966192313216915)", angleMode: .radians)
+            try engine.evaluate("tan(3×π/2)", angleMode: .radians)
         }
         #expect(throws: CalculatorError.domainError) {
-            try engine.evaluate("tan(3×π/2)", angleMode: .radians)
+            try engine.evaluate("tan(-π/2)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(-3×π/2)", angleMode: .radians)
         }
 
         let nearPoleDegrees = try engine.evaluate("tan(89.9999999995)", angleMode: .degrees)
         let nearPoleRadians = try engine.evaluate("tan(1.57079632675)", angleMode: .radians)
         let floatingPointNearPoleRadians = try engine.evaluate("tan(1.5707963267948967)", angleMode: .radians)
+        let decimalPiHalfApproximation = try engine.evaluate(
+            "tan(1.5707963267948966192313216915)",
+            angleMode: .radians,
+        )
+        let roundedPiHalfApproximation = try engine.evaluate("tan(1.5707963268)", angleMode: .radians)
         let beyondPoleDegrees = try engine.evaluate("tan(90.0000000001)", angleMode: .degrees)
         let beyondPoleMagnitude = (Decimal(string: beyondPoleDegrees) ?? 0).magnitude
         #expect((Decimal(string: nearPoleDegrees) ?? 0) > Decimal(100_000_000_000))
         #expect((Decimal(string: nearPoleRadians) ?? 0) > Decimal(10_000_000_000))
         #expect((Decimal(string: floatingPointNearPoleRadians) ?? 0) > Decimal(1_000_000_000_000_000))
+        #expect(Decimal(string: decimalPiHalfApproximation) != nil)
+        #expect(Decimal(string: roundedPiHalfApproximation) != nil)
         #expect(beyondPoleMagnitude > Decimal(100_000_000_000))
+    }
+
+    @Test("Degree tangent poles use the unrounded angle expression")
+    func degreeTangentPoleClassificationIgnoresDisplayRoundingScale() throws {
+        let engine = CalculatorEngine(roundingScale: 0)
+        let roundedNearPole = try engine.evaluate("tan(89.9+0)", angleMode: .degrees)
+        let roundedScientificResult = try engine.evaluate("tan(square(9.5))", angleMode: .degrees)
+
+        #expect(Decimal(string: roundedNearPole) != nil)
+        #expect(Decimal(string: roundedScientificResult) != nil)
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(90)", angleMode: .degrees)
+        }
+    }
+
+    @Test("Radian tangent pole classification ignores display rounding scale")
+    func radianTangentPoleClassificationIgnoresDisplayRoundingScale() throws {
+        let zeroScaleEngine = CalculatorEngine(roundingScale: 0)
+        let oneScaleEngine = CalculatorEngine(roundingScale: 1)
+
+        let zeroScaleOrdinaryAngle = try zeroScaleEngine.evaluate("tan(2)", angleMode: .radians)
+        let oneScaleOrdinaryAngle = try oneScaleEngine.evaluate("tan(1.6)", angleMode: .radians)
+
+        #expect(Decimal(string: zeroScaleOrdinaryAngle) != nil)
+        #expect(Decimal(string: oneScaleOrdinaryAngle) != nil)
+        #expect(throws: CalculatorError.domainError) {
+            try zeroScaleEngine.evaluate("tan(π/2)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try oneScaleEngine.evaluate("tan(π/2)", angleMode: .radians)
+        }
     }
 }
