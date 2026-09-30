@@ -1,0 +1,32 @@
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_712077a572d328 180-181,188-200
+  s_6e45b70b7be182::t_1922c352a67936 168-179,182-187,201-220
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorExactRational.swift
+  s_6e45b70b7be182::t_040c8be2d19f87 39-54
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_4886e5b3a159e1 666-669,673-676,679,690-694
+  s_6e45b70b7be182::t_08a438227ddaed 836-837,847-851,855-856,859-860,868
+  s_6e45b70b7be182::t_1fd20096d74e28 838
+  s_6e45b70b7be182::t_5c7200de0788d9 842-844,936-938
+  s_6e45b70b7be182::t_534918b31c16a2 89,102,105-138,140-150,336
+  s_6e45b70b7be182::t_08a7f007de2da3 96-99
+  s_6e45b70b7be182::t_c81818c504340f 87-88,90,95,103-104,139,151,334-335,337,396-401,403-408,468-470,474-476,561-563,569,644-665,670-672,677-678,680-689,695-698,700-701,703-704,706-739,798-801,832-835,839-841,845-846,852-854,857-858,861,866-867,869,880,883,896,919,923-924,926-930,932-935,939-940,946,948,950-951,953-955,959-960,962,995-996,998-1014
+  s_6e45b70b7be182::t_e1328f9bda912d 564-568,699,702,705
+  s_6e45b70b7be182::t_86e9a128ea8801 925,941-945,949,952,961,976,981-994,997
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d25490aee33de019c651000541e321013e6a5535",
+  "prompts": {},
+  "sessions": {
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
