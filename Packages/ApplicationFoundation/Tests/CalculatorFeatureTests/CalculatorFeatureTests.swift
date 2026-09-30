@@ -237,4 +237,39 @@ struct CalculatorFeatureTests {
             try oneScaleEngine.evaluate("tan(π/2)", angleMode: .radians)
         }
     }
+
+    @Test("Tangent evaluates the same semantic degree angle used for pole classification")
+    func tangentEvaluationUsesSemanticDegreeAngle() throws {
+        let engine = CalculatorEngine()
+        let direct = try engine.evaluate("tan(89.99999999996)", angleMode: .degrees)
+        let composed = try engine.evaluate("tan(89.99999999996+0)", angleMode: .degrees)
+
+        #expect(composed == direct)
+    }
+
+    @Test("Inverse trigonometric results preserve exact tangent pole semantics")
+    func inverseTrigonometricResultsPreserveTangentPoleSemantics() throws {
+        let engine = CalculatorEngine()
+
+        for expression in ["tan(asin(1))", "tan(acos(0))", "tan(atan(1)×2)"] {
+            #expect(throws: CalculatorError.domainError) {
+                try engine.evaluate(expression, angleMode: .degrees)
+            }
+            #expect(throws: CalculatorError.domainError) {
+                try engine.evaluate(expression, angleMode: .radians)
+            }
+        }
+
+        let nearPoleDegrees = try engine.evaluate("tan(asin(0.9999999999))", angleMode: .degrees)
+        let nearPoleRadians = try engine.evaluate("tan(asin(0.9999999999))", angleMode: .radians)
+        #expect(Decimal(string: nearPoleDegrees) != nil)
+        #expect(Decimal(string: nearPoleRadians) != nil)
+    }
+
+    @Test("Inverse trigonometric semantic results ignore display rounding before tangent")
+    func inverseTrigonometricSemanticResultsIgnoreDisplayRounding() throws {
+        let engine = CalculatorEngine(roundingScale: 0)
+        #expect(try engine.evaluate("tan(asin(0.999))", angleMode: .degrees) == "22")
+        #expect(try engine.evaluate("tan(asin(0.999))", angleMode: .radians) == "22")
+    }
 }
