@@ -422,17 +422,17 @@ public struct CalculatorEngine: Sendable {
             case .arcTangent:
                 result = try decimal(angleMode.fromRadians(Foundation.atan(value)))
             case .naturalLogarithm:
-                guard value > 0 else {
+                guard argument.semanticValue > 0 else {
                     throw CalculatorError.domainError
                 }
 
-                result = try decimal(Foundation.log(value))
+                result = try rounded(logarithm(of: argument.semanticValue, isCommon: false))
             case .commonLogarithm:
-                guard value > 0 else {
+                guard argument.semanticValue > 0 else {
                     throw CalculatorError.domainError
                 }
 
-                result = try decimal(Foundation.log10(value))
+                result = try rounded(logarithm(of: argument.semanticValue, isCommon: true))
             case .squareRoot:
                 result = try rounded(squareRootOf: argument.value)
             case .square:
@@ -493,9 +493,9 @@ public struct CalculatorEngine: Sendable {
                     angleMode.fromRadians(Foundation.atan(NSDecimalNumber(decimal: semanticValue).doubleValue)),
                 )
             case .naturalLogarithm:
-                return try semanticDecimal(Foundation.log(NSDecimalNumber(decimal: semanticValue).doubleValue))
+                return try logarithm(of: semanticValue, isCommon: false)
             case .commonLogarithm:
-                return try semanticDecimal(Foundation.log10(NSDecimalNumber(decimal: semanticValue).doubleValue))
+                return try logarithm(of: semanticValue, isCommon: true)
             case .squareRoot:
                 return try? semanticSquareRoot(of: semanticValue)
             case .square:
@@ -1047,6 +1047,31 @@ public struct CalculatorEngine: Sendable {
             try checkedDecimal(fromFoundationValue: value, applyingDisplayRounding: false)
         }
 
+        /// Computes a logarithm from a semantic `Decimal` argument without collapsing deltas near one.
+        ///
+        /// A `Double` resolves values around one no more finely than one unit in the last place
+        /// (about 2.2e-16), so converting an argument such as `1.0000000000000001` directly would
+        /// discard the delta that carries the whole result. The delta is therefore subtracted while
+        /// the value is still a `Decimal` and converted on its own whenever the direct conversion
+        /// cannot carry it, which lets `log1p` keep the low-order digits that the calculator
+        /// displays. Ordinary arguments keep the direct Foundation path.
+        private func logarithm(of argument: Decimal, isCommon: Bool) throws -> Decimal {
+            let delta = try unrounded(NSDecimalSubtract, argument, 1, allowingLossOfPrecision: true)
+            let deltaValue = NSDecimalNumber(decimal: delta).doubleValue
+            let directValue = NSDecimalNumber(decimal: argument).doubleValue
+
+            // A loss of more than one part in 10^8 of the delta counts as material; below that the
+            // direct conversion still carries the delta accurately enough for the display scale.
+            let reconstructionLoss = abs((directValue - 1) - deltaValue)
+            if reconstructionLoss > abs(deltaValue) * 1e-8 {
+                let natural = Foundation.log1p(deltaValue)
+
+                return try semanticDecimal(isCommon ? natural / Foundation.log(10) : natural)
+            }
+
+            return try semanticDecimal(isCommon ? Foundation.log10(directValue) : Foundation.log(directValue))
+        }
+
         private func decimal(_ literal: String) throws -> Decimal {
             guard let value = Decimal(string: literal, locale: Locale(identifier: "en_US_POSIX")) else {
                 throw CalculatorError.overflow
@@ -1273,8 +1298,11 @@ public struct CalculatorEngine: Sendable {
                 }
 
                 switch try compareSquare(of: midpoint, with: normalization.value) {
-                case .orderedAscending,
-                     .orderedSame:
+                case .orderedSame:
+                    // The exact digit comparison proves the midpoint squares to the normalized
+                    // value, so the midpoint is the root itself rather than a bracket endpoint.
+                    return try rounded(multiplying: midpoint, normalization.scalingFactor, toScale: scale)
+                case .orderedAscending:
                     lower = midpoint
                 case .orderedDescending:
                     upper = midpoint

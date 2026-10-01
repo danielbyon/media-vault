@@ -170,6 +170,50 @@ struct CalculatorFeatureTests {
         )
     }
 
+    @Test("Exact digit-comparison midpoints return high-magnitude square roots")
+    func exactHighMagnitudeSquareRootsReturnTheirMidpoints() throws {
+        let engine = CalculatorEngine()
+        let powerOfTenSquare = "9" + String(repeating: "0", count: 56)
+
+        #expect(try engine.evaluate("sqrt(\(powerOfTenSquare))") == "30000000000000000000000000000")
+        #expect(
+            try engine.evaluate("sqrt(99999999999999999980000000000000000001)")
+                == "9999999999999999999",
+        )
+    }
+
+    @Test("Near-one logarithms preserve Decimal deltas for display and composition")
+    func nearOneLogarithmsPreserveDecimalDeltas() throws {
+        let preciseEngine = CalculatorEngine(roundingScale: 20)
+
+        #expect(try preciseEngine.evaluate("ln(1.0000000000000001)") == "0.0000000000000001")
+        #expect(try preciseEngine.evaluate("log10(1.0000000000000001)") == "0.00000000000000004343")
+        #expect(try preciseEngine.evaluate("ln(0.9999999999999999)") == "-0.0000000000000001")
+        #expect(try preciseEngine.evaluate("log10(0.9999999999999999)") == "-0.00000000000000004343")
+        // The double-precision path is exact to the calculator's display precision at the default scale.
+        let defaultEngine = CalculatorEngine()
+        #expect(try defaultEngine.evaluate("ln(e)") == "1")
+        #expect(try preciseEngine.evaluate("log10(100)") == "2")
+
+        let tinyPositive = "0." + String(repeating: "0", count: 109) + "1"
+        #expect(Decimal(string: try preciseEngine.evaluate("ln(\(tinyPositive))")) != nil)
+        #expect(try preciseEngine.evaluate("log10(\(tinyPositive))") == "-110")
+
+        let composedEngine = CalculatorEngine(roundingScale: 10)
+        let composed = try composedEngine.evaluate(
+            "tan(ln(1.0000000000000001)×10000000000000000)",
+            angleMode: .radians,
+        )
+        #expect(composed == (try composedEngine.evaluate("tan(1)", angleMode: .radians)))
+
+        #expect(throws: CalculatorError.domainError) {
+            try preciseEngine.evaluate("ln(0)")
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try preciseEngine.evaluate("log10(-1)")
+        }
+    }
+
     @Test("The smallest Decimal square root rounds without underflow")
     func minimumDecimalSquareRootRoundsToZero() throws {
         let engine = CalculatorEngine()
