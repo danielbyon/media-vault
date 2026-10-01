@@ -1,0 +1,56 @@
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_59e071ec33e31b 557-662
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_5232d7cfcf3b20 1525,1527-1531,1541-1567,1580,1583-1584
+  s_6e45b70b7be182::t_d3b1f9c50e024c 1674-1680,1701
+  s_6e45b70b7be182::t_e0fe365f59725d 1003-1007,1031-1036,1043-1045
+  s_6e45b70b7be182::t_cd409e90dc4d43 633-634
+  s_6e45b70b7be182::t_2e1b3612c62df5 1008
+  s_6e45b70b7be182::t_d1201ad2205616 466,470,478
+  s_6e45b70b7be182::t_93627e559ec4cb 155
+  s_6e45b70b7be182::t_e9ad39a16a8d7b 180-189
+  s_6e45b70b7be182::t_10ba2fdbc07e72 711
+  s_6e45b70b7be182::t_97450f368c8f5d 1037
+  s_6e45b70b7be182::t_fa1e85c9ee6855 1172,1174-1175
+  s_6e45b70b7be182::t_59f15ffef9a203 435-438,440-441,449
+  s_6e45b70b7be182::t_6ab9afd81d4a35 763-767
+  s_6e45b70b7be182::t_774923c5ab3458 378
+  s_6e45b70b7be182::t_c3f14088d96b01 127-131,136,143,150-154,156-158
+  s_6e45b70b7be182::t_3e7089f8b5fa45 648-653,657,659-663,668-710,712-713
+  s_6e45b70b7be182::t_0b7e58e0f2bb47 1421
+  s_6e45b70b7be182::t_c6046905d2f8bc 508,556-559
+  s_6e45b70b7be182::t_691f462f2282bc 783-786,804,808-811,815-818,821-824,827-831
+  s_6e45b70b7be182::t_1abf46aa44bf36 1131-1136,1142-1144
+  s_6e45b70b7be182::t_4f7ba47306b538 1332-1341,1354
+  s_6e45b70b7be182::t_01c94eb8386e0e 1816-1819
+  s_6e45b70b7be182::t_38df188556ce61 714,1652-1673
+  s_6e45b70b7be182::t_28db57ec43a694 17-22
+  s_6e45b70b7be182::t_9cbe4d8a941bc3 571-578,583-632
+  s_6e45b70b7be182::t_dfb49dee53a6ed 968-987
+  s_6e45b70b7be182::t_8db8471a6351ac 1096-1101
+  s_7a6e5a1c75951d::t_79f3ac5f6733fa 715
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f655f3d7cf47b1519ee2c3f2557fdc8077c62887",
+  "prompts": {},
+  "sessions": {
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_7a6e5a1c75951d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0f65d-dd83-72f3-84aa-edf89b8f640e",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
