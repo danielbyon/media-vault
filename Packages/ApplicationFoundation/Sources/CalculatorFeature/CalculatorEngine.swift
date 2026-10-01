@@ -187,6 +187,17 @@ public struct CalculatorEngine: Sendable {
             let angleProvenance: AngleProvenance?
         }
 
+        /// An angle the engine can place on the unit circle exactly.
+        ///
+        /// Twelfths of π carry both closed-form families in one representation: an even number of
+        /// twelfths is a multiple of π/6, and a number divisible by three is a multiple of π/4.
+        /// The remaining twelfths, such as π/12 and 5π/12, have no closed form this calculator
+        /// supports and classify as references the value table does not cover.
+        private struct ExactUnitCircleAngle {
+            /// The angle in twelfths of π, normalized to 0 ..< 24.
+            let twelfths: Int
+        }
+
         private let characters: [Character]
         private var index = 0
         private let roundingScale: Int
@@ -434,7 +445,7 @@ public struct CalculatorEngine: Sendable {
             // from the exact operand instead of the digits that happen to be visible.
             let exactResult = try exactInverseTrigonometricResult(function, argument: operand)
                 ?? exactScalarResult(for: function, operand: operand)
-                ?? exactQuadrantalResult(for: function, argument: argument)
+                ?? exactTrigonometricResult(for: function, argument: argument)
 
             let mathematicalValue: Decimal
             if let exactResult {
@@ -779,85 +790,129 @@ public struct CalculatorEngine: Sendable {
             }
         }
 
-        /// Returns the exact sine or cosine value when the angle is a known quadrant.
-        private func exactQuadrantalResult(
+        /// Returns the exact sine, cosine, or tangent of an angle the engine can place on the
+        /// unit circle exactly.
+        ///
+        /// Classification never compares a floating-point value against a known angle: Degree
+        /// angles come from the semantic Decimal angle reduced modulo a whole turn, and Radian
+        /// angles come from exact π-relative provenance, so the symbolic π/6 qualifies while a
+        /// decimal approximation of it keeps the ordinary Foundation path.
+        private func exactTrigonometricResult(
             for function: Function,
             argument: ParsedValue,
         ) throws -> ExactFunctionResult? {
-            let quadrant: Int?
-            switch angleMode {
-            case .degrees:
-                quadrant = try quadrantIndex(forDegreeAngle: argument.semanticValue)
-            case .radians:
-                guard let provenance = argument.angleProvenance,
-                      provenance.constant == 0
-                else {
-                    return nil
-                }
-                quadrant = quadrantIndex(forPiCoefficient: provenance)
-            }
-
-            guard let quadrant else {
+            guard let angle = try exactUnitCircleAngle(for: argument),
+                  let value = try exactTrigonometricValue(of: function, at: angle)
+            else {
                 return nil
             }
 
-            let value: Decimal?
-            switch function {
-            case .sine:
-                switch quadrant {
-                case 0, 2: value = 0
-                case 1: value = 1
-                case 3: value = -1
-                default: value = nil
-                }
-            case .cosine:
-                switch quadrant {
-                case 0: value = 1
-                case 1, 3: value = 0
-                case 2: value = -1
-                default: value = nil
-                }
-            default:
-                value = nil
-            }
-
-            guard let value else {
-                return nil
-            }
-
+            // The value is a plain scalar: the input angle's π coefficient describes the angle,
+            // not the result, so only the scalar provenance composes into later terms.
             return ExactFunctionResult(
                 value: value,
                 angleProvenance: exactScalarProvenance(for: value),
             )
         }
 
-        /// Finds exact multiples of 90 degrees after reducing the semantic Decimal angle.
-        private func quadrantIndex(forDegreeAngle value: Decimal) throws -> Int? {
-            var reduced = try reducedDegrees(from: value)
-            if reduced < 0 {
-                reduced = try unrounded(NSDecimalAdd, reduced, 360)
-            }
+        /// Classifies the angle of an exact source expression as a whole number of twelfths of π.
+        ///
+        /// Returns nil whenever the engine cannot prove the angle's exact position, which keeps
+        /// approximate inputs on the ordinary trigonometric path.
+        private func exactUnitCircleAngle(for argument: ParsedValue) throws -> ExactUnitCircleAngle? {
+            switch angleMode {
+            case .degrees:
+                return try unitCircleAngle(forDegreeAngle: argument.semanticValue)
+            case .radians:
+                guard let provenance = argument.angleProvenance,
+                      provenance.constant == 0
+                else {
+                    return nil
+                }
 
-            if reduced == 0 { return 0 }
-            if reduced == 90 { return 1 }
-            if reduced == 180 { return 2 }
-            if reduced == 270 { return 3 }
-            return nil
+                return unitCircleAngle(forPiCoefficient: provenance.piCoefficient)
+            }
         }
 
-        /// Computes the quadrant modulo four without converting π coefficients through Double.
-        private func quadrantIndex(forPiCoefficient provenance: AngleProvenance) -> Int? {
-            if let exactPiCoefficient = provenance.piCoefficient.exactRational {
-                return exactPiCoefficient.halfTurnsModuloFour
-            }
-            guard let exactDecimalValue = provenance.piCoefficient.exactDecimalValue else {
+        /// Classifies an exact Degree angle, ignoring angles that no closed-form family covers.
+        ///
+        /// Fifteen degrees is one twelfth of π, so only an exact multiple of fifteen degrees can
+        /// belong to a closed-form family. The angle is read from its decimal digits, which keeps
+        /// the classification independent of how many digits the angle carries and of every
+        /// bounded integer or fraction representation.
+        private func unitCircleAngle(forDegreeAngle value: Decimal) throws -> ExactUnitCircleAngle? {
+            var reduced = try reducedDegrees(from: value)
+            let text = NSDecimalString(&reduced, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.first == "-"
+            let unsignedText = isNegative ? String(text.dropFirst()) : text
+            let components = unsignedText.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
                 return nil
             }
-            return halfTurnsModuloFour(for: exactDecimalValue)
+
+            var fraction = components.count == 2 ? String(components[1]) : ""
+            while fraction.last == "0" {
+                fraction.removeLast()
+            }
+            guard fraction.isEmpty else {
+                return nil
+            }
+
+            var degrees = 0
+            for digit in components.first ?? "0" {
+                guard let value = digit.wholeNumberValue else {
+                    return nil
+                }
+
+                degrees = (degrees * 10 + value) % 360
+            }
+            guard degrees.isMultiple(of: 15) else {
+                return nil
+            }
+
+            let twelfths = degrees / 15
+            return ExactUnitCircleAngle(twelfths: isNegative ? (24 - twelfths) % 24 : twelfths)
         }
 
-        /// Determines whether a finite Decimal coefficient is an exact integer or half-integer.
-        private func halfTurnsModuloFour(for coefficient: Decimal) -> Int? {
+        /// Classifies an exact π coefficient, ignoring coefficients Decimal only approximates.
+        private func unitCircleAngle(
+            forPiCoefficient coefficient: PiCoefficient,
+        ) -> ExactUnitCircleAngle? {
+            if let rational = coefficient.exactRational {
+                return unitCircleAngle(forPiCoefficient: rational)
+            }
+
+            guard let decimalValue = coefficient.exactDecimalValue else {
+                return nil
+            }
+
+            return unitCircleAngle(forPiCoefficient: decimalValue)
+        }
+
+        /// Classifies an exact rational π coefficient as a whole number of twelfths of π.
+        ///
+        /// Twelve twelfths make one π, so the coefficient classifies only when it is exactly twelve
+        /// times a whole number of twelfths. The exact multiplication cancels and bounds the
+        /// fraction, so a coefficient whose product cannot be represented keeps the ordinary path.
+        private func unitCircleAngle(
+            forPiCoefficient coefficient: CalculatorExactRational,
+        ) -> ExactUnitCircleAngle? {
+            guard let scaled = coefficient.multiplied(by: .integer(12)),
+                  scaled.denominator == 1
+            else {
+                return nil
+            }
+
+            return ExactUnitCircleAngle(twelfths: Int((scaled.numerator % 24 + 24) % 24))
+        }
+
+        /// Classifies an exact Decimal π coefficient, including magnitudes beyond `Int64`.
+        ///
+        /// Twelve times such a coefficient is a whole number only when its fraction is one of the
+        /// quarter steps, so the low-order digits decide the fraction while the integer parity
+        /// decides the remaining half turn. Neither step materializes the coefficient as an
+        /// integer, which keeps coefficients wider than `Int64` classifiable.
+        private func unitCircleAngle(forPiCoefficient coefficient: Decimal) -> ExactUnitCircleAngle? {
             var coefficient = coefficient
             let text = NSDecimalString(&coefficient, Locale(identifier: "en_US_POSIX"))
             let isNegative = text.first == "-"
@@ -871,7 +926,18 @@ public struct CalculatorEngine: Sendable {
             while fraction.last == "0" {
                 fraction.removeLast()
             }
-            guard fraction.isEmpty || fraction == "5" else {
+
+            let fractionTwelfths: Int
+            switch fraction {
+            case "":
+                fractionTwelfths = 0
+            case "25":
+                fractionTwelfths = 3
+            case "5":
+                fractionTwelfths = 6
+            case "75":
+                fractionTwelfths = 9
+            default:
                 return nil
             }
 
@@ -880,12 +946,75 @@ public struct CalculatorEngine: Sendable {
                 guard let value = digit.wholeNumberValue else {
                     return nil
                 }
+
                 integerParity = (integerParity * 10 + value) % 2
             }
 
-            let magnitude = (integerParity * 2 + (fraction == "5" ? 1 : 0)) % 4
-            let signed = isNegative ? -magnitude : magnitude
-            return (signed + 4) % 4
+            let twelfths = (integerParity * 12 + fractionTwelfths) % 24
+            return ExactUnitCircleAngle(twelfths: isNegative ? (24 - twelfths) % 24 : twelfths)
+        }
+
+        /// Derives the exact value of a trigonometric function at a classified angle.
+        ///
+        /// Every reference angle is √radical / 2: zero degrees is √0 / 2, thirty degrees is √1 / 2,
+        /// forty-five degrees is √2 / 2, sixty degrees is √3 / 2, and ninety degrees is √4 / 2. One
+        /// Decimal square root therefore covers both closed-form families without passing a known
+        /// angle through `Double`. A reference outside that table, such as π/12 or 5π/12,
+        /// has no closed form this calculator supports.
+        private func exactTrigonometricValue(
+            of function: Function,
+            at angle: ExactUnitCircleAngle,
+        ) throws -> Decimal? {
+            let quadrant = angle.twelfths / 6
+            let remainder = angle.twelfths % 6
+            let reference = quadrant.isMultiple(of: 2) ? remainder : 6 - remainder
+
+            let radical: Int
+            switch reference {
+            case 0:
+                radical = 0
+            case 2:
+                radical = 1
+            case 3:
+                radical = 2
+            case 4:
+                radical = 3
+            case 6:
+                radical = 4
+            default:
+                return nil
+            }
+
+            let sine = try halfRadical(radical, sign: quadrant < 2 ? 1 : -1)
+            let cosine = try halfRadical(4 - radical, sign: quadrant == 1 || quadrant == 2 ? -1 : 1)
+
+            switch function {
+            case .sine:
+                return sine
+            case .cosine:
+                return cosine
+            case .tangent:
+                guard cosine != 0 else {
+                    // An exact pole belongs to the domain-error path rather than to a value.
+                    throw CalculatorError.domainError
+                }
+
+                return try unrounded(NSDecimalDivide, sine, cosine, allowingLossOfPrecision: true)
+            default:
+                return nil
+            }
+        }
+
+        /// Computes the signed half of a small square root at the precision `Decimal` carries.
+        ///
+        /// Every reference radical is below four, so its root is below two and thirty-seven
+        /// fractional digits already hold all thirty-eight significant digits `Decimal`
+        /// supports. A wider scale cannot add precision to the closed form; the value is
+        /// rounded to the configured display scale after this calculation.
+        private func halfRadical(_ radical: Int, sign: Int) throws -> Decimal {
+            let root = try squareRoot(of: Decimal(radical), toScale: 37)
+            let half = try unrounded(NSDecimalDivide, root, 2, allowingLossOfPrecision: true)
+            return sign < 0 ? try negateExactly(half) : half
         }
 
         /// Reduces an angle with Decimal arithmetic and does not apply display rounding.
@@ -924,33 +1053,17 @@ public struct CalculatorEngine: Sendable {
 
         /// Detects exact tangent poles while keeping nearby Decimal angles finite.
         ///
-        /// The parser rounds arithmetic at the calculator's display scale, so this also recognizes
-        /// the rounded π/2 value produced by `tan(π/2)` and its periodic equivalents.
+        /// The parser rounds arithmetic at the calculator's display scale, so the classification
+        /// reads the semantic angle rather than the displayed digits: a symbolic π/2 keeps its
+        /// exact provenance, while a decimal approximation of the same magnitude stays an ordinary
+        /// finite angle. A tangent pole is an odd quarter turn, which is six of the twenty-four
+        /// twelfths of π that a full turn contains.
         private func isTangentPole(for angle: ParsedValue) throws -> Bool {
-            switch angleMode {
-            case .degrees:
-                var reduced = try reducedDegrees(from: angle.semanticValue)
-                while reduced >= 180 {
-                    reduced = try unrounded(NSDecimalSubtract, reduced, 180)
-                }
-                while reduced <= -180 {
-                    reduced = try unrounded(NSDecimalAdd, reduced, 180)
-                }
-
-                let magnitude = reduced < 0 ? -reduced : reduced
-                return magnitude == 90
-            case .radians:
-                guard let provenance = angle.angleProvenance,
-                      provenance.constant == 0
-                else {
-                    return false
-                }
-
-                guard let quadrant = quadrantIndex(forPiCoefficient: provenance) else {
-                    return false
-                }
-                return quadrant % 2 == 1
+            guard let classification = try exactUnitCircleAngle(for: angle) else {
+                return false
             }
+
+            return classification.twelfths % 12 == 6
         }
 
         private func unrounded(_ operation: DecimalOperation, _ lhs: Decimal?, _ rhs: Decimal?) -> Decimal? {

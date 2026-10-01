@@ -36,22 +36,6 @@ struct CalculatorExactRational: Equatable {
         denominator == 1 && numerator % 2 != 0
     }
 
-    /// Returns the exact quadrant index for this π coefficient when it is a half-integer.
-    var halfTurnsModuloFour: Int? {
-        let quotient = numerator / denominator
-        let remainder = numerator % denominator
-        let halfTurn: Int64
-        if remainder == 0 {
-            halfTurn = (quotient % 2) * 2
-        } else if denominator.isMultiple(of: 2), remainder.magnitude == UInt64(denominator / 2) {
-            halfTurn = (quotient % 2) * 2 + (numerator < 0 ? -1 : 1)
-        } else {
-            return nil
-        }
-
-        return Int((halfTurn % 4 + 4) % 4)
-    }
-
     static func integer(_ value: Int64) -> Self {
         Self(uncheckedNumerator: value, denominator: 1)
     }

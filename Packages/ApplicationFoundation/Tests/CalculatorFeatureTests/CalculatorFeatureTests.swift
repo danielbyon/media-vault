@@ -270,6 +270,140 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("cos(1.57079632679489661923)", angleMode: .radians) != "0")
     }
 
+    @Test("Common exact angles return closed-form values at high display precision")
+    func commonExactAnglesReturnClosedFormValues() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        // Degree angles are classified from the semantic Decimal angle reduced modulo a whole
+        // turn, so every quadrant and periodic equivalent shares the same closed form.
+        let degreeCases = [
+            ("sin(30)", "0.5"),
+            ("cos(60)", "0.5"),
+            ("tan(45)", "1"),
+            ("sin(-30)", "-0.5"),
+            ("cos(-60)", "0.5"),
+            ("tan(-45)", "-1"),
+            ("sin(150)", "0.5"),
+            ("cos(120)", "-0.5"),
+            ("tan(135)", "-1"),
+            ("sin(210)", "-0.5"),
+            ("cos(240)", "-0.5"),
+            ("tan(225)", "1"),
+            ("sin(330)", "-0.5"),
+            ("cos(300)", "0.5"),
+            ("tan(315)", "-1"),
+            ("sin(390)", "0.5"),
+            ("cos(420)", "0.5"),
+            ("sin(450)", "1"),
+            ("cos(-90)", "0"),
+            ("sin(360)", "0"),
+            ("cos(720)", "1"),
+        ]
+        for (expression, expected) in degreeCases {
+            #expect(try engine.evaluate(expression, angleMode: .degrees) == expected)
+        }
+
+        // √2 / 2, √3 / 2, and √3 come from the Decimal square root rather than from an angle
+        // converted through Double.
+        let degreeClosedForms = [
+            ("sin(45)", "0.7071067811865475244"),
+            ("cos(45)", "0.7071067811865475244"),
+            ("sin(60)", "0.86602540378443864676"),
+            ("cos(30)", "0.86602540378443864676"),
+            ("sin(120)", "0.86602540378443864676"),
+            ("cos(150)", "-0.86602540378443864676"),
+            ("tan(30)", "0.57735026918962576451"),
+            ("tan(60)", "1.73205080756887729353"),
+        ]
+        for (expression, expected) in degreeClosedForms {
+            #expect(try engine.evaluate(expression, angleMode: .degrees) == expected)
+        }
+
+        // The same closed forms follow from symbolic π radians, including periodic and negative
+        // equivalents of the reference angles.
+        let radianCases = [
+            ("sin(π/6)", "0.5"),
+            ("cos(π/3)", "0.5"),
+            ("tan(π/4)", "1"),
+            ("sin(-π/6)", "-0.5"),
+            ("cos(-π/3)", "0.5"),
+            ("tan(-π/4)", "-1"),
+            ("sin(13×π/6)", "0.5"),
+            ("cos(7×π/3)", "0.5"),
+            ("sin(7×π/6)", "-0.5"),
+            ("sin(11×π/6)", "-0.5"),
+            ("cos(5×π/3)", "0.5"),
+            ("tan(5×π/4)", "1"),
+            ("sin(π/4)", "0.7071067811865475244"),
+            ("cos(π/4)", "0.7071067811865475244"),
+            ("sin(π/3)", "0.86602540378443864676"),
+            ("cos(π/6)", "0.86602540378443864676"),
+            ("tan(π/3)", "1.73205080756887729353"),
+            ("tan(π/6)", "0.57735026918962576451"),
+        ]
+        for (expression, expected) in radianCases {
+            #expect(try engine.evaluate(expression, angleMode: .radians) == expected)
+        }
+
+        // The closed forms hold at any display scale the engine supports.
+        let wideEngine = CalculatorEngine(roundingScale: 30)
+        #expect(try wideEngine.evaluate("sin(45)", angleMode: .degrees) == "0.707106781186547524400844362105")
+        #expect(try wideEngine.evaluate("sin(60)", angleMode: .degrees) == "0.866025403784438646763723170753")
+        #expect(try wideEngine.evaluate("cos(π/4)", angleMode: .radians) == "0.707106781186547524400844362105")
+        #expect(try wideEngine.evaluate("tan(π/6)", angleMode: .radians) == "0.577350269189625764509148780502")
+    }
+
+    @Test("Exact angle results compose as scalars while approximations stay ordinary")
+    func exactAngleResultsComposeAsScalars() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        // A trigonometric result is a scalar: the input angle's π coefficient describes the
+        // angle, not the result, so multiplying the result by π reaches the pole described by
+        // the scalar instead of the original angle's coefficient.
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(sin(π/6)×π)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(cos(π/3)×π)", angleMode: .radians)
+        }
+        #expect(try engine.evaluate("sin(π/6)×6", angleMode: .radians) == "3")
+        #expect(try engine.evaluate("sin(π/6)+sin(π/6)", angleMode: .radians) == "1")
+
+        // Degree classification reads the semantic angle, so an angle that only rounds to a
+        // common angle keeps the ordinary trigonometric path.
+        #expect(try engine.evaluate("sin(30.0000000001)", angleMode: .degrees) == "0.5000000000015113")
+        #expect(try engine.evaluate("sin(29.9999999999999999)", angleMode: .degrees) == "0.49999999999999994")
+
+        // Tangent poles are read from the same reduced semantic angle, so a pole stays a domain
+        // error however many digits its exact spelling carries.
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(90.00000000000000000000000000000000000000)", angleMode: .degrees)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(-270.0000000000)", angleMode: .degrees)
+        }
+        #expect(
+            Decimal(
+                string: try engine.evaluate("tan(89.99999999999999999999999999999999999999)", angleMode: .degrees),
+            ) != nil,
+        )
+
+        // Angles outside the supported families keep the ordinary trigonometric path.
+        #expect(try engine.evaluate("sin(15)", angleMode: .degrees) == "0.25881904510252074")
+        #expect(try engine.evaluate("sin(105)", angleMode: .degrees) == "0.9659258262890683")
+        #expect(try engine.evaluate("tan(75)", angleMode: .degrees) == "3.7320508075688776")
+        #expect(try engine.evaluate("sin(π/12)", angleMode: .radians) == "0.2588190451025208")
+
+        // A decimal approximation of a symbolic angle never acquires exactness: the symbolic form
+        // lands on an exact result, while the same value typed out stays an approximate angle.
+        #expect(try engine.evaluate("tan(π/6×6)", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("tan(0.52359877559829887308×6)", angleMode: .radians) != "0")
+        #expect(try engine.evaluate("tan(π/4×4)", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("tan(0.78539816339744830962×4)", angleMode: .radians) != "0")
+        #expect(try engine.evaluate("cos(1.04719755119659774615)", angleMode: .radians) == "0.4999999999999999")
+        #expect(try engine.evaluate("tan(0.78539816339744830962)", angleMode: .radians) == "0.9999999999999999")
+    }
+
     @Test("Large Decimal multiples retain exact pi-turn classification")
     func largePiCoefficientsPreserveQuadrantalProvenance() throws {
         let engine = CalculatorEngine()
