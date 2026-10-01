@@ -554,4 +554,110 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("asin(sin(30))", angleMode: .degrees) == "30")
         #expect(try engine.evaluate("tan(atan(1))", angleMode: .degrees) == "1")
     }
+
+    @Test("Exact scalar scientific results keep the symbolic angle they compose with")
+    func exactScalarScientificResultsKeepSymbolicAngles() throws {
+        let engine = CalculatorEngine()
+        let exactZeroAdditions = [
+            "tan(π/2+sin(0))",
+            "tan(π/2+cos(π/2))",
+            "tan(π/2+asin(0))",
+            "tan(π/2+atan(0))",
+            "tan(π/2+acos(1))",
+            "tan(π/2+sqrt(0))",
+            "tan(π/2+square(0))",
+            "tan(π/2+ln(1))",
+            "tan(π/2+log10(1))",
+        ]
+
+        for expression in exactZeroAdditions {
+            #expect(throws: CalculatorError.domainError) {
+                try engine.evaluate(expression, angleMode: .radians)
+            }
+        }
+
+        // A function result that only rounds toward zero is not exact, so the pole stays finite.
+        #expect(
+            try engine.evaluate("tan(π/2+sin(0.0000000001))", angleMode: .radians)
+                == "-10000027500.366405",
+        )
+
+        // Degree mode keeps the exactness in the semantic angle rather than in provenance.
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(90+sin(0))", angleMode: .degrees)
+        }
+    }
+
+    @Test("The e constant carries the full Decimal precision of the engine")
+    func eulerConstantCarriesFullDecimalPrecision() throws {
+        let preciseEngine = CalculatorEngine(roundingScale: 30)
+
+        #expect(try preciseEngine.evaluate("e") == "2.718281828459045235360287471353")
+        #expect(try preciseEngine.evaluate("e", angleMode: .radians) == "2.718281828459045235360287471353")
+        #expect(try CalculatorEngine().evaluate("e") == "2.7182818285")
+        #expect(try CalculatorEngine().evaluate("ln(e)") == "1")
+    }
+
+    @Test("Symbolic pi angles reduce from provenance before materializing")
+    func symbolicPiAnglesReduceFromProvenance() throws {
+        let engine = CalculatorEngine()
+        let largeCoefficient = "100000000000000000000"
+
+        #expect(try engine.evaluate("tan(π×\(largeCoefficient)+π/4)", angleMode: .radians) == "1")
+        #expect(try engine.evaluate("tan(π×\(largeCoefficient)-π/4)", angleMode: .radians) == "-1")
+        #expect(try engine.evaluate("sin(π×\(largeCoefficient)+π/2)", angleMode: .radians) == "1")
+        #expect(try engine.evaluate("sin(π×\(largeCoefficient)+π/6)", angleMode: .radians) == "0.5")
+        #expect(try engine.evaluate("cos(π×\(largeCoefficient))", angleMode: .radians) == "1")
+        #expect(try engine.evaluate("cos(π×\(largeCoefficient)+π)", angleMode: .radians) == "-1")
+        #expect(try engine.evaluate("sin(π×\(largeCoefficient)+π)", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("sin(-π×\(largeCoefficient)+π/2)", angleMode: .radians) == "1")
+        #expect(try engine.evaluate("cos(-π×\(largeCoefficient))", angleMode: .radians) == "1")
+
+        // Nonquadrantal phases keep the phase of the small-angle form of the same expression.
+        #expect(
+            try engine.evaluate("tan(π×\(largeCoefficient)+π/3)", angleMode: .radians)
+                == (try engine.evaluate("tan(π/3)", angleMode: .radians)),
+        )
+        #expect(
+            try engine.evaluate("tan(-π×\(largeCoefficient)+π/3)", angleMode: .radians)
+                == (try engine.evaluate("tan(π/3)", angleMode: .radians)),
+        )
+        #expect(
+            try engine.evaluate("sin(π×\(largeCoefficient)+π/3)", angleMode: .radians)
+                == (try engine.evaluate("sin(π/3)", angleMode: .radians)),
+        )
+
+        // An exact numeric constant keeps its own phase next to a large symbolic coefficient.
+        #expect(
+            try engine.evaluate("tan(π×\(largeCoefficient)+5)", angleMode: .radians)
+                == (try engine.evaluate("tan(5)", angleMode: .radians)),
+        )
+    }
+
+    @Test("Precision-limit square roots reason about Decimal ULP spacing")
+    func precisionLimitSquareRootsReasonAboutDecimalULPSpacing() throws {
+        let engine = CalculatorEngine()
+        let zeros = String(repeating: "0", count: 77)
+
+        #expect(try engine.evaluate("sqrt(1\(zeros))") == "316227766016837933199889354443271853372")
+        #expect(try engine.evaluate("sqrt(10^77)") == "316227766016837933199889354443271853372")
+        #expect(try engine.evaluate("sqrt(2\(zeros))") == "447213595499957939281834733746255247090")
+        #expect(try engine.evaluate("sqrt(3\(zeros))") == "547722557505166113456969782800802133950")
+    }
+
+    @Test("Negative half powers share the normalization-aware root")
+    func negativeHalfPowersShareTheNormalizationAwareRoot() throws {
+        let engine = CalculatorEngine()
+        let tinyBase = "0." + String(repeating: "0", count: 41) + "1"
+
+        #expect(try engine.evaluate("\(tinyBase)^-0.5") == "1000000000000000000000")
+        #expect(try engine.evaluate("2×\(tinyBase)^-0.5") == "2000000000000000000000")
+        #expect(try engine.evaluate("4^-0.5") == "0.5")
+        #expect(throws: CalculatorError.divisionByZero) {
+            try engine.evaluate("0^-0.5")
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("(-4)^-0.5")
+        }
+    }
 }
