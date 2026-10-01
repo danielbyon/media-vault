@@ -7,6 +7,13 @@
 
 import Foundation
 
+/// The calculator's π at the full precision `Foundation.Decimal` can carry.
+///
+/// `Decimal` keeps at most 38 significant digits, so a longer literal would be rounded away.
+/// The π constant, exact π-relative semantic values and Radian range reduction all read this
+/// single representation, which keeps those calculations from drifting apart.
+private let calculatorPiDigits = "3.1415926535897932384626433832795028842"
+
 /// Evaluates calculator expressions with deterministic decimal rounding.
 public struct CalculatorEngine: Sendable {
     private let roundingScale: Int
@@ -328,7 +335,7 @@ public struct CalculatorEngine: Sendable {
             }
 
             if consume("π") {
-                let value = try decimal("3.141592653589793238462643383")
+                let value = try piValue()
                 return ParsedValue(
                     value: value,
                     semanticValue: value,
@@ -377,134 +384,93 @@ public struct CalculatorEngine: Sendable {
             _ function: Function,
             to argument: ParsedValue,
         ) throws -> ParsedValue {
+            let operand = argument.semanticValue
             switch function {
             case .arcSine,
                  .arcCosine:
-                guard argument.value >= -1, argument.value <= 1,
-                      argument.semanticValue >= -1, argument.semanticValue <= 1
-                else {
+                guard operand >= -1, operand <= 1 else {
                     throw CalculatorError.domainError
                 }
-
+            case .naturalLogarithm,
+                 .commonLogarithm:
+                guard operand > 0 else {
+                    throw CalculatorError.domainError
+                }
             default:
                 break
             }
 
-            let value = NSDecimalNumber(decimal: argument.value).doubleValue
-            let result: Decimal
+            // Each scientific function produces one mathematical value from the semantic operand;
+            // only the value handed to the display is rounded. Nested functions therefore compose
+            // from the exact operand instead of the digits that happen to be visible.
+            let exactInverseResult = try exactInverseTrigonometricResult(function, argument: operand)
+            let mathematicalValue: Decimal
+            if let exactInverseResult {
+                mathematicalValue = exactInverseResult.value
+            } else if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
+                mathematicalValue = exactResult
+            } else {
+                mathematicalValue = try computedValue(for: function, operand: operand, argument: argument)
+            }
+
+            return ParsedValue(
+                value: try rounded(mathematicalValue),
+                semanticValue: mathematicalValue,
+                angleProvenance: exactInverseResult?.angleProvenance,
+            )
+        }
+
+        /// Computes the mathematical value of a scientific function at a semantic operand.
+        ///
+        /// The result is not display-rounded, so composition through `ParsedValue.semanticValue`
+        /// keeps as much precision as the underlying calculation provides.
+        private func computedValue(
+            for function: Function,
+            operand: Decimal,
+            argument: ParsedValue,
+        ) throws -> Decimal {
+            let operandValue = NSDecimalNumber(decimal: operand).doubleValue
             switch function {
             case .sine:
-                if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
-                    result = exactResult
-                } else {
-                    let input = try trigonometricArgument(from: argument.value)
-                    result = try decimal(Foundation.sin(radians(from: input)))
-                }
+                return try semanticDecimal(
+                    Foundation.sin(radians(from: try trigonometricArgument(from: operand))),
+                )
             case .cosine:
-                if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
-                    result = exactResult
-                } else {
-                    let input = try trigonometricArgument(from: argument.value)
-                    result = try decimal(Foundation.cos(radians(from: input)))
-                }
+                return try semanticDecimal(
+                    Foundation.cos(radians(from: try trigonometricArgument(from: operand))),
+                )
             case .tangent:
                 guard try !isTangentPole(for: argument) else {
                     throw CalculatorError.domainError
                 }
 
-                let input = try trigonometricArgument(from: argument.semanticValue)
-                let angle = radians(from: input)
-                result = try decimal(Foundation.tan(angle))
+                return try semanticDecimal(
+                    Foundation.tan(radians(from: try trigonometricArgument(from: operand))),
+                )
             case .arcSine:
-                result = try decimal(angleMode.fromRadians(Foundation.asin(value)))
+                return try semanticDecimal(angleMode.fromRadians(Foundation.asin(operandValue)))
             case .arcCosine:
-                result = try decimal(angleMode.fromRadians(Foundation.acos(value)))
+                return try semanticDecimal(angleMode.fromRadians(Foundation.acos(operandValue)))
             case .arcTangent:
-                result = try decimal(angleMode.fromRadians(Foundation.atan(value)))
+                return try semanticDecimal(angleMode.fromRadians(Foundation.atan(operandValue)))
             case .naturalLogarithm:
-                guard argument.semanticValue > 0 else {
-                    throw CalculatorError.domainError
-                }
-
-                result = try rounded(logarithm(of: argument.semanticValue, isCommon: false))
+                return try logarithm(of: operand, isCommon: false)
             case .commonLogarithm:
-                guard argument.semanticValue > 0 else {
-                    throw CalculatorError.domainError
+                return try logarithm(of: operand, isCommon: true)
+            case .squareRoot:
+                return try semanticSquareRoot(of: operand)
+            case .square:
+                return try unrounded(NSDecimalMultiply, operand, operand, allowingLossOfPrecision: true)
+            case .reciprocal:
+                guard operand != 0 else {
+                    throw CalculatorError.divisionByZero
                 }
 
-                result = try rounded(logarithm(of: argument.semanticValue, isCommon: true))
-            case .squareRoot:
-                result = try rounded(squareRootOf: argument.value)
-            case .square:
-                result = try rounded(multiplying: argument.value, argument.value)
-            case .reciprocal:
-                result = try rounded(dividing: 1, argument.value)
+                return try unrounded(NSDecimalDivide, 1, operand, allowingLossOfPrecision: true)
             }
-
-            let exactInverseResult = try exactInverseTrigonometricResult(
-                function,
-                argument: argument.semanticValue,
-            )
-            let semanticValue: Decimal
-            if let exactInverseResult {
-                semanticValue = exactInverseResult.value
-            } else if let functionResult = try semanticFunctionResult(function, argument: argument) {
-                semanticValue = functionResult
-            } else {
-                semanticValue = result
-            }
-
-            return ParsedValue(
-                value: result,
-                semanticValue: semanticValue,
-                angleProvenance: exactInverseResult?.angleProvenance,
-            )
         }
 
         /// Computes the function result used by later expression terms without display rounding.
-        private func semanticFunctionResult(_ function: Function, argument: ParsedValue) throws -> Decimal? {
-            let semanticValue = argument.semanticValue
-            switch function {
-            case .sine:
-                if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
-                    return exactResult
-                }
-                let input = try trigonometricArgument(from: semanticValue)
-                return try semanticDecimal(Foundation.sin(radians(from: input)))
-            case .cosine:
-                if let exactResult = try exactQuadrantalResult(for: function, argument: argument) {
-                    return exactResult
-                }
-                let input = try trigonometricArgument(from: semanticValue)
-                return try semanticDecimal(Foundation.cos(radians(from: input)))
-            case .tangent:
-                let input = try trigonometricArgument(from: semanticValue)
-                return try semanticDecimal(Foundation.tan(radians(from: input)))
-            case .arcSine:
-                return try semanticDecimal(
-                    angleMode.fromRadians(Foundation.asin(NSDecimalNumber(decimal: semanticValue).doubleValue)),
-                )
-            case .arcCosine:
-                return try semanticDecimal(
-                    angleMode.fromRadians(Foundation.acos(NSDecimalNumber(decimal: semanticValue).doubleValue)),
-                )
-            case .arcTangent:
-                return try semanticDecimal(
-                    angleMode.fromRadians(Foundation.atan(NSDecimalNumber(decimal: semanticValue).doubleValue)),
-                )
-            case .naturalLogarithm:
-                return try logarithm(of: semanticValue, isCommon: false)
-            case .commonLogarithm:
-                return try logarithm(of: semanticValue, isCommon: true)
-            case .squareRoot:
-                return try? semanticSquareRoot(of: semanticValue)
-            case .square:
-                return try? unrounded(NSDecimalMultiply, semanticValue, semanticValue)
-            case .reciprocal:
-                return try? unrounded(NSDecimalDivide, 1, semanticValue)
-            }
-        }
-
         /// Retains exact π-relative results for inverse-trigonometric values with known forms.
         private func exactInverseTrigonometricResult(
             _ function: Function,
@@ -568,7 +534,7 @@ public struct CalculatorEngine: Sendable {
                         isExactDecimal: isExactDecimal,
                     ),
                 )
-                let pi = try decimal("3.141592653589793238462643383")
+                let pi = try piValue()
                 return (
                     try unrounded(NSDecimalMultiply, pi, coefficient, allowingLossOfPrecision: true),
                     provenance,
@@ -638,8 +604,28 @@ public struct CalculatorEngine: Sendable {
         /// quotient by the period, which could erase the low-order phase at Decimal precision.
         /// This control arithmetic intentionally does not use the calculator display scale.
         private func reducedRadians(from value: Decimal) throws -> Decimal {
-            let period = try decimal("3.141592653589793238462643383") * 2
+            let period = try piValue() * 2
+            try requireSufficientPhasePrecision(for: value, modulo: period)
             return try reducedRadians(from: value, modulo: period)
+        }
+
+        /// The calculator's π value.
+        private func piValue() throws -> Decimal {
+            try decimal(calculatorPiDigits)
+        }
+
+        /// Rejects Radian arguments whose phase cannot be reduced to the requested display scale.
+        ///
+        /// `Decimal` carries 38 significant digits, so reducing an argument of magnitude `m`
+        /// leaves a phase uncertainty of roughly `m × 10⁻³⁷`. Reduction is only trusted while
+        /// that uncertainty stays three orders of magnitude below the first digit the calculator
+        /// displays away from zero; larger arguments report overflow instead of a numerically
+        /// unreliable result. Arguments shorter than one full period need no reduction at all.
+        private func requireSufficientPhasePrecision(for value: Decimal, modulo period: Decimal) throws {
+            let limit = try decimal("1e\(34 - max(roundingScale, 0))")
+            guard value.magnitude < period || value.magnitude < limit else {
+                throw CalculatorError.overflow
+            }
         }
 
         /// Returns the exact sine or cosine value when the angle is a known quadrant.

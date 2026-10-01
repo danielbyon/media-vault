@@ -471,4 +471,87 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("tan(asin(0.999))", angleMode: .degrees) == "22")
         #expect(try engine.evaluate("tan(asin(0.999))", angleMode: .radians) == "22")
     }
+
+    @Test("Radian reduction keeps enough phase precision for large numeric arguments")
+    func radianReductionKeepsPhasePrecisionForLargeArguments() throws {
+        let engine = CalculatorEngine()
+        let largeAngle = "100000000000000000000"
+
+        #expect(try engine.evaluate("sin(\(largeAngle))", angleMode: .radians) == "-0.6452512853")
+        #expect(try engine.evaluate("cos(\(largeAngle))", angleMode: .radians) == "0.7639704044")
+        #expect(try engine.evaluate("tan(\(largeAngle))", angleMode: .radians) == "-0.844602463")
+        #expect(try engine.evaluate("sin(\(largeAngle))", angleMode: .degrees) == "-0.984807753")
+    }
+
+    @Test("Radian arguments beyond the guaranteed reduction range report overflow")
+    func radianArgumentsBeyondTheGuaranteedRangeReportOverflow() {
+        let engine = CalculatorEngine()
+        let beyondRange = "1000000000000000000000000000000"
+
+        #expect(throws: CalculatorError.overflow) {
+            try engine.evaluate("sin(\(beyondRange))", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.overflow) {
+            try engine.evaluate("cos(\(beyondRange))", angleMode: .radians)
+        }
+    }
+
+    @Test("Exact inverse trigonometric results drive the displayed value at high precision")
+    func exactInverseTrigonometryDrivesTheDisplayedValue() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        let degreeCases = [
+            ("asin(0.5)", "30"),
+            ("asin(-0.5)", "-30"),
+            ("asin(1)", "90"),
+            ("asin(-1)", "-90"),
+            ("acos(0.5)", "60"),
+            ("acos(-0.5)", "120"),
+            ("acos(0)", "90"),
+            ("acos(1)", "0"),
+            ("acos(-1)", "180"),
+            ("atan(1)", "45"),
+            ("atan(-1)", "-45"),
+            ("atan(0)", "0"),
+        ]
+        for (expression, expected) in degreeCases {
+            #expect(try engine.evaluate(expression, angleMode: .degrees) == expected)
+        }
+
+        let radianCases = [
+            ("asin(0.5)", "0.52359877559829887308"),
+            ("asin(-0.5)", "-0.52359877559829887308"),
+            ("asin(1)", "1.57079632679489661923"),
+            ("asin(-1)", "-1.57079632679489661923"),
+            ("acos(0.5)", "1.04719755119659774615"),
+            ("acos(-0.5)", "2.09439510239319549231"),
+            ("acos(0)", "1.57079632679489661923"),
+            ("acos(1)", "0"),
+            ("acos(-1)", "3.14159265358979323846"),
+            ("atan(1)", "0.78539816339744830962"),
+            ("atan(-1)", "-0.78539816339744830962"),
+            ("atan(0)", "0"),
+        ]
+        for (expression, expected) in radianCases {
+            #expect(try engine.evaluate(expression, angleMode: .radians) == expected)
+        }
+
+        // Inputs outside the exact table keep the ordinary double-precision result.
+        #expect(try engine.evaluate("asin(0.4999999999)", angleMode: .degrees) == "29.999999993384055")
+        #expect(try engine.evaluate("asin(0.4999999999)", angleMode: .radians) == "0.5235987754828288")
+    }
+
+    @Test("Scientific functions compose from the semantic operand")
+    func scientificFunctionsComposeFromSemanticOperands() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("square(sqrt(2))") == "2")
+        #expect(try engine.evaluate("reciprocal(reciprocal(3))") == "3")
+        #expect(try engine.evaluate("reciprocal(square(0.000001))") == "1000000000000")
+        #expect(try engine.evaluate("sqrt(square(7))") == "7")
+        #expect(try engine.evaluate("log10(square(10))") == "2")
+        #expect(try engine.evaluate("sin(asin(0.5))", angleMode: .degrees) == "0.5")
+        #expect(try engine.evaluate("asin(sin(30))", angleMode: .degrees) == "30")
+        #expect(try engine.evaluate("tan(atan(1))", angleMode: .degrees) == "1")
+    }
 }
