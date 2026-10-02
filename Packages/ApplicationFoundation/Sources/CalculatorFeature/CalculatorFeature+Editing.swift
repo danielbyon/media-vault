@@ -484,6 +484,12 @@ extension CalculatorFeature {
     }
 
     private func appendOperator(_ symbol: Character, to state: inout State) -> Bool {
+        if state.isShowingResult {
+            // The completed result is what the next operator continues from: a pasted source
+            // expression stops describing the edited expression once its result has been shown.
+            state.expression = state.display
+            state.isShowingResult = false
+        }
         if state.expression.isEmpty {
             state.expression = state.display
         }
@@ -491,9 +497,6 @@ extension CalculatorFeature {
             return false
         }
 
-        if state.isShowingResult {
-            state.isShowingResult = false
-        }
         if state.expression.last == "(" {
             guard symbol == "-" else {
                 return false

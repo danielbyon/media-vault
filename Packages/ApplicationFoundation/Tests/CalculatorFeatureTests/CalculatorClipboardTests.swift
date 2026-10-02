@@ -72,4 +72,58 @@ struct CalculatorClipboardTests {
             $0.error = .invalidExpression
         }
     }
+
+    @Test("An operator after a pasted result continues from the displayed value")
+    @MainActor
+    func operatorAfterPastedResultContinuesFromTheDisplayedValue() async throws {
+        let testUUID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000009"))
+        let timestamp = Date(timeIntervalSince1970: 1_725_000_006)
+        let store = TestStore(initialState: CalculatorFeature.State()) {
+            CalculatorFeature()
+        } withDependencies: {
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in }
+            $0.calculatorClipboard.paste = { "2+3" }
+            $0.date.now = timestamp
+            $0.uuid = .constant(testUUID)
+        }
+
+        await store.send(.button(.paste))
+        await store.receive(.pasted("2+3")) {
+            $0.display = "5"
+            $0.expression = "2+3"
+            $0.isShowingResult = true
+            $0.history = [
+                CalculatorHistoryEntry(
+                    id: testUUID,
+                    expression: "2+3",
+                    result: "5",
+                    date: timestamp,
+                ),
+            ]
+        }
+        // The pasted source stops describing the edited expression once its result is shown.
+        await store.send(.button(.power)) {
+            $0.expression = "5^"
+            $0.isShowingResult = false
+        }
+        await store.send(.button(.digit(2))) {
+            $0.display = "2"
+            $0.expression = "5^2"
+        }
+        await store.send(.button(.equals)) {
+            $0.display = "25"
+            $0.expression = "25"
+            $0.isShowingResult = true
+            $0.history.insert(
+                CalculatorHistoryEntry(
+                    id: testUUID,
+                    expression: "5^2",
+                    result: "25",
+                    date: timestamp,
+                ),
+                at: 0,
+            )
+        }
+    }
 }

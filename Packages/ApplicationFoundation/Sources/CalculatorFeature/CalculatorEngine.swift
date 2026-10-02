@@ -666,8 +666,13 @@ public struct CalculatorEngine: Sendable {
         ///
         /// Only operands that make the value exact are recognized — never a floating-point result
         /// that merely rounded to a convenient number — so a tiny non-zero input keeps its
-        /// approximate result and cannot pick up symbolic provenance.
-        private func exactScalarResult(for function: Function, operand: Decimal) -> ExactFunctionResult? {
+        /// approximate result and cannot pick up symbolic provenance. The natural logarithm reads
+        /// the calculator's own Euler constant, and a reciprocal is exact only while one divided
+        /// by the operand needs no Decimal rounding, so 0.5 is exact while 1/3 stays approximate.
+        private func exactScalarResult(
+            for function: Function,
+            operand: Decimal,
+        ) throws -> ExactFunctionResult? {
             let value: Decimal
             switch function {
             case .sine, .tangent, .arcSine, .arcTangent, .squareRoot, .square:
@@ -680,16 +685,29 @@ public struct CalculatorEngine: Sendable {
                     return nil
                 }
                 value = 1
-            case .arcCosine, .naturalLogarithm, .commonLogarithm:
+            case .arcCosine, .commonLogarithm:
                 guard operand == 1 else {
                     return nil
                 }
                 value = 0
-            case .reciprocal:
-                guard operand == 1 else {
+            case .naturalLogarithm:
+                if operand == 1 {
+                    value = 0
+                } else if operand == (try eulerValue()) {
+                    // The calculator's own Euler constant is exactly one natural logarithm, so
+                    // the identity composes instead of returning the nearest Double result.
+                    value = 1
+                } else {
                     return nil
                 }
-                value = 1
+            case .reciprocal:
+                guard operand != 0 else {
+                    return nil
+                }
+                guard let quotient = try? unrounded(NSDecimalDivide, 1, operand) else {
+                    return nil
+                }
+                value = quotient
             }
 
             return ExactFunctionResult(

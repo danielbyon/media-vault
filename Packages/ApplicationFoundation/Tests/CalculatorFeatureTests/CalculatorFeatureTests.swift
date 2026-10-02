@@ -260,6 +260,69 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("sqrt(\(minimumDecimal))") == "0")
     }
 
+    @Test("The exact Euler constant keeps the natural logarithm identity")
+    func naturalLogarithmRecognizesTheExactEulerConstant() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("ln(e)") == "1")
+        #expect(try CalculatorEngine(roundingScale: 16).evaluate("ln(e)") == "1")
+        #expect(try CalculatorEngine(roundingScale: 30).evaluate("ln(e)") == "1")
+        #expect(try engine.evaluate("ln(1)") == "0")
+
+        // The identity composes, so an exact ninety degrees is a tangent pole and an exact
+        // quarter turn keeps its quadrantal sine and cosine.
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(ln(e)×90)", angleMode: .degrees)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(ln(e)×π/2)", angleMode: .radians)
+        }
+        #expect(try CalculatorEngine(roundingScale: 20).evaluate("sin(ln(e)×π/2)", angleMode: .radians) == "1")
+        #expect(try CalculatorEngine(roundingScale: 20).evaluate("cos(ln(e)×π)", angleMode: .radians) == "-1")
+
+        // Decimal values that only approximate the constant keep the ordinary logarithm path.
+        #expect(try CalculatorEngine(roundingScale: 16).evaluate("ln(2.718281828459045)") == "0.9999999999999998")
+        #expect(
+            try CalculatorEngine(roundingScale: 30)
+                .evaluate("ln(2.7182818284590452353602874713526625)") == "0.9999999999999998",
+        )
+    }
+
+    @Test("Exactly representable reciprocals keep their scalar provenance")
+    func exactlyRepresentableReciprocalsKeepScalarProvenance() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("reciprocal(2)") == "0.5")
+        #expect(try engine.evaluate("reciprocal(4)") == "0.25")
+        #expect(try engine.evaluate("reciprocal(8)") == "0.125")
+        #expect(try engine.evaluate("reciprocal(-4)") == "-0.25")
+
+        // An exact reciprocal completes a quarter turn before the tangent is taken, so every one
+        // of these expressions is a pole rather than a large finite quotient.
+        for expression in [
+            "tan(π×reciprocal(2))",
+            "tan(π×(reciprocal(4)×2))",
+            "tan(π×(reciprocal(8)×4))",
+            "tan(π×reciprocal(2)×2+π/2)",
+        ] {
+            #expect(throws: CalculatorError.domainError) {
+                try engine.evaluate(expression, angleMode: .radians)
+            }
+        }
+
+        // The exact quotient also feeds the closed-form angle table and ordinary arithmetic.
+        let preciseEngine = CalculatorEngine(roundingScale: 20)
+        #expect(try preciseEngine.evaluate("tan(π×reciprocal(4))", angleMode: .radians) == "1")
+        #expect(try preciseEngine.evaluate("sin(π×reciprocal(2))", angleMode: .radians) == "1")
+        #expect(try engine.evaluate("π×reciprocal(2)×2") == "3.1415926536")
+
+        // A quotient Decimal can only approximate is not exact, so the same shape stays finite.
+        #expect(Decimal(string: try engine.evaluate("tan(π×(reciprocal(3)×1.5))", angleMode: .radians)) != nil)
+        #expect(throws: CalculatorError.divisionByZero) {
+            try engine.evaluate("reciprocal(0)")
+        }
+    }
+
     @Test("Inverse functions and trigonometry use the selected angle mode")
     func evaluatesScientificFunctionsInBothAngleModes() throws {
         let engine = CalculatorEngine()
