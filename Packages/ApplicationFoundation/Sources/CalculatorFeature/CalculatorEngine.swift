@@ -461,10 +461,21 @@ public struct CalculatorEngine: Sendable {
             let exponent = try parseUnary()
             let mathematicalResult = try power(base.semanticValue, exponent.semanticValue)
             let preservesBaseAngle = exponent.semanticValue == 1
+            // A power generally destroys the linear `constant + coefficient × π` relationship the
+            // angle provenance describes, so only the identity exponent carries the base's angle
+            // provenance. A provably exact result still contributes its value exactly to a later
+            // symbolic angle such as π.
+            let exactScalar = preservesBaseAngle
+                ? nil
+                : try exactPowerProvenance(
+                    base: base.semanticValue,
+                    exponent: exponent.semanticValue,
+                    result: mathematicalResult,
+                )
             return ParsedValue(
                 value: try rounded(mathematicalResult),
                 semanticValue: preservesBaseAngle ? base.semanticValue : mathematicalResult,
-                angleProvenance: preservesBaseAngle ? base.angleProvenance : nil,
+                angleProvenance: preservesBaseAngle ? base.angleProvenance : exactScalar,
                 tangentPoleResidual: preservesBaseAngle ? base.tangentPoleResidual : nil,
             )
         }
@@ -686,14 +697,8 @@ public struct CalculatorEngine: Sendable {
             argument: ParsedValue,
         ) throws -> Decimal {
             switch function {
-            case .sine:
-                return try semanticDecimal(
-                    Foundation.sin(radians(from: try trigonometricArgument(for: argument))),
-                )
-            case .cosine:
-                return try semanticDecimal(
-                    Foundation.cos(radians(from: try trigonometricArgument(for: argument))),
-                )
+            case .sine, .cosine:
+                return try semanticDecimal(trigonometricValue(for: function, argument: argument))
             case .tangent:
                 guard try !isTangentPole(for: argument) else {
                     throw CalculatorError.domainError
@@ -735,6 +740,10 @@ public struct CalculatorEngine: Sendable {
             measuringCosine: Bool,
         ) throws -> Decimal {
             guard try requiresEndpointStableEvaluation(of: operand) else {
+                if measuringCosine, try requiresInteriorStableEvaluation(of: operand) {
+                    return try interiorStableInverseCosine(of: operand)
+                }
+
                 let radians = directInverseTrigonometricRadians(of: operand, measuringCosine: measuringCosine)
                 return try semanticDecimal(angleMode.fromRadians(radians))
             }
@@ -822,6 +831,76 @@ public struct CalculatorEngine: Sendable {
                 return try unrounded(NSDecimalSubtract, quarterTurn, delta, allowingLossOfPrecision: true)
             }
             return try unrounded(NSDecimalAdd, -quarterTurn, delta, allowingLossOfPrecision: true)
+        }
+
+        /// Reports whether converting a small operand to `Double` would erase part of its distance
+        /// from the quarter turn that `acos` measures against.
+        ///
+        /// `acos` crosses its quarter turn at zero, so an operand whose angle is smaller than the
+        /// conversion can resolve is reported as exactly a quarter turn. The distance the converted
+        /// result reports is compared against the distance the Decimal operand implies, using the
+        /// same material-loss rule as the endpoint path: a relative loss beyond one part in 10^8
+        /// counts, which happens only while that distance is smaller than the conversion resolves.
+        private func requiresInteriorStableEvaluation(of operand: Decimal) throws -> Bool {
+            guard operand != 0 else {
+                return false
+            }
+
+            let deviation = NSDecimalNumber(decimal: try interiorDeviation(of: operand)).doubleValue
+            let convertedDeviation = Double.pi / 2
+                - Foundation.acos(NSDecimalNumber(decimal: operand).doubleValue)
+            return abs(convertedDeviation - deviation) > deviation * 1e-8
+        }
+
+        /// Evaluates `acos` around its interior zero from the operand's Decimal distance to it.
+        ///
+        /// The angle is the quarter turn minus the operand's angle from zero, so subtracting that
+        /// distance while both values are still Decimals keeps a difference that no `Double` could
+        /// carry.
+        private func interiorStableInverseCosine(of operand: Decimal) throws -> Decimal {
+            let deviation = try interiorDeviation(of: operand)
+            let quarterTurn: Decimal
+            let delta: Decimal
+            switch angleMode {
+            case .degrees:
+                quarterTurn = 90
+                delta = try semanticDecimal(
+                    NSDecimalNumber(decimal: deviation).doubleValue * 180 / Double.pi,
+                )
+            case .radians:
+                quarterTurn = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                delta = deviation
+            }
+
+            return operand > 0
+                ? try unrounded(NSDecimalSubtract, quarterTurn, delta, allowingLossOfPrecision: true)
+                : try unrounded(NSDecimalAdd, quarterTurn, delta, allowingLossOfPrecision: true)
+        }
+
+        /// Returns the operand's angular distance from the interior zero of `acos`, in radians.
+        ///
+        /// The distance is `atan(|x| ÷ √((1 - x)(1 + x)))` formed while the operand is still a
+        /// `Decimal`: the ratio stays small and well conditioned around zero, and the square root
+        /// keeps the complementary leg's precision.
+        private func interiorDeviation(of operand: Decimal) throws -> Decimal {
+            let magnitude = operand < 0 ? -operand : operand
+            let complement = try unrounded(
+                NSDecimalMultiply,
+                try unrounded(NSDecimalSubtract, 1, operand, allowingLossOfPrecision: true),
+                try unrounded(NSDecimalAdd, 1, operand, allowingLossOfPrecision: true),
+                allowingLossOfPrecision: true,
+            )
+            let complementRoot = try squareRoot(of: complement, toScale: max(roundingScale, 38))
+            let tangent = try unrounded(
+                NSDecimalDivide,
+                magnitude,
+                complementRoot,
+                allowingLossOfPrecision: true,
+            )
+
+            return try semanticDecimal(
+                Foundation.atan(NSDecimalNumber(decimal: tangent).doubleValue),
+            )
         }
 
         /// Computes the function result used by later expression terms without display rounding.
@@ -965,10 +1044,9 @@ public struct CalculatorEngine: Sendable {
                     return nil
                 }
             case .reciprocal:
-                guard operand != 0 else {
-                    return nil
-                }
-                guard let quotient = try? unrounded(NSDecimalDivide, 1, operand) else {
+                // Only a quotient that multiplies back to exactly one proves that Decimal divided
+                // without rounding; a repeating expansion such as 1 ÷ 3 stays approximate.
+                guard let quotient = exactReciprocal(of: operand) else {
                     return nil
                 }
                 value = quotient
@@ -993,6 +1071,105 @@ public struct CalculatorEngine: Sendable {
                 constant: value,
                 piCoefficient: .exactRational(.zero, decimal: 0),
             )
+        }
+
+        /// Describes a power result as an exact scalar contribution when the engine can prove the
+        /// result exactly, and returns nil otherwise.
+        private func exactPowerProvenance(
+            base: Decimal,
+            exponent: Decimal,
+            result: Decimal,
+        ) throws -> AngleProvenance? {
+            guard try powerIsExactlyRepresentable(base: base, exponent: exponent) else {
+                return nil
+            }
+
+            return exactScalarProvenance(for: result)
+        }
+
+        /// Reports whether a power's mathematical result is exactly representable in `Decimal`.
+        ///
+        /// `Decimal` does not report every discarded digit through its calculation status, so the
+        /// proof reads the operands' exact base-ten digits instead. An integral exponent is exact
+        /// while the exact result stays inside the coefficient precision, and a negative exponent
+        /// additionally needs a reciprocal that `Decimal` divides exactly. Half powers reuse the
+        /// digit-based square-root proof.
+        private func powerIsExactlyRepresentable(base: Decimal, exponent: Decimal) throws -> Bool {
+            if exponent == 0 {
+                // A zero base with a zero or negative exponent is rejected before a power exists.
+                return true
+            }
+
+            if exponent == 0.5 || exponent == -0.5 {
+                guard base != 0 else {
+                    return exponent == 0.5
+                }
+                guard base > 0 else {
+                    return false
+                }
+
+                let root = try squareRoot(of: base, toScale: max(roundingScale, 38))
+                guard (try? compareSquare(of: root, with: base)) == .orderedSame else {
+                    return false
+                }
+
+                return exponent == 0.5 || exactReciprocal(of: root) != nil
+            }
+
+            guard base != 0 else {
+                return false
+            }
+
+            var integralExponent = exponent
+            var exponentToRound = exponent
+            NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
+            guard integralExponent == exponent else {
+                return false
+            }
+
+            let factor: Decimal
+            if integralExponent < 0 {
+                guard let reciprocal = exactReciprocal(of: base) else {
+                    return false
+                }
+                factor = reciprocal
+            } else {
+                factor = base
+            }
+
+            let magnitude = integralExponent < 0 ? -integralExponent : integralExponent
+            return try integralPowerFitsPrecision(factor, exponent: magnitude)
+        }
+
+        /// Reports whether an integral power keeps every intermediate inside the coefficient precision.
+        ///
+        /// A coefficient of `d` digits raised to the exponent `n` needs at most `d × n` digits, and
+        /// exponentiation by squaring only ever builds powers up to that exponent, so every
+        /// intermediate stays inside the bound as well. The bound therefore proves the whole
+        /// calculation exact while it fits the coefficient precision, without relying on how
+        /// `Decimal` reports a rounded multiplication.
+        private func integralPowerFitsPrecision(_ factor: Decimal, exponent: Decimal) throws -> Bool {
+            let magnitude = factor < 0 ? -factor : factor
+            guard let (digits, _) = try? decimalDigitsAndScale(magnitude) else {
+                return false
+            }
+
+            return exponent * Decimal(digits.count) <= 38
+        }
+
+        /// Returns the exact reciprocal of a value, or nil when `Decimal` rounds the quotient.
+        ///
+        /// A quotient is exact only when multiplying it back by the divisor returns exactly one,
+        /// because `Decimal` division does not report a repeating expansion as a lost digit.
+        private func exactReciprocal(of value: Decimal) -> Decimal? {
+            guard let quotient = try? unrounded(NSDecimalDivide, 1, value),
+                  let product = try? unrounded(NSDecimalMultiply, quotient, value),
+                  product == 1
+            else {
+                return nil
+            }
+
+            return quotient
         }
 
         /// Converts an exact rational coefficient to Decimal.
@@ -1087,8 +1264,101 @@ public struct CalculatorEngine: Sendable {
             return nearest
         }
 
-        private func trigonometricArgument(for argument: ParsedValue) throws -> Double {
-            NSDecimalNumber(decimal: try reducedTrigonometricAngle(for: argument)).doubleValue
+        /// Evaluates sine or cosine from a small quadrant-relative residual when `Double` loses it.
+        ///
+        /// A `Double` resolves angles around a quarter turn no more finely than one unit in the last
+        /// place, so an angle such as `180.00000000000000001` degrees reaches Foundation as the
+        /// quarter turn itself and reports that floating-point residue instead of the residual's
+        /// sign and magnitude. Exact quarter turns are classified separately by the exact-angle
+        /// path, so this only changes how a known non-quadrantal angle is evaluated.
+        private func trigonometricValue(for function: Function, argument: ParsedValue) throws -> Double {
+            let reduced = try reducedTrigonometricAngle(for: argument)
+            let reducedValue = NSDecimalNumber(decimal: reduced).doubleValue
+            guard let nearest = try nearestQuadrantalAngle(to: reduced), nearest.residual != 0 else {
+                return foundationTrigonometricValue(for: function, ofAngle: reducedValue)
+            }
+
+            // Only an angle whose conversion lands on the quadrant itself has lost its residual:
+            // every other angle reaches Foundation with the distance it carries.
+            let quadrantValue = NSDecimalNumber(decimal: nearest.quadrant).doubleValue
+            guard reducedValue == quadrantValue else {
+                return foundationTrigonometricValue(for: function, ofAngle: reducedValue)
+            }
+
+            return quadrantalTrigonometricValue(for: function, at: nearest)
+        }
+
+        /// Evaluates sine or cosine through Foundation for an angle the ordinary path can carry.
+        private func foundationTrigonometricValue(for function: Function, ofAngle angle: Double) -> Double {
+            let radians = radians(from: angle)
+            return function == .sine ? Foundation.sin(radians) : Foundation.cos(radians)
+        }
+
+        /// Evaluates sine or cosine of an angle whose `Double` conversion erased its residual.
+        ///
+        /// The residual is measured from the nearest whole quarter turn, so the identity for that
+        /// quarter turn recovers both the sign and the magnitude that Foundation would have
+        /// reported as floating-point residue.
+        private func quadrantalTrigonometricValue(
+            for function: Function,
+            at nearest: (quadrant: Decimal, quarterTurnCount: Int, residual: Decimal),
+        ) -> Double {
+            let residual = radians(from: NSDecimalNumber(decimal: nearest.residual).doubleValue)
+            let isSine = function == .sine
+
+            switch (nearest.quarterTurnCount % 4 + 4) % 4 {
+            case 0:
+                return isSine ? Foundation.sin(residual) : Foundation.cos(residual)
+            case 1:
+                return isSine ? Foundation.cos(residual) : -Foundation.sin(residual)
+            case 2:
+                return isSine ? -Foundation.sin(residual) : -Foundation.cos(residual)
+            default:
+                return isSine ? -Foundation.cos(residual) : Foundation.sin(residual)
+            }
+        }
+
+        /// Finds the closest whole quarter turn used to evaluate sine and cosine from a residual.
+        ///
+        /// The reduced angle stays within one whole turn of zero in Degrees and within two whole
+        /// turns in Radians, so a bounded set of quarter turns covers every angle the reduction
+        /// can produce.
+        private func nearestQuadrantalAngle(
+            to angle: Decimal,
+        ) throws -> (quadrant: Decimal, quarterTurnCount: Int, residual: Decimal)? {
+            let quarterTurn: Decimal
+            let quarterTurnCounts: [Int]
+            switch angleMode {
+            case .degrees:
+                quarterTurn = 90
+                quarterTurnCounts = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
+            case .radians:
+                quarterTurn = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                quarterTurnCounts = Array(-8 ... 8)
+            }
+
+            var nearest: (quadrant: Decimal, quarterTurnCount: Int, residual: Decimal)?
+            for countedTurns in quarterTurnCounts {
+                let quadrant = try unrounded(
+                    NSDecimalMultiply,
+                    quarterTurn,
+                    Decimal(countedTurns),
+                    allowingLossOfPrecision: true,
+                )
+                let residual = try unrounded(
+                    NSDecimalSubtract,
+                    angle,
+                    quadrant,
+                    allowingLossOfPrecision: true,
+                )
+                let magnitude = residual < 0 ? -residual : residual
+                let nearestMagnitude = nearest.map { $0.residual < 0 ? -$0.residual : $0.residual }
+                if nearestMagnitude == nil || magnitude < nearestMagnitude! {
+                    nearest = (quadrant, countedTurns, residual)
+                }
+            }
+
+            return nearest
         }
 
         /// Reduces a symbolic Radian angle from its exact parts.
@@ -1921,7 +2191,14 @@ public struct CalculatorEngine: Sendable {
                 allowingLossOfPrecision: true,
             )
             let fractionalExponentDouble = NSDecimalNumber(decimal: fractionalExponent).doubleValue
-            let conversionLosesFraction = fractionalExponentDouble == 0 || exponentDouble == integralExponentDouble
+            // Converting the exponent can move its fractional part rather than erase it, which makes
+            // Foundation evaluate a different exponent than the expression asked for. A change
+            // beyond one part in 10^8 of the fractional part counts as material.
+            let convertedFraction = exponentDouble - integralExponentDouble
+            let fractionalLoss = abs(convertedFraction - fractionalExponentDouble)
+            let conversionLosesFraction = fractionalExponentDouble == 0
+                || exponentDouble == integralExponentDouble
+                || fractionalLoss > abs(fractionalExponentDouble) * 1e-8
 
             if baseIsNearOne || conversionLosesFraction {
                 return try stableFractionalPower(

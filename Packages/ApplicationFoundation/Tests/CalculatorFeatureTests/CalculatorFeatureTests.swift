@@ -397,8 +397,19 @@ struct CalculatorFeatureTests {
         for (expression, expected) in degreeCases {
             #expect(try engine.evaluate(expression, angleMode: .degrees) == expected)
         }
-        #expect(try engine.evaluate("sin(3.14159265358979323846)", angleMode: .radians) != "0")
-        #expect(try engine.evaluate("cos(1.57079632679489661923)", angleMode: .radians) != "0")
+        // A decimal approximation of a quadrantal angle never acquires exactness. The symbolic
+        // form is exactly zero, while the literal keeps the digit-level distance it carries from
+        // the quadrant: once the display is fine enough to show it, that distance is what the
+        // engine evaluates instead of the floating-point residue of the quadrant itself.
+        let fineEngine = CalculatorEngine(roundingScale: 25)
+        #expect(
+            try fineEngine.evaluate("sin(3.14159265358979323846)", angleMode: .radians)
+                == "0.0000000000000000000026434"
+        )
+        #expect(
+            try fineEngine.evaluate("cos(1.57079632679489661923)", angleMode: .radians)
+                == "0.0000000000000000000013217"
+        )
     }
 
     @Test("Common exact angles return closed-form values at high display precision")
@@ -1128,5 +1139,71 @@ struct CalculatorFeatureTests {
         #expect(throws: CalculatorError.domainError) {
             try engine.evaluate("(-4)^-0.5")
         }
+    }
+
+    @Test("Exact powers keep scalar provenance for symbolic angles")
+    func exactPowersKeepScalarProvenance() throws {
+        let engine = CalculatorEngine()
+
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×(2^0)/2)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×(2^-1))", angleMode: .radians)
+        }
+        #expect(try engine.evaluate("sin(π×(2^0))", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("sin(π×(2^2))", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("cos(π×(3^0))", angleMode: .radians) == "-1")
+
+        // A power the engine cannot prove exact keeps the ordinary numeric path, so an irrational
+        // power may not turn a near-pole expression into a symbolic pole.
+        let irrationalPower = try? engine.evaluate("tan(π×(2^0.5)/((2^0.5)×2))", angleMode: .radians)
+        #expect(irrationalPower != nil, "An irrational power must not create exact pole provenance")
+    }
+
+    @Test("Arccosine keeps its distance from the interior quarter turn")
+    func arccosineKeepsInteriorQuarterTurnDistance() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+        let tiny = "0.00000000000000001"
+
+        #expect(try engine.evaluate("acos(0)") == "90")
+        #expect(try engine.evaluate("acos(\(tiny))") == "89.99999999999999942704")
+        #expect(try engine.evaluate("acos(-\(tiny))") == "90.00000000000000057296")
+        #expect(try engine.evaluate("acos(\(tiny))", angleMode: .radians) == "1.57079632679489660923")
+
+        // The angle is below the pole, so its tangent is a large finite number rather than an error.
+        let tangent = Decimal(
+            string: try engine.evaluate("tan(acos(\(tiny)))"),
+            locale: Locale(identifier: "en_US_POSIX"),
+        ) ?? 0
+        #expect(tangent > 90_000_000_000_000_000)
+    }
+
+    @Test("Sine and cosine keep quadrant-relative residuals")
+    func sineAndCosineKeepQuadrantRelativeResiduals() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        #expect(try engine.evaluate("sin(180.00000000000000001)") == "-0.00000000000000000017")
+        #expect(try engine.evaluate("cos(90.00000000000000001)") == "-0.00000000000000000017")
+        #expect(try engine.evaluate("cos(180.00000000000000001)") == "-1")
+        #expect(try engine.evaluate("sin(90.00000000000000001)") == "1")
+        #expect(
+            try engine.evaluate("sin(π+0.000000000000000001)", angleMode: .radians)
+                == "-0.000000000000000001",
+        )
+
+        // The exact family angle resolves to its closed form, while an angle just outside the
+        // families keeps the ordinary Foundation evaluation and is not snapped to that form.
+        #expect(try engine.evaluate("sin(30)") == "0.5")
+        #expect(try engine.evaluate("sin(30.0000000001)") == "0.5000000000015113")
+    }
+
+    @Test("Fractional powers keep a material exponent delta")
+    func fractionalPowersKeepMaterialExponentDelta() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        #expect(try engine.evaluate("2^1.0000000000000002") == "2.00000000000000027726")
+        #expect(try engine.evaluate("16^0.25") == "2")
+        #expect(try engine.evaluate("4^0.5") == "2")
     }
 }
