@@ -256,47 +256,5 @@ extension CalculatorReducerTests {
         await store.send(.button(.multiply))
     }
 
-    @Test("Arithmetic operators continue from a completed pasted result")
-    @MainActor
-    func arithmeticOperatorsContinueFromCompletedPastedResult() async {
-        let multiplyStore = makeCompletedPastedResultStore()
-        await multiplyStore.send(.button(.multiply)) {
-            $0.expression = "5×"
-            $0.isShowingResult = false
-        }
-        await multiplyStore.send(.button(.digit(2))) {
-            $0.display = "2"
-            $0.expression = "5×2"
-        }
-
-        let divideStore = makeCompletedPastedResultStore()
-        await divideStore.send(.button(.divide)) {
-            $0.expression = "5÷"
-            $0.isShowingResult = false
-        }
-        await divideStore.send(.button(.digit(5))) {
-            $0.display = "5"
-            $0.expression = "5÷5"
-        }
-
-        let subtractStore = makeCompletedPastedResultStore()
-        await subtractStore.send(.button(.subtract)) {
-            $0.expression = "5-"
-            $0.isShowingResult = false
-        }
-    }
-
     /// Builds the state a paste leaves behind: a shown result beside its source expression.
-    private func makeCompletedPastedResultStore() -> TestStoreOf<CalculatorFeature> {
-        TestStore(
-            initialState: CalculatorFeature.State(
-                snapshot: CalculatorSnapshot(display: "5", expression: "2+3", isShowingResult: true),
-            ),
-        ) {
-            CalculatorFeature()
-        } withDependencies: {
-            $0.calculatorPersistence.load = { nil }
-            $0.calculatorPersistence.save = { _ in }
-        }
-    }
 }

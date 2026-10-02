@@ -75,6 +75,13 @@ public struct CalculatorEngine: Sendable {
             case reciprocal
         }
 
+        private enum BinaryOperationKind {
+            case addition
+            case subtraction
+            case multiplication
+            case division
+        }
+
         private typealias DecimalOperation = (
             UnsafeMutablePointer<Decimal>,
             UnsafePointer<Decimal>,
@@ -82,16 +89,23 @@ public struct CalculatorEngine: Sendable {
             Decimal.RoundingMode,
         ) -> Decimal.CalculationError
 
-        /// Carries a calculator-rounded result alongside its semantic value and exact Radian provenance.
+        /// Carries display, semantic, symbolic-angle, and pole-residual information for one value.
         private struct ParsedValue {
             let value: Decimal
             let semanticValue: Decimal
             let angleProvenance: AngleProvenance?
+            let tangentPoleResidual: TangentPoleResidual?
 
-            init(value: Decimal, semanticValue: Decimal? = nil, angleProvenance: AngleProvenance? = nil) {
+            init(
+                value: Decimal,
+                semanticValue: Decimal? = nil,
+                angleProvenance: AngleProvenance? = nil,
+                tangentPoleResidual: TangentPoleResidual? = nil,
+            ) {
                 self.value = value
                 self.semanticValue = semanticValue ?? value
                 self.angleProvenance = angleProvenance
+                self.tangentPoleResidual = tangentPoleResidual
             }
 
             static func scalar(_ value: Decimal) -> Self {
@@ -102,6 +116,15 @@ public struct CalculatorEngine: Sendable {
                         piCoefficient: .exactDecimal(0),
                     ),
                 )
+            }
+        }
+
+        /// Retains a nonzero angle delta when Decimal cannot store it beside a quarter turn.
+        private struct TangentPoleResidual {
+            let residual: Decimal
+
+            var negated: Self {
+                Self(residual: -residual)
             }
         }
 
@@ -231,23 +254,35 @@ public struct CalculatorEngine: Sendable {
                 skipWhitespace()
                 if consume("+") {
                     let right = try parseTerm()
-                    value = ParsedValue(
-                        value: try rounded(adding: value.value, right.value),
-                        semanticValue: unroundedResult(NSDecimalAdd, value.semanticValue, right.semanticValue),
+                    value = try binaryResult(
+                        NSDecimalAdd,
+                        lhs: value,
+                        rhs: right,
                         angleProvenance: combinedAngleProvenance(
                             value.angleProvenance,
                             right.angleProvenance,
                         ),
+                        tangentPoleResidual: propagatedTangentPoleResidual(
+                            for: .addition,
+                            lhs: value,
+                            rhs: right,
+                        ),
                     )
                 } else if consume("−") || consume("-") {
                     let right = try parseTerm()
-                    value = ParsedValue(
-                        value: try rounded(subtracting: value.value, right.value),
-                        semanticValue: unroundedResult(NSDecimalSubtract, value.semanticValue, right.semanticValue),
+                    value = try binaryResult(
+                        NSDecimalSubtract,
+                        lhs: value,
+                        rhs: right,
                         angleProvenance: combinedAngleProvenance(
                             value.angleProvenance,
                             right.angleProvenance,
                             subtracting: true,
+                        ),
+                        tangentPoleResidual: propagatedTangentPoleResidual(
+                            for: .subtraction,
+                            lhs: value,
+                            rhs: right,
                         ),
                     )
                 } else {
@@ -263,17 +298,38 @@ public struct CalculatorEngine: Sendable {
                 skipWhitespace()
                 if consume("×") || consume("*") {
                     let right = try parseUnary()
-                    value = ParsedValue(
-                        value: try rounded(multiplying: value.value, right.value),
-                        semanticValue: unroundedResult(NSDecimalMultiply, value.semanticValue, right.semanticValue),
-                        angleProvenance: multipliedAngleProvenance(value.angleProvenance, right.angleProvenance),
+                    value = try binaryResult(
+                        NSDecimalMultiply,
+                        lhs: value,
+                        rhs: right,
+                        angleProvenance: multipliedAngleProvenance(
+                            value.angleProvenance,
+                            right.angleProvenance,
+                        ),
+                        tangentPoleResidual: propagatedTangentPoleResidual(
+                            for: .multiplication,
+                            lhs: value,
+                            rhs: right,
+                        ),
                     )
                 } else if consume("÷") || consume("/") {
                     let right = try parseUnary()
-                    value = ParsedValue(
-                        value: try rounded(dividing: value.value, right.value),
-                        semanticValue: unroundedResult(NSDecimalDivide, value.semanticValue, right.semanticValue),
-                        angleProvenance: dividedAngleProvenance(value.angleProvenance, right.angleProvenance),
+                    guard right.semanticValue != 0 else {
+                        throw CalculatorError.divisionByZero
+                    }
+                    value = try binaryResult(
+                        NSDecimalDivide,
+                        lhs: value,
+                        rhs: right,
+                        angleProvenance: dividedAngleProvenance(
+                            value.angleProvenance,
+                            right.angleProvenance,
+                        ),
+                        tangentPoleResidual: propagatedTangentPoleResidual(
+                            for: .division,
+                            lhs: value,
+                            rhs: right,
+                        ),
                     )
                 } else {
                     return value
@@ -282,6 +338,85 @@ public struct CalculatorEngine: Sendable {
         }
 
         /// Unary signs apply after exponentiation, while the exponent may itself be signed.
+        /// Evaluates a binary operation from semantic operands and rounds only its displayed result.
+        private func binaryResult(
+            _ operation: DecimalOperation,
+            lhs: ParsedValue,
+            rhs: ParsedValue,
+            angleProvenance: AngleProvenance?,
+            tangentPoleResidual: TangentPoleResidual? = nil,
+        ) throws -> ParsedValue {
+            let result = try unrounded(
+                operation,
+                lhs.semanticValue,
+                rhs.semanticValue,
+                allowingLossOfPrecision: true,
+            )
+            return ParsedValue(
+                value: try rounded(result),
+                semanticValue: result,
+                angleProvenance: angleProvenance,
+                tangentPoleResidual: tangentPoleResidual,
+            )
+        }
+
+        /// Keeps a pole residual only when exact scalar identity arithmetic preserves it.
+        private func propagatedTangentPoleResidual(
+            for operation: BinaryOperationKind,
+            lhs: ParsedValue,
+            rhs: ParsedValue,
+        ) -> TangentPoleResidual? {
+            switch operation {
+            case .addition:
+                if let residual = lhs.tangentPoleResidual, isExactScalar(rhs, equalTo: 0) {
+                    return residual
+                }
+                if let residual = rhs.tangentPoleResidual, isExactScalar(lhs, equalTo: 0) {
+                    return residual
+                }
+            case .subtraction:
+                if let residual = lhs.tangentPoleResidual, isExactScalar(rhs, equalTo: 0) {
+                    return residual
+                }
+                if let residual = rhs.tangentPoleResidual, isExactScalar(lhs, equalTo: 0) {
+                    return residual.negated
+                }
+            case .multiplication:
+                if let residual = lhs.tangentPoleResidual {
+                    if isExactScalar(rhs, equalTo: 1) {
+                        return residual
+                    }
+                    if isExactScalar(rhs, equalTo: -1) {
+                        return residual.negated
+                    }
+                }
+                if let residual = rhs.tangentPoleResidual {
+                    if isExactScalar(lhs, equalTo: 1) {
+                        return residual
+                    }
+                    if isExactScalar(lhs, equalTo: -1) {
+                        return residual.negated
+                    }
+                }
+            case .division:
+                if let residual = lhs.tangentPoleResidual, isExactScalar(rhs, equalTo: 1) {
+                    return residual
+                }
+            }
+            return nil
+        }
+
+        private func isExactScalar(_ value: ParsedValue, equalTo expected: Decimal) -> Bool {
+            guard value.value == expected,
+                  value.semanticValue == expected,
+                  let provenance = value.angleProvenance
+            else {
+                return false
+            }
+
+            return provenance.constant == expected && provenance.piCoefficientIsZero
+        }
+
         private mutating func parseUnary() throws -> ParsedValue {
             skipWhitespace()
             if consume("+") {
@@ -293,6 +428,7 @@ public struct CalculatorEngine: Sendable {
                     value: try negateExactly(operand.value),
                     semanticValue: negated(operand.semanticValue),
                     angleProvenance: negated(operand.angleProvenance),
+                    tangentPoleResidual: operand.tangentPoleResidual?.negated,
                 )
             }
             return try parsePower()
@@ -329,6 +465,7 @@ public struct CalculatorEngine: Sendable {
                 value: try rounded(mathematicalResult),
                 semanticValue: preservesBaseAngle ? base.semanticValue : mathematicalResult,
                 angleProvenance: preservesBaseAngle ? base.angleProvenance : nil,
+                tangentPoleResidual: preservesBaseAngle ? base.tangentPoleResidual : nil,
             )
         }
 
@@ -449,9 +586,14 @@ public struct CalculatorEngine: Sendable {
                 ?? exactScalarResult(for: function, operand: operand)
                 ?? exactTrigonometricResult(for: function, argument: argument)
 
+            var tangentPoleResidual: TangentPoleResidual?
             let mathematicalValue: Decimal
             if let exactResult {
                 mathematicalValue = exactResult.value
+            } else if case .arcTangent = function {
+                let result = try arcTangentValue(of: operand)
+                mathematicalValue = result.value
+                tangentPoleResidual = result.tangentPoleResidual
             } else {
                 mathematicalValue = try computedValue(for: function, operand: operand, argument: argument)
             }
@@ -460,6 +602,7 @@ public struct CalculatorEngine: Sendable {
                 value: try rounded(mathematicalValue),
                 semanticValue: mathematicalValue,
                 angleProvenance: exactResult?.angleProvenance,
+                tangentPoleResidual: tangentPoleResidual,
             )
         }
 
@@ -467,12 +610,81 @@ public struct CalculatorEngine: Sendable {
         ///
         /// The result is not display-rounded, so composition through `ParsedValue.semanticValue`
         /// keeps as much precision as the underlying calculation provides.
+        /// Evaluates arctangent without collapsing its distance from the asymptote.
+        private func arcTangentValue(
+            of operand: Decimal,
+        ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
+            let magnitude = operand < 0 ? -operand : operand
+            guard magnitude > 1 else {
+                let radians = Foundation.atan(NSDecimalNumber(decimal: operand).doubleValue)
+                return (try semanticDecimal(angleMode.fromRadians(radians)), nil)
+            }
+
+            // Form the small asymptotic delta in Decimal before converting it to Double.
+            let reciprocal = try decimalReciprocal(ofPositive: magnitude)
+            let deltaRadians = try semanticDecimal(
+                Foundation.atan(NSDecimalNumber(decimal: reciprocal).doubleValue),
+            )
+
+            let pole: Decimal
+            let delta: Decimal
+            let spacing: Double
+            switch angleMode {
+            case .degrees:
+                pole = 90
+                let scaledDelta = try unrounded(NSDecimalMultiply, deltaRadians, 180, allowingLossOfPrecision: true)
+                delta = try unrounded(NSDecimalDivide, scaledDelta, piValue(), allowingLossOfPrecision: true)
+                spacing = Double(90).ulp
+            case .radians:
+                pole = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                delta = deltaRadians
+                spacing = (Double.pi / 2).ulp
+            }
+
+            let decimalSpacing = try semanticDecimal(spacing)
+            guard delta < decimalSpacing else {
+                let radians = Foundation.atan(NSDecimalNumber(decimal: operand).doubleValue)
+                return (try semanticDecimal(angleMode.fromRadians(radians)), nil)
+            }
+
+            let positiveAngle = try unrounded(NSDecimalSubtract, pole, delta, allowingLossOfPrecision: true)
+            let value = operand < 0 ? -positiveAngle : positiveAngle
+            let signedPole = operand < 0 ? -pole : pole
+            let residual = value == signedPole
+                ? TangentPoleResidual(residual: operand < 0 ? delta : -delta)
+                : nil
+            return (value, residual)
+        }
+
+        /// Computes a Decimal reciprocal through its significand and exponent.
+        ///
+        /// Dividing one by the whole Decimal can return NaN near the upper exponent limit even
+        /// when the reciprocal is representable. Separating the base-ten exponent keeps the small
+        /// asymptotic value inside Decimal's supported range.
+        private func decimalReciprocal(ofPositive value: Decimal) throws -> Decimal {
+            let significandReciprocal = try unrounded(
+                NSDecimalDivide,
+                1,
+                value.significand,
+                allowingLossOfPrecision: true,
+            )
+            let reciprocal = Decimal(
+                sign: .plus,
+                exponent: -value.exponent,
+                significand: significandReciprocal,
+            )
+            guard !reciprocal.isNaN else {
+                throw CalculatorError.overflow
+            }
+
+            return reciprocal
+        }
+
         private func computedValue(
             for function: Function,
             operand: Decimal,
             argument: ParsedValue,
         ) throws -> Decimal {
-            let operandValue = NSDecimalNumber(decimal: operand).doubleValue
             switch function {
             case .sine:
                 return try semanticDecimal(
@@ -487,15 +699,13 @@ public struct CalculatorEngine: Sendable {
                     throw CalculatorError.domainError
                 }
 
-                return try semanticDecimal(
-                    Foundation.tan(radians(from: try trigonometricArgument(for: argument))),
-                )
+                return try semanticDecimal(tangentValue(for: argument))
             case .arcSine:
                 return try inverseTrigonometricAngle(of: operand, measuringCosine: false)
             case .arcCosine:
                 return try inverseTrigonometricAngle(of: operand, measuringCosine: true)
             case .arcTangent:
-                return try semanticDecimal(angleMode.fromRadians(Foundation.atan(operandValue)))
+                return try arcTangentValue(of: operand).value
             case .naturalLogarithm:
                 return try logarithm(of: operand, isCommon: false)
             case .commonLogarithm:
@@ -524,10 +734,12 @@ public struct CalculatorEngine: Sendable {
             of operand: Decimal,
             measuringCosine: Bool,
         ) throws -> Decimal {
-            let radians = try requiresEndpointStableEvaluation(of: operand)
-                ? stableInverseTrigonometricRadians(of: operand, measuringCosine: measuringCosine)
-                : directInverseTrigonometricRadians(of: operand, measuringCosine: measuringCosine)
-            return try semanticDecimal(angleMode.fromRadians(radians))
+            guard try requiresEndpointStableEvaluation(of: operand) else {
+                let radians = directInverseTrigonometricRadians(of: operand, measuringCosine: measuringCosine)
+                return try semanticDecimal(angleMode.fromRadians(radians))
+            }
+
+            return try stableInverseTrigonometricAngle(of: operand, measuringCosine: measuringCosine)
         }
 
         /// Evaluates `asin`/`acos` through Foundation for operands that convert without loss.
@@ -560,26 +772,56 @@ public struct CalculatorEngine: Sendable {
 
         /// Evaluates `asin`/`acos` from the Decimal distance to the unit circle.
         ///
-        /// `(1 - x)(1 + x)` is `1 - x²` formed without subtracting nearly equal numbers, and
-        /// its square root is the remaining leg of the right triangle whose other leg is the
-        /// operand. `atan2` therefore recovers the angle from both legs instead of from an
-        /// operand that has already collapsed onto the endpoint.
-        private func stableInverseTrigonometricRadians(
+        /// `(1 - x)(1 + x)` preserves the small complementary leg before floating-point math.
+        /// The small angle is then subtracted from an exact Decimal quarter or half turn, so a
+        /// later tangent can still recover the distance from its pole.
+        private func stableInverseTrigonometricAngle(
             of operand: Decimal,
             measuringCosine: Bool,
-        ) throws -> Double {
+        ) throws -> Decimal {
             let complement = try unrounded(
                 NSDecimalMultiply,
                 try unrounded(NSDecimalSubtract, 1, operand, allowingLossOfPrecision: true),
                 try unrounded(NSDecimalAdd, 1, operand, allowingLossOfPrecision: true),
                 allowingLossOfPrecision: true,
             )
-            let complementRoot = try squareRoot(of: complement, toScale: max(roundingScale, 20))
-            let complementValue = NSDecimalNumber(decimal: complementRoot).doubleValue
-            let operandValue = NSDecimalNumber(decimal: operand).doubleValue
-            return measuringCosine
-                ? Foundation.atan2(complementValue, operandValue)
-                : Foundation.atan2(operandValue, complementValue)
+            let complementRoot = try squareRoot(of: complement, toScale: max(roundingScale, 38))
+            let ratio = try unrounded(
+                NSDecimalDivide,
+                complementRoot,
+                abs(operand),
+                allowingLossOfPrecision: true,
+            )
+            let deltaRadians = try semanticDecimal(
+                Foundation.atan(NSDecimalNumber(decimal: ratio).doubleValue),
+            )
+
+            let quarterTurn: Decimal
+            let halfTurn: Decimal
+            let delta: Decimal
+            switch angleMode {
+            case .degrees:
+                quarterTurn = 90
+                halfTurn = 180
+                delta = try semanticDecimal(
+                    NSDecimalNumber(decimal: deltaRadians).doubleValue * 180 / Double.pi,
+                )
+            case .radians:
+                quarterTurn = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                halfTurn = try piValue()
+                delta = deltaRadians
+            }
+
+            if measuringCosine {
+                return operand > 0
+                    ? delta
+                    : try unrounded(NSDecimalSubtract, halfTurn, delta, allowingLossOfPrecision: true)
+            }
+
+            if operand > 0 {
+                return try unrounded(NSDecimalSubtract, quarterTurn, delta, allowingLossOfPrecision: true)
+            }
+            return try unrounded(NSDecimalAdd, -quarterTurn, delta, allowingLossOfPrecision: true)
         }
 
         /// Computes the function result used by later expression terms without display rounding.
@@ -675,7 +917,7 @@ public struct CalculatorEngine: Sendable {
         ) throws -> ExactFunctionResult? {
             let value: Decimal
             switch function {
-            case .sine, .tangent, .arcSine, .arcTangent, .squareRoot, .square:
+            case .sine, .tangent, .arcSine, .arcTangent:
                 guard operand == 0 else {
                     return nil
                 }
@@ -685,6 +927,28 @@ public struct CalculatorEngine: Sendable {
                     return nil
                 }
                 value = 1
+            case .square:
+                // An exact checked product proves the square without treating Decimal's rounded
+                // loss-of-precision result as a mathematical identity. Verify the product using
+                // exact digit arithmetic as well, since Foundation may not report every discarded
+                // low-order digit through its calculation status.
+                let magnitude = operand < 0 ? -operand : operand
+                guard let square = try? unrounded(NSDecimalMultiply, operand, operand) else {
+                    return nil
+                }
+                guard (try? compareSquare(of: magnitude, with: square)) == .orderedSame else {
+                    return nil
+                }
+                value = square
+            case .squareRoot:
+                // Only the digit-based square comparison can prove a root exact; Decimal's ordinary
+                // multiplication may compare equal after finite-precision rounding.
+                guard let root = try? squareRoot(of: operand, toScale: max(roundingScale, 38)),
+                      (try? compareSquare(of: root, with: operand)) == .orderedSame
+                else {
+                    return nil
+                }
+                value = root
             case .arcCosine, .commonLogarithm:
                 guard operand == 1 else {
                     return nil
@@ -750,19 +1014,81 @@ public struct CalculatorEngine: Sendable {
         /// A symbolic Radian angle is reduced from its provenance rather than from the
         /// materialized angle: the provenance still knows the exact π multiple, while the
         /// materialized `Decimal` has already lost the low-order phase of a large coefficient.
-        private func trigonometricArgument(for argument: ParsedValue) throws -> Double {
-            let reduced: Decimal =
-                switch angleMode {
-                case .degrees:
-                    try reducedDegrees(from: argument.semanticValue)
-                case .radians:
-                    if let provenance = argument.angleProvenance {
-                        try reducedSymbolicRadians(from: provenance)
-                    } else {
-                        try reducedRadians(from: argument.semanticValue)
-                    }
+        private func reducedTrigonometricAngle(for argument: ParsedValue) throws -> Decimal {
+            switch angleMode {
+            case .degrees:
+                try reducedDegrees(from: argument.semanticValue)
+            case .radians:
+                if let provenance = argument.angleProvenance {
+                    try reducedSymbolicRadians(from: provenance)
+                } else {
+                    try reducedRadians(from: argument.semanticValue)
                 }
-            return NSDecimalNumber(decimal: reduced).doubleValue
+            }
+        }
+
+        /// Evaluates tangent from a small pole-relative residual when Double loses that residual.
+        ///
+        /// Exact poles are classified separately from their numeric expansions. This path only
+        /// changes how a known non-pole angle is evaluated after Decimal-to-Double conversion.
+        private func tangentValue(for argument: ParsedValue) throws -> Double {
+            if let residual = argument.tangentPoleResidual {
+                return tangentValue(fromPoleResidual: residual.residual)
+            }
+
+            let reduced = try reducedTrigonometricAngle(for: argument)
+            let reducedDouble = NSDecimalNumber(decimal: reduced).doubleValue
+            let nearest = try nearestTangentPole(to: reduced)
+            guard nearest.residual != 0 else {
+                return Foundation.tan(radians(from: reducedDouble))
+            }
+
+            let poleDouble = NSDecimalNumber(decimal: nearest.pole).doubleValue
+            let representedResidual = reducedDouble - poleDouble
+            let semanticResidual = NSDecimalNumber(decimal: nearest.residual).doubleValue
+            guard representedResidual != semanticResidual else {
+                return Foundation.tan(radians(from: reducedDouble))
+            }
+
+            return tangentValue(fromPoleResidual: nearest.residual)
+        }
+
+        private func tangentValue(fromPoleResidual residual: Decimal) -> Double {
+            let semanticResidual = NSDecimalNumber(decimal: residual).doubleValue
+            let residualRadians = angleMode == .degrees ? radians(from: semanticResidual) : semanticResidual
+            return -1 / Foundation.tan(residualRadians)
+        }
+
+        /// Finds the closest odd quarter-turn used to evaluate tangent from its residual.
+        private func nearestTangentPole(to angle: Decimal) throws -> (pole: Decimal, residual: Decimal) {
+            let poles: [Decimal]
+            switch angleMode {
+            case .degrees:
+                poles = [-270, -90, 90, 270]
+            case .radians:
+                let halfPi = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                let threeHalfPi = try unrounded(NSDecimalMultiply, halfPi, 3, allowingLossOfPrecision: true)
+                poles = [-threeHalfPi, -halfPi, halfPi, threeHalfPi]
+            }
+
+            var nearest: (pole: Decimal, residual: Decimal)?
+            for pole in poles {
+                let residual = try unrounded(NSDecimalSubtract, angle, pole, allowingLossOfPrecision: true)
+                let magnitude = residual < 0 ? -residual : residual
+                let nearestMagnitude = nearest.map { $0.residual < 0 ? -$0.residual : $0.residual }
+                if nearestMagnitude == nil || magnitude < nearestMagnitude! {
+                    nearest = (pole, residual)
+                }
+            }
+
+            guard let nearest else {
+                throw CalculatorError.overflow
+            }
+            return nearest
+        }
+
+        private func trigonometricArgument(for argument: ParsedValue) throws -> Double {
+            NSDecimalNumber(decimal: try reducedTrigonometricAngle(for: argument)).doubleValue
         }
 
         /// Reduces a symbolic Radian angle from its exact parts.
@@ -909,6 +1235,12 @@ public struct CalculatorEngine: Sendable {
         /// Returns nil whenever the engine cannot prove the angle's exact position, which keeps
         /// approximate inputs on the ordinary trigonometric path.
         private func exactUnitCircleAngle(for argument: ParsedValue) throws -> ExactUnitCircleAngle? {
+            // A retained nonzero residual proves that a displayed quarter turn is only an
+            // approximation to the source angle, so it cannot use an exact-angle shortcut.
+            guard argument.tangentPoleResidual == nil else {
+                return nil
+            }
+
             switch angleMode {
             case .degrees:
                 return try unitCircleAngle(forDegreeAngle: argument.semanticValue)
@@ -1562,6 +1894,9 @@ public struct CalculatorEngine: Sendable {
                 }
                 return try reciprocalSquareRoot(of: base)
             }
+            if base == 0 {
+                return 0
+            }
 
             var integralExponent = exponent
             var exponentToRound = exponent
@@ -1570,17 +1905,69 @@ public struct CalculatorEngine: Sendable {
                 return try unrounded(integralPower: base, exponent: integralExponent)
             }
 
-            guard base >= 0 else {
+            guard base > 0 else {
                 throw CalculatorError.domainError
             }
+
+            let baseDelta = try unrounded(NSDecimalSubtract, base, 1, allowingLossOfPrecision: true)
+            let deltaMagnitude = baseDelta < 0 ? -baseDelta : baseDelta
+            let baseIsNearOne = deltaMagnitude <= 0.5
+            let exponentDouble = NSDecimalNumber(decimal: exponent).doubleValue
+            let integralExponentDouble = NSDecimalNumber(decimal: integralExponent).doubleValue
+            let fractionalExponent = try unrounded(
+                NSDecimalSubtract,
+                exponent,
+                integralExponent,
+                allowingLossOfPrecision: true,
+            )
+            let fractionalExponentDouble = NSDecimalNumber(decimal: fractionalExponent).doubleValue
+            let conversionLosesFraction = fractionalExponentDouble == 0 || exponentDouble == integralExponentDouble
+
+            if baseIsNearOne || conversionLosesFraction {
+                return try stableFractionalPower(
+                    base: base,
+                    integralExponent: integralExponent,
+                    fractionalExponent: fractionalExponent,
+                    baseDelta: baseDelta,
+                )
+            }
+
             let result = Foundation.pow(
                 NSDecimalNumber(decimal: base).doubleValue,
-                NSDecimalNumber(decimal: exponent).doubleValue,
+                exponentDouble,
             )
             return try semanticDecimal(result)
         }
 
         /// Retains additional Decimal precision when a square root is composed with another function.
+        /// Evaluates the fractional part separately so near-one and near-integer deltas survive Double conversion.
+        private func stableFractionalPower(
+            base: Decimal,
+            integralExponent: Decimal,
+            fractionalExponent: Decimal,
+            baseDelta: Decimal,
+        ) throws -> Decimal {
+            let logarithm: Double
+            let deltaMagnitude = baseDelta < 0 ? -baseDelta : baseDelta
+            if deltaMagnitude <= 0.5 {
+                logarithm = Foundation.log1p(NSDecimalNumber(decimal: baseDelta).doubleValue)
+            } else {
+                logarithm = Foundation.log(NSDecimalNumber(decimal: base).doubleValue)
+            }
+
+            let fractionalExponentDouble = NSDecimalNumber(decimal: fractionalExponent).doubleValue
+            let fractionalChange = Foundation.expm1(fractionalExponentDouble * logarithm)
+            let change = try semanticDecimal(fractionalChange)
+            let fractionalFactor = try unrounded(NSDecimalAdd, 1, change, allowingLossOfPrecision: true)
+            let integralFactor = try unrounded(integralPower: base, exponent: integralExponent)
+            return try unrounded(
+                NSDecimalMultiply,
+                integralFactor,
+                fractionalFactor,
+                allowingLossOfPrecision: true,
+            )
+        }
+
         private func semanticSquareRoot(of value: Decimal) throws -> Decimal {
             try squareRoot(of: value, toScale: max(roundingScale, 20))
         }

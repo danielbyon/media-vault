@@ -126,4 +126,46 @@ struct CalculatorClipboardTests {
             )
         }
     }
+
+
+    @Test("Multiply and divide after paste continue from the completed value")
+    @MainActor
+    func multiplyAndDivideAfterPasteUseTheDisplayedResult() async {
+        let multiplyStore = makePastedExpressionStore("2+3")
+        multiplyStore.exhaustivity = .off(showSkippedAssertions: false)
+        await multiplyStore.send(.button(.paste))
+        await multiplyStore.receive(.pasted("2+3"))
+        #expect(multiplyStore.state.display == "5")
+        #expect(multiplyStore.state.expression == "2+3")
+        #expect(multiplyStore.state.isShowingResult)
+        await multiplyStore.send(.button(.multiply))
+        await multiplyStore.send(.button(.digit(2)))
+        await multiplyStore.send(.button(.equals))
+        #expect(multiplyStore.state.display == "10")
+        #expect(multiplyStore.state.expression == "10")
+
+        let divideStore = makePastedExpressionStore("2+3")
+        divideStore.exhaustivity = .off(showSkippedAssertions: false)
+        await divideStore.send(.button(.paste))
+        await divideStore.receive(.pasted("2+3"))
+        #expect(divideStore.state.display == "5")
+        await divideStore.send(.button(.divide))
+        await divideStore.send(.button(.digit(2)))
+        await divideStore.send(.button(.equals))
+        #expect(divideStore.state.display == "2.5")
+        #expect(divideStore.state.expression == "2.5")
+    }
+
+    @MainActor
+    private func makePastedExpressionStore(_ expression: String) -> TestStoreOf<CalculatorFeature> {
+        TestStore(initialState: CalculatorFeature.State()) {
+            CalculatorFeature()
+        } withDependencies: {
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in }
+            $0.calculatorClipboard.paste = { expression }
+            $0.date.now = Date(timeIntervalSince1970: 1_725_000_006)
+            $0.uuid = .constant(UUID(10_103))
+        }
+    }
 }

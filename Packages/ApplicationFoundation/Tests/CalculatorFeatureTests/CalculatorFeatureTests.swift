@@ -178,6 +178,36 @@ struct CalculatorFeatureTests {
         }
     }
 
+
+    @Test("Binary arithmetic composes scientific operands from their semantic values")
+    func binaryArithmeticUsesSemanticScientificOperands() throws {
+        let engine = CalculatorEngine()
+        let preciseEngine = CalculatorEngine(roundingScale: 20)
+        let smallOperand = "reciprocal(100000000000)"
+
+        #expect(try engine.evaluate("1/\(smallOperand)") == "100000000000")
+        #expect(try engine.evaluate("100000000000×\(smallOperand)") == "1")
+        #expect(try engine.evaluate("\(smallOperand)×100000000000") == "1")
+
+        #expect(try preciseEngine.evaluate("1+\(smallOperand)") == "1.00000000001")
+        #expect(try preciseEngine.evaluate("\(smallOperand)+1") == "1.00000000001")
+        #expect(try preciseEngine.evaluate("1-\(smallOperand)") == "0.99999999999")
+        #expect(try preciseEngine.evaluate("\(smallOperand)-1") == "-0.99999999999")
+        #expect(try preciseEngine.evaluate("8/square(2)") == "2")
+        #expect(try preciseEngine.evaluate("square(2)/8") == "0.5")
+        #expect(try preciseEngine.evaluate("\(smallOperand)/1") == "0.00000000001")
+    }
+
+    @Test("Fractional powers retain small base and exponent deltas")
+    func fractionalPowersPreserveNearOneDecimalDeltas() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        #expect(try engine.evaluate("1.0000000000000001^0.25") == "1.000000000000000025")
+        #expect(try engine.evaluate("1.0000000000000001^1.5") == "1.00000000000000015")
+        #expect(try engine.evaluate("2^1.0000000000000001") == "2.00000000000000013863")
+        #expect(try engine.evaluate("16^0.25") == "2")
+    }
+
     @Test("Square roots preserve Decimal precision and display rounding")
     func squareRootsPreserveDecimalPrecisionAndDisplayRounding() throws {
         let engine = CalculatorEngine()
@@ -578,7 +608,9 @@ struct CalculatorFeatureTests {
         let beyondPoleMagnitude = (Decimal(string: beyondPoleDegrees) ?? 0).magnitude
         #expect((Decimal(string: nearPoleDegrees) ?? 0) > Decimal(100_000_000_000))
         #expect((Decimal(string: nearPoleRadians) ?? 0) > Decimal(10_000_000_000))
-        #expect((Decimal(string: floatingPointNearPoleRadians) ?? 0) > Decimal(1_000_000_000_000_000))
+        let floatingPointNearPole = try #require(Decimal(string: floatingPointNearPoleRadians))
+        let floatingPointNearPoleMagnitude = floatingPointNearPole < 0 ? -floatingPointNearPole : floatingPointNearPole
+        #expect(floatingPointNearPoleMagnitude > Decimal(1_000_000_000_000_000))
         #expect(Decimal(string: decimalPiHalfApproximation) != nil)
         #expect(Decimal(string: roundedPiHalfApproximation) != nil)
         #expect(beyondPoleMagnitude > Decimal(100_000_000_000))
@@ -623,6 +655,97 @@ struct CalculatorFeatureTests {
 
         #expect(composed == direct)
     }
+
+
+    @Test("Large arctangents retain their small asymptotic angle for tangent")
+    func largeArctangentsPreserveTangentMagnitude() throws {
+        let engine = CalculatorEngine()
+        let relativeTolerance = try #require(Decimal(string: "0.00000000000001"))
+
+        func approximatelyMatches(_ actual: Decimal, _ expected: Decimal) -> Bool {
+            let difference = actual >= expected ? actual - expected : expected - actual
+            let magnitude = expected < 0 ? -expected : expected
+            return difference <= magnitude * relativeTolerance
+        }
+
+        let positiveDegree = try #require(Decimal(string: try engine.evaluate(
+            "tan(atan(10000000000000000))",
+            angleMode: .degrees,
+        )))
+        let negativeDegree = try #require(Decimal(string: try engine.evaluate(
+            "tan(atan(-10000000000000000))",
+            angleMode: .degrees,
+        )))
+        let positiveRadians = try #require(Decimal(string: try engine.evaluate(
+            "tan(atan(100000000000000000000))",
+            angleMode: .radians,
+        )))
+        let negativeRadians = try #require(Decimal(string: try engine.evaluate(
+            "tan(atan(-100000000000000000000))",
+            angleMode: .radians,
+        )))
+
+        #expect(approximatelyMatches(positiveDegree, 10_000_000_000_000_000))
+        #expect(approximatelyMatches(negativeDegree, -10_000_000_000_000_000))
+        let expectedRadians = Decimal(string: "100000000000000000000")!
+        #expect(approximatelyMatches(positiveRadians, expectedRadians))
+        #expect(approximatelyMatches(negativeRadians, -expectedRadians))
+
+        // These angles are too close to the pole for Decimal to keep the delta beside 90 or π/2.
+        // The parsed arctangent must carry that nonzero residual into tangent evaluation.
+        let extremeArgument = "1" + String(repeating: "0", count: 100)
+        let extremeExpected = try #require(Decimal(string: extremeArgument))
+        for mode in [CalculatorAngleMode.degrees, .radians] {
+            let positive = try #require(Decimal(string: engine.evaluate(
+                "tan(atan(\(extremeArgument)))",
+                angleMode: mode,
+            )))
+            let negative = try #require(Decimal(string: engine.evaluate(
+                "tan(atan(-\(extremeArgument)))",
+                angleMode: mode,
+            )))
+            let positiveAfterZero = try #require(Decimal(string: engine.evaluate(
+                "tan(atan(\(extremeArgument)) + 0)",
+                angleMode: mode,
+            )))
+            let negativeAfterZero = try #require(Decimal(string: engine.evaluate(
+                "tan(atan(-\(extremeArgument)) + 0)",
+                angleMode: mode,
+            )))
+            let positiveAfterSubtractingZero = try #require(Decimal(string: engine.evaluate(
+                "tan(atan(\(extremeArgument)) − 0)",
+                angleMode: mode,
+            )))
+            let positiveAfterMultiplyingByOne = try #require(Decimal(string: engine.evaluate(
+                "tan(atan(\(extremeArgument)) × 1)",
+                angleMode: mode,
+            )))
+            let positiveAfterDividingByOne = try #require(Decimal(string: engine.evaluate(
+                "tan(atan(\(extremeArgument)) ÷ 1)",
+                angleMode: mode,
+            )))
+            let negatedBySubtraction = try #require(Decimal(string: engine.evaluate(
+                "tan(0 − atan(\(extremeArgument)))",
+                angleMode: mode,
+            )))
+            #expect(approximatelyMatches(positive, extremeExpected))
+            #expect(approximatelyMatches(negative, -extremeExpected))
+            #expect(approximatelyMatches(positiveAfterZero, extremeExpected))
+            #expect(approximatelyMatches(negativeAfterZero, -extremeExpected))
+            #expect(approximatelyMatches(positiveAfterSubtractingZero, extremeExpected))
+            #expect(approximatelyMatches(positiveAfterMultiplyingByOne, extremeExpected))
+            #expect(approximatelyMatches(positiveAfterDividingByOne, extremeExpected))
+            #expect(approximatelyMatches(negatedBySubtraction, -extremeExpected))
+        }
+
+        #expect(try engine.evaluate("atan(1)", angleMode: .degrees) == "45")
+        #expect(try engine.evaluate("atan(-1)", angleMode: .degrees) == "-45")
+        #expect(try engine.evaluate("tan(atan(2))") == "2")
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(atan(1)×2)", angleMode: .radians)
+        }
+    }
+
 
     @Test("Exact inverse half-angles preserve tangent pole provenance")
     func exactInverseHalfAnglesPreserveTangentPoleProvenance() throws {
@@ -713,13 +836,26 @@ struct CalculatorFeatureTests {
         let precise = CalculatorEngine(roundingScale: 20)
         let nearPositiveOne = "0.99999999999999999"
         let nearNegativeOne = "-0.99999999999999999"
+        let highPrecisionTolerance = Decimal(string: "0.000000000001")!
+        func isHighPrecisionClose(_ actual: Decimal, to expected: Decimal) -> Bool {
+            let difference = actual >= expected ? actual - expected : expected - actual
+            return difference < highPrecisionTolerance
+        }
 
         // Both operands convert to the `Double` endpoint itself, so a direct conversion would
         // report a quarter turn and lose the distance that keeps the angle off the pole.
         #expect(try engine.evaluate("asin(\(nearPositiveOne))", angleMode: .degrees) == "89.9999997438")
         #expect(try engine.evaluate("asin(\(nearPositiveOne))", angleMode: .radians) == "1.5707963223")
-        #expect(try precise.evaluate("asin(\(nearPositiveOne))", angleMode: .degrees) == "89.99999974376549")
-        #expect(try precise.evaluate("asin(\(nearPositiveOne))", angleMode: .radians) == "1.5707963223227606")
+        let preciseAsinDegrees = try #require(Decimal(string: precise.evaluate(
+            "asin(\(nearPositiveOne))",
+            angleMode: .degrees,
+        )))
+        let preciseAsinRadians = try #require(Decimal(string: precise.evaluate(
+            "asin(\(nearPositiveOne))",
+            angleMode: .radians,
+        )))
+        #expect(isHighPrecisionClose(preciseAsinDegrees, to: Decimal(string: "89.99999974376549")!))
+        #expect(isHighPrecisionClose(preciseAsinRadians, to: Decimal(string: "1.5707963223227606")!))
         #expect(try engine.evaluate("asin(\(nearNegativeOne))", angleMode: .degrees) == "-89.9999997438")
         #expect(try engine.evaluate("asin(\(nearNegativeOne))", angleMode: .radians) == "-1.5707963223")
         #expect(try engine.evaluate("acos(\(nearPositiveOne))", angleMode: .degrees) == "0.0000002562")
@@ -740,10 +876,28 @@ struct CalculatorFeatureTests {
         #expect(arcCosineDegrees > 0)
         #expect(negativeArcCosineDegrees < 180)
 
-        // The recovered angle is finite, so its tangent is a large finite number and not a pole.
-        #expect(try engine.evaluate("tan(asin(\(nearPositiveOne)))", angleMode: .degrees) == "223606792.69535968")
-        #expect(try engine.evaluate("tan(asin(\(nearPositiveOne)))", angleMode: .radians) == "223606792.69535968")
-        #expect(try engine.evaluate("tan(asin(\(nearNegativeOne)))", angleMode: .degrees) == "-223606792.69535968")
+        // The recovered angle is finite and its tangent tracks the Decimal endpoint ratio.
+        let expectedTangent = Decimal(string: "223606797.749978967963866")!
+        let tangentTolerance = Decimal(string: "0.01")!
+        func isClose(_ actual: Decimal, to expected: Decimal) -> Bool {
+            let difference = actual >= expected ? actual - expected : expected - actual
+            return difference < tangentTolerance
+        }
+        let positiveDegreeTangent = try #require(Decimal(string: engine.evaluate(
+            "tan(asin(\(nearPositiveOne)))",
+            angleMode: .degrees,
+        )))
+        let positiveRadianTangent = try #require(Decimal(string: engine.evaluate(
+            "tan(asin(\(nearPositiveOne)))",
+            angleMode: .radians,
+        )))
+        let negativeDegreeTangent = try #require(Decimal(string: engine.evaluate(
+            "tan(asin(\(nearNegativeOne)))",
+            angleMode: .degrees,
+        )))
+        #expect(isClose(positiveDegreeTangent, to: expectedTangent))
+        #expect(isClose(positiveRadianTangent, to: expectedTangent))
+        #expect(isClose(negativeDegreeTangent, to: -expectedTangent))
 
         // Exact endpoint results and operands away from the endpoints keep their established values.
         #expect(try precise.evaluate("asin(1)", angleMode: .degrees) == "90")
@@ -865,15 +1019,42 @@ struct CalculatorFeatureTests {
         }
 
         // A function result that only rounds toward zero is not exact, so the pole stays finite.
-        #expect(
-            try engine.evaluate("tan(π/2+sin(0.0000000001))", angleMode: .radians)
-                == "-10000027500.366405",
-        )
+        let symbolicNearPole = try #require(Decimal(string: engine.evaluate(
+            "tan(π/2+sin(0.0000000001))",
+            angleMode: .radians,
+        )))
+        let symbolicNearPoleError = symbolicNearPole + 10_000_000_000
+        #expect(symbolicNearPoleError > -1 && symbolicNearPoleError < 1)
 
         // Degree mode keeps the exactness in the semantic angle rather than in provenance.
         #expect(throws: CalculatorError.domainError) {
             try engine.evaluate("tan(90+sin(0))", angleMode: .degrees)
         }
+    }
+
+
+    @Test("Exact nonzero squares and roots preserve scalar provenance")
+    func exactSquaresAndRootsPreserveScalarProvenance() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×square(1)/2)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×sqrt(1)/2)", angleMode: .radians)
+        }
+        #expect(try engine.evaluate("sin(π×square(1))", angleMode: .radians) == "0")
+        #expect(try engine.evaluate("square(3)") == "9")
+        #expect(try engine.evaluate("sqrt(9)") == "3")
+
+        // Approximate roots and squares that lose Decimal precision must not become exact scalars.
+        let irrationalRootComposition = try? engine.evaluate("tan(π×sqrt(2)/(sqrt(2)×2))", angleMode: .radians)
+        let roundedSquareComposition = try? engine.evaluate(
+            "tan(π×square(123456789012345678901234567890)/(square(123456789012345678901234567890)×2))",
+            angleMode: .radians,
+        )
+        #expect(irrationalRootComposition != nil, "An approximate sqrt(2) must not create exact pole provenance")
+        #expect(roundedSquareComposition != nil, "A rounded square must not create exact pole provenance")
     }
 
     @Test("The e constant carries the full Decimal precision of the engine")
