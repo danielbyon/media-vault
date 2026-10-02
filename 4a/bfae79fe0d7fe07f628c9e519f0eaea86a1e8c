@@ -1,0 +1,33 @@
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_efdd93a25cce98 314-317,326,329-330,494,496,516-583
+  s_6e45b70b7be182::t_be34de994bd350 1390-1392,1404,1409
+  s_6e45b70b7be182::t_3c11c11fd31dc0 1522-1530,1532-1533,1552
+  s_66f791c4ab49f1::t_1982fb25b595d3 584
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_09576c8eb94c85 143-180,647-698
+  s_6e45b70b7be182::t_033d38d9391095 699
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4abfae79fe0d7fe07f628c9e519f0eaea86a1e8c",
+  "prompts": {},
+  "sessions": {
+    "s_66f791c4ab49f1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0f3ae-5178-7a42-8e9f-531122b57503",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
