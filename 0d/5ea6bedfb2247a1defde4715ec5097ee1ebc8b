@@ -1,0 +1,93 @@
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorEngine.swift
+  s_6e45b70b7be182::t_10b657c568be3f 78-84,286,308-313,317-332
+  s_6e45b70b7be182::t_ca426d8cb42fda 97-104,108,122-126,129,418,589,593-596,605,613-620,647-653,655,681,708,1028,1035-1057,1060,1088,1969
+  s_6e45b70b7be182::t_96e910f883d09b 625,627,630,632-633,638,640,737-742,775-778,781,788-824,920,930-941,949-950,1018-1019,1021,1065-1066,1068,1081,1921-1922,1932,1949,1967-1968
+  s_6e45b70b7be182::t_4a1c32ff3cc435 265-269,273-276,282-285,344-345,347-417
+  s_6e45b70b7be182::t_cb887dbe6d645b 656
+  s_6e45b70b7be182::t_8e0701b9264a0f 624,657-680,1031,1085
+  s_6e45b70b7be182::t_73a6683fe952fd 128,621,642,1027,1072,1082,1086,1238-1243,1899,1933,1956
+  s_6e45b70b7be182::t_80882ede093c6b 92,127,431,468,654
+  s_6e45b70b7be182::t_ab02aa578bfea5 130
+  s_6e45b70b7be182::t_8459e72d598248 305-307
+  s_6e45b70b7be182::t_e631c3851fdd80 341-343
+  s_6e45b70b7be182::t_f4e8fe0d6e200a 346
+  s_6e45b70b7be182::t_faead166eadbf6 419
+  s_6e45b70b7be182::t_0b5a3025e6e03b 622-623
+  s_6e45b70b7be182::t_0de5391d5d5612 626
+  s_6e45b70b7be182::t_fb886ff3287fa8 628-629
+  s_6e45b70b7be182::t_e0c754c6619f0b 631
+  s_6e45b70b7be182::t_7f8f1f91ef9ed5 634-637
+  s_6e45b70b7be182::t_0a49448855b747 639
+  s_6e45b70b7be182::t_161df4ca375e6c 641
+  s_6e45b70b7be182::t_a3bb02b4d72643 643-646
+  s_6e45b70b7be182::t_212f16aefaad44 682
+  s_6e45b70b7be182::t_f96dbe9c1b6009 942-944,946-948
+  s_6e45b70b7be182::t_256090ac0a30a5 951
+  s_6e45b70b7be182::t_a27918bef238bd 1017
+  s_6e45b70b7be182::t_20f7beaad3de88 1020
+  s_6e45b70b7be182::t_da7175bf0c6f00 1022-1024
+  s_6e45b70b7be182::t_eef40d698ab5bd 1029-1030
+  s_6e45b70b7be182::t_1467b257439c5f 1032-1034
+  s_6e45b70b7be182::t_aea53ef8b94458 1058-1059
+  s_6e45b70b7be182::t_097424387ce274 1061-1064
+  s_6e45b70b7be182::t_ba9465a5b1ea7b 1067
+  s_6e45b70b7be182::t_2cae5ebc808949 1069-1071
+  s_6e45b70b7be182::t_01ce948c389096 1073-1075,1078-1080
+  s_6e45b70b7be182::t_64c18493197511 1083-1084
+  s_6e45b70b7be182::t_f2a01a9101f74e 1087
+  s_6e45b70b7be182::t_8f7ab897d88da6 1089-1091
+  s_6e45b70b7be182::t_9d83423560f31c 1897-1898
+  s_6e45b70b7be182::t_b92e0ea9121984 1918-1920
+  s_6e45b70b7be182::t_bf4ae36921857b 1923-1925,1929-1931
+  s_6e45b70b7be182::t_b1a3ecf07c7e00 1934
+  s_6e45b70b7be182::t_ea24234a40f9f4 1946-1948
+  s_6e45b70b7be182::t_7b2a958f801869 1950-1955
+  s_6e45b70b7be182::t_a69473a90e9109 1957-1959,1964-1966
+  s_6e45b70b7be182::t_62cf107d276012 1970
+  s_dccb117b07d93a::t_e937f91c704d4e 257-260,301-304,702,945,1025,1076-1077,1908,1911-1917,1926-1928,1937,1943-1945,1960-1963
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorFeatureTests.swift
+  s_6e45b70b7be182::t_5ec86c6aeedbfe 694-706,731-732,739-740
+  s_6e45b70b7be182::t_f5d3248e32bfd1 715-730,735-738
+  s_6e45b70b7be182::t_4814ed10c6fb53 746,879-900,1042,1045
+  s_6e45b70b7be182::t_0b194e025b0de0 707-714,733-734
+  s_6e45b70b7be182::t_6389989d356a34 611-613,659-689
+  s_6e45b70b7be182::t_fbcca10e03f414 1022-1027
+  s_6e45b70b7be182::t_010ee17785e6d9 1051-1057
+  s_6e45b70b7be182::t_e2d7eea85f2cbc 690-692
+  s_6e45b70b7be182::t_3b3863203ef5ce 839-843,849-858
+  s_7a6e5a1c75951d::t_b00c33ad49f432 181-210,693,741-745,747-749,1035-1041,1043-1044,1046-1050,1058-1059
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorClipboardTests.swift
+  s_dccb117b07d93a::t_5f76c06488c65f 129-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0d5ea6bedfb2247a1defde4715ec5097ee1ebc8b",
+  "prompts": {},
+  "sessions": {
+    "s_6e45b70b7be182": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67d-0812-78b0-a9f2-1a3c3d5e671b",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_7a6e5a1c75951d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0f65d-dd83-72f3-84aa-edf89b8f640e",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_dccb117b07d93a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e67e-8b66-7a21-a090-170ef0c6e1e2",
+        "model": "unknown"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
