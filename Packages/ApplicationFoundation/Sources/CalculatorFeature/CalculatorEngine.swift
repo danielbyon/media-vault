@@ -60,6 +60,95 @@ public struct CalculatorEngine: Sendable {
         return rounded.description
     }
 
+    /// Performs bounded exact coefficient proofs used by calculator arithmetic.
+    ///
+    /// These digit operations are limited to values that Foundation Decimal can represent. They
+    /// verify multiplication and signed addition without relying on Decimal's rounding status.
+    private enum ExactDecimalArithmetic {
+        static func product(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+            var product = Array(repeating: 0, count: lhs.count + rhs.count)
+            for leftIndex in lhs.indices {
+                for rightIndex in rhs.indices {
+                    product[leftIndex + rightIndex + 1] += lhs[leftIndex] * rhs[rightIndex]
+                }
+            }
+            for index in stride(from: product.count - 1, through: 1, by: -1) {
+                product[index - 1] += product[index] / 10
+                product[index] %= 10
+            }
+            while product.count > 1, product.first == 0 {
+                product.removeFirst()
+            }
+            return product
+        }
+
+        static func additionMatches(
+            lhs: (digits: [Int], scale: Int, negative: Bool),
+            rhs: (digits: [Int], scale: Int, negative: Bool),
+            result: (digits: [Int], scale: Int, negative: Bool),
+            subtracting: Bool,
+        ) -> Bool {
+            let scale = max(max(lhs.scale, rhs.scale), result.scale)
+            let leftMagnitude = lhs.digits + Array(repeating: 0, count: scale - lhs.scale)
+            let rightMagnitude = rhs.digits + Array(repeating: 0, count: scale - rhs.scale)
+            let resultValue = result.digits + Array(repeating: 0, count: scale - result.scale)
+            let width = max(max(leftMagnitude.count, rightMagnitude.count), resultValue.count) + 1
+            let left = Array(repeating: 0, count: width - leftMagnitude.count) + leftMagnitude
+            let right = Array(repeating: 0, count: width - rightMagnitude.count) + rightMagnitude
+            let resultDigits = Array(repeating: 0, count: width - resultValue.count) + resultValue
+            let rightIsNegative = rhs.negative != subtracting
+
+            let expected: (digits: [Int], negative: Bool)
+            if lhs.negative == rightIsNegative {
+                expected = (add(left, right), lhs.negative)
+            } else {
+                let comparison = compare(left, right)
+                if comparison == 0 {
+                    expected = ([0], false)
+                } else if comparison > 0 {
+                    expected = (subtract(left, right), lhs.negative)
+                } else {
+                    expected = (subtract(right, left), rightIsNegative)
+                }
+            }
+
+            let expectedDigits = Array(repeating: 0, count: width - expected.digits.count) + expected.digits
+            return expectedDigits == resultDigits && expected.negative == result.negative
+        }
+
+        private static func add(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+            var result: [Int] = []
+            var carry = 0
+            for index in lhs.indices.reversed() {
+                let sum = lhs[index] + rhs[index] + carry
+                result.append(sum % 10)
+                carry = sum / 10
+            }
+            if carry > 0 { result.append(carry) }
+            return result.reversed()
+        }
+
+        private static func subtract(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+            var result: [Int] = []
+            var borrow = 0
+            for index in lhs.indices.reversed() {
+                var difference = lhs[index] - rhs[index] - borrow
+                borrow = difference < 0 ? 1 : 0
+                if borrow != 0 { difference += 10 }
+                result.append(difference)
+            }
+            while result.count > 1, result.last == 0 { result.removeLast() }
+            return result.reversed()
+        }
+
+        private static func compare(_ lhs: [Int], _ rhs: [Int]) -> Int {
+            for index in lhs.indices {
+                if lhs[index] != rhs[index] { return lhs[index] < rhs[index] ? -1 : 1 }
+            }
+            return 0
+        }
+    }
+
     private struct Parser {
         private enum Function: String, CaseIterable {
             case sine = "sin"
@@ -147,6 +236,8 @@ public struct CalculatorEngine: Sendable {
             case exactRational(CalculatorExactRational, decimal: Decimal)
             case roundedRational(CalculatorExactRational, decimal: Decimal)
             case exactDecimal(Decimal)
+            /// Exact phase modulo two turns when the full coefficient cannot fit in Decimal.
+            case exactPhase(decimal: Decimal, twelfths: Int)
             /// Decimal coefficient that Decimal arithmetic could only approximate.
             ///
             /// The value still drives periodic reduction, but it must never decide an exact
@@ -157,20 +248,21 @@ public struct CalculatorEngine: Sendable {
                 switch self {
                 case let .exactRational(_, decimal), let .roundedRational(_, decimal): decimal
                 case let .exactDecimal(decimal), let .roundedDecimal(decimal): decimal
+                case let .exactPhase(decimal, _): decimal
                 }
             }
 
             var exactRational: CalculatorExactRational? {
                 switch self {
                 case let .exactRational(rational, _), let .roundedRational(rational, _): rational
-                case .exactDecimal, .roundedDecimal: nil
+                case .exactDecimal, .exactPhase, .roundedDecimal: nil
                 }
             }
 
             var exactDecimalValue: Decimal? {
                 switch self {
                 case let .exactRational(_, decimal), let .exactDecimal(decimal): decimal
-                case .roundedRational, .roundedDecimal: nil
+                case .roundedRational, .exactPhase, .roundedDecimal: nil
                 }
             }
 
@@ -179,6 +271,7 @@ public struct CalculatorEngine: Sendable {
                 switch self {
                 case let .exactRational(_, decimal), let .exactDecimal(decimal): (decimal, true)
                 case let .roundedRational(_, decimal), let .roundedDecimal(decimal): (decimal, false)
+                case let .exactPhase(decimal, _): (decimal, false)
                 }
             }
 
@@ -605,6 +698,14 @@ public struct CalculatorEngine: Sendable {
                 let result = try arcTangentValue(of: operand)
                 mathematicalValue = result.value
                 tangentPoleResidual = result.tangentPoleResidual
+            } else if case .arcCosine = function {
+                let result = try inverseTrigonometricAngle(of: operand, measuringCosine: true)
+                mathematicalValue = result.value
+                tangentPoleResidual = result.tangentPoleResidual
+            } else if case .arcSine = function {
+                let result = try inverseTrigonometricAngle(of: operand, measuringCosine: false)
+                mathematicalValue = result.value
+                tangentPoleResidual = result.tangentPoleResidual
             } else {
                 mathematicalValue = try computedValue(for: function, operand: operand, argument: argument)
             }
@@ -706,9 +807,9 @@ public struct CalculatorEngine: Sendable {
 
                 return try semanticDecimal(tangentValue(for: argument))
             case .arcSine:
-                return try inverseTrigonometricAngle(of: operand, measuringCosine: false)
+                return try inverseTrigonometricAngle(of: operand, measuringCosine: false).value
             case .arcCosine:
-                return try inverseTrigonometricAngle(of: operand, measuringCosine: true)
+                return try inverseTrigonometricAngle(of: operand, measuringCosine: true).value
             case .arcTangent:
                 return try arcTangentValue(of: operand).value
             case .naturalLogarithm:
@@ -738,17 +839,17 @@ public struct CalculatorEngine: Sendable {
         private func inverseTrigonometricAngle(
             of operand: Decimal,
             measuringCosine: Bool,
-        ) throws -> Decimal {
+        ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
             guard try requiresEndpointStableEvaluation(of: operand) else {
                 if measuringCosine, try requiresInteriorStableEvaluation(of: operand) {
                     return try interiorStableInverseCosine(of: operand)
                 }
 
                 let radians = directInverseTrigonometricRadians(of: operand, measuringCosine: measuringCosine)
-                return try semanticDecimal(angleMode.fromRadians(radians))
+                return (try semanticDecimal(angleMode.fromRadians(radians)), nil)
             }
 
-            return try stableInverseTrigonometricAngle(of: operand, measuringCosine: measuringCosine)
+            return (try stableInverseTrigonometricAngle(of: operand, measuringCosine: measuringCosine), nil)
         }
 
         /// Evaluates `asin`/`acos` through Foundation for operands that convert without loss.
@@ -857,7 +958,10 @@ public struct CalculatorEngine: Sendable {
         /// The angle is the quarter turn minus the operand's angle from zero, so subtracting that
         /// distance while both values are still Decimals keeps a difference that no `Double` could
         /// carry.
-        private func interiorStableInverseCosine(of operand: Decimal) throws -> Decimal {
+        /// Keeps a lost quarter-turn deviation so tangent can evaluate the finite source angle.
+        private func interiorStableInverseCosine(
+            of operand: Decimal,
+        ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
             let deviation = try interiorDeviation(of: operand)
             let quarterTurn: Decimal
             let delta: Decimal
@@ -872,9 +976,13 @@ public struct CalculatorEngine: Sendable {
                 delta = deviation
             }
 
-            return operand > 0
+            let value = operand > 0
                 ? try unrounded(NSDecimalSubtract, quarterTurn, delta, allowingLossOfPrecision: true)
                 : try unrounded(NSDecimalAdd, quarterTurn, delta, allowingLossOfPrecision: true)
+            let residual = value == quarterTurn && delta != 0
+                ? TangentPoleResidual(residual: operand > 0 ? -delta : delta)
+                : nil
+            return (value, residual)
         }
 
         /// Returns the operand's angular distance from the interior zero of `acos`, in radians.
@@ -891,12 +999,16 @@ public struct CalculatorEngine: Sendable {
                 allowingLossOfPrecision: true,
             )
             let complementRoot = try squareRoot(of: complement, toScale: max(roundingScale, 38))
-            let tangent = try unrounded(
-                NSDecimalDivide,
-                magnitude,
-                complementRoot,
-                allowingLossOfPrecision: true,
-            )
+            // Decimal division can underflow for a tiny numerator even when the divisor is
+            // exactly one. In that case the numerator already is the representable ratio.
+            let tangent = complementRoot == 1
+                ? magnitude
+                : try unrounded(
+                    NSDecimalDivide,
+                    magnitude,
+                    complementRoot,
+                    allowingLossOfPrecision: true,
+                )
 
             return try semanticDecimal(
                 Foundation.atan(NSDecimalNumber(decimal: tangent).doubleValue),
@@ -1080,7 +1192,7 @@ public struct CalculatorEngine: Sendable {
             exponent: Decimal,
             result: Decimal,
         ) throws -> AngleProvenance? {
-            guard try powerIsExactlyRepresentable(base: base, exponent: exponent) else {
+            guard try powerIsExactlyRepresentable(base: base, exponent: exponent, result: result) else {
                 return nil
             }
 
@@ -1094,7 +1206,7 @@ public struct CalculatorEngine: Sendable {
         /// while the exact result stays inside the coefficient precision, and a negative exponent
         /// additionally needs a reciprocal that `Decimal` divides exactly. Half powers reuse the
         /// digit-based square-root proof.
-        private func powerIsExactlyRepresentable(base: Decimal, exponent: Decimal) throws -> Bool {
+        private func powerIsExactlyRepresentable(base: Decimal, exponent: Decimal, result: Decimal) throws -> Bool {
             if exponent == 0 {
                 // A zero base with a zero or negative exponent is rejected before a power exists.
                 return true
@@ -1138,23 +1250,52 @@ public struct CalculatorEngine: Sendable {
             }
 
             let magnitude = integralExponent < 0 ? -integralExponent : integralExponent
-            return try integralPowerFitsPrecision(factor, exponent: magnitude)
+            return try integralPowerFitsPrecision(factor, exponent: magnitude, result: result)
         }
 
-        /// Reports whether an integral power keeps every intermediate inside the coefficient precision.
+        /// Proves an integral power's exact coefficient and base-ten exponent.
         ///
-        /// A coefficient of `d` digits raised to the exponent `n` needs at most `d × n` digits, and
-        /// exponentiation by squaring only ever builds powers up to that exponent, so every
-        /// intermediate stays inside the bound as well. The bound therefore proves the whole
-        /// calculation exact while it fits the coefficient precision, without relying on how
-        /// `Decimal` reports a rounded multiplication.
-        private func integralPowerFitsPrecision(_ factor: Decimal, exponent: Decimal) throws -> Bool {
+        /// Base-ten scaling is separate from significant digits: `10^40` has a one-digit
+        /// coefficient, while a rounded product with 39 nonzero coefficient digits is inexact.
+        /// Compare the exact digit product with the actual Decimal result to verify both its
+        /// coefficient and representable exponent without trusting Decimal's error status.
+        private func integralPowerFitsPrecision(
+            _ factor: Decimal,
+            exponent: Decimal,
+            result: Decimal,
+        ) throws -> Bool {
             let magnitude = factor < 0 ? -factor : factor
-            guard let (digits, _) = try? decimalDigitsAndScale(magnitude) else {
+            let resultMagnitude = result < 0 ? -result : result
+            guard let (digits, scale) = try? decimalDigitsAndScale(magnitude),
+                  let (resultDigits, resultScale) = try? decimalDigitsAndScale(resultMagnitude),
+                  let expectedScale = try? unrounded(NSDecimalMultiply, Decimal(scale), exponent),
+                  expectedScale == Decimal(resultScale)
+            else {
                 return false
             }
 
-            return exponent * Decimal(digits.count) <= 38
+            if digits == [1] {
+                return resultDigits == [1]
+            }
+
+            // A normalized non-unit coefficient is at least two; 2^130 has 40 digits.
+            // An exact 39-digit candidate therefore has a small integral exponent.
+            guard exponent <= 129 else { return false }
+            var remaining = NSDecimalNumber(decimal: exponent).intValue
+            var coefficient = [1]
+            var multiplier = digits
+            while remaining > 0 {
+                if remaining % 2 != 0 {
+                    coefficient = ExactDecimalArithmetic.product(coefficient, multiplier)
+                    guard coefficient.count <= 39 else { return false }
+                }
+                remaining /= 2
+                if remaining > 0 {
+                    multiplier = ExactDecimalArithmetic.product(multiplier, multiplier)
+                    guard multiplier.count <= 39 else { return false }
+                }
+            }
+            return coefficient == resultDigits
         }
 
         /// Returns the exact reciprocal of a value, or nil when `Decimal` rounds the quotient.
@@ -1386,6 +1527,9 @@ public struct CalculatorEngine: Sendable {
 
         /// Reduces a π coefficient modulo one whole turn, keeping any exact fraction intact.
         private func reducedPiCoefficient(_ coefficient: PiCoefficient) throws -> Decimal {
+            if case let .exactPhase(_, twelfths) = coefficient {
+                return try unrounded(NSDecimalDivide, Decimal(twelfths), 12, allowingLossOfPrecision: true)
+            }
             if let rational = coefficient.exactRational {
                 let wholeTurns = rational.numerator / rational.denominator
                 let remainder = rational.numerator % rational.denominator
@@ -1569,6 +1713,9 @@ public struct CalculatorEngine: Sendable {
         private func unitCircleAngle(
             forPiCoefficient coefficient: PiCoefficient,
         ) -> ExactUnitCircleAngle? {
+            if case let .exactPhase(_, twelfths) = coefficient {
+                return ExactUnitCircleAngle(twelfths: twelfths)
+            }
             if let rational = coefficient.exactRational {
                 return unitCircleAngle(forPiCoefficient: rational)
             }
@@ -1842,11 +1989,56 @@ public struct CalculatorEngine: Sendable {
                 return nil
             }
 
+            let decimalCoefficientIsExact = lhsCoefficient.isExact
+                && rhsCoefficient.isExact
+                && decimalAdditionIsExact(
+                    lhsCoefficient.value,
+                    rhsCoefficient.value,
+                    result: coefficient.value,
+                    subtracting: subtracting,
+                )
+
+            if !decimalCoefficientIsExact {
+                let lhsPhase = unitCircleAngle(forPiCoefficient: lhs.piCoefficient)
+                let rhsPhase = unitCircleAngle(forPiCoefficient: rhs.piCoefficient)
+                if let lhsPhase, let rhsPhase {
+                    let signedRight = subtracting ? -rhsPhase.twelfths : rhsPhase.twelfths
+                    let remainder = (lhsPhase.twelfths + signedRight) % 24
+                    let twelfths = remainder < 0 ? remainder + 24 : remainder
+                    return AngleProvenance(
+                        constant: constant,
+                        piCoefficient: .exactPhase(decimal: coefficient.value, twelfths: twelfths),
+                    )
+                }
+            }
+
             return AngleProvenance(
                 constant: constant,
-                piCoefficient: coefficient.isExact && lhsCoefficient.isExact && rhsCoefficient.isExact
+                piCoefficient: decimalCoefficientIsExact
                     ? .exactDecimal(coefficient.value)
                     : .roundedDecimal(coefficient.value),
+            )
+        }
+
+        /// Checks a Decimal sum against exact aligned coefficient digits.
+        private func decimalAdditionIsExact(
+            _ lhs: Decimal,
+            _ rhs: Decimal,
+            result: Decimal,
+            subtracting: Bool,
+        ) -> Bool {
+            guard let (lhsDigits, lhsScale) = try? decimalDigitsAndScale(abs(lhs)),
+                  let (rhsDigits, rhsScale) = try? decimalDigitsAndScale(abs(rhs)),
+                  let (resultDigits, resultScale) = try? decimalDigitsAndScale(abs(result))
+            else {
+                return false
+            }
+
+            return ExactDecimalArithmetic.additionMatches(
+                lhs: (lhsDigits, lhsScale, lhs < 0),
+                rhs: (rhsDigits, rhsScale, rhs < 0),
+                result: (resultDigits, resultScale, result < 0),
+                subtracting: subtracting,
             )
         }
 
@@ -1941,12 +2133,52 @@ public struct CalculatorEngine: Sendable {
                 return nil
             }
 
+            if case let .exactPhase(_, twelfths) = provenance.piCoefficient {
+                if factor == 0, !dividing {
+                    return AngleProvenance(constant: constant, piCoefficient: .exactDecimal(0))
+                }
+                if dividing, factor == 1 || factor == -1 {
+                    let phase = factor == -1 ? (24 - twelfths) % 24 : twelfths
+                    return AngleProvenance(
+                        constant: constant,
+                        piCoefficient: .exactPhase(decimal: coefficient.value, twelfths: phase),
+                    )
+                }
+                if !dividing, let integerFactor = exactIntegerModulo24(factor) {
+                    return AngleProvenance(
+                        constant: constant,
+                        piCoefficient: .exactPhase(
+                            decimal: coefficient.value,
+                            twelfths: twelfths * integerFactor % 24,
+                        ),
+                    )
+                }
+            }
+
             return AngleProvenance(
                 constant: constant,
                 piCoefficient: coefficient.isExact && sourceCoefficient.isExact
                     ? .exactDecimal(coefficient.value)
                     : .roundedDecimal(coefficient.value),
             )
+        }
+
+        /// Reads an exact Decimal integer modulo 24 without narrowing it through Int or Double.
+        private func exactIntegerModulo24(_ value: Decimal) -> Int? {
+            var integral = value
+            var input = value
+            NSDecimalRound(&integral, &input, 0, .plain)
+            guard integral == value else { return nil }
+
+            var decimal = value
+            let text = NSDecimalString(&decimal, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.hasPrefix("-")
+            var remainder = 0
+            for character in isNegative ? text.dropFirst() : text[...] {
+                guard let digit = character.wholeNumberValue else { return nil }
+                remainder = (remainder * 10 + digit) % 24
+            }
+            return isNegative ? (24 - remainder) % 24 : remainder
         }
 
         private func negated(_ value: Decimal?) -> Decimal? {
@@ -1975,6 +2207,8 @@ public struct CalculatorEngine: Sendable {
                 )
             } else if case .exactDecimal = provenance.piCoefficient {
                 coefficientState = .exactDecimal(piCoefficient)
+            } else if case let .exactPhase(_, twelfths) = provenance.piCoefficient {
+                coefficientState = .exactPhase(decimal: piCoefficient, twelfths: (24 - twelfths) % 24)
             } else if case .roundedDecimal = provenance.piCoefficient {
                 coefficientState = .roundedDecimal(piCoefficient)
             } else {

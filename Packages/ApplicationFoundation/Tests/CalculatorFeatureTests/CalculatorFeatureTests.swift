@@ -1161,6 +1161,29 @@ struct CalculatorFeatureTests {
         #expect(irrationalPower != nil, "An irrational power must not create exact pole provenance")
     }
 
+    @Test("Base-ten-scaled integral powers retain exact scalar provenance")
+    func baseTenScaledPowersKeepScalarProvenance() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("sin(π×(10^40))", angleMode: .radians) == "0")
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×(10^40)+π/2)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×(2^127)+π/2)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan((π×(10^40)+π/2)×1)", angleMode: .radians)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π/2-π×(10^40))", angleMode: .radians)
+        }
+        #expect(try engine.evaluate("0.1^40", angleMode: .radians) == "0")
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×((0.1^40)×(10^40))/2)", angleMode: .radians)
+        }
+    }
+
     @Test("Arccosine keeps its distance from the interior quarter turn")
     func arccosineKeepsInteriorQuarterTurnDistance() throws {
         let engine = CalculatorEngine(roundingScale: 20)
@@ -1177,6 +1200,35 @@ struct CalculatorFeatureTests {
             locale: Locale(identifier: "en_US_POSIX"),
         ) ?? 0
         #expect(tangent > 90_000_000_000_000_000)
+    }
+
+    @Test("Arccosine retains a nonzero pole residual below Decimal angle precision")
+    func arccosineRetainsUnrepresentablePoleResidual() throws {
+        let engine = CalculatorEngine()
+        let tiny = "10^-100"
+
+        for angleMode: CalculatorAngleMode in [.degrees, .radians] {
+            let displayed = try engine.evaluate("acos(\(tiny))", angleMode: angleMode)
+            #expect(displayed == (angleMode == .degrees ? "90" : "1.5707963268"))
+            let positive = try engine.evaluate("tan(acos(\(tiny)))", angleMode: angleMode)
+            let negative = try engine.evaluate("tan(acos(-\(tiny)))", angleMode: angleMode)
+            #expect(Double(positive).map { $0 > 9e99 && $0 < 1.1e100 } == true)
+            #expect(Double(negative).map { $0 < -9e99 && $0 > -1.1e100 } == true)
+
+            for expression in [
+                "tan(acos(\(tiny))+0)",
+                "tan(acos(\(tiny))-0)",
+                "tan(acos(\(tiny))×1)",
+                "tan(acos(\(tiny))÷1)",
+            ] {
+                let result = try engine.evaluate(expression, angleMode: angleMode)
+                #expect(Double(result).map { $0 > 9e99 && $0 < 1.1e100 } == true)
+            }
+
+            #expect(throws: CalculatorError.domainError) {
+                try engine.evaluate("tan(acos(0))", angleMode: angleMode)
+            }
+        }
     }
 
     @Test("Sine and cosine keep quadrant-relative residuals")
