@@ -140,6 +140,44 @@ struct CalculatorFeatureTests {
         #expect(try CalculatorEngine().evaluate("123456789^2") == "15241578750190521")
     }
 
+    @Test("Powers evaluate from semantic operands and round only the result")
+    func powersEvaluateFromSemanticOperands() throws {
+        let engine = CalculatorEngine()
+
+        // Rounding an operand before the power changes the operation: a root displayed as
+        // 1.4142135624 squares to a value that no longer shows as 2, and a base whose display
+        // collapses to zero raises a division-by-zero error instead of the reciprocal.
+        #expect(try engine.evaluate("sqrt(2)^2") == "2")
+        #expect(try CalculatorEngine(roundingScale: 20).evaluate("sqrt(2)^2") == "2")
+        #expect(try engine.evaluate("reciprocal(3)^-1") == "3")
+        #expect(try CalculatorEngine(roundingScale: 0).evaluate("reciprocal(3)^-1") == "3")
+
+        // A scientific function supplies the exponent's semantic value as well as a base's.
+        #expect(try CalculatorEngine(roundingScale: 0).evaluate("10^log10(3)") == "3")
+        #expect(try engine.evaluate("10^log10(3)") == "3")
+        #expect(try engine.evaluate("2^sqrt(4)") == "4")
+        #expect(try engine.evaluate("3^reciprocal(2)") == "1.7320508076")
+
+        // Every special power semantic survives the single evaluation.
+        #expect(try engine.evaluate("2^3^2") == "512")
+        #expect(try engine.evaluate("-2^2") == "-4")
+        #expect(try engine.evaluate("2^-2") == "0.25")
+        #expect(try engine.evaluate("4^0.5") == "2")
+        #expect(try engine.evaluate("4^-0.5") == "0.5")
+        #expect(try engine.evaluate("16^0.25") == "2")
+        #expect(try engine.evaluate("0.00000000001^-1") == "100000000000")
+        #expect(try engine.evaluate("10^-98") == "0")
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("0^0")
+        }
+        #expect(throws: CalculatorError.divisionByZero) {
+            try engine.evaluate("0^-1")
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("(-2)^0.5")
+        }
+    }
+
     @Test("Square roots preserve Decimal precision and display rounding")
     func squareRootsPreserveDecimalPrecisionAndDisplayRounding() throws {
         let engine = CalculatorEngine()
@@ -604,6 +642,59 @@ struct CalculatorFeatureTests {
         let engine = CalculatorEngine(roundingScale: 0)
         #expect(try engine.evaluate("tan(asin(0.999))", angleMode: .degrees) == "22")
         #expect(try engine.evaluate("tan(asin(0.999))", angleMode: .radians) == "22")
+    }
+
+    @Test("Inverse trigonometric endpoints preserve the Decimal operand distance")
+    func inverseTrigonometricEndpointsPreserveDecimalDistance() throws {
+        let engine = CalculatorEngine()
+        let precise = CalculatorEngine(roundingScale: 20)
+        let nearPositiveOne = "0.99999999999999999"
+        let nearNegativeOne = "-0.99999999999999999"
+
+        // Both operands convert to the `Double` endpoint itself, so a direct conversion would
+        // report a quarter turn and lose the distance that keeps the angle off the pole.
+        #expect(try engine.evaluate("asin(\(nearPositiveOne))", angleMode: .degrees) == "89.9999997438")
+        #expect(try engine.evaluate("asin(\(nearPositiveOne))", angleMode: .radians) == "1.5707963223")
+        #expect(try precise.evaluate("asin(\(nearPositiveOne))", angleMode: .degrees) == "89.99999974376549")
+        #expect(try precise.evaluate("asin(\(nearPositiveOne))", angleMode: .radians) == "1.5707963223227606")
+        #expect(try engine.evaluate("asin(\(nearNegativeOne))", angleMode: .degrees) == "-89.9999997438")
+        #expect(try engine.evaluate("asin(\(nearNegativeOne))", angleMode: .radians) == "-1.5707963223")
+        #expect(try engine.evaluate("acos(\(nearPositiveOne))", angleMode: .degrees) == "0.0000002562")
+        #expect(try engine.evaluate("acos(\(nearPositiveOne))", angleMode: .radians) == "0.0000000045")
+        #expect(try engine.evaluate("acos(\(nearNegativeOne))", angleMode: .degrees) == "179.9999997438")
+        #expect(try engine.evaluate("acos(\(nearNegativeOne))", angleMode: .radians) == "3.1415926491")
+
+        let arcSineDegrees = try #require(
+            Decimal(string: engine.evaluate("asin(\(nearPositiveOne))", angleMode: .degrees)),
+        )
+        let arcCosineDegrees = try #require(
+            Decimal(string: engine.evaluate("acos(\(nearPositiveOne))", angleMode: .degrees)),
+        )
+        let negativeArcCosineDegrees = try #require(
+            Decimal(string: engine.evaluate("acos(\(nearNegativeOne))", angleMode: .degrees)),
+        )
+        #expect(arcSineDegrees < 90)
+        #expect(arcCosineDegrees > 0)
+        #expect(negativeArcCosineDegrees < 180)
+
+        // The recovered angle is finite, so its tangent is a large finite number and not a pole.
+        #expect(try engine.evaluate("tan(asin(\(nearPositiveOne)))", angleMode: .degrees) == "223606792.69535968")
+        #expect(try engine.evaluate("tan(asin(\(nearPositiveOne)))", angleMode: .radians) == "223606792.69535968")
+        #expect(try engine.evaluate("tan(asin(\(nearNegativeOne)))", angleMode: .degrees) == "-223606792.69535968")
+
+        // Exact endpoint results and operands away from the endpoints keep their established values.
+        #expect(try precise.evaluate("asin(1)", angleMode: .degrees) == "90")
+        #expect(try precise.evaluate("acos(-1)", angleMode: .degrees) == "180")
+        #expect(try precise.evaluate("asin(0.4999999999)", angleMode: .degrees) == "29.999999993384055")
+        #expect(try precise.evaluate("asin(0.4999999999)", angleMode: .radians) == "0.5235987754828288")
+        #expect(try precise.evaluate("asin(0.3)", angleMode: .degrees) == "17.45760312372209")
+
+        // Domain checking still happens against the Decimal operand.
+        for expression in ["asin(1.00000000000000000001)", "acos(-1.00000000000000000001)"] {
+            #expect(throws: CalculatorError.domainError) {
+                try engine.evaluate(expression, angleMode: .degrees)
+            }
+        }
     }
 
     @Test("Radian reduction keeps enough phase precision for large numeric arguments")

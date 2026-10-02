@@ -311,6 +311,10 @@ public struct CalculatorEngine: Sendable {
         }
 
         /// Parses exponentiation recursively on its right side so chained powers associate right.
+        ///
+        /// The power itself is evaluated from the operands' semantic values, and only its result
+        /// is rounded for display. Rounding an operand first, such as a base whose display
+        /// collapses to zero, must not change which operation is performed.
         private mutating func parsePower() throws -> ParsedValue {
             let base = try parsePostfix()
             skipWhitespace()
@@ -319,13 +323,11 @@ public struct CalculatorEngine: Sendable {
             }
 
             let exponent = try parseUnary()
-            let displayedResult = try rounded(powering: base.value, exponent.value)
+            let mathematicalResult = try power(base.semanticValue, exponent.semanticValue)
             let preservesBaseAngle = exponent.semanticValue == 1
             return ParsedValue(
-                value: displayedResult,
-                semanticValue: preservesBaseAngle
-                    ? base.semanticValue
-                    : try semanticPowering(base.semanticValue, exponent.semanticValue),
+                value: try rounded(mathematicalResult),
+                semanticValue: preservesBaseAngle ? base.semanticValue : mathematicalResult,
                 angleProvenance: preservesBaseAngle ? base.angleProvenance : nil,
             )
         }
@@ -489,9 +491,9 @@ public struct CalculatorEngine: Sendable {
                     Foundation.tan(radians(from: try trigonometricArgument(for: argument))),
                 )
             case .arcSine:
-                return try semanticDecimal(angleMode.fromRadians(Foundation.asin(operandValue)))
+                return try inverseTrigonometricAngle(of: operand, measuringCosine: false)
             case .arcCosine:
-                return try semanticDecimal(angleMode.fromRadians(Foundation.acos(operandValue)))
+                return try inverseTrigonometricAngle(of: operand, measuringCosine: true)
             case .arcTangent:
                 return try semanticDecimal(angleMode.fromRadians(Foundation.atan(operandValue)))
             case .naturalLogarithm:
@@ -509,6 +511,75 @@ public struct CalculatorEngine: Sendable {
 
                 return try unrounded(NSDecimalDivide, 1, operand, allowingLossOfPrecision: true)
             }
+        }
+
+        /// Computes an inverse-trigonometric angle in the configured angle mode.
+        ///
+        /// The operand stays a `Decimal` until its distance to the endpoints has been preserved.
+        /// A value such as `0.99999999999999999` converts to the same `Double` as `1`, which
+        /// would report a quarter turn exactly and hide that the tangent of that angle is a large
+        /// finite number. Both the displayed and the semantic result come from this single
+        /// evaluation, so they cannot disagree about which angle was computed.
+        private func inverseTrigonometricAngle(
+            of operand: Decimal,
+            measuringCosine: Bool,
+        ) throws -> Decimal {
+            let radians = try requiresEndpointStableEvaluation(of: operand)
+                ? stableInverseTrigonometricRadians(of: operand, measuringCosine: measuringCosine)
+                : directInverseTrigonometricRadians(of: operand, measuringCosine: measuringCosine)
+            return try semanticDecimal(angleMode.fromRadians(radians))
+        }
+
+        /// Evaluates `asin`/`acos` through Foundation for operands that convert without loss.
+        private func directInverseTrigonometricRadians(
+            of operand: Decimal,
+            measuringCosine: Bool,
+        ) -> Double {
+            let operandValue = NSDecimalNumber(decimal: operand).doubleValue
+            return measuringCosine ? Foundation.acos(operandValue) : Foundation.asin(operandValue)
+        }
+
+        /// Reports whether converting the operand to `Double` would erase part of its endpoint distance.
+        ///
+        /// A `Double` resolves values around one no more finely than one unit in the last place
+        /// (about 2.2e-16), so an operand closer to ±1 than that reaches the trigonometry as the
+        /// endpoint itself. The Decimal distance from the endpoint is compared against the
+        /// distance the converted value reports, using the same material-loss rule as the
+        /// near-one logarithm path: a loss of more than one part in 10^8 of the distance counts.
+        private func requiresEndpointStableEvaluation(of operand: Decimal) throws -> Bool {
+            let endpointDistance = try unrounded(
+                NSDecimalSubtract,
+                1,
+                abs(operand),
+                allowingLossOfPrecision: true,
+            )
+            let endpointDistanceValue = NSDecimalNumber(decimal: endpointDistance).doubleValue
+            let convertedDistance = 1 - abs(NSDecimalNumber(decimal: operand).doubleValue)
+            return abs(convertedDistance - endpointDistanceValue) > endpointDistanceValue * 1e-8
+        }
+
+        /// Evaluates `asin`/`acos` from the Decimal distance to the unit circle.
+        ///
+        /// `(1 - x)(1 + x)` is `1 - x²` formed without subtracting nearly equal numbers, and
+        /// its square root is the remaining leg of the right triangle whose other leg is the
+        /// operand. `atan2` therefore recovers the angle from both legs instead of from an
+        /// operand that has already collapsed onto the endpoint.
+        private func stableInverseTrigonometricRadians(
+            of operand: Decimal,
+            measuringCosine: Bool,
+        ) throws -> Double {
+            let complement = try unrounded(
+                NSDecimalMultiply,
+                try unrounded(NSDecimalSubtract, 1, operand, allowingLossOfPrecision: true),
+                try unrounded(NSDecimalAdd, 1, operand, allowingLossOfPrecision: true),
+                allowingLossOfPrecision: true,
+            )
+            let complementRoot = try squareRoot(of: complement, toScale: max(roundingScale, 20))
+            let complementValue = NSDecimalNumber(decimal: complementRoot).doubleValue
+            let operandValue = NSDecimalNumber(decimal: operand).doubleValue
+            return measuringCosine
+                ? Foundation.atan2(complementValue, operandValue)
+                : Foundation.atan2(operandValue, complementValue)
         }
 
         /// Computes the function result used by later expression terms without display rounding.
@@ -1312,19 +1383,13 @@ public struct CalculatorEngine: Sendable {
             }
         }
 
-        private func decimal(_ value: Double) throws -> Decimal {
-            try checkedDecimal(fromFoundationValue: value, applyingDisplayRounding: true)
-        }
-
         /// Converts a Foundation result to Decimal using a locale-independent round-trip string.
         ///
         /// Decimal's direct Double initializer can produce NaN for finite values near the lower
         /// end of Decimal's exponent range, so parsing the Double's canonical representation keeps
-        /// representable scientific results while still rejecting actual range failures.
-        private func checkedDecimal(
-            fromFoundationValue value: Double,
-            applyingDisplayRounding: Bool,
-        ) throws -> Decimal {
+        /// representable scientific results while still rejecting actual range failures. The
+        /// caller applies display rounding to whatever it derives from the converted value.
+        private func checkedDecimal(fromFoundationValue value: Double) throws -> Decimal {
             guard value.isFinite,
                   let result = Decimal(
                       string: value.description,
@@ -1336,12 +1401,12 @@ public struct CalculatorEngine: Sendable {
                 throw CalculatorError.overflow
             }
 
-            return applyingDisplayRounding ? try rounded(result) : result
+            return result
         }
 
         /// Converts a Foundation result to Decimal without applying display rounding.
         private func semanticDecimal(_ value: Double) throws -> Decimal {
-            try checkedDecimal(fromFoundationValue: value, applyingDisplayRounding: false)
+            try checkedDecimal(fromFoundationValue: value)
         }
 
         /// Computes a logarithm from a semantic `Decimal` argument without collapsing deltas near one.
@@ -1402,49 +1467,6 @@ public struct CalculatorEngine: Sendable {
             return try rounded(NSDecimalDivide, lhs, rhs)
         }
 
-        private func rounded(powering base: Decimal, _ exponent: Decimal) throws -> Decimal {
-            if base == 0, exponent == 0 {
-                throw CalculatorError.domainError
-            }
-            if base == 0, exponent < 0 {
-                throw CalculatorError.divisionByZero
-            }
-            if exponent == 0.5 {
-                guard base >= 0 else {
-                    throw CalculatorError.domainError
-                }
-                return try rounded(squareRootOf: base)
-            }
-            if exponent == -0.5 {
-                guard base >= 0 else {
-                    throw CalculatorError.domainError
-                }
-                return try rounded(reciprocalSquareRootOf: base)
-            }
-
-            var integralExponent = exponent
-            var exponentToRound = exponent
-            NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
-            guard integralExponent == exponent else {
-                guard base >= 0 else {
-                    throw CalculatorError.domainError
-                }
-
-                let result = Foundation.pow(
-                    NSDecimalNumber(decimal: base).doubleValue,
-                    NSDecimalNumber(decimal: exponent).doubleValue,
-                )
-                return try decimal(result)
-            }
-
-            return try rounded(integralPower: base, exponent: integralExponent)
-        }
-
-        /// Computes a negative half power with Decimal square root and a checked reciprocal.
-        private func rounded(reciprocalSquareRootOf value: Decimal) throws -> Decimal {
-            try rounded(reciprocalSquareRoot(of: value))
-        }
-
         /// Computes the reciprocal of a square root with normalization-aware precision.
         ///
         /// The root needs enough digits for its reciprocal to stay meaningful: a value such as
@@ -1465,10 +1487,6 @@ public struct CalculatorEngine: Sendable {
                 toScale: max(roundingScale, precisionScale),
             )
             return try unrounded(NSDecimalDivide, 1, root)
-        }
-
-        private func rounded(integralPower base: Decimal, exponent: Decimal) throws -> Decimal {
-            try rounded(unrounded(integralPower: base, exponent: exponent))
         }
 
         private func unrounded(integralPower base: Decimal, exponent: Decimal) throws -> Decimal {
@@ -1501,23 +1519,19 @@ public struct CalculatorEngine: Sendable {
             return result
         }
 
-        private func unroundedIntegralPower(base: Decimal?, exponent: Decimal?) -> Decimal? {
-            guard let base, let exponent else {
-                return nil
+        /// Raises `base` to `exponent` without applying display rounding.
+        ///
+        /// Both the displayed digit string and the semantic value of a parsed power come from
+        /// this one evaluation, so they cannot be computed from different operands. Exponentiation
+        /// control values and intermediate products stay independent of the configured display
+        /// scale; the caller rounds only the completed result.
+        private func power(_ base: Decimal, _ exponent: Decimal) throws -> Decimal {
+            if base == 0, exponent == 0 {
+                throw CalculatorError.domainError
             }
-
-            var integralExponent = exponent
-            var exponentToRound = exponent
-            NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
-            guard integralExponent == exponent else {
-                return nil
+            if base == 0, exponent < 0 {
+                throw CalculatorError.divisionByZero
             }
-
-            return try? unrounded(integralPower: base, exponent: integralExponent)
-        }
-
-        /// Computes the semantic power without applying calculator display rounding.
-        private func semanticPowering(_ base: Decimal, _ exponent: Decimal) throws -> Decimal? {
             if exponent == 0.5 {
                 guard base >= 0 else {
                     throw CalculatorError.domainError
@@ -1528,9 +1542,6 @@ public struct CalculatorEngine: Sendable {
                 guard base >= 0 else {
                     throw CalculatorError.domainError
                 }
-                guard base != 0 else {
-                    throw CalculatorError.divisionByZero
-                }
                 return try reciprocalSquareRoot(of: base)
             }
 
@@ -1538,7 +1549,7 @@ public struct CalculatorEngine: Sendable {
             var exponentToRound = exponent
             NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
             if integralExponent == exponent {
-                return unroundedIntegralPower(base: base, exponent: exponent)
+                return try unrounded(integralPower: base, exponent: integralExponent)
             }
 
             guard base >= 0 else {
@@ -1549,11 +1560,6 @@ public struct CalculatorEngine: Sendable {
                 NSDecimalNumber(decimal: exponent).doubleValue,
             )
             return try semanticDecimal(result)
-        }
-
-        /// Computes a Decimal square root with bounded iteration and rounds only the final result.
-        private func rounded(squareRootOf value: Decimal) throws -> Decimal {
-            try squareRoot(of: value, toScale: roundingScale)
         }
 
         /// Retains additional Decimal precision when a square root is composed with another function.
