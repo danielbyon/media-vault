@@ -21,6 +21,22 @@ struct CalculatorFeatureTests {
         #expect(try CalculatorEngine().evaluate("200 × (2 + 8)%") == "20")
     }
 
+
+    @Test("Postfix percent rounds the semantic scientific result only once")
+    func postfixPercentUsesSemanticScientificValue() throws {
+        let engine = CalculatorEngine()
+        let squareRoot = "sqrt(2.2499999849700000251001)"
+        let square = "square(1.49999999499)"
+
+        #expect(try engine.evaluate("\(squareRoot)%") == "0.0149999999")
+        #expect(try engine.evaluate("\(squareRoot)/100") == "0.0149999999")
+        #expect(try engine.evaluate("\(square)%") == "0.0224999998")
+        #expect(try engine.evaluate("\(square)/100") == "0.0224999998")
+        #expect(try engine.evaluate("50%") == "0.5")
+        #expect(try engine.evaluate("200%%") == "0.02")
+        #expect(try engine.evaluate("\(squareRoot)%×100") == engine.evaluate(squareRoot))
+    }
+
     @Test("The calculator uses deterministic rounded decimal results")
     func usesDeterministicRoundedDecimalResults() throws {
         #expect(try CalculatorEngine().evaluate("0.1 + 0.2") == "0.3")

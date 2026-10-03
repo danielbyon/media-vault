@@ -599,9 +599,15 @@ public struct CalculatorEngine: Sendable {
                     return value
                 }
 
+                let semanticPercentage = try unrounded(
+                    NSDecimalDivide,
+                    value.semanticValue,
+                    100,
+                    allowingLossOfPrecision: true,
+                )
                 value = ParsedValue(
-                    value: try rounded(dividing: value.value, 100),
-                    semanticValue: unroundedResult(NSDecimalDivide, value.semanticValue, 100),
+                    value: try rounded(semanticPercentage),
+                    semanticValue: semanticPercentage,
                     angleProvenance: scaledAngleProvenance(value.angleProvenance, by: 100, dividing: true),
                 )
             }
@@ -2295,10 +2301,6 @@ public struct CalculatorEngine: Sendable {
             }
 
             return try? unrounded(operation, lhs, rhs)
-        }
-
-        private func unroundedResult(_ operation: DecimalOperation, _ lhs: Decimal, _ rhs: Decimal) -> Decimal? {
-            try? unrounded(operation, lhs, rhs)
         }
 
         /// Combines two Decimals without display rounding, recording whether Decimal was exact.
