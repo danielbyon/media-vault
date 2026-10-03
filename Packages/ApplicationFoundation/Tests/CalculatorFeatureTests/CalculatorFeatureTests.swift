@@ -151,9 +151,71 @@ struct CalculatorFeatureTests {
         #expect(try CalculatorEngine(roundingScale: 4).evaluate("3^-2") == "0.1111")
     }
 
+
+    @Test("Negative integral powers do not trap during bounded Decimal multiplication")
+    func negativeIntegralPowersAvoidIntermediateDecimalTrap() throws {
+        let engine = CalculatorEngine(roundingScale: 15)
+        let defaultPrecision = CalculatorEngine()
+        let tenToNinetySeven = "1" + String(repeating: "0", count: 97)
+        let tenToOneTwentyEight = "1" + String(repeating: "0", count: 128)
+        let tenToThirtyNine = "1" + String(repeating: "0", count: 39)
+
+        #expect(try defaultPrecision.evaluate("2^-320") == "0")
+        #expect(try engine.evaluate("2^-320×\(tenToNinetySeven)") == "4.681676354692198")
+        #expect(try engine.evaluate("(-2)^-320×\(tenToNinetySeven)") == "4.681676354692198")
+        #expect(try engine.evaluate("(-2)^-321×\(tenToNinetySeven)") == "-2.340838177346099")
+        #expect(try engine.evaluate("2^-128×\(tenToThirtyNine)") == "2.938735877055719")
+
+        let nearBoundary = try engine.evaluate("2^-425×\(tenToOneTwentyEight)")
+        #expect(nearBoundary == "1")
+        #expect(throws: CalculatorError.overflow) {
+            try engine.evaluate("2^-426")
+        }
+        #expect(throws: CalculatorError.overflow) {
+            try engine.evaluate("10^128")
+        }
+    }
+
     @Test("Integral powers preserve Decimal precision")
     func integralPowersPreserveDecimalPrecision() throws {
         #expect(try CalculatorEngine().evaluate("123456789^2") == "15241578750190521")
+    }
+
+
+    @Test("Large exact Decimal pi coefficients reduce without the rounded-phase gate")
+    func exactDecimalPiCoefficientsReduceModuloTwoWithoutPrecisionGate() throws {
+        let engine = CalculatorEngine()
+        let evenCoefficient = "10000000000000000000000000"
+        let oddCoefficient = "10000000000000000000000001"
+        let fractionalCoefficient = "10000000000000000000000000.25"
+        let negativeOddCoefficient = "-\(oddCoefficient)"
+        let sine = try engine.evaluate("sin(1)", angleMode: .radians)
+        let cosine = try engine.evaluate("cos(1)", angleMode: .radians)
+
+        #expect(try engine.evaluate("sin(π×\(evenCoefficient)+1)", angleMode: .radians) == sine)
+        #expect(try engine.evaluate("cos(π×\(evenCoefficient)+1)", angleMode: .radians) == cosine)
+        #expect(try engine.evaluate("sin(π×\(oddCoefficient)+1)", angleMode: .radians) == "-" + sine)
+        #expect(try engine.evaluate("cos(π×\(oddCoefficient)+1)", angleMode: .radians) == "-" + cosine)
+        #expect(
+            try engine.evaluate("sin(π×\(fractionalCoefficient)+1)", angleMode: .radians)
+                == engine.evaluate("sin(π/4+1)", angleMode: .radians),
+        )
+        #expect(
+            try engine.evaluate("sin(π×\(negativeOddCoefficient)+1)", angleMode: .radians) == "-" + sine,
+        )
+    }
+
+    @Test("Rounded Decimal pi coefficients still require phase precision")
+    func roundedDecimalPiCoefficientsRequireReliablePhase() {
+        let largeInteger = "1000000000000000000000000000000000000"
+        let nonQuadrantalFraction = "0.123456789012345678901234567890123456"
+
+        #expect(throws: CalculatorError.overflow) {
+            try CalculatorEngine().evaluate(
+                "sin(π×\(largeInteger)+π×\(nonQuadrantalFraction)+1)",
+                angleMode: .radians,
+            )
+        }
     }
 
     @Test("Powers evaluate from semantic operands and round only the result")

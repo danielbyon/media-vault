@@ -1932,10 +1932,10 @@ public struct CalculatorEngine: Sendable {
 
         /// Reduces a π coefficient modulo one whole turn, keeping any exact fraction intact.
         private func reducedPiCoefficient(_ coefficient: PiCoefficient) throws -> Decimal {
-            if case let .exactPhase(_, twelfths) = coefficient {
+            switch coefficient {
+            case let .exactPhase(_, twelfths):
                 return try unrounded(NSDecimalDivide, Decimal(twelfths), 12, allowingLossOfPrecision: true)
-            }
-            if let rational = coefficient.exactRational {
+            case let .exactRational(rational, _), let .roundedRational(rational, _):
                 let wholeTurns = rational.numerator / rational.denominator
                 let remainder = rational.numerator % rational.denominator
                 let fractional = try unrounded(
@@ -1951,11 +1951,12 @@ public struct CalculatorEngine: Sendable {
                     fractional,
                     allowingLossOfPrecision: true,
                 )
+            case let .exactDecimal(decimalValue):
+                return try reducedRadians(from: decimalValue, modulo: 2)
+            case let .roundedDecimal(decimalValue):
+                try requireSufficientPhasePrecision(for: decimalValue, modulo: 2)
+                return try reducedRadians(from: decimalValue, modulo: 2)
             }
-
-            let decimalValue = coefficient.decimalValue
-            try requireSufficientPhasePrecision(for: decimalValue, modulo: 2)
-            return try reducedRadians(from: decimalValue, modulo: 2)
         }
 
         /// Reduces whole-degree digits modulo 360 while preserving the fractional digits.
@@ -2740,7 +2741,7 @@ public struct CalculatorEngine: Sendable {
             var result: Decimal = 1
 
             while remaining > 0 {
-                // Exponent bookkeeping must stay independent of the configured result scale.
+                // Exponent bookkeeping stays independent of configured display rounding.
                 let half = remaining / 2
                 var integralHalf = Decimal()
                 var halfToRound = half
@@ -2748,26 +2749,20 @@ public struct CalculatorEngine: Sendable {
 
                 let remainder = remaining - integralHalf * 2
                 if remainder != 0 {
-                    result = try checkedUnroundedProduct(
+                    result = try integralPowerProduct(
                         result,
                         factor,
                         allowingLossOfPrecision: allowingLossOfPrecision,
                     )
-                    guard result != 0 else {
-                        throw CalculatorError.overflow
-                    }
                 }
 
                 remaining = integralHalf
                 if remaining > 0 {
-                    factor = try checkedUnroundedProduct(
+                    factor = try integralPowerProduct(
                         factor,
                         factor,
                         allowingLossOfPrecision: allowingLossOfPrecision,
                     )
-                    guard factor != 0 else {
-                        throw CalculatorError.overflow
-                    }
                 }
             }
 
@@ -2775,6 +2770,113 @@ public struct CalculatorEngine: Sendable {
         }
 
         /// Multiplies two values and rejects Decimal's silent underflow result.
+        /// Multiplies Decimal values from exact base-ten digits before constructing a result.
+        ///
+        /// Exponentiation may keep a rounded representable intermediate, but callers that request
+        /// strict precision still fail when the exact coefficient cannot be represented.
+        private func integralPowerProduct(
+            _ lhs: Decimal,
+            _ rhs: Decimal,
+            allowingLossOfPrecision: Bool,
+        ) throws -> Decimal {
+            guard lhs != 0, rhs != 0 else {
+                return 0
+            }
+
+            let isNegative = (lhs < 0) != (rhs < 0)
+            let (lhsDigits, lhsScale) = try decimalDigitsAndScale(lhs < 0 ? -lhs : lhs)
+            let (rhsDigits, rhsScale) = try decimalDigitsAndScale(rhs < 0 ? -rhs : rhs)
+            let (productScale, scaleOverflow) = lhsScale.addingReportingOverflow(rhsScale)
+            guard !scaleOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            var digits = ExactDecimalArithmetic.product(lhsDigits, rhsDigits)
+            var scale = productScale
+            while digits.count > 1, digits.last == 0 {
+                digits.removeLast()
+                let (nextScale, underflow) = scale.subtractingReportingOverflow(1)
+                guard !underflow else {
+                    throw CalculatorError.overflow
+                }
+                scale = nextScale
+            }
+
+            let order = digits.count - 1 - scale
+            guard (-128 ... 127).contains(order) else {
+                throw CalculatorError.overflow
+            }
+
+            if digits.count <= 39,
+               let exactMagnitude = try? decimal(fromDigits: digits, scale: scale),
+               exactMagnitude != 0,
+               !exactMagnitude.isNaN,
+               let (exactDigits, exactScale) = try? decimalDigitsAndScale(exactMagnitude),
+               exactDigits == digits,
+               exactScale == scale
+            {
+                return isNegative ? -exactMagnitude : exactMagnitude
+            }
+
+            guard allowingLossOfPrecision else {
+                throw CalculatorError.overflow
+            }
+
+            let maximumPrecision = min(38, order + 129)
+            guard maximumPrecision > 0 else {
+                throw CalculatorError.overflow
+            }
+
+            for precision in stride(from: maximumPrecision, through: 1, by: -1) {
+                var roundedDigits = digits
+                var roundedScale = scale
+                let discardedCount = digits.count - precision
+                if discardedCount > 0 {
+                    roundedDigits = Array(digits.prefix(precision))
+                    if digits[precision] >= 5 {
+                        roundedDigits = incrementingDecimalDigits(roundedDigits)
+                    }
+                    let (adjustedScale, scaleOverflow) = roundedScale
+                        .subtractingReportingOverflow(discardedCount)
+                    guard !scaleOverflow else {
+                        throw CalculatorError.overflow
+                    }
+                    roundedScale = adjustedScale
+
+                    while roundedDigits.count > 1, roundedDigits.last == 0 {
+                        roundedDigits.removeLast()
+                        let (nextScale, underflow) = roundedScale.subtractingReportingOverflow(1)
+                        guard !underflow else {
+                            throw CalculatorError.overflow
+                        }
+                        roundedScale = nextScale
+                    }
+                }
+
+                let roundedOrder = roundedDigits.count - 1 - roundedScale
+                if roundedOrder > 127 {
+                    throw CalculatorError.overflow
+                }
+                guard roundedOrder >= -128 else {
+                    continue
+                }
+
+                guard let magnitude = try? decimal(fromDigits: roundedDigits, scale: roundedScale),
+                      magnitude != 0,
+                      !magnitude.isNaN,
+                      let (representedDigits, representedScale) = try? decimalDigitsAndScale(magnitude),
+                      representedDigits == roundedDigits,
+                      representedScale == roundedScale
+                else {
+                    continue
+                }
+
+                return isNegative ? -magnitude : magnitude
+            }
+
+            throw CalculatorError.overflow
+        }
+
         private func checkedUnroundedProduct(
             _ lhs: Decimal,
             _ rhs: Decimal,
@@ -2842,7 +2944,11 @@ public struct CalculatorEngine: Sendable {
             var exponentToRound = exponent
             NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
             if integralExponent == exponent {
-                let result = try unrounded(integralPower: base, exponent: integralExponent)
+                let result = try unrounded(
+                    integralPower: base,
+                    exponent: integralExponent,
+                    allowingLossOfPrecision: true,
+                )
                 return PowerEvaluation(semanticValue: result, displayValue: rounded(result, toScale: roundingScale))
             }
 
