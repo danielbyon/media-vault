@@ -750,6 +750,30 @@ public struct CalculatorEngine: Sendable {
             of operand: Decimal,
         ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
             let magnitude = operand < 0 ? -operand : operand
+            let unitDistance = magnitude >= 1 ? magnitude - 1 : 1 - magnitude
+            let directOperand = NSDecimalNumber(decimal: magnitude).doubleValue
+            let materialUnitDistanceLoss: Bool
+            if directOperand.isFinite {
+                let decimalUnitDistance = NSDecimalNumber(decimal: unitDistance).doubleValue
+                if decimalUnitDistance == 0 {
+                    materialUnitDistanceLoss = false
+                } else {
+                    let directUnitDistance = abs(directOperand - 1)
+                    let relativeDistanceLoss = abs(decimalUnitDistance - directUnitDistance)
+                        / decimalUnitDistance
+                    materialUnitDistanceLoss = relativeDistanceLoss > 1e-8
+                }
+            } else {
+                materialUnitDistanceLoss = true
+            }
+
+            // Preserve the Decimal path when Double materially changes the distance from ±1.
+            // A tiny relative difference for very large inputs does not affect the asymptotic
+            // result, while high display scales still use Decimal regardless of input magnitude.
+            if roundingScale > 14 || materialUnitDistanceLoss {
+                return try decimalArcTangentValue(of: operand, magnitude: magnitude)
+            }
+
             guard magnitude > 1 else {
                 let radians = Foundation.atan(NSDecimalNumber(decimal: operand).doubleValue)
                 return (try semanticDecimal(angleMode.fromRadians(radians)), nil)
@@ -789,6 +813,147 @@ public struct CalculatorEngine: Sendable {
                 ? TangentPoleResidual(residual: operand < 0 ? delta : -delta)
                 : nil
             return (value, residual)
+        }
+
+        /// Evaluates inverse tangent in Decimal when Double cannot retain requested precision.
+        private func decimalArcTangentValue(
+            of operand: Decimal,
+            magnitude: Decimal,
+        ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
+            if magnitude > 2 {
+                let reciprocal: Decimal
+                do {
+                    reciprocal = try decimalReciprocal(ofPositive: magnitude)
+                } catch CalculatorError.overflow {
+                    // If the asymptotic delta is below Decimal's range, the angle itself is
+                    // still representable at its pole value. Keep it non-symbolic and omit an
+                    // unrepresentable residual so it cannot be mistaken for an exact pole.
+                    let pole: Decimal
+                    switch angleMode {
+                    case .degrees:
+                        pole = 90
+                    case .radians:
+                        pole = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                    }
+                    return (operand < 0 ? -pole : pole, nil)
+                }
+                let deltaRadians = try decimalArcTangentSeries(of: reciprocal)
+                let pole: Decimal
+                let delta: Decimal
+                switch angleMode {
+                case .degrees:
+                    pole = 90
+                    let scaledDelta = try unrounded(
+                        NSDecimalMultiply,
+                        deltaRadians,
+                        180,
+                        allowingLossOfPrecision: true,
+                    )
+                    delta = try unrounded(NSDecimalDivide, scaledDelta, piValue(), allowingLossOfPrecision: true)
+                case .radians:
+                    pole = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                    delta = deltaRadians
+                }
+
+                let positiveAngle = try unrounded(NSDecimalSubtract, pole, delta, allowingLossOfPrecision: true)
+                let value: Decimal
+                let signedPole: Decimal
+                let signedResidual: Decimal
+                if operand < 0 {
+                    value = try negateExactly(positiveAngle)
+                    signedPole = try negateExactly(pole)
+                    signedResidual = delta
+                } else {
+                    value = positiveAngle
+                    signedPole = pole
+                    signedResidual = try negateExactly(delta)
+                }
+                let residual = value == signedPole
+                    ? TangentPoleResidual(residual: signedResidual)
+                    : nil
+                return (value, residual)
+            }
+
+            let positiveRadians: Decimal
+            if magnitude < Decimal(string: "0.5", locale: Locale(identifier: "en_US_POSIX"))! {
+                positiveRadians = try decimalArcTangentSeries(of: magnitude)
+            } else {
+                let numerator = try unrounded(NSDecimalSubtract, magnitude, 1, allowingLossOfPrecision: true)
+                let denominator = try unrounded(NSDecimalAdd, magnitude, 1, allowingLossOfPrecision: true)
+                let ratio = try unrounded(NSDecimalDivide, numerator, denominator, allowingLossOfPrecision: true)
+                let correction = try decimalArcTangentSeries(of: ratio)
+                let quarterPi = try unrounded(NSDecimalDivide, piValue(), 4, allowingLossOfPrecision: true)
+                positiveRadians = try unrounded(NSDecimalAdd, quarterPi, correction, allowingLossOfPrecision: true)
+            }
+
+            let signedRadians: Decimal
+            if operand < 0 {
+                signedRadians = try negateExactly(positiveRadians)
+            } else {
+                signedRadians = positiveRadians
+            }
+            let value: Decimal
+            switch angleMode {
+            case .degrees:
+                let scaledAngle = try unrounded(
+                    NSDecimalMultiply,
+                    signedRadians,
+                    180,
+                    allowingLossOfPrecision: true,
+                )
+                value = try unrounded(NSDecimalDivide, scaledAngle, piValue(), allowingLossOfPrecision: true)
+            case .radians:
+                value = signedRadians
+            }
+
+            return (value, nil)
+        }
+
+        /// Evaluates atan(x) with the alternating Decimal series for |x| below one half.
+        private func decimalArcTangentSeries(of value: Decimal) throws -> Decimal {
+            guard value != 0 else {
+                return 0
+            }
+
+            let squaredValue: Decimal
+            do {
+                squaredValue = try checkedUnroundedProduct(
+                    value,
+                    value,
+                    allowingLossOfPrecision: true,
+                )
+            } catch {
+                // If x² is below Decimal's range, all later terms are smaller than x and cannot
+                // affect the representable result.
+                return value
+            }
+
+            var power = value
+            var sum: Decimal = 0
+            for denominator in stride(from: 1, through: 511, by: 2) {
+                let term = try unrounded(
+                    NSDecimalDivide,
+                    power,
+                    Decimal(denominator),
+                    allowingLossOfPrecision: true,
+                )
+                let nextSum = try unrounded(NSDecimalAdd, sum, term, allowingLossOfPrecision: true)
+                if nextSum == sum {
+                    return sum
+                }
+                sum = nextSum
+                do {
+                    power = try checkedUnroundedProduct(
+                        power,
+                        squaredValue,
+                        allowingLossOfPrecision: true,
+                    )
+                } catch {
+                    return sum
+                }
+            }
+
+            throw CalculatorError.overflow
         }
 
         /// Computes a Decimal reciprocal through its significand and exponent.
@@ -2433,29 +2598,24 @@ public struct CalculatorEngine: Sendable {
             try checkedDecimal(fromFoundationValue: value)
         }
 
-        /// Computes a logarithm from a semantic `Decimal` argument without collapsing deltas near one.
+        /// Computes logarithms with Decimal range reduction and a convergent atanh series.
         ///
-        /// A `Double` resolves values around one no more finely than one unit in the last place
-        /// (about 2.2e-16), so converting an argument such as `1.0000000000000001` directly would
-        /// discard the delta that carries the whole result. The delta is therefore subtracted while
-        /// the value is still a `Decimal` and converted on its own whenever the direct conversion
-        /// cannot carry it, which lets `log1p` keep the low-order digits that the calculator
-        /// displays. Ordinary arguments keep the direct Foundation path.
+        /// Keeping both the argument and its delta from one in Decimal preserves configured
+        /// display precision for ordinary and near-one inputs alike.
         private func logarithm(of argument: Decimal, isCommon: Bool) throws -> Decimal {
             let delta = try unrounded(NSDecimalSubtract, argument, 1, allowingLossOfPrecision: true)
-            let deltaValue = NSDecimalNumber(decimal: delta).doubleValue
-            let directValue = NSDecimalNumber(decimal: argument).doubleValue
-
-            // A loss of more than one part in 10^8 of the delta counts as material; below that the
-            // direct conversion still carries the delta accurately enough for the display scale.
-            let reconstructionLoss = abs((directValue - 1) - deltaValue)
-            if reconstructionLoss > abs(deltaValue) * 1e-8 {
-                let natural = Foundation.log1p(deltaValue)
-
-                return try semanticDecimal(isCommon ? natural / Foundation.log(10) : natural)
+            let natural = try decimalLogarithm(of: argument, nearOneDelta: delta)
+            guard isCommon else {
+                return natural
             }
 
-            return try semanticDecimal(isCommon ? Foundation.log10(directValue) : Foundation.log(directValue))
+            let naturalOfTen = try decimalLogarithm(of: 10, nearOneDelta: 9)
+            return try unrounded(
+                NSDecimalDivide,
+                natural,
+                naturalOfTen,
+                allowingLossOfPrecision: true,
+            )
         }
 
         private func decimal(_ literal: String) throws -> Decimal {
@@ -2941,19 +3101,14 @@ public struct CalculatorEngine: Sendable {
 
             var reduced = value
             var binaryExponent = 0
+            // Decimal has a finite exponent range, and each step moves the magnitude toward one.
             while reduced >= 2 {
                 reduced = try unrounded(NSDecimalDivide, reduced, 2, allowingLossOfPrecision: true)
                 binaryExponent += 1
-                guard binaryExponent <= 512 else {
-                    throw CalculatorError.overflow
-                }
             }
             while reduced < 1 {
                 reduced = try unrounded(NSDecimalMultiply, reduced, 2, allowingLossOfPrecision: true)
                 binaryExponent -= 1
-                guard binaryExponent >= -512 else {
-                    throw CalculatorError.overflow
-                }
             }
 
             let numerator = try unrounded(NSDecimalSubtract, reduced, 1, allowingLossOfPrecision: true)
@@ -2964,6 +3119,7 @@ public struct CalculatorEngine: Sendable {
                 return reducedLogarithm
             }
 
+            // This constant is rounded to Decimal's full 38-significant-digit precision.
             let logarithmOfTwo = try decimal("0.69314718055994530941723212145817656808")
             let exponentPart = try unrounded(
                 NSDecimalMultiply,

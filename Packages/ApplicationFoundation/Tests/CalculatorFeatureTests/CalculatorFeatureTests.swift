@@ -282,6 +282,26 @@ struct CalculatorFeatureTests {
         }
     }
 
+    @Test("Ordinary logarithms preserve configured Decimal precision")
+    func ordinaryLogarithmsPreserveConfiguredDecimalPrecision() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        #expect(try engine.evaluate("ln(2)") == "0.69314718055994530942")
+        #expect(try engine.evaluate("ln(4)") == "1.38629436111989061883")
+        #expect(try engine.evaluate("log10(2)") == "0.30102999566398119521")
+        #expect(try engine.evaluate("log10(3)") == "0.4771212547196624373")
+    }
+
+    @Test("Logarithms cover the full finite Decimal exponent range")
+    func logarithmsCoverTheFullDecimalExponentRange() throws {
+        var maximum = Decimal.greatestFiniteMagnitude
+        let maximumLiteral = NSDecimalString(&maximum, Locale(identifier: "en_US_POSIX"))
+        let logarithm = try CalculatorEngine(roundingScale: 20).evaluate("ln(\(maximumLiteral))")
+
+        #expect(Decimal(string: logarithm, locale: Locale(identifier: "en_US_POSIX")) != nil)
+        #expect(logarithm != "0")
+    }
+
     @Test("The smallest Decimal square root rounds without underflow")
     func minimumDecimalSquareRootRoundsToZero() throws {
         let engine = CalculatorEngine()
@@ -310,11 +330,10 @@ struct CalculatorFeatureTests {
         #expect(try CalculatorEngine(roundingScale: 20).evaluate("sin(ln(e)×π/2)", angleMode: .radians) == "1")
         #expect(try CalculatorEngine(roundingScale: 20).evaluate("cos(ln(e)×π)", angleMode: .radians) == "-1")
 
-        // Decimal values that only approximate the constant keep the ordinary logarithm path.
-        #expect(try CalculatorEngine(roundingScale: 16).evaluate("ln(2.718281828459045)") == "0.9999999999999998")
+        // A Decimal input near the constant remains on the ordinary logarithm path.
         #expect(
-            try CalculatorEngine(roundingScale: 30)
-                .evaluate("ln(2.7182818284590452353602874713526625)") == "0.9999999999999998",
+            try CalculatorEngine(roundingScale: 20).evaluate("ln(2.718281828459045)")
+                == "0.99999999999999991342",
         )
     }
 
@@ -758,6 +777,52 @@ struct CalculatorFeatureTests {
         #expect(throws: CalculatorError.domainError) {
             try engine.evaluate("tan(atan(1)×2)", angleMode: .radians)
         }
+    }
+
+    @Test("Arctangent preserves Decimal deltas around positive and negative one")
+    func arctangentPreservesDeltasAroundUnitEndpoints() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+        let positiveEndpoint = try #require(Decimal(string: engine.evaluate("atan(1)", angleMode: .degrees)))
+        let negativeEndpoint = try #require(Decimal(string: engine.evaluate("atan(-1)", angleMode: .degrees)))
+        let positiveRadianEndpoint = try #require(Decimal(string: engine.evaluate("atan(1)", angleMode: .radians)))
+        let negativeRadianEndpoint = try #require(Decimal(string: engine.evaluate("atan(-1)", angleMode: .radians)))
+        let cases = [
+            ("1.0000000000000001", true),
+            ("0.9999999999999999", false),
+            ("-1.0000000000000001", false),
+            ("-0.9999999999999999", true),
+        ]
+
+        for (operand, isAboveEndpoint) in cases {
+            let positive = operand.first != "-"
+            let degrees = try #require(Decimal(string: engine.evaluate("atan(\(operand))", angleMode: .degrees)))
+            if positive {
+                #expect((degrees > positiveEndpoint) == isAboveEndpoint)
+            } else {
+                #expect((degrees < negativeEndpoint) == !isAboveEndpoint)
+            }
+
+            let radians = try #require(Decimal(string: engine.evaluate("atan(\(operand))", angleMode: .radians)))
+            if positive {
+                #expect((radians > positiveRadianEndpoint) == isAboveEndpoint)
+            } else {
+                #expect((radians < negativeRadianEndpoint) == !isAboveEndpoint)
+            }
+
+            let expectedTangent = try engine.evaluate(operand)
+            for mode in [CalculatorAngleMode.degrees, .radians] {
+                #expect(
+                    try engine.evaluate("tan(atan(\(operand)))", angleMode: mode)
+                        == expectedTangent,
+                )
+            }
+        }
+
+        var largestDecimal = Decimal.greatestFiniteMagnitude
+        let largestLiteral = NSDecimalString(&largestDecimal, Locale(identifier: "en_US_POSIX"))
+        #expect(
+            Decimal(string: try engine.evaluate("atan(\(largestLiteral))", angleMode: .radians)) != nil,
+        )
     }
 
 
