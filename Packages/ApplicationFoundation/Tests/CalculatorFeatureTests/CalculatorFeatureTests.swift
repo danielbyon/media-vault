@@ -534,9 +534,9 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("sin(π/6)+sin(π/6)", angleMode: .radians) == "1")
 
         // Degree classification reads the semantic angle, so an angle that only rounds to a
-        // common angle keeps the ordinary trigonometric path.
-        #expect(try engine.evaluate("sin(30.0000000001)", angleMode: .degrees) == "0.5000000000015113")
-        #expect(try engine.evaluate("sin(29.9999999999999999)", angleMode: .degrees) == "0.49999999999999994")
+        // common angle keeps the ordinary Decimal trigonometric path.
+        #expect(try engine.evaluate("sin(30.0000000001)", angleMode: .degrees) == "0.50000000000151149947")
+        #expect(try engine.evaluate("sin(29.9999999999999999)", angleMode: .degrees) == "0.49999999999999999849")
 
         // Tangent poles are read from the same reduced semantic angle, so a pole stays a domain
         // error however many digits its exact spelling carries.
@@ -552,11 +552,11 @@ struct CalculatorFeatureTests {
             ) != nil,
         )
 
-        // Angles outside the supported families keep the ordinary trigonometric path.
-        #expect(try engine.evaluate("sin(15)", angleMode: .degrees) == "0.25881904510252074")
-        #expect(try engine.evaluate("sin(105)", angleMode: .degrees) == "0.9659258262890683")
+        // Angles outside the supported families keep the ordinary Decimal trigonometric path.
+        #expect(try engine.evaluate("sin(15)", angleMode: .degrees) == "0.25881904510252076235")
+        #expect(try engine.evaluate("sin(105)", angleMode: .degrees) == "0.96592582628906828675")
         #expect(try engine.evaluate("tan(75)", angleMode: .degrees) == "3.73205080756887729353")
-        #expect(try engine.evaluate("sin(π/12)", angleMode: .radians) == "0.2588190451025208")
+        #expect(try engine.evaluate("sin(π/12)", angleMode: .radians) == "0.25881904510252076235")
 
         // A decimal approximation of a symbolic angle never acquires exactness: the symbolic form
         // lands on an exact result, while the same value typed out stays an approximate angle.
@@ -564,7 +564,12 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("tan(0.52359877559829887308×6)", angleMode: .radians) != "0")
         #expect(try engine.evaluate("tan(π/4×4)", angleMode: .radians) == "0")
         #expect(try engine.evaluate("tan(0.78539816339744830962×4)", angleMode: .radians) != "0")
-        #expect(try engine.evaluate("cos(1.04719755119659774615)", angleMode: .radians) == "0.4999999999999999")
+        #expect(try engine.evaluate("cos(1.04719755119659774615)", angleMode: .radians) == "0.5")
+        let preciseApproximateCosine = try CalculatorEngine(roundingScale: 24).evaluate(
+            "cos(1.04719755119659774615)",
+            angleMode: .radians,
+        )
+        #expect(preciseApproximateCosine == "0.50000000000000000000365")
         #expect(try engine.evaluate("tan(0.78539816339744830962)", angleMode: .radians) == "1.00000000000000000001")
     }
 
@@ -998,9 +1003,9 @@ struct CalculatorFeatureTests {
         // Exact endpoint results and operands away from the endpoints keep their established values.
         #expect(try precise.evaluate("asin(1)", angleMode: .degrees) == "90")
         #expect(try precise.evaluate("acos(-1)", angleMode: .degrees) == "180")
-        #expect(try precise.evaluate("asin(0.4999999999)", angleMode: .degrees) == "29.999999993384055")
-        #expect(try precise.evaluate("asin(0.4999999999)", angleMode: .radians) == "0.5235987754828288")
-        #expect(try precise.evaluate("asin(0.3)", angleMode: .degrees) == "17.45760312372209")
+        #expect(try precise.evaluate("asin(0.4999999999)", angleMode: .degrees) == "29.99999999338405325516")
+        #expect(try precise.evaluate("asin(0.4999999999)", angleMode: .radians) == "0.52359877548282881924")
+        #expect(try precise.evaluate("asin(0.3)", angleMode: .degrees) == "17.45760312372209229025")
 
         // Domain checking still happens against the Decimal operand.
         for expression in ["asin(1.00000000000000000001)", "acos(-1.00000000000000000001)"] {
@@ -1074,9 +1079,26 @@ struct CalculatorFeatureTests {
             #expect(try engine.evaluate(expression, angleMode: .radians) == expected)
         }
 
-        // Inputs outside the exact table keep the ordinary double-precision result.
-        #expect(try engine.evaluate("asin(0.4999999999)", angleMode: .degrees) == "29.999999993384055")
-        #expect(try engine.evaluate("asin(0.4999999999)", angleMode: .radians) == "0.5235987754828288")
+        // Inputs outside the exact table keep the ordinary Decimal-precision result.
+        #expect(try engine.evaluate("asin(0.4999999999)", angleMode: .degrees) == "29.99999999338405325516")
+        #expect(try engine.evaluate("asin(0.4999999999)", angleMode: .radians) == "0.52359877548282881924")
+    }
+
+    @Test("Ordinary inverse trigonometry preserves configured Decimal precision")
+    func ordinaryInverseTrigonometryPreservesDecimalPrecision() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        #expect(try engine.evaluate("asin(0.3)", angleMode: .radians) == "0.30469265401539750797")
+        #expect(try engine.evaluate("acos(0.3)", angleMode: .radians) == "1.26610367277949911126")
+        #expect(try engine.evaluate("asin(-0.3)", angleMode: .radians) == "-0.30469265401539750797")
+        let negativeAcos = try engine.evaluate("acos(-0.3)", angleMode: .radians)
+        #expect(negativeAcos == "1.8754889808102941272", "Produced \(negativeAcos)")
+        #expect(try engine.evaluate("asin(0.3)", angleMode: .degrees) == "17.45760312372209229025")
+        #expect(try engine.evaluate("acos(0.3)", angleMode: .degrees) == "72.54239687627790770975")
+        #expect(try engine.evaluate("sin(asin(0.3))", angleMode: .radians) == "0.3")
+        #expect(try engine.evaluate("sin(asin(0.3))", angleMode: .degrees) == "0.3")
+        #expect(try engine.evaluate("cos(acos(0.3))", angleMode: .radians) == "0.3")
+        #expect(try engine.evaluate("cos(acos(0.3))", angleMode: .degrees) == "0.3")
     }
 
     @Test("Scientific functions compose from the semantic operand")
@@ -1335,9 +1357,21 @@ struct CalculatorFeatureTests {
         )
 
         // The exact family angle resolves to its closed form, while an angle just outside the
-        // families keeps the ordinary Foundation evaluation and is not snapped to that form.
+        // families keeps the ordinary Decimal evaluation and is not snapped to that form.
         #expect(try engine.evaluate("sin(30)") == "0.5")
-        #expect(try engine.evaluate("sin(30.0000000001)") == "0.5000000000015113")
+        #expect(try engine.evaluate("sin(30.0000000001)") == "0.50000000000151149947")
+    }
+
+    @Test("Ordinary sine and cosine preserve configured Decimal precision")
+    func ordinarySineAndCosinePreserveDecimalPrecision() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        #expect(try engine.evaluate("sin(1)", angleMode: .radians) == "0.84147098480789650665")
+        #expect(try engine.evaluate("cos(1)", angleMode: .radians) == "0.5403023058681397174")
+        #expect(try engine.evaluate("sin(-1)", angleMode: .radians) == "-0.84147098480789650665")
+        #expect(try engine.evaluate("sin(1)", angleMode: .degrees) == "0.01745240643728351282")
+        #expect(try engine.evaluate("sin(2.5)", angleMode: .radians) == "0.59847214410395649405")
+        #expect(try engine.evaluate("cos(2.5)", angleMode: .radians) == "-0.80114361554693371483")
     }
 
     @Test("Fractional powers keep a material exponent delta")
@@ -1361,6 +1395,25 @@ struct CalculatorFeatureTests {
             try CalculatorEngine(roundingScale: 20).evaluate("2^1.0000000000000002")
                 == "2.00000000000000027726",
         )
+    }
+
+    @Test("Large rational fractional powers respect Decimal significant precision")
+    func largeRationalFractionalPowersRespectDecimalPrecision() throws {
+        let largeBase = "1000000000000000000000000000000000000"
+        let engine = CalculatorEngine()
+
+        let largePower = try engine.evaluate("\(largeBase)^0.9")
+        #expect(largePower == "251188643150958011108503206779932.73942", "Produced \(largePower)")
+        let precisionLimitPower = try engine.evaluate("99999999999999999999999999999999999999^0.9")
+        #expect(
+            precisionLimitPower == "15848931924611134852021013733915070.133",
+            "Produced \(precisionLimitPower)",
+        )
+        #expect(try engine.evaluate("1000000^0.9") == "251188.643150958")
+
+        let highPrecision = try CalculatorEngine(roundingScale: 38).evaluate("\(largeBase)^-0.9")
+        let expectedNegativePower = "0." + String(repeating: "0", count: 32) + "398107"
+        #expect(highPrecision == expectedNegativePower)
     }
 
     @Test("Large square roots round directly from their mathematical bracket")
