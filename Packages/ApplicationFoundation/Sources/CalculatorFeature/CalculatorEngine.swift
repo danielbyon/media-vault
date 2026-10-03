@@ -943,11 +943,12 @@ public struct CalculatorEngine: Sendable {
                 }
                 sum = nextSum
                 do {
-                    power = try checkedUnroundedProduct(
+                    let nextPower = try checkedUnroundedProduct(
                         power,
                         squaredValue,
                         allowingLossOfPrecision: true,
                     )
+                    power = try negateExactly(nextPower)
                 } catch {
                     return sum
                 }

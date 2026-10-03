@@ -825,6 +825,23 @@ struct CalculatorFeatureTests {
         )
     }
 
+    @Test("Decimal arctangent series alternates terms across its reduced range")
+    func decimalArctangentSeriesAlternatesTerms() throws {
+        let engine = CalculatorEngine(roundingScale: 20)
+
+        #expect(try engine.evaluate("atan(0.3)", angleMode: .radians) == "0.291456794477867092")
+        #expect(try engine.evaluate("atan(0.3)", angleMode: .degrees) == "16.69924423399362184037")
+        #expect(try engine.evaluate("atan(0.49)", angleMode: .radians) == "0.45561565321122449214")
+        #expect(try engine.evaluate("atan(0.49)", angleMode: .degrees) == "26.10485400909929559831")
+
+        let roundTripEngine = CalculatorEngine(roundingScale: 15)
+        for mode in [CalculatorAngleMode.degrees, .radians] {
+            #expect(try engine.evaluate("atan(-0.3)", angleMode: mode) == "-" + engine.evaluate("atan(0.3)", angleMode: mode))
+            #expect(try roundTripEngine.evaluate("tan(atan(0.3))", angleMode: mode) == "0.3")
+            #expect(try roundTripEngine.evaluate("tan(atan(-0.3))", angleMode: mode) == "-0.3")
+        }
+    }
+
 
     @Test("Exact inverse half-angles preserve tangent pole provenance")
     func exactInverseHalfAnglesPreserveTangentPoleProvenance() throws {
