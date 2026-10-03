@@ -335,8 +335,11 @@ struct CalculatorFeatureTests {
             "tan(π×(reciprocal(8)×4))",
             "tan(π×reciprocal(2)×2+π/2)",
         ] {
-            #expect(throws: CalculatorError.domainError) {
+            do {
                 try engine.evaluate(expression, angleMode: .radians)
+                Issue.record("Expected a tangent pole for \(expression)")
+            } catch let error as CalculatorError {
+                #expect(error == .domainError, "\(expression) threw \(error)")
             }
         }
 
@@ -533,7 +536,7 @@ struct CalculatorFeatureTests {
         // Angles outside the supported families keep the ordinary trigonometric path.
         #expect(try engine.evaluate("sin(15)", angleMode: .degrees) == "0.25881904510252074")
         #expect(try engine.evaluate("sin(105)", angleMode: .degrees) == "0.9659258262890683")
-        #expect(try engine.evaluate("tan(75)", angleMode: .degrees) == "3.7320508075688776")
+        #expect(try engine.evaluate("tan(75)", angleMode: .degrees) == "3.73205080756887729353")
         #expect(try engine.evaluate("sin(π/12)", angleMode: .radians) == "0.2588190451025208")
 
         // A decimal approximation of a symbolic angle never acquires exactness: the symbolic form
@@ -543,7 +546,7 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("tan(π/4×4)", angleMode: .radians) == "0")
         #expect(try engine.evaluate("tan(0.78539816339744830962×4)", angleMode: .radians) != "0")
         #expect(try engine.evaluate("cos(1.04719755119659774615)", angleMode: .radians) == "0.4999999999999999")
-        #expect(try engine.evaluate("tan(0.78539816339744830962)", angleMode: .radians) == "0.9999999999999999")
+        #expect(try engine.evaluate("tan(0.78539816339744830962)", angleMode: .radians) == "1.00000000000000000001")
     }
 
     @Test("Large Decimal multiples retain exact pi-turn classification")
@@ -1059,7 +1062,12 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("sqrt(9)") == "3")
 
         // Approximate roots and squares that lose Decimal precision must not become exact scalars.
-        let irrationalRootComposition = try? engine.evaluate("tan(π×sqrt(2)/(sqrt(2)×2))", angleMode: .radians)
+        var irrationalRootComposition: String?
+        do {
+            irrationalRootComposition = try engine.evaluate("tan(π×sqrt(2)/(sqrt(2)×2))", angleMode: .radians)
+        } catch {
+            Issue.record("An approximate square root composition should stay finite, but threw \(error)")
+        }
         let roundedSquareComposition = try? engine.evaluate(
             "tan(π×square(123456789012345678901234567890)/(square(123456789012345678901234567890)×2))",
             angleMode: .radians,
@@ -1257,5 +1265,58 @@ struct CalculatorFeatureTests {
         #expect(try engine.evaluate("2^1.0000000000000002") == "2.00000000000000027726")
         #expect(try engine.evaluate("16^0.25") == "2")
         #expect(try engine.evaluate("4^0.5") == "2")
+    }
+
+    @Test("Fractional powers preserve Decimal display precision beyond Double")
+    func fractionalPowersPreserveConfiguredDecimalPrecision() throws {
+        let defaultPrecision = try CalculatorEngine().evaluate("10000.1^4.2")
+        let highPrecision = try CalculatorEngine(roundingScale: 20).evaluate("10000.1^4.2")
+
+        #expect(defaultPrecision == "63098384511266786.2408647919", "Produced \(defaultPrecision)")
+        #expect(highPrecision == "63098384511266786.24086479188723247818", "Produced \(highPrecision)")
+        #expect(try CalculatorEngine().evaluate("2^0.3") == "1.2311444133")
+        #expect(
+            try CalculatorEngine(roundingScale: 20).evaluate("2^1.0000000000000002")
+                == "2.00000000000000027726",
+        )
+    }
+
+    @Test("Large square roots round directly from their mathematical bracket")
+    func largeSquareRootsRoundDisplayWithoutSemanticDoubleRounding() throws {
+        let engine = CalculatorEngine()
+
+        #expect(try engine.evaluate("sqrt(999999×10^47)") == "316227607902915396290406402.0282365178")
+        #expect(try engine.evaluate("(999999×10^47)^0.5") == "316227607902915396290406402.0282365178")
+        #expect(try engine.evaluate("sqrt(999999×10^49)") == "3162276079029153962904064020.2823651785")
+        #expect(try engine.evaluate("sqrt(81129638414606699710187514626049)") == "9007199254740993")
+    }
+
+    @Test("Near-pole tangent uses the Decimal residual at display precision")
+    func nearPoleTangentPreservesDecimalResidualPrecision() throws {
+        let engine = CalculatorEngine()
+
+        #expect(
+            try engine.evaluate("tan(89.9999999999999999)", angleMode: .degrees)
+                == "572957795130823208.7679815481",
+        )
+        #expect(
+            try engine.evaluate("tan(90.0000000000000001)", angleMode: .degrees)
+                == "-572957795130823208.7679815481",
+        )
+        #expect(
+            try engine.evaluate("tan(π/2-0.00000000000000000175)", angleMode: .radians)
+                == "571428571428571428.5714285714",
+        )
+        let atanNearPole = try engine.evaluate("tan(atan(123456789012345678.9))", angleMode: .degrees)
+        #expect(Decimal(string: atanNearPole) != nil)
+        #expect(
+            try engine.evaluate("tan(acos(0.00000000000000000175))", angleMode: .radians)
+                == "571428571428571428.5714285714",
+        )
+        #expect(try engine.evaluate("tan(45)", angleMode: .degrees) == "1")
+        #expect(try engine.evaluate("tan(π/4)", angleMode: .radians) == "1")
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π/2)", angleMode: .radians)
+        }
     }
 }
