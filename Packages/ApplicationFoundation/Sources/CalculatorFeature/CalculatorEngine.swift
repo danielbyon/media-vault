@@ -178,32 +178,44 @@ public struct CalculatorEngine: Sendable {
             Decimal.RoundingMode,
         ) -> Decimal.CalculationError
 
+        /// Identifies named mathematical constants whose identity exceeds their Decimal projection.
+        private enum ExactConstantIdentity: Equatable {
+            case euler
+        }
+
         /// Carries display, semantic, symbolic-angle, and pole-residual information for one value.
         private struct ParsedValue {
             let value: Decimal
             let semanticValue: Decimal
             let angleProvenance: AngleProvenance?
             let tangentPoleResidual: TangentPoleResidual?
+            let exactConstantIdentity: ExactConstantIdentity?
 
             init(
                 value: Decimal,
                 semanticValue: Decimal? = nil,
                 angleProvenance: AngleProvenance? = nil,
                 tangentPoleResidual: TangentPoleResidual? = nil,
+                exactConstantIdentity: ExactConstantIdentity? = nil,
             ) {
                 self.value = value
                 self.semanticValue = semanticValue ?? value
                 self.angleProvenance = angleProvenance
                 self.tangentPoleResidual = tangentPoleResidual
+                self.exactConstantIdentity = exactConstantIdentity
             }
 
-            static func scalar(_ value: Decimal) -> Self {
+            static func scalar(
+                _ value: Decimal,
+                exactConstantIdentity: ExactConstantIdentity? = nil,
+            ) -> Self {
                 Self(
                     value: value,
                     angleProvenance: AngleProvenance(
                         constant: value,
                         piCoefficient: .exactDecimal(0),
                     ),
+                    exactConstantIdentity: exactConstantIdentity,
                 )
             }
         }
@@ -653,7 +665,7 @@ public struct CalculatorEngine: Sendable {
                 )
             }
             if consume("e") {
-                return .scalar(try eulerValue())
+                return .scalar(try eulerValue(), exactConstantIdentity: .euler)
             }
             return .scalar(try parseNumber())
         }
@@ -711,7 +723,7 @@ public struct CalculatorEngine: Sendable {
             // only the value handed to the display is rounded. Nested functions therefore compose
             // from the exact operand instead of the digits that happen to be visible.
             let exactResult = try exactInverseTrigonometricResult(function, argument: operand)
-                ?? exactScalarResult(for: function, operand: operand)
+                ?? exactScalarResult(for: function, argument: argument)
                 ?? exactTrigonometricResult(for: function, argument: argument)
 
             var tangentPoleResidual: TangentPoleResidual?
@@ -1336,13 +1348,15 @@ public struct CalculatorEngine: Sendable {
         ///
         /// Only operands that make the value exact are recognized — never a floating-point result
         /// that merely rounded to a convenient number — so a tiny non-zero input keeps its
-        /// approximate result and cannot pick up symbolic provenance. The natural logarithm reads
-        /// the calculator's own Euler constant, and a reciprocal is exact only while one divided
-        /// by the operand needs no Decimal rounding, so 0.5 is exact while 1/3 stays approximate.
+        /// approximate result and cannot pick up symbolic provenance. The natural logarithm
+        /// recognizes the built-in Euler token by source identity, and a reciprocal is exact only
+        /// while one divided by the operand needs no Decimal rounding, so 0.5 is exact while 1/3
+        /// stays approximate.
         private func exactScalarResult(
             for function: Function,
-            operand: Decimal,
-        ) throws -> ExactFunctionResult? {
+            argument: ParsedValue,
+        ) -> ExactFunctionResult? {
+            let operand = argument.semanticValue
             let value: Decimal
             switch function {
             case .sine, .tangent, .arcSine, .arcTangent:
@@ -1385,9 +1399,9 @@ public struct CalculatorEngine: Sendable {
             case .naturalLogarithm:
                 if operand == 1 {
                     value = 0
-                } else if operand == (try eulerValue()) {
-                    // The calculator's own Euler constant is exactly one natural logarithm, so
-                    // the identity composes instead of returning the nearest Double result.
+                } else if argument.exactConstantIdentity == .euler {
+                    // Only the built-in token represents mathematical Euler's constant; a literal
+                    // with the same Decimal projection does not carry this identity.
                     value = 1
                 } else {
                     return nil

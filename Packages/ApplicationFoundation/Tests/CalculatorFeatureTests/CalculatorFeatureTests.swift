@@ -1206,6 +1206,34 @@ struct CalculatorFeatureTests {
         #expect(try CalculatorEngine().evaluate("ln(e)") == "1")
     }
 
+
+    @Test("The natural-log Euler identity follows the built-in constant token")
+    func naturalLogarithmEulerIdentityRequiresConstantToken() throws {
+        let engine = CalculatorEngine(roundingScale: 38)
+        let equalEulerLiteral = "2.718281828459045235360287471352662498"
+        let nearbyEulerLiteral = "2.718281828459045235360287471352662497"
+
+        #expect(try CalculatorEngine().evaluate("ln(e)") == "1")
+        #expect(try engine.evaluate("ln((e))") == "1")
+        #expect(throws: CalculatorError.domainError) {
+            try CalculatorEngine().evaluate("tan(ln(e)×90)", angleMode: .degrees)
+        }
+        #expect(throws: CalculatorError.domainError) {
+            try engine.evaluate("tan(π×ln(e)/2)", angleMode: .radians)
+        }
+
+        let equalLiteralLog = try engine.evaluate("ln(\(equalEulerLiteral))")
+        #expect(Decimal(string: equalLiteralLog).map { $0 != 1 } == true)
+        let equalLiteralTangent = try engine.evaluate(
+            "tan(ln(\(equalEulerLiteral))×90)",
+            angleMode: .degrees,
+        )
+        #expect(Decimal(string: equalLiteralTangent) != nil)
+
+        let nearbyLiteralLog = try engine.evaluate("ln(\(nearbyEulerLiteral))")
+        #expect(Decimal(string: nearbyLiteralLog).map { $0 != 1 } == true)
+    }
+
     @Test("Symbolic pi angles reduce from provenance before materializing")
     func symbolicPiAnglesReduceFromProvenance() throws {
         let engine = CalculatorEngine()
