@@ -255,4 +255,6 @@ extension CalculatorReducerTests {
         }
         await store.send(.button(.multiply))
     }
+
+    /// Builds the state a paste leaves behind: a shown result beside its source expression.
 }

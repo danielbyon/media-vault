@@ -7,23 +7,46 @@
 
 import Foundation
 
-/// Evaluates calculator expressions.
+/// The calculator's π at the full precision `Foundation.Decimal` can carry.
+///
+/// `Decimal` keeps at most 38 significant digits, so a longer literal would be rounded away.
+/// The π constant, exact π-relative semantic values and Radian range reduction all read this
+/// single representation, which keeps those calculations from drifting apart.
+private let calculatorPiDigits = "3.1415926535897932384626433832795028842"
+
+/// The calculator's e at the full precision `Foundation.Decimal` can carry.
+///
+/// Like `calculatorPiDigits` this is the single representation the e token reads, so the
+/// constant keeps every digit a high-precision display can show.
+private let calculatorEulerDigits = "2.718281828459045235360287471352662498"
+
+/// Evaluates calculator expressions with deterministic decimal rounding.
 public struct CalculatorEngine: Sendable {
     private let roundingScale: Int
 
-    /// Creates an evaluator with deterministic decimal rounding.
+    /// Creates an evaluator that rounds arithmetic results to a stable display scale.
     ///
-    /// The result is rounded after each arithmetic operation and again before it is displayed. The
-    /// scale is intentionally an implementation parameter rather than part of the calculator's
-    /// public state so a later scientific mode can add richer numeric behavior without changing the
-    /// feature's reducer or persistence interfaces.
+    /// - Parameter roundingScale: The number of fractional decimal places retained after each
+    ///   operation and before the result is displayed.
     public init(roundingScale: Int = 10) {
         self.roundingScale = max(0, roundingScale)
     }
 
-    /// Evaluates core calculator syntax and returns its stable display representation.
-    public func evaluate(_ expression: String) throws -> String {
-        var parser = Parser(expression: expression, roundingScale: roundingScale)
+    /// Evaluates an expression using the selected angle mode for trigonometric functions.
+    ///
+    /// - Parameters:
+    ///   - expression: The calculator expression to evaluate.
+    ///   - angleMode: The angle unit used by direct and inverse trigonometric functions.
+    /// - Returns: A stable decimal string suitable for the calculator display.
+    public func evaluate(
+        _ expression: String,
+        angleMode: CalculatorAngleMode = .degrees,
+    ) throws -> String {
+        var parser = Parser(
+            expression: expression,
+            roundingScale: roundingScale,
+            angleMode: angleMode,
+        )
         return try format(parser.parse())
     }
 
@@ -37,14 +60,286 @@ public struct CalculatorEngine: Sendable {
         return rounded.description
     }
 
+    /// Performs bounded exact coefficient proofs used by calculator arithmetic.
+    ///
+    /// These digit operations are limited to values that Foundation Decimal can represent. They
+    /// verify multiplication and signed addition without relying on Decimal's rounding status.
+    private enum ExactDecimalArithmetic {
+        static func product(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+            var product = Array(repeating: 0, count: lhs.count + rhs.count)
+            for leftIndex in lhs.indices {
+                for rightIndex in rhs.indices {
+                    product[leftIndex + rightIndex + 1] += lhs[leftIndex] * rhs[rightIndex]
+                }
+            }
+            for index in stride(from: product.count - 1, through: 1, by: -1) {
+                product[index - 1] += product[index] / 10
+                product[index] %= 10
+            }
+            while product.count > 1, product.first == 0 {
+                product.removeFirst()
+            }
+            return product
+        }
+
+        static func additionMatches(
+            lhs: (digits: [Int], scale: Int, negative: Bool),
+            rhs: (digits: [Int], scale: Int, negative: Bool),
+            result: (digits: [Int], scale: Int, negative: Bool),
+            subtracting: Bool,
+        ) -> Bool {
+            let scale = max(max(lhs.scale, rhs.scale), result.scale)
+            let leftMagnitude = lhs.digits + Array(repeating: 0, count: scale - lhs.scale)
+            let rightMagnitude = rhs.digits + Array(repeating: 0, count: scale - rhs.scale)
+            let resultValue = result.digits + Array(repeating: 0, count: scale - result.scale)
+            let width = max(max(leftMagnitude.count, rightMagnitude.count), resultValue.count) + 1
+            let left = Array(repeating: 0, count: width - leftMagnitude.count) + leftMagnitude
+            let right = Array(repeating: 0, count: width - rightMagnitude.count) + rightMagnitude
+            let resultDigits = Array(repeating: 0, count: width - resultValue.count) + resultValue
+            let rightIsNegative = rhs.negative != subtracting
+
+            let expected: (digits: [Int], negative: Bool)
+            if lhs.negative == rightIsNegative {
+                expected = (add(left, right), lhs.negative)
+            } else {
+                let comparison = compare(left, right)
+                if comparison == 0 {
+                    expected = ([0], false)
+                } else if comparison > 0 {
+                    expected = (subtract(left, right), lhs.negative)
+                } else {
+                    expected = (subtract(right, left), rightIsNegative)
+                }
+            }
+
+            let expectedDigits = Array(repeating: 0, count: width - expected.digits.count) + expected.digits
+            return expectedDigits == resultDigits && expected.negative == result.negative
+        }
+
+        private static func add(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+            var result: [Int] = []
+            var carry = 0
+            for index in lhs.indices.reversed() {
+                let sum = lhs[index] + rhs[index] + carry
+                result.append(sum % 10)
+                carry = sum / 10
+            }
+            if carry > 0 { result.append(carry) }
+            return result.reversed()
+        }
+
+        private static func subtract(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+            var result: [Int] = []
+            var borrow = 0
+            for index in lhs.indices.reversed() {
+                var difference = lhs[index] - rhs[index] - borrow
+                borrow = difference < 0 ? 1 : 0
+                if borrow != 0 { difference += 10 }
+                result.append(difference)
+            }
+            while result.count > 1, result.last == 0 { result.removeLast() }
+            return result.reversed()
+        }
+
+        private static func compare(_ lhs: [Int], _ rhs: [Int]) -> Int {
+            for index in lhs.indices {
+                if lhs[index] != rhs[index] { return lhs[index] < rhs[index] ? -1 : 1 }
+            }
+            return 0
+        }
+    }
+
     private struct Parser {
+        private enum Function: String, CaseIterable {
+            case sine = "sin"
+            case cosine = "cos"
+            case tangent = "tan"
+            case arcSine = "asin"
+            case arcCosine = "acos"
+            case arcTangent = "atan"
+            case naturalLogarithm = "ln"
+            case commonLogarithm = "log10"
+            case squareRoot = "sqrt"
+            case square
+            case reciprocal
+        }
+
+        private enum BinaryOperationKind {
+            case addition
+            case subtraction
+            case multiplication
+            case division
+        }
+
+        private typealias DecimalOperation = (
+            UnsafeMutablePointer<Decimal>,
+            UnsafePointer<Decimal>,
+            UnsafePointer<Decimal>,
+            Decimal.RoundingMode,
+        ) -> Decimal.CalculationError
+
+        /// Carries display, semantic, symbolic-angle, and pole-residual information for one value.
+        private struct ParsedValue {
+            let value: Decimal
+            let semanticValue: Decimal
+            let angleProvenance: AngleProvenance?
+            let tangentPoleResidual: TangentPoleResidual?
+
+            init(
+                value: Decimal,
+                semanticValue: Decimal? = nil,
+                angleProvenance: AngleProvenance? = nil,
+                tangentPoleResidual: TangentPoleResidual? = nil,
+            ) {
+                self.value = value
+                self.semanticValue = semanticValue ?? value
+                self.angleProvenance = angleProvenance
+                self.tangentPoleResidual = tangentPoleResidual
+            }
+
+            static func scalar(_ value: Decimal) -> Self {
+                Self(
+                    value: value,
+                    angleProvenance: AngleProvenance(
+                        constant: value,
+                        piCoefficient: .exactDecimal(0),
+                    ),
+                )
+            }
+        }
+
+        /// Retains a nonzero angle delta when Decimal cannot store it beside a quarter turn.
+        private struct TangentPoleResidual {
+            let residual: Decimal
+
+            var negated: Self {
+                Self(residual: -residual)
+            }
+        }
+
+        /// Tracks exact `constant + coefficient × π` expressions through Decimal arithmetic.
+        ///
+        /// The rational form preserves repeating inverse-trigonometric fractions. The Decimal
+        /// coefficient covers exact scalar magnitudes beyond Int64, while its exactness flag keeps
+        /// a rounded rational approximation from being mistaken for a quadrantal angle.
+        private struct AngleProvenance {
+            let constant: Decimal
+            let piCoefficient: PiCoefficient
+
+            var piCoefficientIsZero: Bool {
+                piCoefficient.isZero
+            }
+        }
+
+        /// Keeps each π coefficient's exact source and Decimal projection in one valid state.
+        private enum PiCoefficient {
+            case exactRational(CalculatorExactRational, decimal: Decimal)
+            case roundedRational(CalculatorExactRational, decimal: Decimal)
+            case exactDecimal(Decimal)
+            /// Exact phase modulo two turns when the full coefficient cannot fit in Decimal.
+            case exactPhase(decimal: Decimal, twelfths: Int)
+            /// Decimal coefficient that Decimal arithmetic could only approximate.
+            ///
+            /// The value still drives periodic reduction, but it must never decide an exact
+            /// classification such as a quadrant or a tangent pole.
+            case roundedDecimal(Decimal)
+
+            var decimalValue: Decimal {
+                switch self {
+                case let .exactRational(_, decimal), let .roundedRational(_, decimal): decimal
+                case let .exactDecimal(decimal), let .roundedDecimal(decimal): decimal
+                case let .exactPhase(decimal, _): decimal
+                }
+            }
+
+            var exactRational: CalculatorExactRational? {
+                switch self {
+                case let .exactRational(rational, _), let .roundedRational(rational, _): rational
+                case .exactDecimal, .exactPhase, .roundedDecimal: nil
+                }
+            }
+
+            var exactDecimalValue: Decimal? {
+                switch self {
+                case let .exactRational(_, decimal), let .exactDecimal(decimal): decimal
+                case .roundedRational, .exactPhase, .roundedDecimal: nil
+                }
+            }
+
+            /// The Decimal coefficient together with whether it is known exactly.
+            var decimalCoefficient: (value: Decimal, isExact: Bool) {
+                switch self {
+                case let .exactRational(_, decimal), let .exactDecimal(decimal): (decimal, true)
+                case let .roundedRational(_, decimal), let .roundedDecimal(decimal): (decimal, false)
+                case let .exactPhase(decimal, _): (decimal, false)
+                }
+            }
+
+            var isZero: Bool {
+                if let exactRational {
+                    return exactRational.isZero
+                }
+                return exactDecimalValue == 0
+            }
+
+            static func rational(
+                _ rational: CalculatorExactRational,
+                decimal: Decimal,
+                isExactDecimal: Bool,
+            ) -> Self {
+                isExactDecimal
+                    ? .exactRational(rational, decimal: decimal)
+                    : .roundedRational(rational, decimal: decimal)
+            }
+        }
+
+        /// A scientific-function result the engine proves exactly, with the provenance it carries.
+        ///
+        /// Provenance is recorded even when the value is a plain scalar, because later terms
+        /// combine it: adding the exact zero of `sin(0)` to a symbolic angle has to leave the
+        /// angle symbolic, or a tangent pole would stop being recognizable.
+        private struct ExactFunctionResult {
+            let value: Decimal
+            let angleProvenance: AngleProvenance?
+        }
+
+        /// Keeps the Decimal mathematical result beside the value rounded for calculator display.
+        private struct PowerEvaluation {
+            let semanticValue: Decimal
+            let displayValue: Decimal
+        }
+
+        /// Carries both semantic and display rounding from one square-root bracket calculation.
+        private struct SquareRootEvaluation {
+            let semanticValue: Decimal
+            let displayValue: Decimal
+        }
+
+        private enum SquareRootProjection: Equatable {
+            case root
+            case reciprocal
+        }
+
+        /// An angle the engine can place on the unit circle exactly.
+        ///
+        /// Twelfths of π carry both closed-form families in one representation: an even number of
+        /// twelfths is a multiple of π/6, and a number divisible by three is a multiple of π/4.
+        /// The remaining twelfths, such as π/12 and 5π/12, have no closed form this calculator
+        /// supports and classify as references the value table does not cover.
+        private struct ExactUnitCircleAngle {
+            /// The angle in twelfths of π, normalized to 0 ..< 24.
+            let twelfths: Int
+        }
+
         private let characters: [Character]
         private var index = 0
         private let roundingScale: Int
+        private let angleMode: CalculatorAngleMode
 
-        init(expression: String, roundingScale: Int) {
+        init(expression: String, roundingScale: Int, angleMode: CalculatorAngleMode) {
             characters = Array(expression)
             self.roundingScale = roundingScale
+            self.angleMode = angleMode
         }
 
         mutating func parse() throws -> Decimal {
@@ -59,40 +354,244 @@ public struct CalculatorEngine: Sendable {
                 throw CalculatorError.invalidExpression
             }
 
-            return value
+            return value.value
         }
 
-        private mutating func parseExpression() throws -> Decimal {
+        private mutating func parseExpression() throws -> ParsedValue {
             var value = try parseTerm()
 
             while true {
                 skipWhitespace()
                 if consume("+") {
-                    value = try rounded(adding: value, parseTerm())
+                    let right = try parseTerm()
+                    value = try binaryResult(
+                        NSDecimalAdd,
+                        lhs: value,
+                        rhs: right,
+                        angleProvenance: combinedAngleProvenance(
+                            value.angleProvenance,
+                            right.angleProvenance,
+                        ),
+                        tangentPoleResidual: propagatedTangentPoleResidual(
+                            for: .addition,
+                            lhs: value,
+                            rhs: right,
+                        ),
+                    )
                 } else if consume("−") || consume("-") {
-                    value = try rounded(subtracting: value, parseTerm())
+                    let right = try parseTerm()
+                    value = try binaryResult(
+                        NSDecimalSubtract,
+                        lhs: value,
+                        rhs: right,
+                        angleProvenance: combinedAngleProvenance(
+                            value.angleProvenance,
+                            right.angleProvenance,
+                            subtracting: true,
+                        ),
+                        tangentPoleResidual: propagatedTangentPoleResidual(
+                            for: .subtraction,
+                            lhs: value,
+                            rhs: right,
+                        ),
+                    )
                 } else {
                     return value
                 }
             }
         }
 
-        private mutating func parseTerm() throws -> Decimal {
-            var value = try parsePostfix()
+        private mutating func parseTerm() throws -> ParsedValue {
+            var value = try parseUnary()
 
             while true {
                 skipWhitespace()
                 if consume("×") || consume("*") {
-                    value = try rounded(multiplying: value, parsePostfix())
+                    let right = try parseUnary()
+                    value = try binaryResult(
+                        NSDecimalMultiply,
+                        lhs: value,
+                        rhs: right,
+                        angleProvenance: multipliedAngleProvenance(
+                            value.angleProvenance,
+                            right.angleProvenance,
+                        ),
+                        tangentPoleResidual: propagatedTangentPoleResidual(
+                            for: .multiplication,
+                            lhs: value,
+                            rhs: right,
+                        ),
+                    )
                 } else if consume("÷") || consume("/") {
-                    value = try rounded(dividing: value, parsePostfix())
+                    let right = try parseUnary()
+                    guard right.semanticValue != 0 else {
+                        throw CalculatorError.divisionByZero
+                    }
+                    value = try binaryResult(
+                        NSDecimalDivide,
+                        lhs: value,
+                        rhs: right,
+                        angleProvenance: dividedAngleProvenance(
+                            value.angleProvenance,
+                            right.angleProvenance,
+                        ),
+                        tangentPoleResidual: propagatedTangentPoleResidual(
+                            for: .division,
+                            lhs: value,
+                            rhs: right,
+                        ),
+                    )
                 } else {
                     return value
                 }
             }
         }
 
-        private mutating func parsePostfix() throws -> Decimal {
+        /// Unary signs apply after exponentiation, while the exponent may itself be signed.
+        /// Evaluates a binary operation from semantic operands and rounds only its displayed result.
+        private func binaryResult(
+            _ operation: DecimalOperation,
+            lhs: ParsedValue,
+            rhs: ParsedValue,
+            angleProvenance: AngleProvenance?,
+            tangentPoleResidual: TangentPoleResidual? = nil,
+        ) throws -> ParsedValue {
+            let result = try unrounded(
+                operation,
+                lhs.semanticValue,
+                rhs.semanticValue,
+                allowingLossOfPrecision: true,
+            )
+            return ParsedValue(
+                value: try rounded(result),
+                semanticValue: result,
+                angleProvenance: angleProvenance,
+                tangentPoleResidual: tangentPoleResidual,
+            )
+        }
+
+        /// Keeps a pole residual only when exact scalar identity arithmetic preserves it.
+        private func propagatedTangentPoleResidual(
+            for operation: BinaryOperationKind,
+            lhs: ParsedValue,
+            rhs: ParsedValue,
+        ) -> TangentPoleResidual? {
+            switch operation {
+            case .addition:
+                if let residual = lhs.tangentPoleResidual, isExactScalar(rhs, equalTo: 0) {
+                    return residual
+                }
+                if let residual = rhs.tangentPoleResidual, isExactScalar(lhs, equalTo: 0) {
+                    return residual
+                }
+            case .subtraction:
+                if let residual = lhs.tangentPoleResidual, isExactScalar(rhs, equalTo: 0) {
+                    return residual
+                }
+                if let residual = rhs.tangentPoleResidual, isExactScalar(lhs, equalTo: 0) {
+                    return residual.negated
+                }
+            case .multiplication:
+                if let residual = lhs.tangentPoleResidual {
+                    if isExactScalar(rhs, equalTo: 1) {
+                        return residual
+                    }
+                    if isExactScalar(rhs, equalTo: -1) {
+                        return residual.negated
+                    }
+                }
+                if let residual = rhs.tangentPoleResidual {
+                    if isExactScalar(lhs, equalTo: 1) {
+                        return residual
+                    }
+                    if isExactScalar(lhs, equalTo: -1) {
+                        return residual.negated
+                    }
+                }
+            case .division:
+                if let residual = lhs.tangentPoleResidual, isExactScalar(rhs, equalTo: 1) {
+                    return residual
+                }
+            }
+            return nil
+        }
+
+        private func isExactScalar(_ value: ParsedValue, equalTo expected: Decimal) -> Bool {
+            guard value.value == expected,
+                  value.semanticValue == expected,
+                  let provenance = value.angleProvenance
+            else {
+                return false
+            }
+
+            return provenance.constant == expected && provenance.piCoefficientIsZero
+        }
+
+        private mutating func parseUnary() throws -> ParsedValue {
+            skipWhitespace()
+            if consume("+") {
+                return try parseUnary()
+            }
+            if consume("−") || consume("-") {
+                let operand = try parseUnary()
+                return ParsedValue(
+                    value: try negateExactly(operand.value),
+                    semanticValue: negated(operand.semanticValue),
+                    angleProvenance: negated(operand.angleProvenance),
+                    tangentPoleResidual: operand.tangentPoleResidual?.negated,
+                )
+            }
+            return try parsePower()
+        }
+
+        private func negateExactly(_ value: Decimal) throws -> Decimal {
+            var zero: Decimal = 0
+            var value = value
+            var result = Decimal()
+            let error = NSDecimalSubtract(&result, &zero, &value, .plain)
+            guard error == .noError else {
+                throw CalculatorError.overflow
+            }
+
+            return result
+        }
+
+        /// Parses exponentiation recursively on its right side so chained powers associate right.
+        ///
+        /// The power itself is evaluated from the operands' semantic values, and only its result
+        /// is rounded for display. Rounding an operand first, such as a base whose display
+        /// collapses to zero, must not change which operation is performed.
+        private mutating func parsePower() throws -> ParsedValue {
+            let base = try parsePostfix()
+            skipWhitespace()
+            guard consume("^") else {
+                return base
+            }
+
+            let exponent = try parseUnary()
+            let evaluation = try power(base.semanticValue, exponent.semanticValue)
+            let mathematicalResult = evaluation.semanticValue
+            let preservesBaseAngle = exponent.semanticValue == 1
+            // A power generally destroys the linear `constant + coefficient × π` relationship the
+            // angle provenance describes, so only the identity exponent carries the base's angle
+            // provenance. A provably exact result still contributes its value exactly to a later
+            // symbolic angle such as π.
+            let exactScalar = preservesBaseAngle
+                ? nil
+                : try exactPowerProvenance(
+                    base: base.semanticValue,
+                    exponent: exponent.semanticValue,
+                    result: mathematicalResult,
+            )
+            return ParsedValue(
+                value: evaluation.displayValue,
+                semanticValue: preservesBaseAngle ? base.semanticValue : mathematicalResult,
+                angleProvenance: preservesBaseAngle ? base.angleProvenance : exactScalar,
+                tangentPoleResidual: preservesBaseAngle ? base.tangentPoleResidual : nil,
+            )
+        }
+
+        private mutating func parsePostfix() throws -> ParsedValue {
             var value = try parsePrimary()
             while true {
                 skipWhitespace()
@@ -100,19 +599,23 @@ public struct CalculatorEngine: Sendable {
                     return value
                 }
 
-                value = try rounded(dividing: value, 100)
+                let semanticPercentage = try unrounded(
+                    NSDecimalDivide,
+                    value.semanticValue,
+                    100,
+                    allowingLossOfPrecision: true,
+                )
+                value = ParsedValue(
+                    value: try rounded(semanticPercentage),
+                    semanticValue: semanticPercentage,
+                    angleProvenance: scaledAngleProvenance(value.angleProvenance, by: 100, dividing: true),
+                )
             }
         }
 
-        private mutating func parsePrimary() throws -> Decimal {
+        private mutating func parsePrimary() throws -> ParsedValue {
             skipWhitespace()
 
-            if consume("+") {
-                return try parsePrimary()
-            }
-            if consume("−") || consume("-") {
-                return try rounded(subtracting: 0, parsePrimary())
-            }
             if consume("(") {
                 let value = try parseExpression()
                 skipWhitespace()
@@ -123,7 +626,36 @@ public struct CalculatorEngine: Sendable {
                 return value
             }
 
-            return try parseNumber()
+            for function in Function.allCases where consume(function.rawValue) {
+                skipWhitespace()
+                guard consume("(") else {
+                    throw CalculatorError.invalidExpression
+                }
+
+                let argument = try parseExpression()
+                skipWhitespace()
+                guard consume(")") else {
+                    throw CalculatorError.invalidExpression
+                }
+
+                return try apply(function, to: argument)
+            }
+
+            if consume("π") {
+                let value = try piValue()
+                return ParsedValue(
+                    value: value,
+                    semanticValue: value,
+                    angleProvenance: AngleProvenance(
+                        constant: 0,
+                        piCoefficient: .exactRational(.one, decimal: 1),
+                    ),
+                )
+            }
+            if consume("e") {
+                return .scalar(try eulerValue())
+            }
+            return .scalar(try parseNumber())
         }
 
         private mutating func parseNumber() throws -> Decimal {
@@ -155,23 +687,1995 @@ public struct CalculatorEngine: Sendable {
             return number
         }
 
-        private mutating func skipWhitespace() {
-            while !isAtEnd, characters[index].isWhitespace {
-                index += 1
+        private mutating func apply(
+            _ function: Function,
+            to argument: ParsedValue,
+        ) throws -> ParsedValue {
+            let operand = argument.semanticValue
+            switch function {
+            case .arcSine,
+                 .arcCosine:
+                guard operand >= -1, operand <= 1 else {
+                    throw CalculatorError.domainError
+                }
+            case .naturalLogarithm,
+                 .commonLogarithm:
+                guard operand > 0 else {
+                    throw CalculatorError.domainError
+                }
+            default:
+                break
+            }
+
+            // Each scientific function produces one mathematical value from the semantic operand;
+            // only the value handed to the display is rounded. Nested functions therefore compose
+            // from the exact operand instead of the digits that happen to be visible.
+            let exactResult = try exactInverseTrigonometricResult(function, argument: operand)
+                ?? exactScalarResult(for: function, operand: operand)
+                ?? exactTrigonometricResult(for: function, argument: argument)
+
+            var tangentPoleResidual: TangentPoleResidual?
+            var displayValueOverride: Decimal?
+            let mathematicalValue: Decimal
+            if let exactResult {
+                mathematicalValue = exactResult.value
+            } else if case .squareRoot = function {
+                let result = try squareRootEvaluation(of: operand, displayScale: roundingScale)
+                mathematicalValue = result.semanticValue
+                displayValueOverride = result.displayValue
+            } else if case .arcTangent = function {
+                let result = try arcTangentValue(of: operand)
+                mathematicalValue = result.value
+                tangentPoleResidual = result.tangentPoleResidual
+            } else if case .arcCosine = function {
+                let result = try inverseTrigonometricAngle(of: operand, measuringCosine: true)
+                mathematicalValue = result.value
+                tangentPoleResidual = result.tangentPoleResidual
+            } else if case .arcSine = function {
+                let result = try inverseTrigonometricAngle(of: operand, measuringCosine: false)
+                mathematicalValue = result.value
+                tangentPoleResidual = result.tangentPoleResidual
+            } else {
+                mathematicalValue = try computedValue(for: function, operand: operand, argument: argument)
+            }
+
+            return ParsedValue(
+                value: try displayValueOverride ?? rounded(mathematicalValue),
+                semanticValue: mathematicalValue,
+                angleProvenance: exactResult?.angleProvenance,
+                tangentPoleResidual: tangentPoleResidual,
+            )
+        }
+
+        /// Computes the mathematical value of a scientific function at a semantic operand.
+        ///
+        /// The result is not display-rounded, so composition through `ParsedValue.semanticValue`
+        /// keeps as much precision as the underlying calculation provides.
+        /// Evaluates arctangent without collapsing its distance from the asymptote.
+        private func arcTangentValue(
+            of operand: Decimal,
+        ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
+            let magnitude = operand < 0 ? -operand : operand
+            let unitDistance = magnitude >= 1 ? magnitude - 1 : 1 - magnitude
+            let directOperand = NSDecimalNumber(decimal: magnitude).doubleValue
+            let materialUnitDistanceLoss: Bool
+            if directOperand.isFinite {
+                let decimalUnitDistance = NSDecimalNumber(decimal: unitDistance).doubleValue
+                if decimalUnitDistance == 0 {
+                    materialUnitDistanceLoss = false
+                } else {
+                    let directUnitDistance = abs(directOperand - 1)
+                    let relativeDistanceLoss = abs(decimalUnitDistance - directUnitDistance)
+                        / decimalUnitDistance
+                    materialUnitDistanceLoss = relativeDistanceLoss > 1e-8
+                }
+            } else {
+                materialUnitDistanceLoss = true
+            }
+
+            // Preserve the Decimal path when Double materially changes the distance from ±1.
+            // A tiny relative difference for very large inputs does not affect the asymptotic
+            // result, while high display scales still use Decimal regardless of input magnitude.
+            if roundingScale > 14 || materialUnitDistanceLoss {
+                return try decimalArcTangentValue(of: operand, magnitude: magnitude)
+            }
+
+            guard magnitude > 1 else {
+                let radians = Foundation.atan(NSDecimalNumber(decimal: operand).doubleValue)
+                return (try semanticDecimal(angleMode.fromRadians(radians)), nil)
+            }
+
+            // Form the small asymptotic delta in Decimal before converting it to Double.
+            let reciprocal = try decimalReciprocal(ofPositive: magnitude)
+            let deltaRadians = try semanticDecimal(
+                Foundation.atan(NSDecimalNumber(decimal: reciprocal).doubleValue),
+            )
+
+            let pole: Decimal
+            let delta: Decimal
+            let spacing: Double
+            switch angleMode {
+            case .degrees:
+                pole = 90
+                let scaledDelta = try unrounded(NSDecimalMultiply, deltaRadians, 180, allowingLossOfPrecision: true)
+                delta = try unrounded(NSDecimalDivide, scaledDelta, piValue(), allowingLossOfPrecision: true)
+                spacing = Double(90).ulp
+            case .radians:
+                pole = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                delta = deltaRadians
+                spacing = (Double.pi / 2).ulp
+            }
+
+            let decimalSpacing = try semanticDecimal(spacing)
+            guard delta < decimalSpacing else {
+                let radians = Foundation.atan(NSDecimalNumber(decimal: operand).doubleValue)
+                return (try semanticDecimal(angleMode.fromRadians(radians)), nil)
+            }
+
+            let positiveAngle = try unrounded(NSDecimalSubtract, pole, delta, allowingLossOfPrecision: true)
+            let value = operand < 0 ? -positiveAngle : positiveAngle
+            let signedPole = operand < 0 ? -pole : pole
+            let residual = value == signedPole
+                ? TangentPoleResidual(residual: operand < 0 ? delta : -delta)
+                : nil
+            return (value, residual)
+        }
+
+        /// Evaluates inverse tangent in Decimal when Double cannot retain requested precision.
+        private func decimalArcTangentValue(
+            of operand: Decimal,
+            magnitude: Decimal,
+        ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
+            if magnitude > 2 {
+                let reciprocal: Decimal
+                do {
+                    reciprocal = try decimalReciprocal(ofPositive: magnitude)
+                } catch CalculatorError.overflow {
+                    // If the asymptotic delta is below Decimal's range, the angle itself is
+                    // still representable at its pole value. Keep it non-symbolic and omit an
+                    // unrepresentable residual so it cannot be mistaken for an exact pole.
+                    let pole: Decimal
+                    switch angleMode {
+                    case .degrees:
+                        pole = 90
+                    case .radians:
+                        pole = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                    }
+                    return (operand < 0 ? -pole : pole, nil)
+                }
+                let deltaRadians = try decimalArcTangentSeries(of: reciprocal)
+                let pole: Decimal
+                let delta: Decimal
+                switch angleMode {
+                case .degrees:
+                    pole = 90
+                    let scaledDelta = try unrounded(
+                        NSDecimalMultiply,
+                        deltaRadians,
+                        180,
+                        allowingLossOfPrecision: true,
+                    )
+                    delta = try unrounded(NSDecimalDivide, scaledDelta, piValue(), allowingLossOfPrecision: true)
+                case .radians:
+                    pole = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                    delta = deltaRadians
+                }
+
+                let positiveAngle = try unrounded(NSDecimalSubtract, pole, delta, allowingLossOfPrecision: true)
+                let value: Decimal
+                let signedPole: Decimal
+                let signedResidual: Decimal
+                if operand < 0 {
+                    value = try negateExactly(positiveAngle)
+                    signedPole = try negateExactly(pole)
+                    signedResidual = delta
+                } else {
+                    value = positiveAngle
+                    signedPole = pole
+                    signedResidual = try negateExactly(delta)
+                }
+                let residual = value == signedPole
+                    ? TangentPoleResidual(residual: signedResidual)
+                    : nil
+                return (value, residual)
+            }
+
+            let positiveRadians: Decimal
+            if magnitude < Decimal(string: "0.5", locale: Locale(identifier: "en_US_POSIX"))! {
+                positiveRadians = try decimalArcTangentSeries(of: magnitude)
+            } else {
+                let numerator = try unrounded(NSDecimalSubtract, magnitude, 1, allowingLossOfPrecision: true)
+                let denominator = try unrounded(NSDecimalAdd, magnitude, 1, allowingLossOfPrecision: true)
+                let ratio = try unrounded(NSDecimalDivide, numerator, denominator, allowingLossOfPrecision: true)
+                let correction = try decimalArcTangentSeries(of: ratio)
+                let quarterPi = try unrounded(NSDecimalDivide, piValue(), 4, allowingLossOfPrecision: true)
+                positiveRadians = try unrounded(NSDecimalAdd, quarterPi, correction, allowingLossOfPrecision: true)
+            }
+
+            let signedRadians: Decimal
+            if operand < 0 {
+                signedRadians = try negateExactly(positiveRadians)
+            } else {
+                signedRadians = positiveRadians
+            }
+            let value: Decimal
+            switch angleMode {
+            case .degrees:
+                let scaledAngle = try unrounded(
+                    NSDecimalMultiply,
+                    signedRadians,
+                    180,
+                    allowingLossOfPrecision: true,
+                )
+                value = try unrounded(NSDecimalDivide, scaledAngle, piValue(), allowingLossOfPrecision: true)
+            case .radians:
+                value = signedRadians
+            }
+
+            return (value, nil)
+        }
+
+        /// Evaluates atan(x) with the alternating Decimal series for |x| below one half.
+        private func decimalArcTangentSeries(of value: Decimal) throws -> Decimal {
+            guard value != 0 else {
+                return 0
+            }
+
+            let squaredValue: Decimal
+            do {
+                squaredValue = try checkedUnroundedProduct(
+                    value,
+                    value,
+                    allowingLossOfPrecision: true,
+                )
+            } catch {
+                // If x² is below Decimal's range, all later terms are smaller than x and cannot
+                // affect the representable result.
+                return value
+            }
+
+            var power = value
+            var sum: Decimal = 0
+            for denominator in stride(from: 1, through: 511, by: 2) {
+                let term = try unrounded(
+                    NSDecimalDivide,
+                    power,
+                    Decimal(denominator),
+                    allowingLossOfPrecision: true,
+                )
+                let nextSum = try unrounded(NSDecimalAdd, sum, term, allowingLossOfPrecision: true)
+                if nextSum == sum {
+                    return sum
+                }
+                sum = nextSum
+                do {
+                    let nextPower = try checkedUnroundedProduct(
+                        power,
+                        squaredValue,
+                        allowingLossOfPrecision: true,
+                    )
+                    power = try negateExactly(nextPower)
+                } catch {
+                    return sum
+                }
+            }
+
+            throw CalculatorError.overflow
+        }
+
+        /// Computes a Decimal reciprocal through its significand and exponent.
+        ///
+        /// Dividing one by the whole Decimal can return NaN near the upper exponent limit even
+        /// when the reciprocal is representable. Separating the base-ten exponent keeps the small
+        /// asymptotic value inside Decimal's supported range.
+        private func decimalReciprocal(ofPositive value: Decimal) throws -> Decimal {
+            let (digits, scale) = try decimalDigitsAndScale(value)
+            let significand = try decimal(fromDigits: digits, scale: digits.count - 1)
+            let significandReciprocal = try unrounded(
+                NSDecimalDivide,
+                1,
+                significand,
+                allowingLossOfPrecision: true,
+            )
+            let reciprocalExponent = scale - digits.count + 1
+            let reciprocal = Decimal(
+                sign: .plus,
+                exponent: reciprocalExponent,
+                significand: significandReciprocal,
+            )
+            guard !reciprocal.isNaN, reciprocal != 0 else {
+                throw CalculatorError.overflow
+            }
+
+            return reciprocal
+        }
+
+        private func computedValue(
+            for function: Function,
+            operand: Decimal,
+            argument: ParsedValue,
+        ) throws -> Decimal {
+            switch function {
+            case .sine, .cosine:
+                return try trigonometricValue(for: function, argument: argument)
+            case .tangent:
+                guard try !isTangentPole(for: argument) else {
+                    throw CalculatorError.domainError
+                }
+
+                return try tangentValue(for: argument)
+            case .arcSine:
+                return try inverseTrigonometricAngle(of: operand, measuringCosine: false).value
+            case .arcCosine:
+                return try inverseTrigonometricAngle(of: operand, measuringCosine: true).value
+            case .arcTangent:
+                return try arcTangentValue(of: operand).value
+            case .naturalLogarithm:
+                return try logarithm(of: operand, isCommon: false)
+            case .commonLogarithm:
+                return try logarithm(of: operand, isCommon: true)
+            case .squareRoot:
+                return try semanticSquareRoot(of: operand)
+            case .square:
+                return try unrounded(NSDecimalMultiply, operand, operand, allowingLossOfPrecision: true)
+            case .reciprocal:
+                guard operand != 0 else {
+                    throw CalculatorError.divisionByZero
+                }
+
+                return try unrounded(NSDecimalDivide, 1, operand, allowingLossOfPrecision: true)
             }
         }
 
-        private mutating func consume(_ character: Character) -> Bool {
-            guard !isAtEnd, characters[index] == character else {
+        /// Computes an inverse-trigonometric angle in the configured angle mode.
+        ///
+        /// The operand stays a `Decimal` until its distance to the endpoints has been preserved.
+        /// A value such as `0.99999999999999999` converts to the same `Double` as `1`, which
+        /// would report a quarter turn exactly and hide that the tangent of that angle is a large
+        /// finite number. Both the displayed and the semantic result come from this single
+        /// evaluation, so they cannot disagree about which angle was computed.
+        private func inverseTrigonometricAngle(
+            of operand: Decimal,
+            measuringCosine: Bool,
+        ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
+            if try requiresEndpointStableEvaluation(of: operand) {
+                return (try stableInverseTrigonometricAngle(of: operand, measuringCosine: measuringCosine), nil)
+            }
+
+            if measuringCosine, try requiresInteriorStableEvaluation(of: operand) {
+                return try interiorStableInverseCosine(of: operand)
+            }
+
+            if roundingScale > 14 {
+                return (try decimalInverseTrigonometricAngle(of: operand, measuringCosine: measuringCosine), nil)
+            }
+
+            let radians = directInverseTrigonometricRadians(of: operand, measuringCosine: measuringCosine)
+            return (try semanticDecimal(angleMode.fromRadians(radians)), nil)
+        }
+
+        /// Evaluates ordinary inverse-trigonometric angles without reducing their precision to Double.
+        private func decimalInverseTrigonometricAngle(
+            of operand: Decimal,
+            measuringCosine: Bool,
+        ) throws -> Decimal {
+            let complement = try unrounded(
+                NSDecimalMultiply,
+                try unrounded(NSDecimalSubtract, 1, operand, allowingLossOfPrecision: true),
+                try unrounded(NSDecimalAdd, 1, operand, allowingLossOfPrecision: true),
+                allowingLossOfPrecision: true,
+            )
+            let complementaryLeg = try squareRoot(of: complement, toScale: max(roundingScale, 38))
+            let tangent = try unrounded(
+                NSDecimalDivide,
+                operand,
+                complementaryLeg,
+                allowingLossOfPrecision: true,
+            )
+            let magnitude = tangent < 0 ? -tangent : tangent
+            let arcsine = try decimalArcTangentValue(of: tangent, magnitude: magnitude).value
+            guard measuringCosine else {
+                return arcsine
+            }
+
+            let halfTurn: Decimal
+            switch angleMode {
+            case .degrees:
+                halfTurn = 90
+            case .radians:
+                halfTurn = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+            }
+            return try unrounded(NSDecimalSubtract, halfTurn, arcsine, allowingLossOfPrecision: true)
+        }
+
+        /// Evaluates `asin`/`acos` through Foundation for operands that convert without loss.
+        private func directInverseTrigonometricRadians(
+            of operand: Decimal,
+            measuringCosine: Bool,
+        ) -> Double {
+            let operandValue = NSDecimalNumber(decimal: operand).doubleValue
+            return measuringCosine ? Foundation.acos(operandValue) : Foundation.asin(operandValue)
+        }
+
+        /// Reports whether converting the operand to `Double` would erase part of its endpoint distance.
+        ///
+        /// A `Double` resolves values around one no more finely than one unit in the last place
+        /// (about 2.2e-16), so an operand closer to ±1 than that reaches the trigonometry as the
+        /// endpoint itself. The Decimal distance from the endpoint is compared against the
+        /// distance the converted value reports, using the same material-loss rule as the
+        /// near-one logarithm path: a loss of more than one part in 10^8 of the distance counts.
+        private func requiresEndpointStableEvaluation(of operand: Decimal) throws -> Bool {
+            let endpointDistance = try unrounded(
+                NSDecimalSubtract,
+                1,
+                abs(operand),
+                allowingLossOfPrecision: true,
+            )
+            let endpointDistanceValue = NSDecimalNumber(decimal: endpointDistance).doubleValue
+            let convertedDistance = 1 - abs(NSDecimalNumber(decimal: operand).doubleValue)
+            return abs(convertedDistance - endpointDistanceValue) > endpointDistanceValue * 1e-8
+        }
+
+        /// Evaluates `asin`/`acos` from the Decimal distance to the unit circle.
+        ///
+        /// `(1 - x)(1 + x)` preserves the small complementary leg before floating-point math.
+        /// The small angle is then subtracted from an exact Decimal quarter or half turn, so a
+        /// later tangent can still recover the distance from its pole.
+        private func stableInverseTrigonometricAngle(
+            of operand: Decimal,
+            measuringCosine: Bool,
+        ) throws -> Decimal {
+            let complement = try unrounded(
+                NSDecimalMultiply,
+                try unrounded(NSDecimalSubtract, 1, operand, allowingLossOfPrecision: true),
+                try unrounded(NSDecimalAdd, 1, operand, allowingLossOfPrecision: true),
+                allowingLossOfPrecision: true,
+            )
+            let complementRoot = try squareRoot(of: complement, toScale: max(roundingScale, 38))
+            let ratio = try unrounded(
+                NSDecimalDivide,
+                complementRoot,
+                abs(operand),
+                allowingLossOfPrecision: true,
+            )
+            let deltaRadians = try semanticDecimal(
+                Foundation.atan(NSDecimalNumber(decimal: ratio).doubleValue),
+            )
+
+            let quarterTurn: Decimal
+            let halfTurn: Decimal
+            let delta: Decimal
+            switch angleMode {
+            case .degrees:
+                quarterTurn = 90
+                halfTurn = 180
+                delta = try semanticDecimal(
+                    NSDecimalNumber(decimal: deltaRadians).doubleValue * 180 / Double.pi,
+                )
+            case .radians:
+                quarterTurn = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                halfTurn = try piValue()
+                delta = deltaRadians
+            }
+
+            if measuringCosine {
+                return operand > 0
+                    ? delta
+                    : try unrounded(NSDecimalSubtract, halfTurn, delta, allowingLossOfPrecision: true)
+            }
+
+            if operand > 0 {
+                return try unrounded(NSDecimalSubtract, quarterTurn, delta, allowingLossOfPrecision: true)
+            }
+            return try unrounded(NSDecimalAdd, -quarterTurn, delta, allowingLossOfPrecision: true)
+        }
+
+        /// Reports whether converting a small operand to `Double` would erase part of its distance
+        /// from the quarter turn that `acos` measures against.
+        ///
+        /// `acos` crosses its quarter turn at zero, so an operand whose angle is smaller than the
+        /// conversion can resolve is reported as exactly a quarter turn. The distance the converted
+        /// result reports is compared against the distance the Decimal operand implies, using the
+        /// same material-loss rule as the endpoint path: a relative loss beyond one part in 10^8
+        /// counts, which happens only while that distance is smaller than the conversion resolves.
+        private func requiresInteriorStableEvaluation(of operand: Decimal) throws -> Bool {
+            guard operand != 0 else {
                 return false
             }
 
-            index += 1
-            return true
+            let deviation = NSDecimalNumber(decimal: try interiorDeviation(of: operand)).doubleValue
+            let convertedDeviation = abs(
+                Double.pi / 2 - Foundation.acos(NSDecimalNumber(decimal: operand).doubleValue),
+            )
+            return abs(convertedDeviation - deviation) > deviation * 1e-8
         }
 
-        private var isAtEnd: Bool {
-            index == characters.count
+        /// Evaluates `acos` around its interior zero from the operand's Decimal distance to it.
+        ///
+        /// The angle is the quarter turn minus the operand's angle from zero, so subtracting that
+        /// distance while both values are still Decimals keeps a difference that no `Double` could
+        /// carry.
+        /// Keeps a lost quarter-turn deviation so tangent can evaluate the finite source angle.
+        private func interiorStableInverseCosine(
+            of operand: Decimal,
+        ) throws -> (value: Decimal, tangentPoleResidual: TangentPoleResidual?) {
+            let deviation = try interiorDeviation(of: operand)
+            let quarterTurn: Decimal
+            let delta: Decimal
+            switch angleMode {
+            case .degrees:
+                quarterTurn = 90
+                delta = try semanticDecimal(
+                    NSDecimalNumber(decimal: deviation).doubleValue * 180 / Double.pi,
+                )
+            case .radians:
+                quarterTurn = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                delta = deviation
+            }
+
+            let value = operand > 0
+                ? try unrounded(NSDecimalSubtract, quarterTurn, delta, allowingLossOfPrecision: true)
+                : try unrounded(NSDecimalAdd, quarterTurn, delta, allowingLossOfPrecision: true)
+            let residual = value == quarterTurn && delta != 0
+                ? TangentPoleResidual(residual: operand > 0 ? -delta : delta)
+                : nil
+            return (value, residual)
+        }
+
+        /// Returns the operand's angular distance from the interior zero of `acos`, in radians.
+        ///
+        /// The distance is `atan(|x| ÷ √((1 - x)(1 + x)))` formed while the operand is still a
+        /// `Decimal`: the ratio stays small and well conditioned around zero, and the square root
+        /// keeps the complementary leg's precision.
+        private func interiorDeviation(of operand: Decimal) throws -> Decimal {
+            let magnitude = operand < 0 ? -operand : operand
+            let complement = try unrounded(
+                NSDecimalMultiply,
+                try unrounded(NSDecimalSubtract, 1, operand, allowingLossOfPrecision: true),
+                try unrounded(NSDecimalAdd, 1, operand, allowingLossOfPrecision: true),
+                allowingLossOfPrecision: true,
+            )
+            let complementRoot = try squareRoot(of: complement, toScale: max(roundingScale, 38))
+            // Decimal division can underflow for a tiny numerator even when the divisor is
+            // exactly one. In that case the numerator already is the representable ratio.
+            let tangent = complementRoot == 1
+                ? magnitude
+                : try unrounded(
+                    NSDecimalDivide,
+                    magnitude,
+                    complementRoot,
+                    allowingLossOfPrecision: true,
+                )
+
+            return try semanticDecimal(
+                Foundation.atan(NSDecimalNumber(decimal: tangent).doubleValue),
+            )
+        }
+
+        /// Computes the function result used by later expression terms without display rounding.
+        /// Retains exact π-relative results for inverse-trigonometric values with known forms.
+        private func exactInverseTrigonometricResult(
+            _ function: Function,
+            argument: Decimal,
+        ) throws -> ExactFunctionResult? {
+            let piCoefficient: CalculatorExactRational
+            switch function {
+            case .arcSine:
+                if argument == 1 {
+                    piCoefficient = .half
+                } else if argument == -1 {
+                    piCoefficient = .negativeHalf
+                } else if argument == 0.5 {
+                    piCoefficient = .oneSixth
+                } else if argument == -0.5 {
+                    piCoefficient = .negativeOneSixth
+                } else {
+                    return nil
+                }
+            case .arcCosine:
+                if argument == -1 {
+                    piCoefficient = .one
+                } else if argument == 0 {
+                    piCoefficient = .half
+                } else if argument == 1 {
+                    piCoefficient = .zero
+                } else if argument == 0.5 {
+                    piCoefficient = .oneThird
+                } else if argument == -0.5 {
+                    piCoefficient = .twoThirds
+                } else {
+                    return nil
+                }
+            case .arcTangent:
+                if argument == -1 {
+                    piCoefficient = .negativeOneQuarter
+                } else if argument == 0 {
+                    piCoefficient = .zero
+                } else if argument == 1 {
+                    piCoefficient = .oneQuarter
+                } else {
+                    return nil
+                }
+            default:
+                return nil
+            }
+
+            switch angleMode {
+            case .degrees:
+                guard let degreeCoefficient = piCoefficient.multiplied(by: .integer(180)) else {
+                    throw CalculatorError.overflow
+                }
+                return ExactFunctionResult(
+                    value: try decimal(from: degreeCoefficient),
+                    angleProvenance: nil,
+                )
+            case .radians:
+                let (coefficient, isExactDecimal) = try decimalRepresentation(of: piCoefficient)
+                let provenance = AngleProvenance(
+                    constant: 0,
+                    piCoefficient: .rational(
+                        piCoefficient,
+                        decimal: coefficient,
+                        isExactDecimal: isExactDecimal,
+                    ),
+                )
+                let pi = try piValue()
+                return ExactFunctionResult(
+                    value: try unrounded(
+                        NSDecimalMultiply,
+                        pi,
+                        coefficient,
+                        allowingLossOfPrecision: true,
+                    ),
+                    angleProvenance: provenance,
+                )
+            }
+        }
+
+        /// Returns the exact result for functions whose value the engine can prove directly.
+        ///
+        /// Only operands that make the value exact are recognized — never a floating-point result
+        /// that merely rounded to a convenient number — so a tiny non-zero input keeps its
+        /// approximate result and cannot pick up symbolic provenance. The natural logarithm reads
+        /// the calculator's own Euler constant, and a reciprocal is exact only while one divided
+        /// by the operand needs no Decimal rounding, so 0.5 is exact while 1/3 stays approximate.
+        private func exactScalarResult(
+            for function: Function,
+            operand: Decimal,
+        ) throws -> ExactFunctionResult? {
+            let value: Decimal
+            switch function {
+            case .sine, .tangent, .arcSine, .arcTangent:
+                guard operand == 0 else {
+                    return nil
+                }
+                value = 0
+            case .cosine:
+                guard operand == 0 else {
+                    return nil
+                }
+                value = 1
+            case .square:
+                // An exact checked product proves the square without treating Decimal's rounded
+                // loss-of-precision result as a mathematical identity. Verify the product using
+                // exact digit arithmetic as well, since Foundation may not report every discarded
+                // low-order digit through its calculation status.
+                let magnitude = operand < 0 ? -operand : operand
+                guard let square = try? unrounded(NSDecimalMultiply, operand, operand) else {
+                    return nil
+                }
+                guard (try? compareSquare(of: magnitude, with: square)) == .orderedSame else {
+                    return nil
+                }
+                value = square
+            case .squareRoot:
+                // Only the digit-based square comparison can prove a root exact; Decimal's ordinary
+                // multiplication may compare equal after finite-precision rounding.
+                guard let root = try? squareRoot(of: operand, toScale: max(roundingScale, 38)),
+                      (try? compareSquare(of: root, with: operand)) == .orderedSame
+                else {
+                    return nil
+                }
+                value = root
+            case .arcCosine, .commonLogarithm:
+                guard operand == 1 else {
+                    return nil
+                }
+                value = 0
+            case .naturalLogarithm:
+                if operand == 1 {
+                    value = 0
+                } else if operand == (try eulerValue()) {
+                    // The calculator's own Euler constant is exactly one natural logarithm, so
+                    // the identity composes instead of returning the nearest Double result.
+                    value = 1
+                } else {
+                    return nil
+                }
+            case .reciprocal:
+                // Only a quotient that multiplies back to exactly one proves that Decimal divided
+                // without rounding; a repeating expansion such as 1 ÷ 3 stays approximate.
+                guard let quotient = exactReciprocal(of: operand) else {
+                    return nil
+                }
+                value = quotient
+            }
+
+            return ExactFunctionResult(
+                value: value,
+                angleProvenance: exactScalarProvenance(for: value),
+            )
+        }
+
+        /// Describes an exactly known scalar result as an angle contribution.
+        ///
+        /// Radian angles are the only ones that read provenance: a Degree angle already carries
+        /// its exactness in the semantic value, so Degree mode records nothing here.
+        private func exactScalarProvenance(for value: Decimal) -> AngleProvenance? {
+            guard angleMode == .radians else {
+                return nil
+            }
+
+            return AngleProvenance(
+                constant: value,
+                piCoefficient: .exactRational(.zero, decimal: 0),
+            )
+        }
+
+        /// Describes a power result as an exact scalar contribution when the engine can prove the
+        /// result exactly, and returns nil otherwise.
+        private func exactPowerProvenance(
+            base: Decimal,
+            exponent: Decimal,
+            result: Decimal,
+        ) throws -> AngleProvenance? {
+            guard try powerIsExactlyRepresentable(base: base, exponent: exponent, result: result) else {
+                return nil
+            }
+
+            return exactScalarProvenance(for: result)
+        }
+
+        /// Reports whether a power's mathematical result is exactly representable in `Decimal`.
+        ///
+        /// `Decimal` does not report every discarded digit through its calculation status, so the
+        /// proof reads the operands' exact base-ten digits instead. An integral exponent is exact
+        /// while the exact result stays inside the coefficient precision, and a negative exponent
+        /// additionally needs a reciprocal that `Decimal` divides exactly. Half powers reuse the
+        /// digit-based square-root proof.
+        private func powerIsExactlyRepresentable(base: Decimal, exponent: Decimal, result: Decimal) throws -> Bool {
+            if exponent == 0 {
+                // A zero base with a zero or negative exponent is rejected before a power exists.
+                return true
+            }
+
+            if exponent == 0.5 || exponent == -0.5 {
+                guard base != 0 else {
+                    return exponent == 0.5
+                }
+                guard base > 0 else {
+                    return false
+                }
+
+                let root = try squareRoot(of: base, toScale: max(roundingScale, 38))
+                guard (try? compareSquare(of: root, with: base)) == .orderedSame else {
+                    return false
+                }
+
+                return exponent == 0.5 || exactReciprocal(of: root) != nil
+            }
+
+            guard base != 0 else {
+                return false
+            }
+
+            var integralExponent = exponent
+            var exponentToRound = exponent
+            NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
+            guard integralExponent == exponent else {
+                return false
+            }
+
+            let factor: Decimal
+            if integralExponent < 0 {
+                guard let reciprocal = exactReciprocal(of: base) else {
+                    return false
+                }
+                factor = reciprocal
+            } else {
+                factor = base
+            }
+
+            let magnitude = integralExponent < 0 ? -integralExponent : integralExponent
+            return try integralPowerFitsPrecision(factor, exponent: magnitude, result: result)
+        }
+
+        /// Proves an integral power's exact coefficient and base-ten exponent.
+        ///
+        /// Base-ten scaling is separate from significant digits: `10^40` has a one-digit
+        /// coefficient, while a rounded product with 39 nonzero coefficient digits is inexact.
+        /// Compare the exact digit product with the actual Decimal result to verify both its
+        /// coefficient and representable exponent without trusting Decimal's error status.
+        private func integralPowerFitsPrecision(
+            _ factor: Decimal,
+            exponent: Decimal,
+            result: Decimal,
+        ) throws -> Bool {
+            let magnitude = factor < 0 ? -factor : factor
+            let resultMagnitude = result < 0 ? -result : result
+            guard let (digits, scale) = try? decimalDigitsAndScale(magnitude),
+                  let (resultDigits, resultScale) = try? decimalDigitsAndScale(resultMagnitude),
+                  let expectedScale = try? unrounded(NSDecimalMultiply, Decimal(scale), exponent),
+                  expectedScale == Decimal(resultScale)
+            else {
+                return false
+            }
+
+            if digits == [1] {
+                return resultDigits == [1]
+            }
+
+            // A normalized non-unit coefficient is at least two; 2^130 has 40 digits.
+            // An exact 39-digit candidate therefore has a small integral exponent.
+            guard exponent <= 129 else { return false }
+            var remaining = NSDecimalNumber(decimal: exponent).intValue
+            var coefficient = [1]
+            var multiplier = digits
+            while remaining > 0 {
+                if remaining % 2 != 0 {
+                    coefficient = ExactDecimalArithmetic.product(coefficient, multiplier)
+                    guard coefficient.count <= 39 else { return false }
+                }
+                remaining /= 2
+                if remaining > 0 {
+                    multiplier = ExactDecimalArithmetic.product(multiplier, multiplier)
+                    guard multiplier.count <= 39 else { return false }
+                }
+            }
+            return coefficient == resultDigits
+        }
+
+        /// Returns the exact reciprocal of a value, or nil when `Decimal` rounds the quotient.
+        ///
+        /// A quotient is exact only when multiplying it back by the divisor returns exactly one,
+        /// because `Decimal` division does not report a repeating expansion as a lost digit.
+        private func exactReciprocal(of value: Decimal) -> Decimal? {
+            guard let quotient = try? unrounded(NSDecimalDivide, 1, value),
+                  let product = try? unrounded(NSDecimalMultiply, quotient, value),
+                  product == 1
+            else {
+                return nil
+            }
+
+            return quotient
+        }
+
+        /// Converts an exact rational coefficient to Decimal.
+        private func decimal(from rational: CalculatorExactRational) throws -> Decimal {
+            try unrounded(
+                NSDecimalDivide,
+                Decimal(rational.numerator),
+                Decimal(rational.denominator),
+                allowingLossOfPrecision: true,
+            )
+        }
+
+        private func radians(from value: Double) -> Double {
+            angleMode == .degrees ? value * .pi / 180 : value
+        }
+
+        /// Reduces an angle before Double conversion so large angles retain their phase.
+        ///
+        /// A symbolic Radian angle is reduced from its provenance rather than from the
+        /// materialized angle: the provenance still knows the exact π multiple, while the
+        /// materialized `Decimal` has already lost the low-order phase of a large coefficient.
+        private func reducedTrigonometricAngle(for argument: ParsedValue) throws -> Decimal {
+            switch angleMode {
+            case .degrees:
+                try reducedDegrees(from: argument.semanticValue)
+            case .radians:
+                if let provenance = argument.angleProvenance {
+                    try reducedSymbolicRadians(from: provenance)
+                } else {
+                    try reducedRadians(from: argument.semanticValue)
+                }
+            }
+        }
+
+        /// Evaluates tangent from a small pole-relative residual when Double loses that residual.
+        ///
+        /// Exact poles are classified separately from their numeric expansions. This path only
+        /// changes how a known non-pole angle is evaluated after Decimal-to-Double conversion.
+        private func tangentValue(for argument: ParsedValue) throws -> Decimal {
+            if let residual = argument.tangentPoleResidual {
+                return try tangentValue(fromPoleResidual: residual.residual)
+            }
+
+            let reduced = try reducedTrigonometricAngle(for: argument)
+            let reducedDouble = NSDecimalNumber(decimal: reduced).doubleValue
+            let nearest = try nearestTangentPole(to: reduced)
+            guard nearest.residual != 0 else {
+                return try semanticDecimal(Foundation.tan(radians(from: reducedDouble)))
+            }
+
+            let poleDouble = NSDecimalNumber(decimal: nearest.pole).doubleValue
+            let representedResidual = reducedDouble - poleDouble
+            let semanticResidual = NSDecimalNumber(decimal: nearest.residual).doubleValue
+            let angleConversionUncertainty = reducedDouble.ulp / 2
+                + poleDouble.ulp / 2
+                + representedResidual.ulp / 2
+            let residualRadians = radians(from: semanticResidual)
+            let residualSine = Foundation.sin(residualRadians)
+            let tangentErrorBound = residualSine == 0
+                ? Double.infinity
+                : angleConversionUncertainty / (residualSine * residualSine)
+            let displayUnit = Foundation.pow(10, Double(-max(roundingScale, 0)))
+            guard tangentErrorBound > displayUnit / 2 else {
+                return try semanticDecimal(Foundation.tan(radians(from: reducedDouble)))
+            }
+
+            return try tangentValue(fromPoleResidual: nearest.residual)
+        }
+
+        /// Evaluates the pole identity using Decimal so a tiny residual keeps its significant digits.
+        private func tangentValue(fromPoleResidual residual: Decimal) throws -> Decimal {
+            guard residual != 0 else {
+                throw CalculatorError.domainError
+            }
+
+            let residualMagnitude = residual < 0 ? -residual : residual
+            let smallRadians = try decimal("1e-19")
+            let degreesPerRadian: Decimal?
+            let smallResidualThreshold: Decimal
+            if angleMode == .degrees {
+                let conversion = try unrounded(
+                    NSDecimalDivide,
+                    180,
+                    piValue(),
+                    allowingLossOfPrecision: true,
+                )
+                degreesPerRadian = conversion
+                smallResidualThreshold = try unrounded(
+                    NSDecimalDivide,
+                    unrounded(NSDecimalMultiply, smallRadians, 180, allowingLossOfPrecision: true),
+                    piValue(),
+                    allowingLossOfPrecision: true,
+                )
+            } else {
+                degreesPerRadian = nil
+                smallResidualThreshold = smallRadians
+            }
+
+            if residualMagnitude < smallResidualThreshold {
+                let unsignedReciprocal: Decimal
+                if let degreesPerRadian {
+                    unsignedReciprocal = try checkedUnroundedProduct(
+                        degreesPerRadian,
+                        decimalReciprocal(ofPositive: residualMagnitude),
+                        allowingLossOfPrecision: true,
+                    )
+                } else {
+                    unsignedReciprocal = try decimalReciprocal(ofPositive: residualMagnitude)
+                }
+                return try unrounded(
+                    NSDecimalMultiply,
+                    residual < 0 ? 1 : -1,
+                    unsignedReciprocal,
+                    allowingLossOfPrecision: true,
+                )
+            }
+
+            let residualRadians: Decimal
+            if let _ = degreesPerRadian {
+                let scaledResidual = try unrounded(
+                    NSDecimalMultiply,
+                    residual,
+                    piValue(),
+                    allowingLossOfPrecision: true,
+                )
+                residualRadians = try unrounded(
+                    NSDecimalDivide,
+                    scaledResidual,
+                    180,
+                    allowingLossOfPrecision: true,
+                )
+            } else {
+                residualRadians = residual
+            }
+            return try decimalTangentFromPoleResidual(residualRadians)
+        }
+
+        /// Evaluates `-cot(residual)` from bounded Decimal sine and cosine series.
+        private func decimalTangentFromPoleResidual(_ residual: Decimal) throws -> Decimal {
+            let (sine, cosine) = try decimalSineAndCosine(of: residual)
+            return try negativeCotangent(sine: sine, cosine: cosine)
+        }
+
+        /// Divides by the small sine through a normalized reciprocal to retain its digits.
+        private func negativeCotangent(sine: Decimal, cosine: Decimal) throws -> Decimal {
+            guard sine != 0 else {
+                throw CalculatorError.overflow
+            }
+
+            let reciprocal = try decimalReciprocal(ofPositive: sine < 0 ? -sine : sine)
+            return try checkedUnroundedProduct(
+                sine < 0 ? cosine : negateExactly(cosine),
+                reciprocal,
+                allowingLossOfPrecision: true,
+            )
+        }
+
+        /// Finds the closest odd quarter-turn used to evaluate tangent from its residual.
+        private func nearestTangentPole(to angle: Decimal) throws -> (pole: Decimal, residual: Decimal) {
+            let poles: [Decimal]
+            switch angleMode {
+            case .degrees:
+                poles = [-270, -90, 90, 270]
+            case .radians:
+                let halfPi = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                let threeHalfPi = try unrounded(NSDecimalMultiply, halfPi, 3, allowingLossOfPrecision: true)
+                poles = [-threeHalfPi, -halfPi, halfPi, threeHalfPi]
+            }
+
+            var nearest: (pole: Decimal, residual: Decimal)?
+            for pole in poles {
+                let residual = try unrounded(NSDecimalSubtract, angle, pole, allowingLossOfPrecision: true)
+                let magnitude = residual < 0 ? -residual : residual
+                let nearestMagnitude = nearest.map { $0.residual < 0 ? -$0.residual : $0.residual }
+                if nearestMagnitude == nil || magnitude < nearestMagnitude! {
+                    nearest = (pole, residual)
+                }
+            }
+
+            guard let nearest else {
+                throw CalculatorError.overflow
+            }
+            return nearest
+        }
+
+        /// Evaluates sine or cosine with Decimal arithmetic after reducing around a quarter turn.
+        ///
+        /// The shared Taylor core sees only the residual from the nearest quadrant. That preserves
+        /// configured display precision and keeps tiny residual angles from disappearing in a
+        /// floating-point conversion.
+        private func trigonometricValue(for function: Function, argument: ParsedValue) throws -> Decimal {
+            let reduced = try reducedTrigonometricAngle(for: argument)
+            guard let nearest = try nearestQuadrantalAngle(to: reduced) else {
+                throw CalculatorError.overflow
+            }
+            let residualRadians = try radians(fromDecimalAngle: nearest.residual)
+            let (residualSine, residualCosine) = try decimalSineAndCosine(of: residualRadians)
+            let quadrant = (nearest.quarterTurnCount % 4 + 4) % 4
+
+            switch (function, quadrant) {
+            case (.sine, 0), (.cosine, 0):
+                return function == .sine ? residualSine : residualCosine
+            case (.sine, 1):
+                return residualCosine
+            case (.cosine, 1):
+                return try negateExactly(residualSine)
+            case (.sine, 2):
+                return try negateExactly(residualSine)
+            case (.cosine, 2):
+                return try negateExactly(residualCosine)
+            case (.sine, 3):
+                return try negateExactly(residualCosine)
+            case (.cosine, 3):
+                return residualSine
+            default:
+                throw CalculatorError.invalidExpression
+            }
+        }
+
+        /// Evaluates both trigonometric functions by bounded Taylor recurrences in Decimal.
+        ///
+        /// The caller reduces the angle to at most a quarter turn, so both series converge quickly.
+        /// If multiplication underflows, later terms are smaller than the representable result and
+        /// the current sums are the most precise Decimal values available.
+        private func decimalSineAndCosine(of angle: Decimal) throws -> (sine: Decimal, cosine: Decimal) {
+            guard angle != 0 else {
+                return (0, 1)
+            }
+
+            let squaredAngle: Decimal
+            do {
+                squaredAngle = try checkedUnroundedProduct(
+                    angle,
+                    angle,
+                    allowingLossOfPrecision: true,
+                )
+            } catch {
+                return (angle, 1)
+            }
+
+            var sineTerm = angle
+            var sine = angle
+            var cosineTerm: Decimal = 1
+            var cosine: Decimal = 1
+            for index in 1 ... 128 {
+                let nextSineTerm: Decimal
+                let nextCosineTerm: Decimal
+                do {
+                    let sineProduct = try checkedUnroundedProduct(
+                        sineTerm,
+                        squaredAngle,
+                        allowingLossOfPrecision: true,
+                    )
+                    let cosineProduct = try checkedUnroundedProduct(
+                        cosineTerm,
+                        squaredAngle,
+                        allowingLossOfPrecision: true,
+                    )
+                    nextSineTerm = try unrounded(
+                        NSDecimalDivide,
+                        negateExactly(sineProduct),
+                        Decimal((2 * index) * (2 * index + 1)),
+                        allowingLossOfPrecision: true,
+                    )
+                    nextCosineTerm = try unrounded(
+                        NSDecimalDivide,
+                        negateExactly(cosineProduct),
+                        Decimal((2 * index - 1) * (2 * index)),
+                        allowingLossOfPrecision: true,
+                    )
+                } catch {
+                    return (sine, cosine)
+                }
+
+                let nextSine = try unrounded(NSDecimalAdd, sine, nextSineTerm, allowingLossOfPrecision: true)
+                let nextCosine = try unrounded(NSDecimalAdd, cosine, nextCosineTerm, allowingLossOfPrecision: true)
+                if nextSine == sine, nextCosine == cosine {
+                    return (sine, cosine)
+                }
+
+                sineTerm = nextSineTerm
+                sine = nextSine
+                cosineTerm = nextCosineTerm
+                cosine = nextCosine
+            }
+
+            throw CalculatorError.overflow
+        }
+
+        private func radians(fromDecimalAngle angle: Decimal) throws -> Decimal {
+            guard angleMode == .degrees else {
+                return angle
+            }
+
+            let scaledAngle = try checkedUnroundedProduct(
+                angle,
+                piValue(),
+                allowingLossOfPrecision: true,
+            )
+            return try unrounded(NSDecimalDivide, scaledAngle, 180, allowingLossOfPrecision: true)
+        }
+
+        /// Finds the closest whole quarter turn used to evaluate sine and cosine from a residual.
+        ///
+        /// The reduced angle stays within one whole turn of zero in Degrees and within two whole
+        /// turns in Radians, so a bounded set of quarter turns covers every angle the reduction
+        /// can produce.
+        private func nearestQuadrantalAngle(
+            to angle: Decimal,
+        ) throws -> (quadrant: Decimal, quarterTurnCount: Int, residual: Decimal)? {
+            let quarterTurn: Decimal
+            let quarterTurnCounts: [Int]
+            switch angleMode {
+            case .degrees:
+                quarterTurn = 90
+                quarterTurnCounts = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
+            case .radians:
+                quarterTurn = try unrounded(NSDecimalDivide, piValue(), 2, allowingLossOfPrecision: true)
+                quarterTurnCounts = Array(-8 ... 8)
+            }
+
+            var nearest: (quadrant: Decimal, quarterTurnCount: Int, residual: Decimal)?
+            for countedTurns in quarterTurnCounts {
+                let quadrant = try unrounded(
+                    NSDecimalMultiply,
+                    quarterTurn,
+                    Decimal(countedTurns),
+                    allowingLossOfPrecision: true,
+                )
+                let residual = try unrounded(
+                    NSDecimalSubtract,
+                    angle,
+                    quadrant,
+                    allowingLossOfPrecision: true,
+                )
+                let magnitude = residual < 0 ? -residual : residual
+                let nearestMagnitude = nearest.map { $0.residual < 0 ? -$0.residual : $0.residual }
+                if nearestMagnitude == nil || magnitude < nearestMagnitude! {
+                    nearest = (quadrant, countedTurns, residual)
+                }
+            }
+
+            return nearest
+        }
+
+        /// Reduces a symbolic Radian angle from its exact parts.
+        ///
+        /// The angle is `constant + coefficient × π`. The coefficient is reduced modulo a whole
+        /// turn and the constant modulo two π, so neither the multiplied-out π nor a large
+        /// constant ever has to be materialized before the phase is known.
+        private func reducedSymbolicRadians(from provenance: AngleProvenance) throws -> Decimal {
+            let reducedConstant = try reducedRadians(from: provenance.constant)
+            let reducedCoefficient = try reducedPiCoefficient(provenance.piCoefficient)
+            let coefficientAngle = try unrounded(
+                NSDecimalMultiply,
+                try piValue(),
+                reducedCoefficient,
+                allowingLossOfPrecision: true,
+            )
+
+            return try unrounded(
+                NSDecimalAdd,
+                reducedConstant,
+                coefficientAngle,
+                allowingLossOfPrecision: true,
+            )
+        }
+
+        /// Reduces a π coefficient modulo one whole turn, keeping any exact fraction intact.
+        private func reducedPiCoefficient(_ coefficient: PiCoefficient) throws -> Decimal {
+            if case let .exactPhase(_, twelfths) = coefficient {
+                return try unrounded(NSDecimalDivide, Decimal(twelfths), 12, allowingLossOfPrecision: true)
+            }
+            if let rational = coefficient.exactRational {
+                let wholeTurns = rational.numerator / rational.denominator
+                let remainder = rational.numerator % rational.denominator
+                let fractional = try unrounded(
+                    NSDecimalDivide,
+                    Decimal(remainder),
+                    Decimal(rational.denominator),
+                    allowingLossOfPrecision: true,
+                )
+
+                return try unrounded(
+                    NSDecimalAdd,
+                    Decimal(wholeTurns % 2),
+                    fractional,
+                    allowingLossOfPrecision: true,
+                )
+            }
+
+            let decimalValue = coefficient.decimalValue
+            try requireSufficientPhasePrecision(for: decimalValue, modulo: 2)
+            return try reducedRadians(from: decimalValue, modulo: 2)
+        }
+
+        /// Reduces whole-degree digits modulo 360 while preserving the fractional digits.
+        private func reducedDegrees(from value: Decimal) throws -> Decimal {
+            var value = value
+            let text = NSDecimalString(&value, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.first == "-"
+            let unsignedText = isNegative ? String(text.dropFirst()) : text
+            let components = unsignedText.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
+                throw CalculatorError.overflow
+            }
+
+            var integerRemainder = 0
+            for digit in components.first ?? "0" {
+                guard let value = digit.wholeNumberValue else {
+                    throw CalculatorError.overflow
+                }
+
+                integerRemainder = (integerRemainder * 10 + value) % 360
+            }
+
+            let fraction = components.count == 2 ? String(components[1]) : ""
+            let sign = isNegative ? "-" : ""
+            let reducedText = sign + String(integerRemainder)
+                + (fraction.isEmpty ? "" : "." + fraction)
+            guard let reduced = Decimal(string: reducedText, locale: Locale(identifier: "en_US_POSIX")) else {
+                throw CalculatorError.overflow
+            }
+
+            return reduced
+        }
+
+        /// Reduces an angle modulo two pi while keeping its Decimal remainder small.
+        ///
+        /// Processing the integer digits one at a time avoids multiplying a very large
+        /// quotient by the period, which could erase the low-order phase at Decimal precision.
+        /// This control arithmetic intentionally does not use the calculator display scale.
+        private func reducedRadians(from value: Decimal) throws -> Decimal {
+            let period = try piValue() * 2
+            try requireSufficientPhasePrecision(for: value, modulo: period)
+            return try reducedRadians(from: value, modulo: period)
+        }
+
+        /// The calculator's π value.
+        private func piValue() throws -> Decimal {
+            try decimal(calculatorPiDigits)
+        }
+
+        /// The calculator's e value.
+        private func eulerValue() throws -> Decimal {
+            try decimal(calculatorEulerDigits)
+        }
+
+        /// Rejects Radian arguments whose phase cannot be reduced to the requested display scale.
+        ///
+        /// `Decimal` carries 38 significant digits, so reducing an argument of magnitude `m`
+        /// leaves a phase uncertainty of roughly `m × 10⁻³⁷`. Reduction is only trusted while
+        /// that uncertainty stays three orders of magnitude below the first digit the calculator
+        /// displays away from zero; larger arguments report overflow instead of a numerically
+        /// unreliable result. Arguments shorter than one full period need no reduction at all.
+        private func requireSufficientPhasePrecision(for value: Decimal, modulo period: Decimal) throws {
+            let limit = try decimal("1e\(34 - max(roundingScale, 0))")
+            guard value.magnitude < period || value.magnitude < limit else {
+                throw CalculatorError.overflow
+            }
+        }
+
+        /// Returns the exact sine, cosine, or tangent of an angle the engine can place on the
+        /// unit circle exactly.
+        ///
+        /// Classification never compares a floating-point value against a known angle: Degree
+        /// angles come from the semantic Decimal angle reduced modulo a whole turn, and Radian
+        /// angles come from exact π-relative provenance, so the symbolic π/6 qualifies while a
+        /// decimal approximation of it keeps the ordinary Foundation path.
+        private func exactTrigonometricResult(
+            for function: Function,
+            argument: ParsedValue,
+        ) throws -> ExactFunctionResult? {
+            guard let angle = try exactUnitCircleAngle(for: argument),
+                  let value = try exactTrigonometricValue(of: function, at: angle)
+            else {
+                return nil
+            }
+
+            // The value is a plain scalar: the input angle's π coefficient describes the angle,
+            // not the result, so only the scalar provenance composes into later terms.
+            return ExactFunctionResult(
+                value: value,
+                angleProvenance: exactScalarProvenance(for: value),
+            )
+        }
+
+        /// Classifies the angle of an exact source expression as a whole number of twelfths of π.
+        ///
+        /// Returns nil whenever the engine cannot prove the angle's exact position, which keeps
+        /// approximate inputs on the ordinary trigonometric path.
+        private func exactUnitCircleAngle(for argument: ParsedValue) throws -> ExactUnitCircleAngle? {
+            // A retained nonzero residual proves that a displayed quarter turn is only an
+            // approximation to the source angle, so it cannot use an exact-angle shortcut.
+            guard argument.tangentPoleResidual == nil else {
+                return nil
+            }
+
+            switch angleMode {
+            case .degrees:
+                return try unitCircleAngle(forDegreeAngle: argument.semanticValue)
+            case .radians:
+                guard let provenance = argument.angleProvenance,
+                      provenance.constant == 0
+                else {
+                    return nil
+                }
+
+                return unitCircleAngle(forPiCoefficient: provenance.piCoefficient)
+            }
+        }
+
+        /// Classifies an exact Degree angle, ignoring angles that no closed-form family covers.
+        ///
+        /// Fifteen degrees is one twelfth of π, so only an exact multiple of fifteen degrees can
+        /// belong to a closed-form family. The angle is read from its decimal digits, which keeps
+        /// the classification independent of how many digits the angle carries and of every
+        /// bounded integer or fraction representation.
+        private func unitCircleAngle(forDegreeAngle value: Decimal) throws -> ExactUnitCircleAngle? {
+            var reduced = try reducedDegrees(from: value)
+            let text = NSDecimalString(&reduced, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.first == "-"
+            let unsignedText = isNegative ? String(text.dropFirst()) : text
+            let components = unsignedText.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
+                return nil
+            }
+
+            var fraction = components.count == 2 ? String(components[1]) : ""
+            while fraction.last == "0" {
+                fraction.removeLast()
+            }
+            guard fraction.isEmpty else {
+                return nil
+            }
+
+            var degrees = 0
+            for digit in components.first ?? "0" {
+                guard let value = digit.wholeNumberValue else {
+                    return nil
+                }
+
+                degrees = (degrees * 10 + value) % 360
+            }
+            guard degrees.isMultiple(of: 15) else {
+                return nil
+            }
+
+            let twelfths = degrees / 15
+            return ExactUnitCircleAngle(twelfths: isNegative ? (24 - twelfths) % 24 : twelfths)
+        }
+
+        /// Classifies an exact π coefficient, ignoring coefficients Decimal only approximates.
+        private func unitCircleAngle(
+            forPiCoefficient coefficient: PiCoefficient,
+        ) -> ExactUnitCircleAngle? {
+            if case let .exactPhase(_, twelfths) = coefficient {
+                return ExactUnitCircleAngle(twelfths: twelfths)
+            }
+            if let rational = coefficient.exactRational {
+                return unitCircleAngle(forPiCoefficient: rational)
+            }
+
+            guard let decimalValue = coefficient.exactDecimalValue else {
+                return nil
+            }
+
+            return unitCircleAngle(forPiCoefficient: decimalValue)
+        }
+
+        /// Classifies an exact rational π coefficient as a whole number of twelfths of π.
+        ///
+        /// Twelve twelfths make one π, so the coefficient classifies only when it is exactly twelve
+        /// times a whole number of twelfths. The exact multiplication cancels and bounds the
+        /// fraction, so a coefficient whose product cannot be represented keeps the ordinary path.
+        private func unitCircleAngle(
+            forPiCoefficient coefficient: CalculatorExactRational,
+        ) -> ExactUnitCircleAngle? {
+            guard let scaled = coefficient.multiplied(by: .integer(12)),
+                  scaled.denominator == 1
+            else {
+                return nil
+            }
+
+            return ExactUnitCircleAngle(twelfths: Int((scaled.numerator % 24 + 24) % 24))
+        }
+
+        /// Classifies an exact Decimal π coefficient, including magnitudes beyond `Int64`.
+        ///
+        /// Twelve times such a coefficient is a whole number only when its fraction is one of the
+        /// quarter steps, so the low-order digits decide the fraction while the integer parity
+        /// decides the remaining half turn. Neither step materializes the coefficient as an
+        /// integer, which keeps coefficients wider than `Int64` classifiable.
+        private func unitCircleAngle(forPiCoefficient coefficient: Decimal) -> ExactUnitCircleAngle? {
+            var coefficient = coefficient
+            let text = NSDecimalString(&coefficient, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.first == "-"
+            let unsignedText = isNegative ? String(text.dropFirst()) : text
+            let components = unsignedText.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
+                return nil
+            }
+
+            var fraction = components.count == 2 ? String(components[1]) : ""
+            while fraction.last == "0" {
+                fraction.removeLast()
+            }
+
+            let fractionTwelfths: Int
+            switch fraction {
+            case "":
+                fractionTwelfths = 0
+            case "25":
+                fractionTwelfths = 3
+            case "5":
+                fractionTwelfths = 6
+            case "75":
+                fractionTwelfths = 9
+            default:
+                return nil
+            }
+
+            var integerParity = 0
+            for digit in components.first ?? "0" {
+                guard let value = digit.wholeNumberValue else {
+                    return nil
+                }
+
+                integerParity = (integerParity * 10 + value) % 2
+            }
+
+            let twelfths = (integerParity * 12 + fractionTwelfths) % 24
+            return ExactUnitCircleAngle(twelfths: isNegative ? (24 - twelfths) % 24 : twelfths)
+        }
+
+        /// Derives the exact value of a trigonometric function at a classified angle.
+        ///
+        /// Every reference angle is √radical / 2: zero degrees is √0 / 2, thirty degrees is √1 / 2,
+        /// forty-five degrees is √2 / 2, sixty degrees is √3 / 2, and ninety degrees is √4 / 2. One
+        /// Decimal square root therefore covers both closed-form families without passing a known
+        /// angle through `Double`. A reference outside that table, such as π/12 or 5π/12,
+        /// has no closed form this calculator supports.
+        private func exactTrigonometricValue(
+            of function: Function,
+            at angle: ExactUnitCircleAngle,
+        ) throws -> Decimal? {
+            let quadrant = angle.twelfths / 6
+            let remainder = angle.twelfths % 6
+            let reference = quadrant.isMultiple(of: 2) ? remainder : 6 - remainder
+
+            let radical: Int
+            switch reference {
+            case 0:
+                radical = 0
+            case 2:
+                radical = 1
+            case 3:
+                radical = 2
+            case 4:
+                radical = 3
+            case 6:
+                radical = 4
+            default:
+                return nil
+            }
+
+            let sine = try halfRadical(radical, sign: quadrant < 2 ? 1 : -1)
+            let cosine = try halfRadical(4 - radical, sign: quadrant == 1 || quadrant == 2 ? -1 : 1)
+
+            switch function {
+            case .sine:
+                return sine
+            case .cosine:
+                return cosine
+            case .tangent:
+                guard cosine != 0 else {
+                    // An exact pole belongs to the domain-error path rather than to a value.
+                    throw CalculatorError.domainError
+                }
+
+                return try unrounded(NSDecimalDivide, sine, cosine, allowingLossOfPrecision: true)
+            default:
+                return nil
+            }
+        }
+
+        /// Computes the signed half of a small square root at the precision `Decimal` carries.
+        ///
+        /// Every reference radical is below four, so its root is below two and thirty-seven
+        /// fractional digits already hold all thirty-eight significant digits `Decimal`
+        /// supports. A wider scale cannot add precision to the closed form; the value is
+        /// rounded to the configured display scale after this calculation.
+        private func halfRadical(_ radical: Int, sign: Int) throws -> Decimal {
+            let root = try squareRoot(of: Decimal(radical), toScale: 37)
+            let half = try unrounded(NSDecimalDivide, root, 2, allowingLossOfPrecision: true)
+            return sign < 0 ? try negateExactly(half) : half
+        }
+
+        /// Reduces an angle with Decimal arithmetic and does not apply display rounding.
+        private func reducedRadians(from value: Decimal, modulo period: Decimal) throws -> Decimal {
+            var decimalValue = value
+            let text = NSDecimalString(&decimalValue, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.first == "-"
+            let unsignedText = isNegative ? String(text.dropFirst()) : text
+            let components = unsignedText.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
+                throw CalculatorError.overflow
+            }
+
+            var remainder: Decimal = 0
+            for character in components.first ?? "0" {
+                guard let digit = character.wholeNumberValue else {
+                    throw CalculatorError.overflow
+                }
+
+                remainder = remainder * 10 + Decimal(digit)
+                while remainder >= period {
+                    remainder -= period
+                }
+            }
+
+            let fraction = components.count == 2 ? String(components[1]) : ""
+            if !fraction.isEmpty {
+                remainder += try decimal("0." + fraction)
+                if remainder >= period {
+                    remainder -= period
+                }
+            }
+
+            return isNegative ? -remainder : remainder
+        }
+
+        /// Detects exact tangent poles while keeping nearby Decimal angles finite.
+        ///
+        /// The parser rounds arithmetic at the calculator's display scale, so the classification
+        /// reads the semantic angle rather than the displayed digits: a symbolic π/2 keeps its
+        /// exact provenance, while a decimal approximation of the same magnitude stays an ordinary
+        /// finite angle. A tangent pole is an odd quarter turn, which is six of the twenty-four
+        /// twelfths of π that a full turn contains.
+        private func isTangentPole(for angle: ParsedValue) throws -> Bool {
+            guard let classification = try exactUnitCircleAngle(for: angle) else {
+                return false
+            }
+
+            return classification.twelfths % 12 == 6
+        }
+
+        private func unrounded(_ operation: DecimalOperation, _ lhs: Decimal?, _ rhs: Decimal?) -> Decimal? {
+            guard let lhs, let rhs else {
+                return nil
+            }
+
+            return try? unrounded(operation, lhs, rhs)
+        }
+
+        /// Combines two Decimals without display rounding, recording whether Decimal was exact.
+        ///
+        /// Phase reduction needs a coefficient even when `Decimal` can only approximate the sum,
+        /// while exact quadrant and tangent-pole classification has to stay limited to sums the
+        /// engine knows exactly.
+        private func approximated(
+            _ operation: DecimalOperation,
+            _ lhs: Decimal,
+            _ rhs: Decimal,
+        ) -> (value: Decimal, isExact: Bool)? {
+            do {
+                return (try unrounded(operation, lhs, rhs), true)
+            } catch {
+                guard let value = try? unrounded(operation, lhs, rhs, allowingLossOfPrecision: true) else {
+                    return nil
+                }
+                return (value, false)
+            }
+        }
+
+        private func combinedAngleProvenance(
+            _ lhs: AngleProvenance?,
+            _ rhs: AngleProvenance?,
+            subtracting: Bool = false,
+        ) -> AngleProvenance? {
+            guard let lhs, let rhs else {
+                return nil
+            }
+
+            let operation: DecimalOperation
+            if subtracting {
+                operation = NSDecimalSubtract
+            } else {
+                operation = NSDecimalAdd
+            }
+            guard let constant = try? unrounded(
+                operation,
+                lhs.constant,
+                rhs.constant,
+                allowingLossOfPrecision: true,
+            ) else {
+                return nil
+            }
+
+            if let lhsExactPiCoefficient = lhs.piCoefficient.exactRational,
+               let rhsExactPiCoefficient = rhs.piCoefficient.exactRational,
+               let exactPiCoefficient = lhsExactPiCoefficient.adding(
+                   rhsExactPiCoefficient,
+                   subtracting: subtracting,
+               ) {
+                guard let representation = try? decimalRepresentation(of: exactPiCoefficient) else {
+                    return nil
+                }
+                return AngleProvenance(
+                    constant: constant,
+                    piCoefficient: .rational(
+                        exactPiCoefficient,
+                        decimal: representation.value,
+                        isExactDecimal: representation.isExact,
+                    ),
+                )
+            }
+
+            let lhsCoefficient = lhs.piCoefficient.decimalCoefficient
+            let rhsCoefficient = rhs.piCoefficient.decimalCoefficient
+            guard let coefficient = approximated(
+                operation,
+                lhsCoefficient.value,
+                rhsCoefficient.value,
+            ) else {
+                return nil
+            }
+
+            let decimalCoefficientIsExact = lhsCoefficient.isExact
+                && rhsCoefficient.isExact
+                && decimalAdditionIsExact(
+                    lhsCoefficient.value,
+                    rhsCoefficient.value,
+                    result: coefficient.value,
+                    subtracting: subtracting,
+                )
+
+            if !decimalCoefficientIsExact {
+                let lhsPhase = unitCircleAngle(forPiCoefficient: lhs.piCoefficient)
+                let rhsPhase = unitCircleAngle(forPiCoefficient: rhs.piCoefficient)
+                if let lhsPhase, let rhsPhase {
+                    let signedRight = subtracting ? -rhsPhase.twelfths : rhsPhase.twelfths
+                    let remainder = (lhsPhase.twelfths + signedRight) % 24
+                    let twelfths = remainder < 0 ? remainder + 24 : remainder
+                    return AngleProvenance(
+                        constant: constant,
+                        piCoefficient: .exactPhase(decimal: coefficient.value, twelfths: twelfths),
+                    )
+                }
+            }
+
+            return AngleProvenance(
+                constant: constant,
+                piCoefficient: decimalCoefficientIsExact
+                    ? .exactDecimal(coefficient.value)
+                    : .roundedDecimal(coefficient.value),
+            )
+        }
+
+        /// Checks a Decimal sum against exact aligned coefficient digits.
+        private func decimalAdditionIsExact(
+            _ lhs: Decimal,
+            _ rhs: Decimal,
+            result: Decimal,
+            subtracting: Bool,
+        ) -> Bool {
+            guard let (lhsDigits, lhsScale) = try? decimalDigitsAndScale(abs(lhs)),
+                  let (rhsDigits, rhsScale) = try? decimalDigitsAndScale(abs(rhs)),
+                  let (resultDigits, resultScale) = try? decimalDigitsAndScale(abs(result))
+            else {
+                return false
+            }
+
+            return ExactDecimalArithmetic.additionMatches(
+                lhs: (lhsDigits, lhsScale, lhs < 0),
+                rhs: (rhsDigits, rhsScale, rhs < 0),
+                result: (resultDigits, resultScale, result < 0),
+                subtracting: subtracting,
+            )
+        }
+
+        private func multipliedAngleProvenance(
+            _ lhs: AngleProvenance?,
+            _ rhs: AngleProvenance?,
+        ) -> AngleProvenance? {
+            guard let lhs, let rhs else {
+                return nil
+            }
+
+            if lhs.piCoefficientIsZero {
+                return scaledAngleProvenance(rhs, by: lhs.constant)
+            }
+            if rhs.piCoefficientIsZero {
+                return scaledAngleProvenance(lhs, by: rhs.constant)
+            }
+
+            return nil
+        }
+
+        private func dividedAngleProvenance(
+            _ numerator: AngleProvenance?,
+            _ denominator: AngleProvenance?,
+        ) -> AngleProvenance? {
+            guard let numerator,
+                  let denominator,
+                  denominator.piCoefficientIsZero
+            else {
+                return nil
+            }
+
+            return scaledAngleProvenance(numerator, by: denominator.constant, dividing: true)
+        }
+
+        private func scaledAngleProvenance(
+            _ provenance: AngleProvenance?,
+            by factor: Decimal,
+            dividing: Bool = false,
+        ) -> AngleProvenance? {
+            guard let provenance else {
+                return nil
+            }
+
+            let operation: DecimalOperation
+            if dividing {
+                operation = NSDecimalDivide
+            } else {
+                operation = NSDecimalMultiply
+            }
+            guard let constant = try? unrounded(
+                operation,
+                provenance.constant,
+                factor,
+                allowingLossOfPrecision: true,
+            ) else {
+                return nil
+            }
+
+            let exactFactor = CalculatorExactRational.decimal(factor)
+            let exactPiCoefficient: CalculatorExactRational?
+            if let source = provenance.piCoefficient.exactRational, let exactFactor {
+                if dividing {
+                    exactPiCoefficient = source.divided(by: exactFactor)
+                } else {
+                    exactPiCoefficient = source.multiplied(by: exactFactor)
+                }
+            } else {
+                exactPiCoefficient = nil
+            }
+
+            if let exactPiCoefficient {
+                guard let representation = try? decimalRepresentation(of: exactPiCoefficient) else {
+                    return nil
+                }
+                return AngleProvenance(
+                    constant: constant,
+                    piCoefficient: .rational(
+                        exactPiCoefficient,
+                        decimal: representation.value,
+                        isExactDecimal: representation.isExact,
+                    ),
+                )
+            }
+
+            let sourceCoefficient = provenance.piCoefficient.decimalCoefficient
+            guard let coefficient = approximated(
+                operation,
+                sourceCoefficient.value,
+                factor,
+            ) else {
+                return nil
+            }
+
+            if case let .exactPhase(_, twelfths) = provenance.piCoefficient {
+                if factor == 0, !dividing {
+                    return AngleProvenance(constant: constant, piCoefficient: .exactDecimal(0))
+                }
+                if dividing, factor == 1 || factor == -1 {
+                    let phase = factor == -1 ? (24 - twelfths) % 24 : twelfths
+                    return AngleProvenance(
+                        constant: constant,
+                        piCoefficient: .exactPhase(decimal: coefficient.value, twelfths: phase),
+                    )
+                }
+                if !dividing, let integerFactor = exactIntegerModulo24(factor) {
+                    return AngleProvenance(
+                        constant: constant,
+                        piCoefficient: .exactPhase(
+                            decimal: coefficient.value,
+                            twelfths: twelfths * integerFactor % 24,
+                        ),
+                    )
+                }
+            }
+
+            return AngleProvenance(
+                constant: constant,
+                piCoefficient: coefficient.isExact && sourceCoefficient.isExact
+                    ? .exactDecimal(coefficient.value)
+                    : .roundedDecimal(coefficient.value),
+            )
+        }
+
+        /// Reads an exact Decimal integer modulo 24 without narrowing it through Int or Double.
+        private func exactIntegerModulo24(_ value: Decimal) -> Int? {
+            var integral = value
+            var input = value
+            NSDecimalRound(&integral, &input, 0, .plain)
+            guard integral == value else { return nil }
+
+            var decimal = value
+            let text = NSDecimalString(&decimal, Locale(identifier: "en_US_POSIX"))
+            let isNegative = text.hasPrefix("-")
+            var remainder = 0
+            for character in isNegative ? text.dropFirst() : text[...] {
+                guard let digit = character.wholeNumberValue else { return nil }
+                remainder = (remainder * 10 + digit) % 24
+            }
+            return isNegative ? (24 - remainder) % 24 : remainder
+        }
+
+        private func negated(_ value: Decimal?) -> Decimal? {
+            guard let value else {
+                return nil
+            }
+
+            return try? unrounded(NSDecimalSubtract, 0, value)
+        }
+
+        private func negated(_ provenance: AngleProvenance?) -> AngleProvenance? {
+            guard let provenance,
+                  let constant = negated(provenance.constant),
+                  let piCoefficient = negated(provenance.piCoefficient.decimalValue)
+            else {
+                return nil
+            }
+
+            let exactRational = provenance.piCoefficient.exactRational?.negated()
+            let coefficientState: PiCoefficient
+            if let exactRational {
+                coefficientState = .rational(
+                    exactRational,
+                    decimal: piCoefficient,
+                    isExactDecimal: provenance.piCoefficient.exactDecimalValue != nil,
+                )
+            } else if case .exactDecimal = provenance.piCoefficient {
+                coefficientState = .exactDecimal(piCoefficient)
+            } else if case let .exactPhase(_, twelfths) = provenance.piCoefficient {
+                coefficientState = .exactPhase(decimal: piCoefficient, twelfths: (24 - twelfths) % 24)
+            } else if case .roundedDecimal = provenance.piCoefficient {
+                coefficientState = .roundedDecimal(piCoefficient)
+            } else {
+                return nil
+            }
+
+            return AngleProvenance(
+                constant: constant,
+                piCoefficient: coefficientState,
+            )
+        }
+
+        /// Converts an exact rational coefficient to Decimal while recording any finite-precision loss.
+        private func decimalRepresentation(
+            of rational: CalculatorExactRational,
+        ) throws -> (value: Decimal, isExact: Bool) {
+            do {
+                let value = try unrounded(
+                    NSDecimalDivide,
+                    Decimal(rational.numerator),
+                    Decimal(rational.denominator),
+                )
+                return (value, true)
+            } catch {
+                return (try decimal(from: rational), false)
+            }
+        }
+
+        /// Converts a Foundation result to Decimal using a locale-independent round-trip string.
+        ///
+        /// Decimal's direct Double initializer can produce NaN for finite values near the lower
+        /// end of Decimal's exponent range, so parsing the Double's canonical representation keeps
+        /// representable scientific results while still rejecting actual range failures. The
+        /// caller applies display rounding to whatever it derives from the converted value.
+        private func checkedDecimal(fromFoundationValue value: Double) throws -> Decimal {
+            guard value.isFinite,
+                  let result = Decimal(
+                      string: value.description,
+                      locale: Locale(identifier: "en_US_POSIX"),
+                  ),
+                  !result.isNaN,
+                  result != 0 || value == 0
+            else {
+                throw CalculatorError.overflow
+            }
+
+            return result
+        }
+
+        /// Converts a Foundation result to Decimal without applying display rounding.
+        private func semanticDecimal(_ value: Double) throws -> Decimal {
+            try checkedDecimal(fromFoundationValue: value)
+        }
+
+        /// Computes logarithms with Decimal range reduction and a convergent atanh series.
+        ///
+        /// Keeping both the argument and its delta from one in Decimal preserves configured
+        /// display precision for ordinary and near-one inputs alike.
+        private func logarithm(of argument: Decimal, isCommon: Bool) throws -> Decimal {
+            let delta = try unrounded(NSDecimalSubtract, argument, 1, allowingLossOfPrecision: true)
+            let natural = try decimalLogarithm(of: argument, nearOneDelta: delta)
+            guard isCommon else {
+                return natural
+            }
+
+            let naturalOfTen = try decimalLogarithm(of: 10, nearOneDelta: 9)
+            return try unrounded(
+                NSDecimalDivide,
+                natural,
+                naturalOfTen,
+                allowingLossOfPrecision: true,
+            )
+        }
+
+        private func decimal(_ literal: String) throws -> Decimal {
+            guard let value = Decimal(string: literal, locale: Locale(identifier: "en_US_POSIX")) else {
+                throw CalculatorError.overflow
+            }
+
+            return value
         }
 
         private func rounded(adding lhs: Decimal, _ rhs: Decimal) throws -> Decimal {
@@ -186,12 +2690,1273 @@ public struct CalculatorEngine: Sendable {
             try rounded(NSDecimalMultiply, lhs, rhs)
         }
 
+        private func rounded(multiplying lhs: Decimal, _ rhs: Decimal, toScale scale: Int) throws -> Decimal {
+            let product = try unrounded(NSDecimalMultiply, lhs, rhs)
+            return rounded(product, toScale: scale)
+        }
+
         private func rounded(dividing lhs: Decimal, _ rhs: Decimal) throws -> Decimal {
             guard rhs != 0 else {
                 throw CalculatorError.divisionByZero
             }
 
             return try rounded(NSDecimalDivide, lhs, rhs)
+        }
+
+        /// Computes a reciprocal square root directly from its root bracket.
+        private func reciprocalSquareRoot(of value: Decimal) throws -> SquareRootEvaluation {
+            try squareRootEvaluation(
+                of: value,
+                displayScale: roundingScale,
+                projection: .reciprocal,
+            )
+        }
+
+        private func unrounded(
+            integralPower base: Decimal,
+            exponent: Decimal,
+            allowingLossOfPrecision: Bool = false,
+        ) throws -> Decimal {
+            var remaining = exponent
+            var factor = base
+            if remaining < 0 {
+                factor = try unrounded(NSDecimalDivide, 1, factor)
+                remaining = -remaining
+            }
+            var result: Decimal = 1
+
+            while remaining > 0 {
+                // Exponent bookkeeping must stay independent of the configured result scale.
+                let half = remaining / 2
+                var integralHalf = Decimal()
+                var halfToRound = half
+                NSDecimalRound(&integralHalf, &halfToRound, 0, .down)
+
+                let remainder = remaining - integralHalf * 2
+                if remainder != 0 {
+                    result = try checkedUnroundedProduct(
+                        result,
+                        factor,
+                        allowingLossOfPrecision: allowingLossOfPrecision,
+                    )
+                    guard result != 0 else {
+                        throw CalculatorError.overflow
+                    }
+                }
+
+                remaining = integralHalf
+                if remaining > 0 {
+                    factor = try checkedUnroundedProduct(
+                        factor,
+                        factor,
+                        allowingLossOfPrecision: allowingLossOfPrecision,
+                    )
+                    guard factor != 0 else {
+                        throw CalculatorError.overflow
+                    }
+                }
+            }
+
+            return result
+        }
+
+        /// Multiplies two values and rejects Decimal's silent underflow result.
+        private func checkedUnroundedProduct(
+            _ lhs: Decimal,
+            _ rhs: Decimal,
+            allowingLossOfPrecision: Bool,
+        ) throws -> Decimal {
+            let product = try unrounded(
+                NSDecimalMultiply,
+                lhs,
+                rhs,
+                allowingLossOfPrecision: allowingLossOfPrecision,
+            )
+            guard lhs != 0, rhs != 0 else {
+                return product
+            }
+
+            let leftOrder = try decimalOrder(of: lhs < 0 ? -lhs : lhs)
+            let rightOrder = try decimalOrder(of: rhs < 0 ? -rhs : rhs)
+            let resultOrder = try decimalOrder(of: product < 0 ? -product : product)
+            let (minimumOrder, minimumOverflow) = leftOrder.addingReportingOverflow(rightOrder)
+            let (maximumOrder, maximumOverflow) = minimumOrder.addingReportingOverflow(1)
+            guard product != 0,
+                  !minimumOverflow,
+                  !maximumOverflow,
+                  resultOrder >= minimumOrder,
+                  resultOrder <= maximumOrder
+            else {
+                throw CalculatorError.overflow
+            }
+
+            return product
+        }
+
+        private func decimalOrder(of magnitude: Decimal) throws -> Int {
+            let (digits, scale) = try decimalDigitsAndScale(magnitude)
+            return digits.count - 1 - scale
+        }
+
+        /// Raises `base` to `exponent`, retaining one semantic result and its display rounding.
+        private func power(_ base: Decimal, _ exponent: Decimal) throws -> PowerEvaluation {
+            if base == 0, exponent == 0 {
+                throw CalculatorError.domainError
+            }
+            if base == 0, exponent < 0 {
+                throw CalculatorError.divisionByZero
+            }
+            if exponent == 0.5 {
+                guard base >= 0 else {
+                    throw CalculatorError.domainError
+                }
+                let root = try squareRootEvaluation(of: base, displayScale: roundingScale)
+                return PowerEvaluation(semanticValue: root.semanticValue, displayValue: root.displayValue)
+            }
+            if exponent == -0.5 {
+                guard base >= 0 else {
+                    throw CalculatorError.domainError
+                }
+                let root = try reciprocalSquareRoot(of: base)
+                return PowerEvaluation(semanticValue: root.semanticValue, displayValue: root.displayValue)
+            }
+            if base == 0 {
+                return PowerEvaluation(semanticValue: 0, displayValue: 0)
+            }
+
+            var integralExponent = exponent
+            var exponentToRound = exponent
+            NSDecimalRound(&integralExponent, &exponentToRound, 0, .plain)
+            if integralExponent == exponent {
+                let result = try unrounded(integralPower: base, exponent: integralExponent)
+                return PowerEvaluation(semanticValue: result, displayValue: rounded(result, toScale: roundingScale))
+            }
+
+            guard base > 0 else {
+                throw CalculatorError.domainError
+            }
+
+            let baseDelta = try unrounded(NSDecimalSubtract, base, 1, allowingLossOfPrecision: true)
+            let fractionalExponent = try unrounded(
+                NSDecimalSubtract,
+                exponent,
+                integralExponent,
+                allowingLossOfPrecision: true,
+            )
+            if let rationalResult = try rationalFractionalPower(
+                base: base,
+                integralExponent: integralExponent,
+                fractionalExponent: fractionalExponent,
+            ) {
+                return rationalResult
+            }
+            let result = try stableFractionalPower(
+                base: base,
+                integralExponent: integralExponent,
+                fractionalExponent: fractionalExponent,
+                baseDelta: baseDelta,
+            )
+            return PowerEvaluation(semanticValue: result, displayValue: rounded(result, toScale: roundingScale))
+        }
+
+        /// Evaluates small rational fractional exponents from an exact Decimal root bracket.
+        ///
+        /// Exact digit comparisons keep the final display rounding independent of a rounded
+        /// intermediate root. The bounded denominator keeps this path focused on common powers.
+        private func rationalFractionalPower(
+            base: Decimal,
+            integralExponent: Decimal,
+            fractionalExponent: Decimal,
+        ) throws -> PowerEvaluation? {
+            guard let fraction = CalculatorExactRational.decimal(fractionalExponent),
+                  fraction.numerator != 0,
+                  fraction.denominator > 1,
+                  fraction.denominator <= 16
+            else {
+                return nil
+            }
+
+            var adjustedIntegralExponent = integralExponent
+            var numerator = fraction.numerator
+            if fraction.numerator < 0 {
+                adjustedIntegralExponent -= 1
+                numerator = fraction.denominator + fraction.numerator
+            }
+
+            let integralFactor = try unrounded(integralPower: base, exponent: adjustedIntegralExponent)
+            guard try powerIsExactlyRepresentable(
+                base: base,
+                exponent: adjustedIntegralExponent,
+                result: integralFactor,
+            ),
+            let (factorDigits, factorScale) = try? decimalDigitsAndScale(integralFactor)
+            else {
+                return nil
+            }
+
+            let denominator = Int(fraction.denominator)
+            let numeratorValue = Int(numerator)
+            guard numeratorValue > 0, numeratorValue < denominator else {
+                return nil
+            }
+
+            let rootStep = try decimal("1e\(denominator)")
+            var normalizedBase = base
+            var rootOrder = 0
+            while normalizedBase >= rootStep {
+                normalizedBase = try unrounded(
+                    NSDecimalDivide,
+                    normalizedBase,
+                    rootStep,
+                    allowingLossOfPrecision: true,
+                )
+                rootOrder += 1
+                guard rootOrder <= 128 else {
+                    throw CalculatorError.overflow
+                }
+            }
+            while normalizedBase < 1 {
+                normalizedBase = try unrounded(
+                    NSDecimalMultiply,
+                    normalizedBase,
+                    rootStep,
+                    allowingLossOfPrecision: true,
+                )
+                rootOrder -= 1
+                guard rootOrder >= -128 else {
+                    throw CalculatorError.overflow
+                }
+            }
+            let scalingFactor = try decimal("1e\(rootOrder)")
+
+            func resultProjection(
+                forRootDigits rootDigits: [Int],
+                atScale rootScale: Int,
+            ) -> (digits: [Int], scale: Int) {
+                let poweredRootDigits = integerPowerDigits(rootDigits, exponent: numeratorValue)
+                let product = ExactDecimalArithmetic.product(poweredRootDigits, factorDigits)
+                let resultScale = rootScale * numeratorValue + factorScale - rootOrder * numeratorValue
+                return (product, resultScale)
+            }
+
+            func resultProjection(for root: Decimal) throws -> (digits: [Int], scale: Int) {
+                let (rootDigits, rootScale) = try decimalDigitsAndScale(root)
+                return resultProjection(forRootDigits: rootDigits, atScale: rootScale)
+            }
+
+            func representableDisplayScale(for projection: (digits: [Int], scale: Int)) -> Int {
+                let integerDigits = max(0, projection.digits.count - projection.scale)
+                let significantDigitScale = max(0, 38 - integerDigits)
+                return min(max(0, roundingScale), significantDigitScale)
+            }
+
+            func roundedResult(
+                for root: Decimal,
+                at requestedScale: Int? = nil,
+            ) throws -> Decimal {
+                let projection = try resultProjection(for: root)
+                let scale = requestedScale ?? representableDisplayScale(for: projection)
+                return try roundedExactDigits(projection.digits, scale: projection.scale, toScale: scale)
+            }
+
+            func projectedDisplayValue(
+                between lowerRootDigits: [Int],
+                and upperRootDigits: [Int],
+                at rootScale: Int,
+            ) throws -> Decimal? {
+                let lowerProjection = resultProjection(forRootDigits: lowerRootDigits, atScale: rootScale)
+                let upperProjection = resultProjection(forRootDigits: upperRootDigits, atScale: rootScale)
+                let displayScale = min(
+                    representableDisplayScale(for: lowerProjection),
+                    representableDisplayScale(for: upperProjection),
+                )
+                let lowerDisplay = try roundedExactDigits(
+                    lowerProjection.digits,
+                    scale: lowerProjection.scale,
+                    toScale: displayScale,
+                )
+                let upperDisplay = try roundedExactDigits(
+                    upperProjection.digits,
+                    scale: upperProjection.scale,
+                    toScale: displayScale,
+                )
+                return lowerDisplay == upperDisplay ? lowerDisplay : nil
+            }
+
+            func semanticResult(for normalizedRoot: Decimal) throws -> Decimal {
+                let root = try unrounded(
+                    NSDecimalMultiply,
+                    normalizedRoot,
+                    scalingFactor,
+                    allowingLossOfPrecision: true,
+                )
+                let fractionalFactor = try unrounded(
+                    integralPower: root,
+                    exponent: Decimal(numeratorValue),
+                    allowingLossOfPrecision: true,
+                )
+                return try unrounded(
+                    NSDecimalMultiply,
+                    integralFactor,
+                    fractionalFactor,
+                    allowingLossOfPrecision: true,
+                )
+            }
+
+            var lower: Decimal = 1
+            var upper: Decimal = 10
+            for _ in 0 ..< 256 {
+                let lowerProjection = try resultProjection(for: lower)
+                let upperProjection = try resultProjection(for: upper)
+                let displayScale = min(
+                    representableDisplayScale(for: lowerProjection),
+                    representableDisplayScale(for: upperProjection),
+                )
+                let lowerDisplay = try roundedExactDigits(
+                    lowerProjection.digits,
+                    scale: lowerProjection.scale,
+                    toScale: displayScale,
+                )
+                let upperDisplay = try roundedExactDigits(
+                    upperProjection.digits,
+                    scale: upperProjection.scale,
+                    toScale: displayScale,
+                )
+                if lowerDisplay == upperDisplay {
+                    let midpoint = try unrounded(
+                        NSDecimalDivide,
+                        unrounded(NSDecimalAdd, lower, upper, allowingLossOfPrecision: true),
+                        2,
+                        allowingLossOfPrecision: true,
+                    )
+                    let root = (try? exactIntegerRoot(
+                        of: normalizedBase,
+                        degree: denominator,
+                        startingAt: midpoint,
+                    )) ?? midpoint
+                    return PowerEvaluation(
+                        semanticValue: try semanticResult(for: root),
+                        displayValue: lowerDisplay,
+                    )
+                }
+
+                let midpointSum = try unrounded(
+                    NSDecimalAdd,
+                    lower,
+                    upper,
+                    allowingLossOfPrecision: true,
+                )
+                let midpoint = try unrounded(
+                    NSDecimalDivide,
+                    midpointSum,
+                    2,
+                    allowingLossOfPrecision: true,
+                )
+                guard midpoint > lower, midpoint < upper else {
+                    let rootResolution = try roundedIntegerRootAtPrecisionLimit(
+                        between: lower,
+                        and: upper,
+                        degree: denominator,
+                        scaleAdjustment: 0,
+                        normalizedValue: normalizedBase,
+                        displayValueForBracket: { lowerDigits, lowerScale, upperDigits, upperScale in
+                            guard lowerScale == upperScale else {
+                                return nil
+                            }
+                            return try projectedDisplayValue(
+                                between: lowerDigits,
+                                and: upperDigits,
+                                at: lowerScale,
+                            )
+                        },
+                    )
+                    guard let displayValue = rootResolution.displayValue else {
+                        throw CalculatorError.overflow
+                    }
+                    return PowerEvaluation(
+                        semanticValue: try semanticResult(for: rootResolution.root),
+                        displayValue: displayValue,
+                    )
+                }
+
+                switch try compareIntegerPower(of: midpoint, exponent: denominator, with: normalizedBase) {
+                case .orderedSame:
+                    return PowerEvaluation(
+                        semanticValue: try semanticResult(for: midpoint),
+                        displayValue: try roundedResult(for: midpoint),
+                    )
+                case .orderedAscending:
+                    lower = midpoint
+                case .orderedDescending:
+                    upper = midpoint
+                }
+            }
+
+            throw CalculatorError.overflow
+        }
+
+        private func exactIntegerRoot(
+            of value: Decimal,
+            degree: Int,
+            startingAt initialEstimate: Decimal,
+        ) throws -> Decimal? {
+            var estimate = initialEstimate
+            let reducedDegree = Decimal(degree - 1)
+            for _ in 0 ..< 48 {
+                if try compareIntegerPower(of: estimate, exponent: degree, with: value) == .orderedSame {
+                    return estimate
+                }
+
+                let estimatePower = try unrounded(
+                    integralPower: estimate,
+                    exponent: reducedDegree,
+                    allowingLossOfPrecision: true,
+                )
+                let quotient = try unrounded(
+                    NSDecimalDivide,
+                    value,
+                    estimatePower,
+                    allowingLossOfPrecision: true,
+                )
+                let weightedEstimate = try unrounded(
+                    NSDecimalMultiply,
+                    reducedDegree,
+                    estimate,
+                    allowingLossOfPrecision: true,
+                )
+                let nextEstimate = try unrounded(
+                    NSDecimalAdd,
+                    weightedEstimate,
+                    quotient,
+                    allowingLossOfPrecision: true,
+                )
+                let next = try unrounded(
+                    NSDecimalDivide,
+                    nextEstimate,
+                    Decimal(degree),
+                    allowingLossOfPrecision: true,
+                )
+                guard next != estimate else {
+                    return nil
+                }
+                estimate = next
+            }
+
+            return try compareIntegerPower(of: estimate, exponent: degree, with: value) == .orderedSame
+                ? estimate
+                : nil
+        }
+
+        private func integerPowerDigits(_ digits: [Int], exponent: Int) -> [Int] {
+            var remaining = exponent
+            var factor = digits
+            var result = [1]
+            while remaining > 0 {
+                if remaining % 2 != 0 {
+                    result = ExactDecimalArithmetic.product(result, factor)
+                }
+                remaining /= 2
+                if remaining > 0 {
+                    factor = ExactDecimalArithmetic.product(factor, factor)
+                }
+            }
+            return result
+        }
+
+        private func compareIntegerPower(
+            of candidate: Decimal,
+            exponent: Int,
+            with value: Decimal,
+        ) throws -> ComparisonResult {
+            let (candidateDigits, candidateScale) = try decimalDigitsAndScale(candidate)
+            return try compareIntegerPower(
+                of: candidateDigits,
+                scale: candidateScale,
+                exponent: exponent,
+                with: value,
+            )
+        }
+
+        private func compareIntegerPower(
+            of candidateDigits: [Int],
+            scale candidateScale: Int,
+            exponent: Int,
+            with value: Decimal,
+        ) throws -> ComparisonResult {
+            let (valueDigits, valueScale) = try decimalDigitsAndScale(value)
+            return compareDecimalDigits(
+                integerPowerDigits(candidateDigits, exponent: exponent),
+                scale: candidateScale * exponent,
+                with: valueDigits,
+                scale: valueScale,
+            )
+        }
+
+        private func roundedExactDigits(_ digits: [Int], scale: Int, toScale targetScale: Int) throws -> Decimal {
+            let discardedCount = scale - targetScale
+            if discardedCount <= 0 {
+                let expanded = digits + Array(repeating: 0, count: -discardedCount)
+                return try decimal(fromDigits: expanded, scale: targetScale)
+            }
+
+            let retainedCount = digits.count - discardedCount
+            var retained = retainedCount > 0 ? Array(digits.prefix(retainedCount)) : []
+            let firstDiscarded = retainedCount >= 0 && retainedCount < digits.count ? digits[retainedCount] : 0
+            if firstDiscarded >= 5 {
+                retained = incrementingDecimalDigits(retained.isEmpty ? [0] : retained)
+            }
+            if retained.isEmpty {
+                retained = [0]
+            }
+            return try decimal(fromDigits: retained, scale: targetScale)
+        }
+
+        /// Evaluates the fractional part with Decimal logarithm/exponential series.
+        ///
+        /// Range reduction keeps each series convergent, while the atanh form of the logarithm
+        /// retains near-one base deltas without converting either operand through `Double`.
+        private func stableFractionalPower(
+            base: Decimal,
+            integralExponent: Decimal,
+            fractionalExponent: Decimal,
+            baseDelta: Decimal,
+        ) throws -> Decimal {
+            let logarithm = try decimalLogarithm(of: base, nearOneDelta: baseDelta)
+            let fractionalLogarithm = try unrounded(
+                NSDecimalMultiply,
+                fractionalExponent,
+                logarithm,
+                allowingLossOfPrecision: true,
+            )
+            let change = try decimalExponentialMinusOne(of: fractionalLogarithm)
+            let fractionalFactor = try unrounded(NSDecimalAdd, 1, change, allowingLossOfPrecision: true)
+            let integralFactor = try unrounded(integralPower: base, exponent: integralExponent)
+            return try unrounded(
+                NSDecimalMultiply,
+                integralFactor,
+                fractionalFactor,
+                allowingLossOfPrecision: true,
+            )
+        }
+
+        /// Computes ln(value) by reducing it to a small atanh-series argument.
+        private func decimalLogarithm(of value: Decimal, nearOneDelta: Decimal) throws -> Decimal {
+            let deltaMagnitude = nearOneDelta < 0 ? -nearOneDelta : nearOneDelta
+            if deltaMagnitude <= 0.5 {
+                let denominator = try unrounded(NSDecimalAdd, 2, nearOneDelta, allowingLossOfPrecision: true)
+                let ratio = try unrounded(NSDecimalDivide, nearOneDelta, denominator, allowingLossOfPrecision: true)
+                return try twiceAtanh(ratio)
+            }
+
+            var reduced = value
+            var binaryExponent = 0
+            // Decimal has a finite exponent range, and each step moves the magnitude toward one.
+            while reduced >= 2 {
+                reduced = try unrounded(NSDecimalDivide, reduced, 2, allowingLossOfPrecision: true)
+                binaryExponent += 1
+            }
+            while reduced < 1 {
+                reduced = try unrounded(NSDecimalMultiply, reduced, 2, allowingLossOfPrecision: true)
+                binaryExponent -= 1
+            }
+
+            let numerator = try unrounded(NSDecimalSubtract, reduced, 1, allowingLossOfPrecision: true)
+            let denominator = try unrounded(NSDecimalAdd, reduced, 1, allowingLossOfPrecision: true)
+            let ratio = try unrounded(NSDecimalDivide, numerator, denominator, allowingLossOfPrecision: true)
+            let reducedLogarithm = try twiceAtanh(ratio)
+            guard binaryExponent != 0 else {
+                return reducedLogarithm
+            }
+
+            // This constant is rounded to Decimal's full 38-significant-digit precision.
+            let logarithmOfTwo = try decimal("0.69314718055994530941723212145817656808")
+            let exponentPart = try unrounded(
+                NSDecimalMultiply,
+                Decimal(binaryExponent),
+                logarithmOfTwo,
+                allowingLossOfPrecision: true,
+            )
+            return try unrounded(NSDecimalAdd, reducedLogarithm, exponentPart, allowingLossOfPrecision: true)
+        }
+
+        /// Evaluates 2 × atanh(value) until Decimal can retain no additional term.
+        private func twiceAtanh(_ value: Decimal) throws -> Decimal {
+            let squaredValue = try unrounded(NSDecimalMultiply, value, value, allowingLossOfPrecision: true)
+            var power = value
+            var sum: Decimal = 0
+
+            for oddDenominator in stride(from: 1, through: 511, by: 2) {
+                let term = try unrounded(NSDecimalDivide, power, Decimal(oddDenominator), allowingLossOfPrecision: true)
+                let nextSum = try unrounded(NSDecimalAdd, sum, term, allowingLossOfPrecision: true)
+                if nextSum == sum {
+                    return try unrounded(NSDecimalMultiply, sum, 2, allowingLossOfPrecision: true)
+                }
+                sum = nextSum
+                power = try unrounded(NSDecimalMultiply, power, squaredValue, allowingLossOfPrecision: true)
+            }
+
+            throw CalculatorError.overflow
+        }
+
+        /// Computes exp(value) after halving into the rapidly convergent Taylor region.
+        private func decimalExponential(of value: Decimal) throws -> Decimal {
+            var reduced = value
+            let threshold = try decimal("0.5")
+            var squarings = 0
+            while (reduced < 0 ? -reduced : reduced) > threshold {
+                reduced = try unrounded(NSDecimalDivide, reduced, 2, allowingLossOfPrecision: true)
+                squarings += 1
+                guard squarings <= 512 else {
+                    throw CalculatorError.overflow
+                }
+            }
+
+            var sum: Decimal = 1
+            var term: Decimal = 1
+            var converged = false
+            for index in 1 ... 256 {
+                term = try unrounded(
+                    NSDecimalDivide,
+                    unrounded(NSDecimalMultiply, term, reduced, allowingLossOfPrecision: true),
+                    Decimal(index),
+                    allowingLossOfPrecision: true,
+                )
+                let nextSum = try unrounded(NSDecimalAdd, sum, term, allowingLossOfPrecision: true)
+                if nextSum == sum {
+                    converged = true
+                    break
+                }
+                sum = nextSum
+            }
+            guard converged else {
+                throw CalculatorError.overflow
+            }
+
+            for _ in 0 ..< squarings {
+                sum = try unrounded(NSDecimalMultiply, sum, sum, allowingLossOfPrecision: true)
+            }
+            return sum
+        }
+
+        /// Computes exp(value) - 1 directly for small values to preserve its leading delta.
+        private func decimalExponentialMinusOne(of value: Decimal) throws -> Decimal {
+            let magnitude = value < 0 ? -value : value
+            if magnitude > 0.5 {
+                return try unrounded(
+                    NSDecimalSubtract,
+                    decimalExponential(of: value),
+                    1,
+                    allowingLossOfPrecision: true,
+                )
+            }
+
+            var sum = value
+            var term = value
+            var converged = false
+            for index in 2 ... 256 {
+                term = try unrounded(
+                    NSDecimalDivide,
+                    unrounded(NSDecimalMultiply, term, value, allowingLossOfPrecision: true),
+                    Decimal(index),
+                    allowingLossOfPrecision: true,
+                )
+                let nextSum = try unrounded(NSDecimalAdd, sum, term, allowingLossOfPrecision: true)
+                if nextSum == sum {
+                    converged = true
+                    break
+                }
+                sum = nextSum
+            }
+            guard converged else {
+                throw CalculatorError.overflow
+            }
+            return sum
+        }
+
+        private func semanticSquareRoot(of value: Decimal) throws -> Decimal {
+            try squareRootEvaluation(of: value, displayScale: roundingScale).semanticValue
+        }
+
+        private func squareRoot(of value: Decimal, toScale scale: Int) throws -> Decimal {
+            try squareRootEvaluation(of: value, displayScale: scale).displayValue
+        }
+
+        /// Resolves one square-root bracket for both Decimal semantics and configured display digits.
+        private func squareRootEvaluation(
+            of value: Decimal,
+            displayScale: Int,
+            projection: SquareRootProjection = .root,
+        ) throws -> SquareRootEvaluation {
+            guard value >= 0 else {
+                throw CalculatorError.domainError
+            }
+            guard value != 0 else {
+                return SquareRootEvaluation(semanticValue: 0, displayValue: 0)
+            }
+
+            let normalization = try squareRootNormalization(for: value)
+            let rootOrder = normalization.scalingFactor.exponent
+            let resultOrder = projection == .root ? rootOrder : -rootOrder
+            let (semanticScale, scaleOverflow) = 37.subtractingReportingOverflow(resultOrder)
+            guard !scaleOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            func projected(_ normalizedRoot: Decimal) throws -> Decimal? {
+                let root = try unrounded(
+                    NSDecimalMultiply,
+                    normalizedRoot,
+                    normalization.scalingFactor,
+                    allowingLossOfPrecision: true,
+                )
+                guard projection == .root else {
+                    guard root != 0 else {
+                        return nil
+                    }
+                    return try unrounded(NSDecimalDivide, 1, root, allowingLossOfPrecision: true)
+                }
+                return root
+            }
+
+            func roundedProjection(_ normalizedRoot: Decimal, toScale scale: Int) throws -> Decimal? {
+                guard let result = try projected(normalizedRoot) else {
+                    return nil
+                }
+                return rounded(result, toScale: scale)
+            }
+
+            var lower: Decimal = 0
+            var upper: Decimal = 10
+
+            // Accept each output only when both mathematical bracket endpoints round alike.
+            for _ in 0 ..< 256 {
+                let lowerDisplay = try roundedProjection(lower, toScale: displayScale)
+                let upperDisplay = try roundedProjection(upper, toScale: displayScale)
+                let lowerSemantic = try roundedProjection(lower, toScale: semanticScale)
+                let upperSemantic = try roundedProjection(upper, toScale: semanticScale)
+                if let lowerDisplay, let upperDisplay, let lowerSemantic, let upperSemantic,
+                   lowerDisplay == upperDisplay, lowerSemantic == upperSemantic
+                {
+                    return SquareRootEvaluation(semanticValue: lowerSemantic, displayValue: lowerDisplay)
+                }
+
+                let midpointSum = try unrounded(
+                    NSDecimalAdd,
+                    lower,
+                    upper,
+                    allowingLossOfPrecision: true,
+                )
+                let midpoint = try unrounded(
+                    NSDecimalDivide,
+                    midpointSum,
+                    2,
+                    allowingLossOfPrecision: true,
+                )
+                guard midpoint > lower, midpoint < upper else {
+                    return try resolveSquareRootBracket(
+                        lower: lower,
+                        upper: upper,
+                        originalValue: value,
+                        normalization: normalization,
+                        projection: projection,
+                        displayScale: displayScale,
+                        semanticScale: semanticScale,
+                    )
+                }
+
+                switch try compareSquare(of: midpoint, with: normalization.value) {
+                case .orderedSame:
+                    // The exact digit comparison proves the midpoint squares to the normalized
+                    // value, so the midpoint is the root itself rather than a bracket endpoint.
+                    guard let result = try projected(midpoint) else {
+                        throw CalculatorError.overflow
+                    }
+                    return SquareRootEvaluation(
+                        semanticValue: rounded(result, toScale: semanticScale),
+                        displayValue: rounded(result, toScale: displayScale),
+                    )
+                case .orderedAscending:
+                    lower = midpoint
+                case .orderedDescending:
+                    upper = midpoint
+                }
+            }
+
+            return try resolveSquareRootBracket(
+                lower: lower,
+                upper: upper,
+                originalValue: value,
+                normalization: normalization,
+                projection: projection,
+                displayScale: displayScale,
+                semanticScale: semanticScale,
+            )
+        }
+
+        private func resolveSquareRootBracket(
+            lower: Decimal,
+            upper: Decimal,
+            originalValue: Decimal,
+            normalization: (value: Decimal, scalingFactor: Decimal),
+            projection: SquareRootProjection,
+            displayScale: Int,
+            semanticScale: Int,
+        ) throws -> SquareRootEvaluation {
+            func resolve(at scale: Int) throws -> Decimal {
+                let lowerRoot = try unrounded(
+                    NSDecimalMultiply,
+                    lower,
+                    normalization.scalingFactor,
+                    allowingLossOfPrecision: true,
+                )
+                let upperRoot = try unrounded(
+                    NSDecimalMultiply,
+                    upper,
+                    normalization.scalingFactor,
+                    allowingLossOfPrecision: true,
+                )
+                let lowerValue: Decimal
+                let upperValue: Decimal
+                if projection == .root {
+                    lowerValue = rounded(lowerRoot, toScale: scale)
+                    upperValue = rounded(upperRoot, toScale: scale)
+                } else {
+                    guard lowerRoot != 0, upperRoot != 0 else {
+                        throw CalculatorError.overflow
+                    }
+                    lowerValue = rounded(
+                        try unrounded(NSDecimalDivide, 1, upperRoot, allowingLossOfPrecision: true),
+                        toScale: scale,
+                    )
+                    upperValue = rounded(
+                        try unrounded(NSDecimalDivide, 1, lowerRoot, allowingLossOfPrecision: true),
+                        toScale: scale,
+                    )
+                }
+                guard lowerValue != upperValue else {
+                    return lowerValue
+                }
+
+                if projection == .root {
+                    return try roundedRootAtPrecisionLimit(
+                        between: min(lowerValue, upperValue),
+                        and: max(lowerValue, upperValue),
+                        scalingFactor: normalization.scalingFactor,
+                        normalizedValue: normalization.value,
+                    )
+                }
+                return try roundedReciprocalRootAtPrecisionLimit(
+                    between: min(lowerValue, upperValue),
+                    and: max(lowerValue, upperValue),
+                    originalValue: originalValue,
+                )
+            }
+
+            return SquareRootEvaluation(
+                semanticValue: try resolve(at: semanticScale),
+                displayValue: try resolve(at: displayScale),
+            )
+        }
+
+        /// Compares a bounded Decimal square exactly without rounding its product to 38 digits.
+        private func compareSquare(of candidate: Decimal, with value: Decimal) throws -> ComparisonResult {
+            let (candidateDigits, candidateScale) = try decimalDigitsAndScale(candidate)
+            return try compareSquare(of: candidateDigits, scale: candidateScale, with: value)
+        }
+
+        /// Resolves the final root bracket with exact squared-midpoint comparisons.
+        ///
+        /// The bracket can end wider than one representable step. A root with more integer digits
+        /// than the coefficient can hold is adjacent to its neighbour at a step larger than one,
+        /// and a root that still fits the coefficient can land several steps short. Bisecting on
+        /// exact squares narrows the bracket to adjacent candidates, and one more comparison
+        /// decides between them, so a rounded Decimal product is never treated as exact.
+        private func roundedRootAtPrecisionLimit(
+            between lowerResult: Decimal,
+            and upperResult: Decimal,
+            scalingFactor: Decimal,
+            normalizedValue: Decimal,
+        ) throws -> Decimal {
+            try roundedIntegerRootAtPrecisionLimit(
+                between: lowerResult,
+                and: upperResult,
+                degree: 2,
+                scaleAdjustment: scalingFactor.exponent,
+                normalizedValue: normalizedValue,
+            ).root
+        }
+
+        /// Resolves a bounded integer-root bracket and any requested projected display value.
+        ///
+        /// The coefficient representation determines the candidates' actual spacing, and exact
+        /// integer-power comparisons choose the nearest Decimal root. When a projection is
+        /// supplied, the same bracket is refined until both endpoints produce the same display
+        /// result, retaining guard digits beyond Decimal's coefficient precision.
+        private func roundedIntegerRootAtPrecisionLimit(
+            between lowerResult: Decimal,
+            and upperResult: Decimal,
+            degree: Int,
+            scaleAdjustment: Int,
+            normalizedValue: Decimal,
+            displayValueForBracket: (([Int], Int, [Int], Int) throws -> Decimal?)? = nil,
+        ) throws -> (root: Decimal, displayValue: Decimal?) {
+            let (lowerDigits, lowerScale) = try decimalDigitsAndScale(lowerResult)
+            let (upperDigits, upperScale) = try decimalDigitsAndScale(upperResult)
+            var commonScale = max(lowerScale, upperScale)
+            var lower = lowerDigits + Array(repeating: 0, count: commonScale - lowerScale)
+            var upper = upperDigits + Array(repeating: 0, count: commonScale - upperScale)
+            var nearestRoot: Decimal?
+            var precisionExtensions = 0
+            var iterationsAtScale = 0
+
+            while precisionExtensions <= 5 {
+                if let nearestRoot, let displayValueForBracket,
+                   let displayValue = try displayValueForBracket(lower, commonScale, upper, commonScale)
+                {
+                    return (nearestRoot, displayValue)
+                }
+
+                if incrementingDecimalDigits(lower) == upper {
+                    if nearestRoot == nil {
+                        let midpointDigits = multiplyDecimalDigits(
+                            addingDecimalDigits(lower, upper),
+                            by: 5,
+                        )
+                        let midpointComparison = try compareIntegerPower(
+                            of: midpointDigits,
+                            scale: commonScale + scaleAdjustment + 1,
+                            exponent: degree,
+                            with: normalizedValue,
+                        )
+                        let nearestDigits = midpointComparison == .orderedDescending ? lower : upper
+                        let root = try decimal(fromDigits: nearestDigits, scale: commonScale)
+                        nearestRoot = root
+                        if displayValueForBracket == nil {
+                            return (root, nil)
+                        }
+                        continue
+                    }
+
+                    guard precisionExtensions < 5 else {
+                        throw CalculatorError.overflow
+                    }
+                    lower += Array(repeating: 0, count: 16)
+                    upper += Array(repeating: 0, count: 16)
+                    commonScale += 16
+                    precisionExtensions += 1
+                    iterationsAtScale = 0
+                    continue
+                }
+
+                guard iterationsAtScale < 256 else {
+                    throw CalculatorError.overflow
+                }
+
+                let midpoint = halvingDecimalDigits(addingDecimalDigits(lower, upper))
+                guard midpoint != lower, midpoint != upper else {
+                    throw CalculatorError.overflow
+                }
+
+                let comparison = try compareIntegerPower(
+                    of: midpoint,
+                    scale: commonScale + scaleAdjustment,
+                    exponent: degree,
+                    with: normalizedValue,
+                )
+                if comparison == .orderedDescending {
+                    upper = midpoint
+                } else {
+                    lower = midpoint
+                }
+                iterationsAtScale += 1
+            }
+
+            throw CalculatorError.overflow
+        }
+
+        /// Rounds a reciprocal root by comparing squared reciprocal candidates with one.
+        private func roundedReciprocalRootAtPrecisionLimit(
+            between lowerResult: Decimal,
+            and upperResult: Decimal,
+            originalValue: Decimal,
+        ) throws -> Decimal {
+            let (lowerDigits, lowerScale) = try decimalDigitsAndScale(lowerResult)
+            let (upperDigits, upperScale) = try decimalDigitsAndScale(upperResult)
+            let commonScale = max(lowerScale, upperScale)
+            var lower = lowerDigits + Array(repeating: 0, count: commonScale - lowerScale)
+            var upper = upperDigits + Array(repeating: 0, count: commonScale - upperScale)
+
+            for _ in 0 ..< 256 {
+                guard incrementingDecimalDigits(lower) != upper else {
+                    break
+                }
+
+                let midpoint = halvingDecimalDigits(addingDecimalDigits(lower, upper))
+                guard midpoint != lower, midpoint != upper else {
+                    break
+                }
+
+                if try compareReciprocalSquare(of: midpoint, scale: commonScale, with: originalValue)
+                    == .orderedAscending
+                {
+                    lower = midpoint
+                } else {
+                    upper = midpoint
+                }
+            }
+
+            guard incrementingDecimalDigits(lower) == upper else {
+                throw CalculatorError.overflow
+            }
+
+            let midpointDigits = multiplyDecimalDigits(
+                addingDecimalDigits(lower, upper),
+                by: 5,
+            )
+            let comparison = try compareReciprocalSquare(
+                of: midpointDigits,
+                scale: commonScale + 1,
+                with: originalValue,
+            )
+            let nearest = comparison == .orderedAscending ? upper : lower
+            return try decimal(fromDigits: nearest, scale: commonScale)
+        }
+
+        private func compareReciprocalSquare(
+            of candidateDigits: [Int],
+            scale candidateScale: Int,
+            with value: Decimal,
+        ) throws -> ComparisonResult {
+            let (valueDigits, valueScale) = try decimalDigitsAndScale(value)
+            let squaredTimesValue = ExactDecimalArithmetic.product(
+                ExactDecimalArithmetic.product(candidateDigits, candidateDigits),
+                valueDigits,
+            )
+            return compareDecimalDigits(
+                squaredTimesValue,
+                scale: candidateScale * 2 + valueScale,
+                with: [1],
+                scale: 0,
+            )
+        }
+
+        private func compareSquare(
+            of candidateDigits: [Int],
+            scale candidateScale: Int,
+            with value: Decimal,
+        ) throws -> ComparisonResult {
+            let (valueDigits, valueScale) = try decimalDigitsAndScale(value)
+            let squaredDigits = multiplyDecimalDigits(candidateDigits)
+            return compareDecimalDigits(
+                squaredDigits,
+                scale: candidateScale * 2,
+                with: valueDigits,
+                scale: valueScale,
+            )
+        }
+
+        /// Adds two nonnegative base-ten integer coefficients stored most-significant digit first.
+        private func addingDecimalDigits(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+            var result: [Int] = []
+            var carry = 0
+            var lhsIndex = lhs.count - 1
+            var rhsIndex = rhs.count - 1
+            for _ in 0 ..< max(lhs.count, rhs.count) {
+                let left = lhsIndex >= 0 ? lhs[lhsIndex] : 0
+                let right = rhsIndex >= 0 ? rhs[rhsIndex] : 0
+                let sum = left + right + carry
+                result.append(sum % 10)
+                carry = sum / 10
+                lhsIndex -= 1
+                rhsIndex -= 1
+            }
+            if carry > 0 {
+                result.append(carry)
+            }
+            return result.reversed()
+        }
+
+        /// Multiplies a base-ten integer coefficient by a small positive integer.
+        private func multiplyDecimalDigits(_ digits: [Int], by multiplier: Int) -> [Int] {
+            var result: [Int] = []
+            var carry = 0
+            for digit in digits.reversed() {
+                let product = digit * multiplier + carry
+                result.append(product % 10)
+                carry = product / 10
+            }
+            while carry > 0 {
+                result.append(carry % 10)
+                carry /= 10
+            }
+            return result.reversed()
+        }
+
+        /// Increments a base-ten integer coefficient while preserving its digit order.
+        private func incrementingDecimalDigits(_ digits: [Int]) -> [Int] {
+            var result = digits
+            for index in result.indices.reversed() {
+                if result[index] < 9 {
+                    result[index] += 1
+                    return result
+                }
+                result[index] = 0
+            }
+            return [1] + result
+        }
+
+        /// Halves a base-ten coefficient, discarding any remainder.
+        private func halvingDecimalDigits(_ digits: [Int]) -> [Int] {
+            var result: [Int] = []
+            var carry = 0
+            for digit in digits {
+                let current = carry * 10 + digit
+                let quotient = current / 2
+                carry = current % 2
+                if !result.isEmpty || quotient != 0 {
+                    result.append(quotient)
+                }
+            }
+
+            return result.isEmpty ? [0] : result
+        }
+
+        /// Rebuilds a Decimal from exact coefficient digits and the scale dividing them.
+        private func decimal(fromDigits digits: [Int], scale: Int) throws -> Decimal {
+            let coefficient = digits.map(String.init).joined()
+            return try decimal(coefficient + "e" + String(-scale))
+        }
+
+        /// Converts a positive Decimal into an exact base-ten coefficient and scale.
+        ///
+        /// The value is `digits × 10⁻ˢᶜᵃˡᵉ`. Trailing zeros move out of the coefficient into the
+        /// scale, so the representation is minimal and the scale turns negative for a whole
+        /// number that ends in zeros. Callers rely on that: a root with more integer digits than
+        /// the coefficient can hold is still adjacent to its neighbour, at a step larger than one,
+        /// and only the trimmed coefficient shows it.
+        private func decimalDigitsAndScale(_ value: Decimal) throws -> (digits: [Int], scale: Int) {
+            var decimalValue = value
+            let text = NSDecimalString(&decimalValue, Locale(identifier: "en_US_POSIX"))
+            let components = text.split(separator: ".", omittingEmptySubsequences: false)
+            guard components.count <= 2, !text.hasPrefix("-") else {
+                throw CalculatorError.overflow
+            }
+
+            let integerDigits = String(components[0])
+            let fractionalDigits = components.count == 2 ? String(components[1]) : ""
+            let coefficient = integerDigits + fractionalDigits
+            guard !coefficient.isEmpty, coefficient.allSatisfy(\.isNumber) else {
+                throw CalculatorError.overflow
+            }
+
+            var digits = coefficient.compactMap(\.wholeNumberValue)
+            while digits.count > 1, digits.first == 0 {
+                digits.removeFirst()
+            }
+            var scale = fractionalDigits.count
+            while digits.count > 1, digits.last == 0 {
+                digits.removeLast()
+                scale -= 1
+            }
+            guard digits.count <= 39 else {
+                throw CalculatorError.overflow
+            }
+
+            return (digits, scale)
+        }
+
+        /// Multiplies two bounded base-ten coefficient digit arrays.
+        private func multiplyDecimalDigits(_ digits: [Int]) -> [Int] {
+            var product = Array(repeating: 0, count: digits.count * 2)
+            for leftIndex in digits.indices {
+                for rightIndex in digits.indices {
+                    product[leftIndex + rightIndex + 1] += digits[leftIndex] * digits[rightIndex]
+                }
+            }
+
+            for index in stride(from: product.count - 1, through: 1, by: -1) {
+                product[index - 1] += product[index] / 10
+                product[index] %= 10
+            }
+
+            while product.count > 1, product.first == 0 {
+                product.removeFirst()
+            }
+            return product
+        }
+
+        /// Compares exact decimal coefficients after aligning their fractional scales.
+        private func compareDecimalDigits(
+            _ lhsDigits: [Int],
+            scale lhsScale: Int,
+            with rhsDigits: [Int],
+            scale rhsScale: Int,
+        ) -> ComparisonResult {
+            let commonScale = max(lhsScale, rhsScale)
+            var lhs = lhsDigits + Array(repeating: 0, count: commonScale - lhsScale)
+            var rhs = rhsDigits + Array(repeating: 0, count: commonScale - rhsScale)
+
+            while lhs.count > 1, lhs.first == 0 {
+                lhs.removeFirst()
+            }
+            while rhs.count > 1, rhs.first == 0 {
+                rhs.removeFirst()
+            }
+
+            if lhs.count != rhs.count {
+                return lhs.count < rhs.count ? .orderedAscending : .orderedDescending
+            }
+            for (leftDigit, rightDigit) in zip(lhs, rhs) where leftDigit != rightDigit {
+                return leftDigit < rightDigit ? .orderedAscending : .orderedDescending
+            }
+            return .orderedSame
+        }
+
+        /// Scales a positive Decimal so its square root lies between one and ten.
+        private func squareRootNormalization(for value: Decimal) throws -> (value: Decimal, scalingFactor: Decimal) {
+            let significand = NSDecimalNumber(decimal: value.significand).stringValue
+            let digitCount = significand.filter(\.isNumber).count
+            guard digitCount > 0 else {
+                throw CalculatorError.overflow
+            }
+
+            let (coefficientOrder, coefficientOverflow) = digitCount.addingReportingOverflow(value.exponent)
+            guard !coefficientOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            let (decimalOrder, decimalOrderOverflow) = coefficientOrder.subtractingReportingOverflow(1)
+            guard !decimalOrderOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            let (halfOrder, halfOrderOverflow) = decimalOrder.addingReportingOverflow(1)
+            guard !halfOrderOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            let estimateExponent = halfOrder >= 0 ? halfOrder / 2 + halfOrder % 2 : halfOrder / 2
+            let (scaleExponent, scaleExponentOverflow) = estimateExponent.subtractingReportingOverflow(1)
+            let (squaredScaleExponent, squaredScaleExponentOverflow) = scaleExponent.multipliedReportingOverflow(by: 2)
+            guard !scaleExponentOverflow, !squaredScaleExponentOverflow else {
+                throw CalculatorError.overflow
+            }
+
+            let scalingFactor = try decimal("1e\(scaleExponent)")
+            let squaredScalingFactor = try decimal("1e\(squaredScaleExponent)")
+            let normalizedValue = try unrounded(NSDecimalDivide, value, squaredScalingFactor)
+            return (normalizedValue, scalingFactor)
+        }
+
+        private func rounded(_ value: Decimal) throws -> Decimal {
+            rounded(value, toScale: roundingScale)
+        }
+
+        private func rounded(_ value: Decimal, toScale scale: Int) -> Decimal {
+            var result = value
+            var valueToRound = result
+            NSDecimalRound(&result, &valueToRound, scale, .plain)
+            return result
         }
 
         private func rounded(
@@ -204,22 +3969,61 @@ public struct CalculatorEngine: Sendable {
             _ lhs: Decimal,
             _ rhs: Decimal,
         ) throws -> Decimal {
+            // Display arithmetic only has to survive until the result is rounded to the display
+            // scale, so a `Decimal` that keeps 38 significant digits of a longer exact result is
+            // an approximation the calculator accepts. Only magnitude errors are overflow.
+            try rounded(unrounded(operation, lhs, rhs, allowingLossOfPrecision: true))
+        }
+
+        /// Performs checked Decimal arithmetic without applying calculator display rounding.
+        /// - Parameter allowingLossOfPrecision: Accepts Decimal's representable approximation for iterative convergence.
+        private func unrounded(
+            _ operation: (
+                UnsafeMutablePointer<Decimal>,
+                UnsafePointer<Decimal>,
+                UnsafePointer<Decimal>,
+                Decimal.RoundingMode,
+            ) -> Decimal.CalculationError,
+            _ lhs: Decimal,
+            _ rhs: Decimal,
+            allowingLossOfPrecision: Bool = false,
+        ) throws -> Decimal {
             var result = Decimal()
             var left = lhs
             var right = rhs
             let error = operation(&result, &left, &right, .plain)
-            guard error == .noError else {
+            guard error == .noError || (allowingLossOfPrecision && error == .lossOfPrecision) else {
                 throw CalculatorError.overflow
             }
 
-            var resultToRound = result
-            NSDecimalRound(&result, &resultToRound, roundingScale, .plain)
             return result
+        }
+
+        private mutating func consume(_ token: String) -> Bool {
+            let tokenCharacters = Array(token)
+            guard characters.count - index >= tokenCharacters.count,
+                  Array(characters[index ..< index + tokenCharacters.count]) == tokenCharacters
+            else {
+                return false
+            }
+
+            index += tokenCharacters.count
+            return true
+        }
+
+        private mutating func skipWhitespace() {
+            while !isAtEnd, characters[index].isWhitespace {
+                index += 1
+            }
+        }
+
+        private var isAtEnd: Bool {
+            index == characters.count
         }
     }
 }
 
-/// Errors produced by the issue #3 calculator evaluator.
+/// Errors produced when calculator input cannot be evaluated.
 public enum CalculatorError: Error, Equatable, Sendable {
     /// The input does not form a complete calculator expression.
     case invalidExpression
@@ -227,6 +4031,9 @@ public enum CalculatorError: Error, Equatable, Sendable {
     /// The expression attempted to divide by zero.
     case divisionByZero
 
-    /// A decimal operation exceeded the supported precision.
+    /// The expression is outside the mathematical domain of an operation.
+    case domainError
+
+    /// A decimal operation exceeded the evaluator's supported precision.
     case overflow
 }

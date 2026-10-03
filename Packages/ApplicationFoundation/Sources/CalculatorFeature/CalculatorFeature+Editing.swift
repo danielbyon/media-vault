@@ -49,6 +49,8 @@ extension CalculatorFeature {
             return appendOperator("×", to: &state)
         case .divide:
             return appendOperator("÷", to: &state)
+        case .power:
+            return appendOperator("^", to: &state)
         case .openParenthesis:
             return applyOpenParenthesis(to: &state)
         case .closeParenthesis:
@@ -57,6 +59,38 @@ extension CalculatorFeature {
             return applyPercent(to: &state)
         case .sign:
             return applySign(to: &state)
+        case .sine:
+            return applyScientificFunction("sin", to: &state)
+        case .cosine:
+            return applyScientificFunction("cos", to: &state)
+        case .tangent:
+            return applyScientificFunction("tan", to: &state)
+        case .arcsine:
+            return applyScientificFunction("asin", to: &state)
+        case .arccosine:
+            return applyScientificFunction("acos", to: &state)
+        case .arctangent:
+            return applyScientificFunction("atan", to: &state)
+        case .naturalLogarithm:
+            return applyScientificFunction("ln", to: &state)
+        case .commonLogarithm:
+            return applyScientificFunction("log10", to: &state)
+        case .squareRoot:
+            return applyScientificFunction("sqrt", to: &state)
+        case .square:
+            return applyScientificFunction("square", to: &state)
+        case .reciprocal:
+            return applyScientificFunction("reciprocal", to: &state)
+        case .pi:
+            return applyConstant("π", to: &state)
+        case .e:
+            return applyConstant("e", to: &state)
+        case .toggleAngleMode:
+            if state.isShowingResult {
+                state.expression = state.display
+            }
+            state.angleMode = state.angleMode == .degrees ? .radians : .degrees
+            return true
         case .equals:
             return applyEquals(to: &state)
         case .clear:
@@ -78,6 +112,11 @@ extension CalculatorFeature {
         }
     }
 
+    /// Evaluates every calculator-owned expression with the state’s persisted angle mode.
+    func evaluate(_ expression: String, in state: State) throws -> String {
+        try CalculatorEngine().evaluate(expression, angleMode: state.angleMode)
+    }
+
     private func applyDigit(_ digit: Int, to state: inout State) -> Bool {
         guard (0 ... 9).contains(digit) else {
             return false
@@ -85,7 +124,11 @@ extension CalculatorFeature {
 
         prepareForNewInput(&state)
         let token = currentToken(in: state.expression)
-        guard token != ")", state.expression.last != "%" else {
+        guard
+            token != ")",
+            state.expression.last != "%",
+            !endsInConstantOperand(in: state.expression)
+        else {
             return false
         }
 
@@ -102,7 +145,12 @@ extension CalculatorFeature {
     private func applyDecimal(to state: inout State) -> Bool {
         prepareForNewInput(&state)
         let token = currentToken(in: state.expression)
-        guard token != ")", state.expression.last != "%", !token.contains(".") else {
+        guard
+            token != ")",
+            state.expression.last != "%",
+            !endsInConstantOperand(in: state.expression),
+            !token.contains(".")
+        else {
             return false
         }
 
@@ -113,6 +161,126 @@ extension CalculatorFeature {
         }
         state.display = currentToken(in: state.expression)
         return true
+    }
+
+    private func applyScientificFunction(_ name: String, to state: inout State) -> Bool {
+        var expression = state.isShowingResult ? state.display : state.expression
+        let display: String
+
+        if let range = currentOperandRange(in: expression) {
+            let argument = String(expression[range])
+            let functionCall = "\(name)(\(argument))"
+            expression.replaceSubrange(range, with: functionCall)
+            display = functionCall
+        } else if isAwaitingOperand(in: expression) {
+            let functionStart = "\(name)("
+            expression.append(functionStart)
+            display = functionStart
+        } else {
+            return false
+        }
+
+        state.expression = expression
+        state.display = display
+        state.isShowingResult = false
+        return true
+    }
+
+    private func applyConstant(_ constant: String, to state: inout State) -> Bool {
+        var expression = state.isShowingResult ? "" : state.expression
+        guard isAwaitingOperand(in: expression) else {
+            return false
+        }
+
+        expression.append(constant)
+        state.expression = expression
+        state.display = constant
+        state.isShowingResult = false
+        return true
+    }
+
+    private func isAwaitingOperand(in expression: String) -> Bool {
+        guard let last = expression.last else {
+            return true
+        }
+        return operatorCharacters.contains(last)
+    }
+
+    private func currentOperandRange(in expression: String) -> Range<String.Index>? {
+        var end = expression.endIndex
+        while end > expression.startIndex {
+            let previous = expression.index(before: end)
+            guard expression[previous] == "%" else {
+                break
+            }
+            end = previous
+        }
+        guard end > expression.startIndex else {
+            return nil
+        }
+
+        let finalIndex = expression.index(before: end)
+        let finalCharacter = expression[finalIndex]
+        var start: String.Index
+
+        if finalCharacter == ")" {
+            var cursor = end
+            var balance = 0
+            var opening: String.Index?
+            while cursor > expression.startIndex {
+                cursor = expression.index(before: cursor)
+                switch expression[cursor] {
+                case ")": balance += 1
+                case "(":
+                    balance -= 1
+                    if balance == 0 {
+                        opening = cursor
+                        break
+                    }
+                default: break
+                }
+                if opening != nil {
+                    break
+                }
+            }
+            guard let opening else {
+                return nil
+            }
+            start = opening
+
+            var identifierStart = opening
+            while identifierStart > expression.startIndex {
+                let previous = expression.index(before: identifierStart)
+                guard expression[previous].isLetter || expression[previous].isNumber else {
+                    break
+                }
+                identifierStart = previous
+            }
+            if identifierStart < opening {
+                start = identifierStart
+            }
+        } else if finalCharacter.isNumber || finalCharacter == "." {
+            start = finalIndex
+            while start > expression.startIndex {
+                let previous = expression.index(before: start)
+                guard expression[previous].isNumber || expression[previous] == "." else {
+                    break
+                }
+                start = previous
+            }
+        } else if finalCharacter == "π" || finalCharacter == "e" {
+            start = finalIndex
+        } else {
+            return nil
+        }
+
+        if start > expression.startIndex {
+            let signIndex = expression.index(before: start)
+            if expression[signIndex] == "-", isUnaryMinus(at: signIndex, in: expression) {
+                start = signIndex
+            }
+        }
+        return start ..< expression.endIndex
     }
 
     private func applyOpenParenthesis(to state: inout State) -> Bool {
@@ -153,7 +321,7 @@ extension CalculatorFeature {
         }
 
         do {
-            state.display = try CalculatorEngine().evaluate(state.expression + "%")
+            state.display = try evaluate(state.expression + "%", in: state)
             state.expression.append("%")
             return true
         } catch let error as CalculatorError {
@@ -176,18 +344,22 @@ extension CalculatorFeature {
             return true
         }
         let token = currentToken(in: state.expression)
-        guard token != ")" else {
-            return false
-        }
-
-        if token.isEmpty {
+        if let range = currentOperandRange(in: state.expression) {
+            let operand = String(state.expression[range])
+            let replacement = operand.hasPrefix("-")
+                ? String(operand.dropFirst())
+                : "-" + operand
+            state.expression.replaceSubrange(range, with: replacement)
+        } else if token.isEmpty {
             state.expression.append("-")
         } else if token.hasPrefix("-") {
             state.expression = replaceCurrentToken(in: state.expression, with: String(token.dropFirst()))
         } else {
             state.expression = replaceCurrentToken(in: state.expression, with: "-" + token)
         }
-        state.display = currentToken(in: state.expression)
+        state.display = currentOperandRange(in: state.expression)
+            .map { String(state.expression[$0]) }
+            ?? currentToken(in: state.expression)
         if state.display.isEmpty {
             state.display = "0"
         }
@@ -205,7 +377,7 @@ extension CalculatorFeature {
         }
 
         do {
-            let result = try CalculatorEngine().evaluate(source)
+            let result = try evaluate(source, in: state)
             recordHistory(source: source, result: result, in: &state)
             state.display = result
             state.expression = result
@@ -272,9 +444,9 @@ extension CalculatorFeature {
         let operation = button == .memoryAdd ? "+" : "-"
         do {
             let operand = state.display == ")"
-                ? try CalculatorEngine().evaluate(state.expression)
+                ? try evaluate(state.expression, in: state)
                 : state.display
-            state.memory = try CalculatorEngine().evaluate("\(memory)\(operation)\(operand)")
+            state.memory = try evaluate("\(memory)\(operation)\(operand)", in: state)
             return true
         } catch let error as CalculatorError {
             state.error = error
@@ -312,6 +484,12 @@ extension CalculatorFeature {
     }
 
     private func appendOperator(_ symbol: Character, to state: inout State) -> Bool {
+        if state.isShowingResult {
+            // The completed result is what the next operator continues from: a pasted source
+            // expression stops describing the edited expression once its result has been shown.
+            state.expression = state.display
+            state.isShowingResult = false
+        }
         if state.expression.isEmpty {
             state.expression = state.display
         }
@@ -319,9 +497,6 @@ extension CalculatorFeature {
             return false
         }
 
-        if state.isShowingResult {
-            state.isShowingResult = false
-        }
         if state.expression.last == "(" {
             guard symbol == "-" else {
                 return false
@@ -382,7 +557,16 @@ extension CalculatorFeature {
             return false
         }
 
-        return last.isNumber || last == ")" || last == "%"
+        return last.isNumber || last == ")" || last == "%" || last == "π" || last == "e"
+    }
+
+    /// Returns whether the active expression ends with a scientific constant operand.
+    private func endsInConstantOperand(in expression: String) -> Bool {
+        guard let last = expression.last else {
+            return false
+        }
+
+        return last == "π" || last == "e"
     }
 
     private func currentToken(in expression: String) -> String {
@@ -417,6 +601,6 @@ extension CalculatorFeature {
     }
 
     private var operatorCharacters: Set<Character> {
-        ["+", "−", "-", "×", "÷", "*", "/", "("]
+        ["+", "−", "-", "×", "÷", "*", "/", "^", "("]
     }
 }

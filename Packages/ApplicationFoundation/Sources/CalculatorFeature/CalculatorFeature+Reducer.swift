@@ -85,6 +85,7 @@ extension CalculatorFeature {
             state.memory = snapshot.memory
             state.history = snapshot.history
             state.isShowingResult = snapshot.isShowingResult
+            state.angleMode = snapshot.angleMode
         case let .failure(error):
             state.persistenceCoordinator.markLoadFailure()
             state.persistenceError = error
@@ -121,7 +122,7 @@ extension CalculatorFeature {
         }
 
         do {
-            let result = try CalculatorEngine().evaluate(value)
+            let result = try evaluate(value, in: state)
             state.error = nil
             state.display = result
             state.expression = value

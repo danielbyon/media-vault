@@ -18,33 +18,49 @@ import Testing
 @MainActor
 @Suite("Calculator view snapshots")
 struct CalculatorViewSnapshotTests {
-    @Test("The initial calculator fits the compact phone configuration")
+    @Test("The compact size class keeps the basic keypad")
     func initialCompactPhone() {
         assertSnapshot(
-            of: view(state: CalculatorFeature.State()),
+            of: view(state: CalculatorFeature.State(), horizontalSizeClass: .compact),
             as: .image(layout: .device(config: DeterministicTestSupport.compactPhone)),
+        )
+    }
+
+    @Test("The regular size class exposes scientific controls in a wide layout")
+    func initialWidePhoneLandscape() {
+        assertSnapshot(
+            of: view(state: CalculatorFeature.State(), horizontalSizeClass: .regular),
+            as: .image(layout: .fixed(width: 844, height: 390)),
+        )
+    }
+
+    @Test("Scientific controls appear in the regular size class")
+    func initialRegularWidthIPad() {
+        assertSnapshot(
+            of: view(state: CalculatorFeature.State(), horizontalSizeClass: .regular),
+            as: .image(layout: .device(config: DeterministicTestSupport.regularWidthIPad)),
         )
     }
 
     @Test("A completed calculation and history fit the large phone configuration")
     func completedLargePhone() throws {
         try assertSnapshot(
-            of: view(state: completedState()),
+            of: view(state: completedState(), horizontalSizeClass: .compact),
             as: .image(layout: .device(config: DeterministicTestSupport.largePhone)),
         )
     }
 
-    @Test("An error state is readable at regular iPad width")
+    @Test("An error state remains readable in the regular size class")
     func errorRegularWidthIPad() {
         var state = CalculatorFeature.State(snapshot: CalculatorSnapshot(display: "7", expression: "7"))
         state.error = .invalidExpression
         assertSnapshot(
-            of: view(state: state),
+            of: view(state: state, horizontalSizeClass: .regular),
             as: .image(layout: .device(config: DeterministicTestSupport.regularWidthIPad)),
         )
     }
 
-    @Test("A captured hidden candidate keeps the calculator surface at regular iPad width")
+    @Test("A captured hidden candidate keeps the regular-size calculator surface")
     func hiddenCaptureRegularWidthIPad() {
         var calculator = CalculatorFeature.State()
         calculator.isLoading = true
@@ -62,7 +78,7 @@ struct CalculatorViewSnapshotTests {
 
         #expect(store.presentation.display == "1234")
         assertSnapshot(
-            of: decoyView(store: store),
+            of: decoyView(store: store, horizontalSizeClass: .regular),
             as: .image(layout: .device(config: DeterministicTestSupport.regularWidthIPad)),
         )
     }
@@ -88,7 +104,7 @@ struct CalculatorViewSnapshotTests {
         let store = adapterStore(state: CalculatorDecoyAdapter.State(calculator: calculator))
 
         assertSnapshot(
-            of: decoyView(store: store),
+            of: decoyView(store: store, horizontalSizeClass: .regular),
             as: .image(layout: .device(config: DeterministicTestSupport.regularWidthIPad)),
         )
     }
@@ -117,7 +133,10 @@ struct CalculatorViewSnapshotTests {
         )
     }
 
-    private func view(state: CalculatorFeature.State) -> some View {
+    private func view(
+        state: CalculatorFeature.State,
+        horizontalSizeClass: UserInterfaceSizeClass?,
+    ) -> some View {
         let store = withDependencies {
             $0.calculatorPersistence.load = { nil }
             $0.calculatorPersistence.save = { _ in }
@@ -128,6 +147,7 @@ struct CalculatorViewSnapshotTests {
         }
         return CalculatorView(store: store)
             .environment(\.colorScheme, .light)
+            .environment(\.horizontalSizeClass, horizontalSizeClass)
     }
 
     private func adapterStore(
@@ -143,7 +163,10 @@ struct CalculatorViewSnapshotTests {
         }
     }
 
-    private func decoyView(store: StoreOf<CalculatorDecoyAdapter>) -> some View {
+    private func decoyView(
+        store: StoreOf<CalculatorDecoyAdapter>,
+        horizontalSizeClass: UserInterfaceSizeClass?,
+    ) -> some View {
         CalculatorView(
             store: store.scope(state: \.calculator, action: \.calculator),
             presentationOverride: store.presentation,
@@ -151,5 +174,6 @@ struct CalculatorViewSnapshotTests {
             loadsPersistenceOnAppear: false,
         )
         .environment(\.colorScheme, .light)
+        .environment(\.horizontalSizeClass, horizontalSizeClass)
     }
 }

@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CalculatorFeature
 import ComposableArchitecture
 import SwiftUI
 @testable import BrowserFeature
@@ -13,9 +14,26 @@ import SwiftUI
 struct BrowserTabOverviewUITestHostApp: App {
     var body: some Scene {
         WindowGroup {
-            BrowserTabOverviewUITestHostView()
-                .environment(\.horizontalSizeClass, .compact)
+            Group {
+                if ProcessInfo.processInfo.arguments.contains("--calculator-keyboard") {
+                    CalculatorKeyboardUITestHostView()
+                } else {
+                    BrowserTabOverviewUITestHostView()
+                }
+            }
+            .environment(\.horizontalSizeClass, .compact)
         }
+    }
+}
+
+@MainActor
+private struct CalculatorKeyboardUITestHostView: View {
+    private let store = Store(initialState: CalculatorFeature.State()) {
+        CalculatorFeature()
+    }
+
+    var body: some View {
+        CalculatorView(store: store, loadsPersistenceOnAppear: false)
     }
 }
 

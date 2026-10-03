@@ -79,6 +79,63 @@ struct CalculatorDecoyAdapterTests {
         await store.finish()
     }
 
+    @Test("PIN capture follows ordinary digit acceptance after completed operands")
+    func pinCaptureRequiresOrdinaryDigitAcceptance() async {
+        let expressions: [(display: String, expression: String)] = [
+            ("π", "π"),
+            ("e", "e"),
+            ("0.5", "50%"),
+            ("3", "sqrt(9)"),
+        ]
+
+        for (display, expression) in expressions {
+            let calculator = CalculatorFeature.State(
+                snapshot: CalculatorSnapshot(display: display, expression: expression),
+            )
+            let store = makeAdapterStore(
+                calculator: calculator,
+                configuration: configuration(pinEqualsEnabled: true),
+                uuidValues: [firstAttemptID, historyID],
+            )
+            store.exhaustivity = .off
+
+            await store.send(.input(.button(.digit(7))))
+            await store.receive(.calculator(.button(.digit(7))))
+            #expect(store.state.lifecycle == .idle)
+
+            await store.send(.input(.button(.equals)))
+            await store.receive(.calculator(.button(.equals)))
+            #expect(store.state.lifecycle == .idle)
+            #expect(store.state.calculator.isShowingResult)
+            await store.finish()
+        }
+    }
+
+    @Test("PIN capture follows ordinary input after a completed result")
+    func pinCaptureStartsFromCompletedResult() async {
+        let calculator = CalculatorFeature.State(
+            snapshot: CalculatorSnapshot(
+                display: "5",
+                expression: "5",
+                isShowingResult: true,
+            ),
+        )
+        let store = makeAdapterStore(
+            calculator: calculator,
+            configuration: configuration(pinEqualsEnabled: true),
+        )
+        store.exhaustivity = .off
+
+        await store.send(.input(.button(.digit(7))))
+
+        if case .capturing = store.state.lifecycle {
+            #expect(store.state.calculator == calculator)
+        } else {
+            Issue.record("An accepted ordinary digit should begin PIN capture from a completed result.")
+        }
+        await store.finish()
+    }
+
     @Test("PIN capture projects digits without changing or saving calculator state")
     func captureProjectsTransientDigits() async {
         let saves = LockIsolated<[CalculatorSnapshot]>([])
