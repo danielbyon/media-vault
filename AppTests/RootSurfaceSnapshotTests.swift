@@ -26,7 +26,7 @@ struct RootSurfaceSnapshotTests {
     @Test("The root surface is stable on a compact iPhone")
     func compactPhoneSnapshot() {
         assertSnapshot(
-            of: rootView(),
+            of: rootView(horizontalSizeClass: .compact),
             as: .image(layout: .device(config: DeterministicTestSupport.compactPhone)),
         )
     }
@@ -34,7 +34,7 @@ struct RootSurfaceSnapshotTests {
     @Test("The root surface is stable on a large iPhone")
     func largePhoneSnapshot() {
         assertSnapshot(
-            of: rootView(),
+            of: rootView(horizontalSizeClass: .compact),
             as: .image(layout: .device(config: DeterministicTestSupport.largePhone)),
         )
     }
@@ -42,16 +42,17 @@ struct RootSurfaceSnapshotTests {
     @Test("The root surface is stable at regular iPad width")
     func regularWidthIPadSnapshot() {
         assertSnapshot(
-            of: rootView(),
+            of: rootView(horizontalSizeClass: .regular),
             as: .image(layout: .device(config: DeterministicTestSupport.regularWidthIPad)),
         )
     }
 
-    private func rootView() -> some View {
+    private func rootView(horizontalSizeClass: UserInterfaceSizeClass) -> some View {
         let store = makeRootStore()
 
         return RootView(store: store)
             .environment(\.colorScheme, .light)
+            .environment(\.horizontalSizeClass, horizontalSizeClass)
     }
 
     private func makeRootStore() -> StoreOf<RootFeature> {

@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CalculatorFeature
 import ComposableArchitecture
 import SwiftUI
 @testable import BrowserFeature
@@ -13,9 +14,41 @@ import SwiftUI
 struct BrowserTabOverviewUITestHostApp: App {
     var body: some Scene {
         WindowGroup {
-            BrowserTabOverviewUITestHostView()
-                .environment(\.horizontalSizeClass, .compact)
+            if ProcessInfo.processInfo.arguments.contains("--calculator-basic") {
+                CalculatorUITestHostView()
+                    .environment(\.horizontalSizeClass, .regular)
+            } else {
+                BrowserTabOverviewUITestHostView()
+                    .environment(\.horizontalSizeClass, .compact)
+            }
         }
+    }
+}
+
+/// Presents the production calculator in isolation for focused accessibility and keyboard tests.
+@MainActor
+private struct CalculatorUITestHostView: View {
+    private let store: StoreOf<CalculatorFeature>
+
+    init() {
+        var state = CalculatorFeature.State()
+        if ProcessInfo.processInfo.arguments.contains("--calculator-seeded-history") {
+            state.history = [
+                CalculatorHistoryEntry(
+                    id: UUID(),
+                    expression: "2 + 2",
+                    result: "4",
+                    date: Date(timeIntervalSince1970: 0),
+                ),
+            ]
+        }
+        store = Store(initialState: state) {
+            CalculatorFeature()
+        }
+    }
+
+    var body: some View {
+        CalculatorView(store: store, loadsPersistenceOnAppear: false)
     }
 }
 
