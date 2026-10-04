@@ -1,0 +1,65 @@
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaIngestionJournalEntry.swift
+  s_8d618134657817::t_7a19b3fd9c46c8 1-180,182,184-187,231-251,253-388
+  s_8d618134657817::t_3ff453e67ee4af 183,193
+  s_8d618134657817::t_237a5eee5e5556 210-211,215
+  s_8d618134657817::t_01fbbbc7a544cd 181,188-192,194-209,212-214,216-230,252
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaLibraryStore.swift
+  s_8d618134657817::t_7a19b3fd9c46c8 23,30,134-139,141-166,168-186,188-202,204-205,212,244-275,277-278
+  s_8d618134657817::t_09652f0f04359e 276
+Packages/ApplicationFoundation/Sources/MediaLibrary/FileMediaResourceRepository.swift
+  s_8d618134657817::t_7a19b3fd9c46c8 53-75,93-138,233-241,295,304,317,337,339,341-343,348-356,360-394,400-543,545,606
+  s_8d618134657817::t_0931ddeafde2f1 140-141
+  s_8d618134657817::t_de80d2235aa291 326,329,332-336,395-399
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/MediaLibraryIngestionTests.swift
+  s_8d618134657817::t_7a19b3fd9c46c8 1-35
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/MediaLibraryImportTests.swift
+  s_8d618134657817::t_b4593874745925 710,713-729,736-791,805-833
+  s_8d618134657817::t_def2e0fa337ed5 131,1059-1060,1062-1151
+  s_8d618134657817::t_c71a2f9748e29e 635,638-639,644,647,650,654-678,705
+  s_8d618134657817::t_7a19b3fd9c46c8 12,15,39-40,66-68,83-85,99,124-128,223-224,251-261,264-276,283-284,294-313,315-490,506-528,530-540,582-634,636-637,640-643,645-646,648-649,651-653,679-704,706-709,711-712,792-804,834-898,989-990,998-999,1006,1020-1029,1036-1058,1166,1172,1180
+  s_8d618134657817::t_85fc707f80fdaa 192,491-492,730-735
+  s_8d618134657817::t_18f8b4f386a835 207
+  s_8d618134657817::t_f230102ef4c7dc 493-505,529,541-581
+  s_8d618134657817::t_fc838b784ebeb1 162-191,193-206,208-222
+  s_8d618134657817::t_3ac37abc22742c 927-965
+  s_8d618134657817::t_72f8d3504c0508 133-152,158-159
+  s_8d618134657817::t_802a91433cfd58 129-130
+  s_8d618134657817::t_a73611d0a75645 132
+  s_8d618134657817::t_31ada3df376534 1061
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaLibraryClient.swift
+  s_8d618134657817::t_7a19b3fd9c46c8 75
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/__Snapshots__/MediaLibrarySnapshotTests/persistedIngestionJournalMapping.1.txt
+  s_8d618134657817::t_7a19b3fd9c46c8 1-11
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaIngestionState.swift
+  s_8d618134657817::t_7a19b3fd9c46c8 1-32
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTransitionTests.swift
+  s_8d618134657817::t_379dcb1a88c8e6 752,788-793,797-805,1104-1114
+  s_09b05cf592369e::t_93008879811f43 1115-1116
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/MediaLibrarySnapshotTests.swift
+  s_8d618134657817::t_398ea44bd53084 65-68,71,74-78,82-86,88-89,92,95
+  s_8d618134657817::t_7a19b3fd9c46c8 64,69-70,72-73,79-81,87,90-91,93-94,96-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dda7529cc2943289253ffc8a842a7d2199414261",
+  "prompts": {},
+  "sessions": {
+    "s_09b05cf592369e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0f8e2-4b10-7ff1-bbb2-622c77762fbd",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_8d618134657817": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1069c-b3f6-7f53-98ee-f86102f9a247",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
