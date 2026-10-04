@@ -26,6 +26,10 @@ let package = Package(
             exact: "1.12.0",
         ),
         .package(
+            url: "https://github.com/groue/GRDB.swift",
+            exact: "7.11.1",
+        ),
+        .package(
             url: "https://github.com/pointfreeco/swift-composable-architecture",
             exact: "1.26.2",
         ),
@@ -117,6 +121,7 @@ let package = Package(
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "DependenciesMacros", package: "swift-dependencies"),
                 .product(name: "SQLiteData", package: "sqlite-data"),
+                .product(name: "GRDB", package: "GRDB.swift"),
                 "PersistenceSupport",
             ],
         ),

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import GRDB
 import SQLiteData
 
 /// The durable record that connects accepted staging bytes to a canonical asset.
@@ -262,59 +263,30 @@ actor SQLiteMediaLibraryIngestionJournal {
         do {
             try await prepareSchema()
             let rows = try await database.read { db in
-                try #sql(
-                    """
+                let statement = try db.makeStatement(sql: """
                     SELECT id, resource_id, state, source_filename, imported_at,
                            source_uti, byte_count, sha256, captured_at
                     FROM media_ingestion_journal
                     ORDER BY imported_at, id
-                    """,
-                    as: (String, String, String, String, Double, String?, Int64?, String?, Double?).self,
-                ).fetchAll(db)
+                    """)
+                return try Row.fetchAll(statement).map(DecodedJournalRow.init)
             }
 
             var entries: [MediaIngestionJournalEntry] = []
             var unreadableAssetIDs = Set<UUID>()
             var knownResourceIDs = Set<UUID>()
             for row in rows {
-                if let resourceID = UUID(uuidString: row.1) {
+                if let resourceID = row.resourceID {
                     knownResourceIDs.insert(resourceID)
                 }
-                guard let assetID = UUID(uuidString: row.0),
-                      let resourceID = UUID(uuidString: row.1),
-                      let state = MediaIngestionState(rawValue: row.2),
-                      !row.3.isEmpty
-                else {
-                    if let assetID = UUID(uuidString: row.0) {
-                        unreadableAssetIDs.insert(assetID)
-                    }
+                guard let assetID = row.assetID else {
                     continue
                 }
-
-                let hasValidationMetadata = row.5 != nil && row.6 != nil && row.7 != nil
-                let hasPartialValidationMetadata = row.5 != nil || row.6 != nil || row.7 != nil
-                guard !hasPartialValidationMetadata || hasValidationMetadata,
-                      !hasValidationMetadata || (row.6 ?? -1) >= 0,
-                      !hasValidationMetadata || (row.7?.count == 64),
-                      ![.duplicateCheck, .ready, .committing, .complete].contains(state) || hasValidationMetadata
-                else {
+                guard let entry = row.entry else {
                     unreadableAssetIDs.insert(assetID)
                     continue
                 }
-
-                entries.append(
-                    MediaIngestionJournalEntry(
-                        id: assetID,
-                        resourceID: resourceID,
-                        state: state,
-                        sourceFilename: row.3,
-                        importedAt: Date(timeIntervalSince1970: row.4),
-                        sourceUTI: row.5,
-                        byteCount: row.6,
-                        sha256: row.7,
-                        capturedAt: row.8.map(Date.init(timeIntervalSince1970:)),
-                    ),
-                )
+                entries.append(entry)
             }
             return MediaIngestionJournalSnapshot(
                 entries: entries,
@@ -323,6 +295,133 @@ actor SQLiteMediaLibraryIngestionJournal {
             )
         } catch {
             throw MediaLibraryStoreError.unavailable
+        }
+    }
+
+    private struct DecodedJournalRow: Sendable {
+        let assetID: UUID?
+        let resourceID: UUID?
+        let entry: MediaIngestionJournalEntry?
+
+        init(_ row: Row) {
+            let assetIDValue: DatabaseValue = row[0]
+            let resourceIDValue: DatabaseValue = row[1]
+            let stateValue: DatabaseValue = row[2]
+            let sourceFilenameValue: DatabaseValue = row[3]
+            let importedAtValue: DatabaseValue = row[4]
+            let sourceUTIValue: DatabaseValue = row[5]
+            let byteCountValue: DatabaseValue = row[6]
+            let sha256Value: DatabaseValue = row[7]
+            let capturedAtValue: DatabaseValue = row[8]
+
+            let assetID = Self.textValue(assetIDValue).flatMap { UUID(uuidString: $0) }
+            let resourceID = Self.textValue(resourceIDValue).flatMap { UUID(uuidString: $0) }
+            self.assetID = assetID
+            self.resourceID = resourceID
+
+            guard let assetID,
+                  let resourceID,
+                  let stateRawValue = Self.textValue(stateValue),
+                  let state = MediaIngestionState(rawValue: stateRawValue),
+                  let sourceFilename = Self.textValue(sourceFilenameValue),
+                  !sourceFilename.isEmpty,
+                  let importedAt = Self.numberValue(importedAtValue),
+                  Self.isOptionalText(sourceUTIValue),
+                  Self.isOptionalInteger(byteCountValue),
+                  Self.isOptionalText(sha256Value),
+                  Self.isOptionalNumber(capturedAtValue)
+            else {
+                entry = nil
+                return
+            }
+
+            let sourceUTI = Self.textValue(sourceUTIValue)
+            let byteCount = Self.integerValue(byteCountValue)
+            let sha256 = Self.textValue(sha256Value)
+            let capturedAt = Self.numberValue(capturedAtValue)
+            let hasValidationMetadata = sourceUTI != nil && byteCount != nil && sha256 != nil
+            let hasPartialValidationMetadata = sourceUTI != nil || byteCount != nil || sha256 != nil
+            let requiresValidationMetadata: Bool
+            switch state {
+            case .duplicateCheck, .ready, .committing, .complete:
+                requiresValidationMetadata = true
+            default:
+                requiresValidationMetadata = false
+            }
+            guard !hasPartialValidationMetadata || hasValidationMetadata,
+                  !hasValidationMetadata || (byteCount ?? -1) >= 0,
+                  !hasValidationMetadata || sha256?.count == 64,
+                  !requiresValidationMetadata || hasValidationMetadata
+            else {
+                entry = nil
+                return
+            }
+
+            entry = MediaIngestionJournalEntry(
+                id: assetID,
+                resourceID: resourceID,
+                state: state,
+                sourceFilename: sourceFilename,
+                importedAt: Date(timeIntervalSince1970: importedAt),
+                sourceUTI: sourceUTI,
+                byteCount: byteCount,
+                sha256: sha256,
+                capturedAt: capturedAt.map(Date.init(timeIntervalSince1970:)),
+            )
+        }
+
+        private static func textValue(_ value: DatabaseValue) -> String? {
+            guard case let .string(string) = value.storage else {
+                return nil
+            }
+            return string
+        }
+
+        private static func numberValue(_ value: DatabaseValue) -> Double? {
+            switch value.storage {
+            case let .double(number) where number.isFinite:
+                number
+            case let .int64(number):
+                Double(number)
+            default:
+                nil
+            }
+        }
+
+        private static func integerValue(_ value: DatabaseValue) -> Int64? {
+            guard case let .int64(integer) = value.storage else {
+                return nil
+            }
+            return integer
+        }
+
+        private static func isOptionalText(_ value: DatabaseValue) -> Bool {
+            switch value.storage {
+            case .null, .string:
+                true
+            default:
+                false
+            }
+        }
+
+        private static func isOptionalInteger(_ value: DatabaseValue) -> Bool {
+            switch value.storage {
+            case .null, .int64:
+                true
+            default:
+                false
+            }
+        }
+
+        private static func isOptionalNumber(_ value: DatabaseValue) -> Bool {
+            switch value.storage {
+            case .null, .int64:
+                true
+            case let .double(number):
+                number.isFinite
+            default:
+                false
+            }
         }
     }
 

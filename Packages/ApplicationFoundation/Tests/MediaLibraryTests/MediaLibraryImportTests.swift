@@ -870,6 +870,36 @@ struct MediaLibraryImportTests {
         try environment.sourceBytes.write(to: environment.resources.url(for: unrelatedResource))
         try await environment.store.commit(damagedAsset)
         try await environment.store.commit(unrelatedAsset)
+
+        let recoveryAssetID = TestFixtures.recoveryAssetIDs[5]
+        let recoveryResourceID = TestFixtures.recoveryResourceIDs[5]
+        let stagingURL = environment.resources.stagingURL(for: recoveryResourceID)
+        try environment.sourceBytes.write(to: stagingURL)
+        try environment.resources.protectStaging(for: recoveryResourceID)
+        let inspection = ImageInspection(
+            uti: "public.png",
+            byteCount: Int64(environment.sourceBytes.count),
+            sha256: SHA256.hash(data: environment.sourceBytes).hexString,
+            capturedAt: nil,
+        )
+        var recoveryEntry = MediaIngestionJournalEntry(
+            id: recoveryAssetID,
+            resourceID: recoveryResourceID,
+            state: .received,
+            sourceFilename: "recoverable-journal.png",
+            importedAt: TestFixtures.importedAt,
+        )
+        try await environment.store.ingestionJournal.accept(recoveryEntry)
+        recoveryEntry = try await environment.store.ingestionJournal.transition(recoveryEntry, to: .validating)
+        recoveryEntry = try await environment.store.ingestionJournal.transition(
+            recoveryEntry,
+            to: .duplicateCheck,
+            inspection: inspection,
+        )
+        recoveryEntry = try await environment.store.ingestionJournal.transition(recoveryEntry, to: .ready)
+        recoveryEntry = try await environment.store.ingestionJournal.transition(recoveryEntry, to: .committing)
+        let recoveredAsset = try journalAsset(from: recoveryEntry)
+
         let damagedByteCount = Int64(environment.sourceBytes.count)
         let damagedSHA256 = SHA256.hash(data: environment.sourceBytes).hexString
         try await environment.database.write { db in
@@ -878,12 +908,11 @@ struct MediaLibraryImportTests {
                 INSERT INTO media_ingestion_journal (
                   id, resource_id, state, source_filename, imported_at,
                   source_uti, byte_count, sha256, captured_at
-                ) VALUES (?, ?, 'complete', '', ?, ?, ?, ?, NULL)
+                ) VALUES (?, ?, 'complete', '', 'not-a-timestamp', ?, ?, ?, NULL)
                 """,
                 arguments: [
                     damagedAsset.id.uuidString,
                     damagedResource.id.uuidString,
-                    TestFixtures.importedAt.timeIntervalSince1970,
                     "public.png",
                     damagedByteCount,
                     damagedSHA256,
@@ -893,9 +922,58 @@ struct MediaLibraryImportTests {
 
         let visibleAssets = try await environment.importer.loadAssets()
         let journal = try await environment.store.ingestionJournal.snapshot()
-        #expect(visibleAssets == [unrelatedAsset])
+        #expect(visibleAssets == [recoveredAsset, unrelatedAsset])
         #expect(journal.unreadableAssetIDs == [damagedAsset.id])
         #expect(try environment.resources.data(for: damagedResource) == environment.sourceBytes)
+        #expect(try environment.resources.data(for: #require(recoveredAsset.resources.first)) == environment.sourceBytes)
+    }
+
+    @Test("A non-finite timestamp makes only its journal row unreadable")
+    func isolatesNonFiniteJournalTimestamps() async throws {
+        let environment = try makeEnvironment()
+        let unreadableEntry = MediaIngestionJournalEntry(
+            id: TestFixtures.recoveryAssetIDs[4],
+            resourceID: TestFixtures.recoveryResourceIDs[4],
+            state: .received,
+            sourceFilename: "non-finite-timestamp.png",
+            importedAt: Date(timeIntervalSince1970: .infinity),
+        )
+        let unreadableCapturedAtEntry = MediaIngestionJournalEntry(
+            id: TestFixtures.recoveryAssetIDs[2],
+            resourceID: TestFixtures.recoveryResourceIDs[2],
+            state: .received,
+            sourceFilename: "non-finite-capture-time.png",
+            importedAt: TestFixtures.importedAt,
+        )
+        let readableEntry = MediaIngestionJournalEntry(
+            id: TestFixtures.recoveryAssetIDs[3],
+            resourceID: TestFixtures.recoveryResourceIDs[3],
+            state: .received,
+            sourceFilename: "readable-timestamp.png",
+            importedAt: TestFixtures.importedAt,
+        )
+        try await environment.store.ingestionJournal.accept(unreadableEntry)
+        try await environment.store.ingestionJournal.accept(unreadableCapturedAtEntry)
+        try await environment.store.ingestionJournal.accept(readableEntry)
+        let validatingEntry = try await environment.store.ingestionJournal.transition(
+            unreadableCapturedAtEntry,
+            to: .validating,
+        )
+        _ = try await environment.store.ingestionJournal.transition(
+            validatingEntry,
+            to: .duplicateCheck,
+            inspection: ImageInspection(
+                uti: "public.png",
+                byteCount: Int64(environment.sourceBytes.count),
+                sha256: SHA256.hash(data: environment.sourceBytes).hexString,
+                capturedAt: Date(timeIntervalSince1970: .infinity),
+            ),
+        )
+
+        let snapshot = try await environment.store.ingestionJournal.snapshot()
+
+        #expect(snapshot.entries == [readableEntry])
+        #expect(snapshot.unreadableAssetIDs == [unreadableEntry.id, unreadableCapturedAtEntry.id])
     }
 
     @Test("A persistent store reloads the committed asset and exact resource bytes")
