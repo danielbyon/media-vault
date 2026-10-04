@@ -749,7 +749,7 @@ struct BrowserTabTransitionTests {
     }
 
     @Test("A destination that becomes ready before the bounded wait animates from real geometry")
-    func uikitCoordinatorBeginsWhenOverviewCardBecomesReady() async {
+    func uikitCoordinatorBeginsWhenOverviewCardBecomesReady() async throws {
         var executions: [BrowserTabTransitionExecution] = []
         var animator: UIViewPropertyAnimator?
         let harness = BrowserTabTransitionUIKitHarness(
@@ -785,13 +785,24 @@ struct BrowserTabTransitionTests {
         #expect(!executions.contains(.geometry))
 
         harness.registerCard()
-        await harness.waitForLayout()
+        #expect(
+            await harness.waitForDisplayTurns(
+                until: { executions.contains(.geometry) && animator != nil },
+                maximumTurns: 8,
+            ),
+        )
 
         #expect(executions.contains(.geometry))
         #expect(animator != nil)
-        animator?.stopAnimation(false)
-        animator?.finishAnimation(at: .end)
-        await harness.waitForDisplayTurns(1)
+        let activeAnimator = try #require(animator)
+        activeAnimator.stopAnimation(false)
+        activeAnimator.finishAnimation(at: .end)
+        #expect(
+            await harness.waitForDisplayTurns(
+                until: { completed },
+                maximumTurns: 8,
+            ),
+        )
 
         #expect(completed)
         #expect(harness.coordinator.isActive == false)
@@ -1088,6 +1099,19 @@ private final class BrowserTabTransitionUIKitHarness {
             await waitForDisplayTurn()
         }
         rootViewController.view.layoutIfNeeded()
+    }
+
+    func waitForDisplayTurns(until condition: () -> Bool, maximumTurns: Int) async -> Bool {
+        precondition(maximumTurns > 0, "The display-turn budget must be positive.")
+        for _ in 0 ..< maximumTurns {
+            rootViewController.view.layoutIfNeeded()
+            if condition() {
+                return true
+            }
+            await waitForDisplayTurn()
+        }
+        rootViewController.view.layoutIfNeeded()
+        return condition()
     }
 
     private func flushUIKitRendering() {

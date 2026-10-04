@@ -1,0 +1,11 @@
+MediaIngestionJournalEntry(
+  id: UUID(00000000-0000-0000-0000-000000000040),
+  resourceID: UUID(00000000-0000-0000-0000-000000000041),
+  state: .ready,
+  sourceFilename: "holiday-photo.png",
+  importedAt: Date(2024-08-30T06:40:00.000Z),
+  sourceUTI: "public.png",
+  byteCount: 68,
+  sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  capturedAt: Date(2024-08-30T06:23:20.000Z)
+)
