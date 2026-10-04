@@ -1,0 +1,24 @@
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/MediaLibraryImportTests.swift
+  s_8d618134657817::t_d6f3a2a5295027 89-131
+  s_8d618134657817::t_691ae9ef3e8406 1364-1384
+Packages/ApplicationFoundation/Sources/MediaLibrary/FileMediaResourceRepository.swift
+  s_8d618134657817::t_ff69b10b3079a9 18,30,36-38,44,185-186
+  s_8d618134657817::t_e7df925aeb676e 184,443,559-566,593-599,618-619
+  s_8d618134657817::t_4dfed4de38e7ee 187-188,620
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bb61c8988f1a46b73c252bf9ae00ea8a12918e9a",
+  "prompts": {},
+  "sessions": {
+    "s_8d618134657817": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1069c-b3f6-7f53-98ee-f86102f9a247",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
