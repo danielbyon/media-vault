@@ -264,11 +264,11 @@ actor SQLiteMediaLibraryIngestionJournal {
             try await prepareSchema()
             let rows = try await database.read { db in
                 let statement = try db.makeStatement(sql: """
-                    SELECT id, resource_id, state, source_filename, imported_at,
-                           source_uti, byte_count, sha256, captured_at
-                    FROM media_ingestion_journal
-                    ORDER BY imported_at, id
-                    """)
+                SELECT id, resource_id, state, source_filename, imported_at,
+                       source_uti, byte_count, sha256, captured_at
+                FROM media_ingestion_journal
+                ORDER BY imported_at, id
+                """)
                 return try Row.fetchAll(statement).map(DecodedJournalRow.init)
             }
 
@@ -286,6 +286,7 @@ actor SQLiteMediaLibraryIngestionJournal {
                     unreadableAssetIDs.insert(assetID)
                     continue
                 }
+
                 entries.append(entry)
             }
             return MediaIngestionJournalSnapshot(
@@ -341,13 +342,16 @@ actor SQLiteMediaLibraryIngestionJournal {
             let capturedAt = Self.numberValue(capturedAtValue)
             let hasValidationMetadata = sourceUTI != nil && byteCount != nil && sha256 != nil
             let hasPartialValidationMetadata = sourceUTI != nil || byteCount != nil || sha256 != nil
-            let requiresValidationMetadata: Bool
-            switch state {
-            case .duplicateCheck, .ready, .committing, .complete:
-                requiresValidationMetadata = true
-            default:
-                requiresValidationMetadata = false
-            }
+            let requiresValidationMetadata =
+                switch state {
+                case .duplicateCheck,
+                     .ready,
+                     .committing,
+                     .complete:
+                    true
+                default:
+                    false
+                }
             guard !hasPartialValidationMetadata || hasValidationMetadata,
                   !hasValidationMetadata || (byteCount ?? -1) >= 0,
                   !hasValidationMetadata || sha256?.count == 64,
@@ -374,6 +378,7 @@ actor SQLiteMediaLibraryIngestionJournal {
             guard case let .string(string) = value.storage else {
                 return nil
             }
+
             return string
         }
 
@@ -392,12 +397,14 @@ actor SQLiteMediaLibraryIngestionJournal {
             guard case let .int64(integer) = value.storage else {
                 return nil
             }
+
             return integer
         }
 
         private static func isOptionalText(_ value: DatabaseValue) -> Bool {
             switch value.storage {
-            case .null, .string:
+            case .null,
+                 .string:
                 true
             default:
                 false
@@ -406,7 +413,8 @@ actor SQLiteMediaLibraryIngestionJournal {
 
         private static func isOptionalInteger(_ value: DatabaseValue) -> Bool {
             switch value.storage {
-            case .null, .int64:
+            case .null,
+                 .int64:
                 true
             default:
                 false
@@ -415,7 +423,8 @@ actor SQLiteMediaLibraryIngestionJournal {
 
         private static func isOptionalNumber(_ value: DatabaseValue) -> Bool {
             switch value.storage {
-            case .null, .int64:
+            case .null,
+                 .int64:
                 true
             case let .double(number):
                 number.isFinite

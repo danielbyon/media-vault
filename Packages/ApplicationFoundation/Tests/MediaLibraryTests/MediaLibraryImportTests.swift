@@ -129,6 +129,133 @@ struct MediaLibraryImportTests {
         #expect(!FileManager.default.fileExists(atPath: stagingURL.path))
     }
 
+    @Test("Overlapping import and load operations serialize durable recovery")
+    func serializesOverlappingImportAndLoadOperations() async throws {
+        let acceptedResourceRead = SuspendedAcceptedResourceRead()
+        let environment = try makeEnvironment(resourcesFactory: { root in
+            try FileMediaResourceRepository(
+                rootURL: root,
+                protectionOperation: { _ in },
+                acceptedResourceReadOperation: { url in
+                    try await acceptedResourceRead.read(url)
+                },
+            )
+        })
+        let importer = environment.importer
+        let sourceURL = environment.sourceURL
+        let importTask = Task {
+            try await importer.importFile(at: sourceURL)
+        }
+
+        await acceptedResourceRead.waitForFirstReadSuspension()
+        let pendingEntry = try await environment.store.ingestionJournal.snapshot().entries.first
+        #expect(pendingEntry?.state == .validating)
+
+        let loadTask = Task {
+            try await importer.loadAssets()
+        }
+        await importer.waitForDurableOperationWaiterForTesting()
+        #expect(await acceptedResourceRead.readCount() == 1)
+
+        await acceptedResourceRead.releaseFirstRead()
+        let importedAsset = try await importTask.value
+        let loadedAssets = try await loadTask.value
+
+        #expect(loadedAssets == [importedAsset])
+        #expect(try await environment.store.loadAssets() == [importedAsset])
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(await acceptedResourceRead.readCount() == 1)
+
+        let resource = try #require(importedAsset.resources.first)
+        #expect(try environment.resources.data(for: resource) == environment.sourceBytes)
+
+        let subsequentAssets = try await importer.loadAssets()
+        #expect(subsequentAssets == loadedAssets)
+        #expect(try await environment.store.loadAssets().count == 1)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+    }
+
+    @Test("A failed durable operation releases the importer gate for reconciliation")
+    func failedOperationReleasesGateForReconciliation() async throws {
+        let readFailure = FirstAcceptedResourceReadFailure()
+        let environment = try makeEnvironment(resourcesFactory: { root in
+            try FileMediaResourceRepository(
+                rootURL: root,
+                protectionOperation: { _ in },
+                acceptedResourceReadOperation: { try readFailure.read($0) },
+            )
+        })
+
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await environment.importer.importFile(at: environment.sourceURL)
+        }
+
+        let gateState = await environment.importer.durableOperationGateStateForTesting()
+        #expect(!gateState.isActive)
+        #expect(gateState.waiterCount == 0)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.first?.state == .validating)
+        #expect(
+            try Data(contentsOf: environment.resources.stagingURL(for: TestFixtures.resourceID))
+                == environment.sourceBytes,
+        )
+
+        try await environment.importer.reconcile()
+
+        let assets = try await environment.store.loadAssets()
+        let asset = try #require(assets.first)
+        let resource = try #require(asset.resources.first)
+        #expect(assets.count == 1)
+        #expect(try environment.resources.data(for: resource) == environment.sourceBytes)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(try await environment.importer.loadAssets() == assets)
+    }
+
+    @Test("Cancelling a queued durable operation does not strand the importer gate")
+    func cancellingQueuedOperationDoesNotStrandGate() async throws {
+        let acceptedResourceRead = SuspendedAcceptedResourceRead()
+        let environment = try makeEnvironment(resourcesFactory: { root in
+            try FileMediaResourceRepository(
+                rootURL: root,
+                protectionOperation: { _ in },
+                acceptedResourceReadOperation: { url in
+                    try await acceptedResourceRead.read(url)
+                },
+            )
+        })
+        let importer = environment.importer
+        let sourceURL = environment.sourceURL
+        let importTask = Task {
+            try await importer.importFile(at: sourceURL)
+        }
+        await acceptedResourceRead.waitForFirstReadSuspension()
+
+        let cancelledLoadTask = Task {
+            try await importer.loadAssets()
+        }
+        await importer.waitForDurableOperationWaiterForTesting()
+        cancelledLoadTask.cancel()
+        await #expect(throws: CancellationError.self) {
+            try await cancelledLoadTask.value
+        }
+
+        let cancelledGateState = await importer.durableOperationGateStateForTesting()
+        #expect(cancelledGateState.isActive)
+        #expect(cancelledGateState.waiterCount == 0)
+
+        let loadTask = Task {
+            try await importer.loadAssets()
+        }
+        await importer.waitForDurableOperationWaiterForTesting()
+        #expect(await importer.durableOperationGateStateForTesting().waiterCount == 1)
+
+        await acceptedResourceRead.releaseFirstRead()
+        _ = try await importTask.value
+        let assets = try await loadTask.value
+
+        #expect(assets.count == 1)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+    }
+
     @Test("Source access failure produces no canonical resource or asset")
     func rejectsSourceAccessFailure() async throws {
         let environment = try makeEnvironment()
@@ -968,7 +1095,8 @@ struct MediaLibraryImportTests {
         #expect(visibleAssets == [recoveredAsset, unrelatedAsset])
         #expect(journal.unreadableAssetIDs == [damagedAsset.id])
         #expect(try environment.resources.data(for: damagedResource) == environment.sourceBytes)
-        #expect(try environment.resources.data(for: #require(recoveredAsset.resources.first)) == environment.sourceBytes)
+        #expect(try environment.resources.data(for: #require(recoveredAsset.resources.first)) == environment
+            .sourceBytes)
     }
 
     @Test("A non-finite timestamp makes only its journal row unreadable")
@@ -1375,6 +1503,47 @@ private final class FirstAcceptedResourceReadFailure: @unchecked Sendable {
             throw InjectedAcceptedResourceReadFailure.unavailable
         }
         return try Data(contentsOf: url, options: [.mappedIfSafe])
+    }
+}
+
+private actor SuspendedAcceptedResourceRead {
+    private var didSuspendFirstRead = false
+    private var firstReadRelease: CheckedContinuation<Void, Never>?
+    private var firstReadObservers: [CheckedContinuation<Void, Never>] = []
+    private var readCountValue = 0
+
+    func read(_ url: URL) async throws -> Data {
+        readCountValue += 1
+        if !didSuspendFirstRead {
+            didSuspendFirstRead = true
+            await withCheckedContinuation { continuation in
+                firstReadRelease = continuation
+                let observers = firstReadObservers
+                firstReadObservers.removeAll(keepingCapacity: true)
+                observers.forEach { $0.resume() }
+            }
+        }
+
+        return try Data(contentsOf: url, options: [.mappedIfSafe])
+    }
+
+    func waitForFirstReadSuspension() async {
+        guard !didSuspendFirstRead else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            firstReadObservers.append(continuation)
+        }
+    }
+
+    func releaseFirstRead() {
+        firstReadRelease?.resume()
+        firstReadRelease = nil
+    }
+
+    func readCount() -> Int {
+        readCountValue
     }
 }
 

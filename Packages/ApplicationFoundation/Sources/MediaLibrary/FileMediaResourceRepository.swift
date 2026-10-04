@@ -15,7 +15,7 @@ public struct FileMediaResourceRepository: Sendable {
     private let rootURL: URL
     private let stagingURL: URL
     private let protectionOperation: @Sendable (URL) throws -> Void
-    private let acceptedResourceReadOperation: @Sendable (URL) throws -> Data
+    private let acceptedResourceReadOperation: @Sendable (URL) async throws -> Data
 
     /// Creates protected resource and staging directories below the supplied root.
     public init(rootURL: URL) throws {
@@ -33,7 +33,7 @@ public struct FileMediaResourceRepository: Sendable {
     public init(
         rootURL: URL,
         protectionOperation: @escaping @Sendable (URL) throws -> Void,
-        acceptedResourceReadOperation: @escaping @Sendable (URL) throws -> Data = { url in
+        acceptedResourceReadOperation: @escaping @Sendable (URL) async throws -> Data = { url in
             try Data(contentsOf: url, options: [.mappedIfSafe])
         },
     ) throws {
@@ -182,8 +182,8 @@ public struct FileMediaResourceRepository: Sendable {
     }
 
     /// Reads accepted bytes before image decoding classifies their contents.
-    func readAcceptedResource(at url: URL) throws -> Data {
-        try acceptedResourceReadOperation(url)
+    func readAcceptedResource(at url: URL) async throws -> Data {
+        try await acceptedResourceReadOperation(url)
     }
 
     /// Loads canonical bytes after validating that the database path remains relative and opaque.
@@ -307,6 +307,14 @@ public actor MediaLibraryImporter {
     private let source: MediaSourceClient
     private let id: @Sendable () -> UUID
     private let now: @Sendable () -> Date
+    private var hasActiveDurableOperation = false
+    private var durableOperationWaiters: [DurableOperationWaiter] = []
+    private var durableOperationWaiterObservers: [CheckedContinuation<Void, Never>] = []
+
+    private struct DurableOperationWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
 
     /// Creates an importer with explicit storage and source-access seams.
     @preconcurrency
@@ -326,6 +334,10 @@ public actor MediaLibraryImporter {
 
     /// Copies, validates, and durably commits one ordinary still image.
     public func importFile(at sourceURL: URL) async throws -> MediaAsset {
+        try await acquireDurableOperation()
+        defer { releaseDurableOperation() }
+        try Task.checkCancellation()
+
         let assetID = id()
         let resourceID = id()
         let stagingFileURL = resources.stagingURL(for: resourceID)
@@ -371,6 +383,10 @@ public actor MediaLibraryImporter {
 
     /// Reconciles durable imports before returning canonical Library assets.
     public func loadAssets() async throws -> [MediaAsset] {
+        try await acquireDurableOperation()
+        defer { releaseDurableOperation() }
+        try Task.checkCancellation()
+
         let existingAssets = try await store.loadAssets()
         let blockedIDs = await reconcile(using: existingAssets)
         return try await store.loadAssets().filter { !blockedIDs.contains($0.id) }
@@ -378,8 +394,71 @@ public actor MediaLibraryImporter {
 
     /// Resumes eligible imports without exposing journal transitions to clients.
     public func reconcile() async throws {
+        try await acquireDurableOperation()
+        defer { releaseDurableOperation() }
+        try Task.checkCancellation()
+
         let existingAssets = try await store.loadAssets()
         _ = await reconcile(using: existingAssets)
+    }
+
+    /// Waits until another durable operation is queued for importer concurrency tests.
+    func waitForDurableOperationWaiterForTesting() async {
+        guard durableOperationWaiters.isEmpty else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            durableOperationWaiterObservers.append(continuation)
+        }
+    }
+
+    /// Returns gate state for deterministic cancellation and failure tests.
+    func durableOperationGateStateForTesting() -> (isActive: Bool, waiterCount: Int) {
+        (hasActiveDurableOperation, durableOperationWaiters.count)
+    }
+
+    private func acquireDurableOperation() async throws {
+        try Task.checkCancellation()
+        guard hasActiveDurableOperation else {
+            hasActiveDurableOperation = true
+            return
+        }
+
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                durableOperationWaiters.append(
+                    DurableOperationWaiter(id: waiterID, continuation: continuation),
+                )
+                let observers = durableOperationWaiterObservers
+                durableOperationWaiterObservers.removeAll(keepingCapacity: true)
+                observers.forEach { $0.resume() }
+            }
+        } onCancel: {
+            Task {
+                await self.cancelDurableOperationWaiter(waiterID)
+            }
+        }
+    }
+
+    private func cancelDurableOperationWaiter(_ waiterID: UUID) {
+        guard let index = durableOperationWaiters.firstIndex(where: { $0.id == waiterID }) else {
+            return
+        }
+
+        let waiter = durableOperationWaiters.remove(at: index)
+        waiter.continuation.resume(throwing: CancellationError())
+    }
+
+    private func releaseDurableOperation() {
+        guard !durableOperationWaiters.isEmpty else {
+            hasActiveDurableOperation = false
+            return
+        }
+
+        let next = durableOperationWaiters.removeFirst()
+        next.continuation.resume()
     }
 
     private func reconcile(using existingAssets: [MediaAsset]) async -> Set<UUID> {
@@ -436,9 +515,9 @@ public actor MediaLibraryImporter {
                 let inspection: ImageInspection
                 do {
                     if FileManager.default.fileExists(atPath: stageURL.path) {
-                        inspection = try inspectStillImage(at: stageURL)
+                        inspection = try await inspectStillImage(at: stageURL)
                     } else if FileManager.default.fileExists(atPath: finalURL.path) {
-                        inspection = try inspectStillImage(at: finalURL)
+                        inspection = try await inspectStillImage(at: finalURL)
                     } else {
                         throw AcceptedResourceReadError()
                     }
@@ -555,10 +634,10 @@ public actor MediaLibraryImporter {
         return sha256
     }
 
-    private func inspectStillImage(at url: URL) throws -> ImageInspection {
+    private func inspectStillImage(at url: URL) async throws -> ImageInspection {
         let bytes: Data
         do {
-            bytes = try resources.readAcceptedResource(at: url)
+            bytes = try await resources.readAcceptedResource(at: url)
         } catch {
             throw AcceptedResourceReadError()
         }
