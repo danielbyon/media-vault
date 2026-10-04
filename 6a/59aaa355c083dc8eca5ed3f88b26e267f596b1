@@ -1,0 +1,39 @@
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/MediaLibraryImportTests.swift
+  s_8d618134657817::t_861a86daf52914 941-947,956,958-971,976
+  s_8d618134657817::t_0ca8fc41afca47 873-902,911,925,928
+  s_8d618134657817::t_f743760a59fe03 931-940,948-955,957,972-975
+  s_8d618134657817::t_6ec51cadc4ab48 929-930
+Packages/ApplicationFoundation/Sources/MediaLibrary/MediaIngestionJournalEntry.swift
+  s_8d618134657817::t_b8bd4ddce4b592 382,418,420-421
+  s_8d618134657817::t_df4f79aa288070 266,271
+  s_8d618134657817::t_2b7fdce18290f0 272,279,282,285,289,301-358,360-370,373-378,380-381,383-388,391-396,398-404,407-413,416-417,419,422-424
+  s_8d618134657817::t_22c5c84a562e98 9,359,371-372,379,389-390,397,405-406,414-415,425
+  s_8d618134657817::t_11d1807287d5af 426-427
+Packages/ApplicationFoundation/Package.swift
+  s_8d618134657817::t_9508899e1d621e 29-31,124
+  s_09b05cf592369e::t_cf0f263e2b1bae 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6a59aaa355c083dc8eca5ed3f88b26e267f596b1",
+  "prompts": {},
+  "sessions": {
+    "s_09b05cf592369e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0f8e2-4b10-7ff1-bbb2-622c77762fbd",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_8d618134657817": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1069c-b3f6-7f53-98ee-f86102f9a247",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
