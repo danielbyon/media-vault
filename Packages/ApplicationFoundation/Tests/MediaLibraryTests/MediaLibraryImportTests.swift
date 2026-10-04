@@ -86,6 +86,49 @@ struct MediaLibraryImportTests {
         #expect(finalResourceURLs(in: environment.resources).isEmpty)
     }
 
+    @Test("A temporary accepted-resource read failure remains resumable")
+    func temporaryAcceptedResourceReadFailureIsResumable() async throws {
+        let readFailure = FirstAcceptedResourceReadFailure()
+        let environment = try makeEnvironment(resourcesFactory: { root in
+            try FileMediaResourceRepository(
+                rootURL: root,
+                protectionOperation: { _ in },
+                acceptedResourceReadOperation: { try readFailure.read($0) },
+            )
+        })
+        let entry = MediaIngestionJournalEntry(
+            id: TestFixtures.assetID,
+            resourceID: TestFixtures.resourceID,
+            state: .received,
+            sourceFilename: "holiday-photo.png",
+            importedAt: TestFixtures.importedAt,
+        )
+        let stagingURL = environment.resources.stagingURL(for: entry.resourceID)
+        try environment.sourceBytes.write(to: stagingURL)
+        try environment.resources.protectStaging(for: entry.resourceID)
+        try await environment.store.ingestionJournal.accept(entry)
+        _ = try await environment.store.ingestionJournal.transition(entry, to: .validating)
+
+        let firstAssets = try await environment.importer.loadAssets()
+
+        #expect(firstAssets.isEmpty)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.first?.state == .validating)
+        #expect(try Data(contentsOf: stagingURL) == environment.sourceBytes)
+
+        let resumedAssets = try await environment.importer.loadAssets()
+
+        let asset = try #require(resumedAssets.first)
+        let resource = try #require(asset.resources.first)
+        #expect(resumedAssets.count == 1)
+        #expect(asset.id == entry.id)
+        #expect(resource.byteCount == Int64(environment.sourceBytes.count))
+        #expect(resource.sha256 == SHA256.hash(data: environment.sourceBytes).hexString)
+        #expect(try environment.resources.data(for: resource) == environment.sourceBytes)
+        #expect(try await environment.store.loadAssets() == [asset])
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: stagingURL.path))
+    }
+
     @Test("Source access failure produces no canonical resource or asset")
     func rejectsSourceAccessFailure() async throws {
         let environment = try makeEnvironment()
@@ -1316,6 +1359,27 @@ private final class IDSequence: @unchecked Sendable {
         defer { lock.unlock() }
         return ids.removeFirst()
     }
+}
+
+private final class FirstAcceptedResourceReadFailure: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didFail = false
+
+    func read(_ url: URL) throws -> Data {
+        lock.lock()
+        let shouldFail = !didFail
+        didFail = true
+        lock.unlock()
+
+        if shouldFail {
+            throw InjectedAcceptedResourceReadFailure.unavailable
+        }
+        return try Data(contentsOf: url, options: [.mappedIfSafe])
+    }
+}
+
+private enum InjectedAcceptedResourceReadFailure: Error {
+    case unavailable
 }
 
 private func requiredUUID(_ string: String) -> UUID {

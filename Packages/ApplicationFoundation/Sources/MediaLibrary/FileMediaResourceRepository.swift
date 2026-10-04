@@ -15,6 +15,7 @@ public struct FileMediaResourceRepository: Sendable {
     private let rootURL: URL
     private let stagingURL: URL
     private let protectionOperation: @Sendable (URL) throws -> Void
+    private let acceptedResourceReadOperation: @Sendable (URL) throws -> Data
 
     /// Creates protected resource and staging directories below the supplied root.
     public init(rootURL: URL) throws {
@@ -26,17 +27,21 @@ public struct FileMediaResourceRepository: Sendable {
         )
     }
 
-    /// Creates a repository with an injected protection operation for deterministic failure tests.
+    /// Creates a repository with injected filesystem operations for deterministic failure tests.
     @preconcurrency
     @_spi(Testing)
     public init(
         rootURL: URL,
         protectionOperation: @escaping @Sendable (URL) throws -> Void,
+        acceptedResourceReadOperation: @escaping @Sendable (URL) throws -> Data = { url in
+            try Data(contentsOf: url, options: [.mappedIfSafe])
+        },
     ) throws {
         let normalizedRootURL = rootURL.standardizedFileURL
         self.rootURL = normalizedRootURL
         stagingURL = normalizedRootURL.appendingPathComponent(".staging", isDirectory: true)
         self.protectionOperation = protectionOperation
+        self.acceptedResourceReadOperation = acceptedResourceReadOperation
         let fileManager = FileManager.default
 
         try fileManager.createDirectory(at: self.rootURL, withIntermediateDirectories: true)
@@ -174,6 +179,11 @@ public struct FileMediaResourceRepository: Sendable {
     /// Returns the final URL for a resource's opaque relative path.
     public func url(for resource: MediaResource) -> URL {
         rootURL.appendingPathComponent(resource.relativePath, isDirectory: false)
+    }
+
+    /// Reads accepted bytes before image decoding classifies their contents.
+    func readAcceptedResource(at url: URL) throws -> Data {
+        try acceptedResourceReadOperation(url)
     }
 
     /// Loads canonical bytes after validating that the database path remains relative and opaque.
@@ -430,7 +440,7 @@ public actor MediaLibraryImporter {
                     } else if FileManager.default.fileExists(atPath: finalURL.path) {
                         inspection = try inspectStillImage(at: finalURL)
                     } else {
-                        throw MediaImportError.unrenderableMedia
+                        throw AcceptedResourceReadError()
                     }
                 } catch let error as MediaImportError {
                     try? await store.ingestionJournal.transition(entry, to: .failed)
@@ -546,7 +556,14 @@ public actor MediaLibraryImporter {
     }
 
     private func inspectStillImage(at url: URL) throws -> ImageInspection {
-        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+        let bytes: Data
+        do {
+            bytes = try resources.readAcceptedResource(at: url)
+        } catch {
+            throw AcceptedResourceReadError()
+        }
+
+        guard let imageSource = CGImageSourceCreateWithData(bytes as CFData, nil) else {
             throw MediaImportError.unrenderableMedia
         }
 
@@ -573,18 +590,13 @@ public actor MediaLibraryImporter {
             throw MediaImportError.unsupportedMedia
         }
 
-        do {
-            let bytes = try Data(contentsOf: url, options: [.mappedIfSafe])
-            let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any]
-            return ImageInspection(
-                uti: sourceTypeString,
-                byteCount: Int64(bytes.count),
-                sha256: SHA256.hash(data: bytes).hexString,
-                capturedAt: captureDate(from: properties),
-            )
-        } catch {
-            throw MediaImportError.unrenderableMedia
-        }
+        let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any]
+        return ImageInspection(
+            uti: sourceTypeString,
+            byteCount: Int64(bytes.count),
+            sha256: SHA256.hash(data: bytes).hexString,
+            capturedAt: captureDate(from: properties),
+        )
     }
 
     private func captureDate(from properties: [String: Any]?) -> Date? {
@@ -602,6 +614,9 @@ public actor MediaLibraryImporter {
         return formatter.date(from: dateString)
     }
 }
+
+/// Keeps accepted work resumable when its bytes cannot currently be read.
+private struct AcceptedResourceReadError: Error, Sendable {}
 
 struct ImageInspection: Sendable {
     let uti: String
