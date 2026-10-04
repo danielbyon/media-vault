@@ -1,0 +1,42 @@
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorDecoyAdapterTests.swift
+  s_137a2dd3cb2cd1::t_5820817314ad55 82-108
+BrowserTabOverviewUITestHost/BrowserTabOverviewUITestHost.swift
+  s_137a2dd3cb2cd1::t_5820817314ad55 8,17-23,28-52
+  s_137a2dd3cb2cd1::t_1837fea230dfb5 53-54
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorViewSnapshotTests.swift
+  s_137a2dd3cb2cd1::t_5820817314ad55 24,29-56,60,70,93,119,148-152,163-164,180-184,192-193
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorDecoyAdapter.swift
+  s_137a2dd3cb2cd1::t_5820817314ad55 313-322
+AppTests/RootSurfaceSnapshotTests.swift
+  s_137a2dd3cb2cd1::t_5820817314ad55 29,37,45,50,55
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorView.swift
+  s_137a2dd3cb2cd1::t_a75c9380a46f77 82-89,91-93,106-122,124
+  s_137a2dd3cb2cd1::t_5820817314ad55 12,14-16,20-28,81,90,123,125-198,209,224,226,245,287,294,306-308
+App.xcodeproj/project.pbxproj
+  s_137a2dd3cb2cd1::t_5820817314ad55 21-22,39,68,161,228,363,641-644
+  s_137a2dd3cb2cd1::t_90fcf25963e06f 645
+BrowserTabOverviewUITests/CalculatorHardwareKeyboardUITests.swift
+  s_137a2dd3cb2cd1::t_c90baf6e03cb78 1-73
+Packages/ApplicationFoundation/Sources/CalculatorFeature/CalculatorAdaptiveLayout.swift
+  s_137a2dd3cb2cd1::t_c6504545361b38 1-98
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorAdaptiveLayoutTests.swift
+  s_137a2dd3cb2cd1::t_07e04ac4dafc68 1-60
+Packages/ApplicationFoundation/Tests/CalculatorFeatureTests/CalculatorKeyboardInputTests.swift
+  s_137a2dd3cb2cd1::t_d9a832ff4dab0a 1-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9dd9b967acbbb6c25e677235dd3708f978220cba",
+  "prompts": {},
+  "sessions": {
+    "s_137a2dd3cb2cd1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10423-b111-7301-97e0-9a0fb8f2b4bc",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
