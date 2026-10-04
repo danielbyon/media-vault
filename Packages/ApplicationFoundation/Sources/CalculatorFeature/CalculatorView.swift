@@ -9,14 +9,23 @@ import ComposableArchitecture
 import Dependencies
 import SwiftUI
 
-/// A width-agnostic calculator surface for compact phones, large phones, and regular-width iPads.
+/// A calculator surface that adapts its basic keypad and history to the available width.
 ///
-/// The view uses flexible grid columns and a centered maximum content width. It does not inspect
-/// device models or branch on iPhone/iPad identity; later adaptive-layout work can extend this
-/// surface without changing the reducer or persistence contracts.
+/// Compact, narrow, and accessibility-sized layouts keep the keypad and supporting content in a
+/// vertical reading order. Regular-width layouts place the keypad beside history when both columns
+/// fit. Hardware-keyboard input enters through the same button actions as touch input.
 @MainActor
 @preconcurrency
 public struct CalculatorView: View {
+    @Environment(\.horizontalSizeClass)
+    private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize)
+    private var dynamicTypeSize
+    @FocusState
+    private var focusedControl: FocusedControl?
+    @ScaledMetric(relativeTo: .largeTitle)
+    private var displayFontSize = 44
+
     private let store: StoreOf<CalculatorFeature>
     private let presentationOverride: CalculatorPresentation?
     private let displayOverride: String?
@@ -69,21 +78,22 @@ public struct CalculatorView: View {
 
     /// Renders the display, controls, keypad, and calculation history.
     public var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                displayPanel
-                if store.persistenceError != nil {
-                    persistenceFailurePanel
+        GeometryReader { geometry in
+            Group {
+                if store.isLoading {
+                    calculatorScrollView(availableWidth: geometry.size.width)
+                } else {
+                    calculatorScrollView(availableWidth: geometry.size.width)
+                        .defaultFocus($focusedControl, .keypad(.clear))
                 }
-                clipboardControls
-                keypad
-                historyPanel
             }
-            .frame(maxWidth: 520)
-            .padding(16)
-            .frame(maxWidth: .infinity)
+            .onKeyPress(action: handleKeyPress)
+            .onChange(of: store.isLoading) { _, isLoading in
+                if isLoading {
+                    focusedControl = nil
+                }
+            }
         }
-        .background(Color(uiColor: .systemBackground))
         .task {
             guard loadsPersistenceOnAppear else {
                 return
@@ -91,6 +101,99 @@ public struct CalculatorView: View {
 
             await store.send(.task).finish()
         }
+    }
+
+    /// Builds the calculator scroll view at the width supplied by its parent layout.
+    private func calculatorScrollView(availableWidth: CGFloat) -> some View {
+        ScrollView {
+            Group {
+                if CalculatorAdaptiveLayout.usesSideBySideLayout(
+                    horizontalSizeClass: horizontalSizeClass,
+                    dynamicTypeSize: dynamicTypeSize,
+                    availableWidth: availableWidth,
+                ) {
+                    sideBySideContent
+                } else {
+                    verticalContent
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(16)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private enum FocusedControl: Hashable {
+        case keypad(CalculatorButton)
+        case copy
+        case paste
+        case retry
+        case clearHistory
+    }
+
+    private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
+        let focusedControlIsNonKeypad =
+            if let focusedControl {
+                if case .keypad = focusedControl {
+                    false
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
+
+        if CalculatorHardwareKeyMapper.shouldDeferNativeActivation(
+            for: keyPress.characters,
+            focusedControlIsNonKeypad: focusedControlIsNonKeypad,
+        ) {
+            return .ignored
+        }
+
+        guard let button = CalculatorHardwareKeyMapper.button(
+            for: keyPress.characters,
+            isDelete: keyPress.key == .delete,
+            isEscape: keyPress.key == .escape,
+        ) else {
+            return .ignored
+        }
+
+        inputHandler(.button(button))
+        return .handled
+    }
+
+    private var verticalContent: some View {
+        VStack(spacing: 16) {
+            displayPanel
+            if store.persistenceError != nil {
+                persistenceFailurePanel
+            }
+            clipboardControls
+            keypad
+            historyPanel
+        }
+        .frame(maxWidth: 520)
+    }
+
+    private var sideBySideContent: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(spacing: 16) {
+                displayPanel
+                keypad
+            }
+            .frame(minWidth: 320, maxWidth: 520)
+
+            VStack(spacing: 16) {
+                if store.persistenceError != nil {
+                    persistenceFailurePanel
+                }
+                clipboardControls
+                historyPanel
+            }
+            .frame(minWidth: 240, maxWidth: 360)
+        }
+        .frame(maxWidth: 896)
     }
 
     private var displayPanel: some View {
@@ -103,7 +206,7 @@ public struct CalculatorView: View {
                 .minimumScaleFactor(0.6)
 
             Text(renderedPresentation.error == nil ? renderedPresentation.display : "Error")
-                .font(.system(size: 44, weight: .regular, design: .rounded).monospacedDigit())
+                .font(.system(size: displayFontSize, weight: .regular, design: .rounded).monospacedDigit())
                 .foregroundStyle(renderedPresentation.error == nil ? Color.primary : Color.red)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .lineLimit(1)
@@ -118,7 +221,9 @@ public struct CalculatorView: View {
     private var clipboardControls: some View {
         HStack(spacing: 12) {
             Button("Copy") { inputHandler(.button(.copy)) }
+                .focused($focusedControl, equals: .copy)
             Button("Paste") { inputHandler(.button(.paste)) }
+                .focused($focusedControl, equals: .paste)
         }
         .buttonStyle(.bordered)
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -137,6 +242,7 @@ public struct CalculatorView: View {
                 inputHandler(.retryPersistence)
             }
             .buttonStyle(.bordered)
+            .focused($focusedControl, equals: .retry)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -178,13 +284,14 @@ public struct CalculatorView: View {
             inputHandler(.button(key.button))
         } label: {
             Text(key.title)
-                .font(.system(size: 21, weight: .medium, design: .rounded))
+                .font(.system(.title3, design: .rounded, weight: .medium))
                 .frame(maxWidth: .infinity, minHeight: 48)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderedProminent)
         .tint(key.isOperator ? .orange : .gray)
         .accessibilityLabel(key.accessibilityLabel)
+        .focused($focusedControl, equals: .keypad(key.button))
     }
 
     private var historyPanel: some View {
@@ -196,6 +303,9 @@ public struct CalculatorView: View {
                 if !store.history.isEmpty {
                     Button("Clear") { inputHandler(.button(.clearHistory)) }
                         .font(.subheadline)
+                        .accessibilityLabel("Clear history")
+                        .accessibilityIdentifier("calculator.clear-history")
+                        .focused($focusedControl, equals: .clearHistory)
                 }
             }
 

@@ -79,6 +79,33 @@ struct CalculatorDecoyAdapterTests {
         await store.finish()
     }
 
+    @Test("PIN capture defers a first digit when calculator editing rejects it")
+    func pinCaptureRequiresOrdinaryAcceptanceForClosedOperands() async {
+        let calculators = [
+            CalculatorFeature.State(
+                snapshot: CalculatorSnapshot(display: "2", expression: "(2)"),
+            ),
+            CalculatorFeature.State(
+                snapshot: CalculatorSnapshot(display: "0.5", expression: "50%"),
+            ),
+        ]
+
+        for calculator in calculators {
+            let store = makeAdapterStore(
+                calculator: calculator,
+                configuration: configuration(pinEqualsEnabled: true),
+            )
+
+            await store.send(.input(.button(.digit(7))))
+            await store.receive(.calculator(.button(.digit(7))))
+
+            #expect(store.state.lifecycle == .idle)
+            #expect(store.state.calculator.display == calculator.display)
+            #expect(store.state.calculator.expression == calculator.expression)
+            await store.finish()
+        }
+    }
+
     @Test("PIN capture projects digits without changing or saving calculator state")
     func captureProjectsTransientDigits() async {
         let saves = LockIsolated<[CalculatorSnapshot]>([])

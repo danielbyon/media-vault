@@ -310,9 +310,16 @@ public struct CalculatorDecoyAdapter {
     }
 
     private func shouldBeginCapture(_ digit: Int, state: State) -> Bool {
-        (0 ... 9).contains(digit)
-            && !state.calculator.isLoading
-            && state.triggerConfiguration.isEnabled(Self.pinEqualsTrigger.id)
+        guard (0 ... 9).contains(digit),
+              !state.calculator.isLoading,
+              state.triggerConfiguration.isEnabled(Self.pinEqualsTrigger.id)
+        else {
+            return false
+        }
+
+        // Applying the digit to a copy checks ordinary editing rules without saving state.
+        var projectedCalculator = state.calculator
+        return CalculatorFeature().apply(.digit(digit), to: &projectedCalculator)
     }
 
     /// Applies buffered digits and an optional following action through the calculator reducer.
