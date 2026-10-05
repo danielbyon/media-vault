@@ -61,6 +61,40 @@ struct MediaLibrarySnapshotTests {
         )
     }
 
+    @Test("The ingestion journal mapping has a stable structural snapshot")
+    func persistedIngestionJournalMapping() async throws {
+        let database = try PersistenceStore.makeInMemory()
+        let store = SQLiteMediaLibraryStore(database: database)
+        let received = MediaIngestionJournalEntry(
+            id: requiredUUID("00000000-0000-0000-0000-000000000040"),
+            resourceID: requiredUUID("00000000-0000-0000-0000-000000000041"),
+            state: .received,
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        try await store.ingestionJournal.accept(received)
+        let validating = try await store.ingestionJournal.transition(received, to: .validating)
+        let inspection = ImageInspection(
+            uti: "public.png",
+            byteCount: 68,
+            sha256: String(repeating: "a", count: 64),
+            capturedAt: Date(timeIntervalSince1970: 1_724_999_000),
+        )
+        let duplicateCheck = try await store.ingestionJournal.transition(
+            validating,
+            to: .duplicateCheck,
+            inspection: inspection,
+        )
+        let ready = try await store.ingestionJournal.transition(duplicateCheck, to: .ready)
+        let persisted = try #require(try await store.ingestionJournal.snapshot().entries.first)
+
+        assertSnapshot(
+            of: persisted,
+            as: .customDump,
+        )
+        #expect(persisted == ready)
+    }
+
     @Test("The empty Library state fits a compact phone")
     func emptyLibraryCompactPhone() {
         assertSnapshot(

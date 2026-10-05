@@ -72,7 +72,7 @@ extension MediaLibraryClient: DependencyKey {
             let importer = MediaLibraryImporter(store: store, resources: resources)
 
             return Self(
-                loadAssets: { try await store.loadAssets() },
+                loadAssets: { try await importer.loadAssets() },
                 importFile: { try await importer.importFile(at: $0) },
                 resourceData: { try resources.data(for: $0) },
             )
