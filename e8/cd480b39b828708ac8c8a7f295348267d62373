@@ -1,0 +1,14 @@
+.github/workflows/tests.yml
+  h_a1fa5c19d60fed 30-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e8cd480b39b828708ac8c8a7f295348267d62373",
+  "prompts": {},
+  "humans": {
+    "h_a1fa5c19d60fed": {
+      "author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
