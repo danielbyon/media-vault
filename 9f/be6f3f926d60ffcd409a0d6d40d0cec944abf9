@@ -1,0 +1,16 @@
+App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
+  h_a1fa5c19d60fed 42-43
+AppHostedTests/BrowserViewInteractionTests.swift
+  h_a1fa5c19d60fed 36-40,156-160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9fbe6f3f926d60ffcd409a0d6d40d0cec944abf9",
+  "prompts": {},
+  "humans": {
+    "h_a1fa5c19d60fed": {
+      "author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
