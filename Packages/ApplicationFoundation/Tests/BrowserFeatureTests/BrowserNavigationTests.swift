@@ -62,8 +62,8 @@ struct BrowserNavigationTests {
     }
 
     @Test("Bookmark validation shares browser web normalization")
-    func bookmarkValidation() throws {
-        #expect(try BrowserNavigation.bookmarkURL(" example.com ") == #require(URL(string: "https://example.com")))
+    func bookmarkValidation() {
+        #expect(BrowserNavigation.bookmarkURL(" example.com ")?.absoluteString == "https://example.com")
         #expect(BrowserNavigation.bookmarkURL("mailto:person@example.com") == nil)
         #expect(BrowserNavigation.bookmarkURL("words to search") == nil)
     }

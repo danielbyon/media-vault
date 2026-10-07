@@ -115,7 +115,7 @@ public struct CalculatorFeature {
     @Dependency(\.calculatorPersistence)
     var persistence
     @Dependency(\.date.now)
-    var now
+    var now: Date
     @Dependency(\.uuid)
     var uuid
 

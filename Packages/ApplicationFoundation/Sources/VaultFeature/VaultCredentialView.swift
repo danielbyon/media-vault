@@ -13,7 +13,6 @@ import UIKit
 
 /// The setup and normal-authentication surface for the vault boundary.
 @MainActor
-@preconcurrency
 public struct VaultCredentialView: View {
     private let store: StoreOf<VaultFeature>
 
@@ -171,7 +170,6 @@ public struct VaultCredentialView: View {
 
 /// The authenticated library, collections, and browser shell.
 @MainActor
-@preconcurrency
 public struct VaultShellView: View {
     private let store: StoreOf<VaultShellFeature>
 

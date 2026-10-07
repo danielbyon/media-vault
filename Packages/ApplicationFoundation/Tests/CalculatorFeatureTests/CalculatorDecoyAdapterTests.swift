@@ -9,6 +9,7 @@ import ComposableArchitecture
 import ConcurrencyExtras
 import CustomDump
 import DecoySupport
+import Dependencies
 import Foundation
 import Testing
 @testable import CalculatorFeature

@@ -38,7 +38,7 @@ extension BrowserFeature {
         }
     }
 
-    func navigate(url: URL, tabID: BrowserTabID? = nil, state: inout State) -> Effect<Action> {
+    func navigate(url: URL, state: inout State, tabID: BrowserTabID? = nil) -> Effect<Action> {
         let targetTabID = tabID ?? state.selectedTabID
         guard !deferWebAction(.navigate(tabID: targetTabID, url: url), state: &state) else {
             return .none
@@ -189,7 +189,7 @@ extension BrowserFeature {
             state.tabOverviewFocusID = nil
         }
         let lazyURL = wasSelected ? state.lazyRestoredWebTabURLs.removeValue(forKey: state.selectedTabID) : nil
-        let restoreEffect = lazyURL.map { navigate(url: $0, tabID: state.selectedTabID, state: &state) } ?? .none
+        let restoreEffect = lazyURL.map { navigate(url: $0, state: &state, tabID: state.selectedTabID) } ?? .none
         return .merge(dismissalEffect, command(.destroyContext(tabID: tabID)), restoreEffect)
     }
 
@@ -204,7 +204,7 @@ extension BrowserFeature {
             return dismissalEffect
         }
 
-        return .merge(dismissalEffect, navigate(url: url, tabID: tabID, state: &state))
+        return .merge(dismissalEffect, navigate(url: url, state: &state, tabID: tabID))
     }
 
     func handle(event: BrowserWebKitEvent, state: inout State) -> Effect<Action> {
@@ -530,10 +530,6 @@ extension BrowserFeature {
         }
     }
 
-    func selectedCommand(state: State, _ make: (BrowserTabID) -> BrowserWebKitCommand) -> Effect<Action> {
-        command(make(state.selectedTabID))
-    }
-
     func command(_ value: BrowserWebKitCommand) -> Effect<Action> {
         let execute = webKit.execute
         return .run { _ in await execute(value) }
@@ -729,7 +725,7 @@ extension BrowserFeature {
             return .none
         }
 
-        return navigate(url: selectedURL, tabID: restoration.selectedTabID, state: &state)
+        return navigate(url: selectedURL, state: &state, tabID: restoration.selectedTabID)
     }
 
     /// Holds WebKit-bound navigation until the adapter confirms the profile that owns its context.
@@ -752,7 +748,7 @@ extension BrowserFeature {
         state.pendingWebAction = nil
         switch pendingWebAction {
         case let .navigate(tabID, url):
-            return navigate(url: url, tabID: tabID, state: &state)
+            return navigate(url: url, state: &state, tabID: tabID)
         case let .openInNewTab(url, openerID):
             return .send(.openInNewTab(url, openerID: openerID))
         }

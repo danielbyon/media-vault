@@ -20,6 +20,19 @@
 		A10000000000000000000029 /* BrowserTabOverviewScrollUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000D /* BrowserTabOverviewScrollUITests.swift */; };
 		A10000000000000000000030 /* CalculatorFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000006 /* CalculatorFeature */; };
 		A10000000000000000000031 /* CalculatorHardwareKeyboardUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* CalculatorHardwareKeyboardUITests.swift */; };
+			A10000000000000000000032 /* AppHostedTestHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* AppHostedTestHost.swift */; };
+			A10000000000000000000033 /* UIKitTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* UIKitTestSupport.swift */; };
+			A10000000000000000000034 /* AppHostedBrowserWebKitAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* AppHostedBrowserWebKitAdapterTests.swift */; };
+			A10000000000000000000035 /* AppHostedBrowserProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* AppHostedBrowserProfileTests.swift */; };
+			A10000000000000000000036 /* AppHostedRootFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* AppHostedRootFeatureTests.swift */; };
+			A10000000000000000000037 /* BrowserTabTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* BrowserTabTransitionTests.swift */; };
+			A10000000000000000000038 /* BrowserViewInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* BrowserViewInteractionTests.swift */; };
+			A10000000000000000000039 /* BrowserProfileConfigurationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* BrowserProfileConfigurationGate.swift */; };
+			A1000000000000000000003A /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
+			A1000000000000000000003B /* BrowserFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000005 /* BrowserFeature */; };
+			A1000000000000000000003C /* FoundationTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000003 /* FoundationTestSupport */; };
+			A1000000000000000000003D /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000002 /* ComposableArchitecture */; };
+			A1000000000000000000003E /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +50,16 @@
 		B1000000000000000000000C /* BrowserTabOverviewUITestHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabOverviewUITestHost.swift; sourceTree = "<group>"; };
 		B1000000000000000000000D /* BrowserTabOverviewScrollUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabOverviewScrollUITests.swift; sourceTree = "<group>"; };
 		B1000000000000000000000E /* CalculatorHardwareKeyboardUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalculatorHardwareKeyboardUITests.swift; sourceTree = "<group>"; };
+			B1000000000000000000000F /* AppHostedTestHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHostedTestHost.swift; sourceTree = "<group>"; };
+			B10000000000000000000010 /* UIKitTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitTestSupport.swift; sourceTree = "<group>"; };
+			B10000000000000000000011 /* AppHostedBrowserWebKitAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHostedBrowserWebKitAdapterTests.swift; sourceTree = "<group>"; };
+			B10000000000000000000012 /* AppHostedBrowserProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHostedBrowserProfileTests.swift; sourceTree = "<group>"; };
+			B10000000000000000000013 /* AppHostedRootFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHostedRootFeatureTests.swift; sourceTree = "<group>"; };
+			B10000000000000000000014 /* BrowserTabTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabTransitionTests.swift; sourceTree = "<group>"; };
+			B10000000000000000000015 /* BrowserViewInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserViewInteractionTests.swift; sourceTree = "<group>"; };
+			B10000000000000000000016 /* BrowserProfileConfigurationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserProfileConfigurationGate.swift; sourceTree = "<group>"; };
+			B10000000000000000000017 /* AppHostedTestHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppHostedTestHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+			B10000000000000000000018 /* AppHostedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppHostedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,6 +99,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+			C10000000000000000000011 /* Frameworks */ = {
+				isa = PBXFrameworksBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
+			C10000000000000000000014 /* Frameworks */ = {
+				isa = PBXFrameworksBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					A1000000000000000000003A,
+					A1000000000000000000003B,
+					A1000000000000000000003C,
+					A1000000000000000000003D,
+					A1000000000000000000003E,
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -84,6 +126,8 @@
 			children = (
 				E10000000000000000000003 /* App */,
 				E10000000000000000000004 /* AppTests */,
+				E1000000000000000000000A /* AppHostedTestHost */,
+				E1000000000000000000000B /* AppHostedTests */,
 				E10000000000000000000008 /* BrowserTabOverviewUITestHost */,
 				E10000000000000000000009 /* BrowserTabOverviewUITests */,
 				E10000000000000000000007 /* Packages */,
@@ -96,6 +140,8 @@
 			children = (
 				B10000000000000000000001 /* App.app */,
 				B10000000000000000000002 /* AppTests.xctest */,
+				B10000000000000000000017 /* AppHostedTestHost.app */,
+				B10000000000000000000018 /* AppHostedTests.xctest */,
 				B1000000000000000000000A /* BrowserTabOverviewUITestHost.app */,
 				B1000000000000000000000B /* BrowserTabOverviewUITests.xctest */,
 			);
@@ -163,6 +209,27 @@
 			path = BrowserTabOverviewUITests;
 			sourceTree = "<group>";
 		};
+			E1000000000000000000000A /* AppHostedTestHost */ = {
+				isa = PBXGroup;
+				children = (
+					B1000000000000000000000F /* AppHostedTestHost.swift */,
+				);
+				path = AppHostedTestHost;
+				sourceTree = "<group>";
+			};
+			E1000000000000000000000B /* AppHostedTests */ = {
+				isa = PBXGroup;
+				children = (
+					B10000000000000000000010 /* UIKitTestSupport.swift */,
+					B10000000000000000000011 /* AppHostedBrowserWebKitAdapterTests.swift */,
+					B10000000000000000000012 /* AppHostedBrowserProfileTests.swift */,
+					B10000000000000000000013 /* AppHostedRootFeatureTests.swift */,
+					B10000000000000000000014 /* BrowserTabTransitionTests.swift */,
+					B10000000000000000000015 /* BrowserViewInteractionTests.swift */,
+				);
+				path = AppHostedTests;
+				sourceTree = "<group>";
+			};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -249,6 +316,49 @@
 			productReference = B1000000000000000000000B /* BrowserTabOverviewUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+			D10000000000000000000005 /* AppHostedTestHost */ = {
+				isa = PBXNativeTarget;
+				buildConfigurationList = F10000000000000000000014 /* Build configuration list for PBXNativeTarget "AppHostedTestHost" */;
+				buildPhases = (
+					C1000000000000000000000F /* Sources */,
+					C10000000000000000000010 /* Resources */,
+					C10000000000000000000011 /* Frameworks */,
+				);
+				buildRules = (
+				);
+				dependencies = (
+				);
+				name = AppHostedTestHost;
+				productName = AppHostedTestHost;
+				productReference = B10000000000000000000017 /* AppHostedTestHost.app */;
+				productType = "com.apple.product-type.application";
+			};
+			D10000000000000000000006 /* AppHostedTests */ = {
+				isa = PBXNativeTarget;
+				buildConfigurationList = F10000000000000000000015 /* Build configuration list for PBXNativeTarget "AppHostedTests" */;
+				buildPhases = (
+					C10000000000000000000012 /* Sources */,
+					C10000000000000000000013 /* Resources */,
+					C10000000000000000000014 /* Frameworks */,
+				);
+				buildRules = (
+				);
+				dependencies = (
+					H10000000000000000000002 /* PBXTargetDependency */,
+				);
+				name = AppHostedTests;
+				packageProductDependencies = (
+					120000000000000000000001 /* AppFeature */,
+					120000000000000000000005 /* BrowserFeature */,
+					120000000000000000000003 /* FoundationTestSupport */,
+					120000000000000000000006 /* CalculatorFeature */,
+					120000000000000000000002 /* ComposableArchitecture */,
+					120000000000000000000007 /* VaultFeature */,
+				);
+				productName = AppHostedTests;
+				productReference = B10000000000000000000018 /* AppHostedTests.xctest */;
+				productType = "com.apple.product-type.bundle.unit-test";
+			};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -270,6 +380,13 @@
 					D10000000000000000000004 = {
 						CreatedOnToolsVersion = 2700;
 						TestTargetID = D10000000000000000000003;
+					};
+					D10000000000000000000005 = {
+						CreatedOnToolsVersion = 2700;
+					};
+					D10000000000000000000006 = {
+						CreatedOnToolsVersion = 2700;
+						TestTargetID = D10000000000000000000005;
 					};
 				};
 			};
@@ -295,6 +412,8 @@
 				D10000000000000000000002 /* AppTests */,
 				D10000000000000000000003 /* BrowserTabOverviewUITestHost */,
 				D10000000000000000000004 /* BrowserTabOverviewUITests */,
+				D10000000000000000000005 /* AppHostedTestHost */,
+				D10000000000000000000006 /* AppHostedTests */,
 			);
 		};
 /* End PBXProject section */
@@ -328,6 +447,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+			C10000000000000000000010 /* Resources */ = {
+				isa = PBXResourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
+			C10000000000000000000013 /* Resources */ = {
+				isa = PBXResourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -364,6 +497,28 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+			C1000000000000000000000F /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					A10000000000000000000032,
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
+			C10000000000000000000012 /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					A10000000000000000000033,
+					A10000000000000000000034,
+					A10000000000000000000035,
+					A10000000000000000000036,
+					A10000000000000000000037,
+					A10000000000000000000038,
+					A10000000000000000000039,
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -536,6 +691,106 @@
 			};
 			name = Release;
 		};
+			F10000000000000000000010 /* Debug */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.apphostedtesthost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				};
+				name = Debug;
+			};
+			F10000000000000000000011 /* Release */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.apphostedtesthost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				};
+				name = Release;
+			};
+			F10000000000000000000012 /* Debug */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.apphostedtests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AppHostedTestHost.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AppHostedTestHost";
+				};
+				name = Debug;
+			};
+			F10000000000000000000013 /* Release */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.apphostedtests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AppHostedTestHost.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AppHostedTestHost";
+				};
+				name = Release;
+			};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -584,6 +839,24 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+			F10000000000000000000014 /* Build configuration list for PBXNativeTarget "AppHostedTestHost" */ = {
+				isa = XCConfigurationList;
+				buildConfigurations = (
+					F10000000000000000000010 /* Debug */,
+					F10000000000000000000011 /* Release */,
+				);
+				defaultConfigurationIsVisible = 0;
+				defaultConfigurationName = Release;
+			};
+			F10000000000000000000015 /* Build configuration list for PBXNativeTarget "AppHostedTests" */ = {
+				isa = XCConfigurationList;
+				buildConfigurations = (
+					F10000000000000000000012 /* Debug */,
+					F10000000000000000000013 /* Release */,
+				);
+				defaultConfigurationIsVisible = 0;
+				defaultConfigurationName = Release;
+			};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -643,6 +916,7 @@
 			package = 110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */;
 			productName = CalculatorFeature;
 		};
+			120000000000000000000007 /* VaultFeature */ = {isa = XCSwiftPackageProductDependency; productName = VaultFeature; };
 /* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXContainerItemProxy section */
@@ -653,6 +927,13 @@
 			remoteGlobalIDString = D10000000000000000000003;
 			remoteInfo = BrowserTabOverviewUITestHost;
 		};
+			G10000000000000000000002 /* PBXContainerItemProxy */ = {
+				isa = PBXContainerItemProxy;
+				containerPortal = A10000000000000000000001 /* Project object */;
+				proxyType = 1;
+				remoteGlobalIDString = D10000000000000000000005;
+				remoteInfo = AppHostedTestHost;
+			};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXTargetDependency section */
@@ -661,6 +942,11 @@
 			target = D10000000000000000000003 /* BrowserTabOverviewUITestHost */;
 			targetProxy = G10000000000000000000001 /* PBXContainerItemProxy */;
 		};
+			H10000000000000000000002 /* PBXTargetDependency */ = {
+				isa = PBXTargetDependency;
+				target = D10000000000000000000005 /* AppHostedTestHost */;
+				targetProxy = G10000000000000000000002 /* PBXContainerItemProxy */;
+			};
 /* End PBXTargetDependency section */
 	};
 	rootObject = A10000000000000000000001 /* Project object */;

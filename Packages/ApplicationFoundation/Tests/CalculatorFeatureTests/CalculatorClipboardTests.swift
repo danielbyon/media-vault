@@ -8,6 +8,7 @@
 import CalculatorFeature
 import ComposableArchitecture
 import ConcurrencyExtras
+import Dependencies
 import Foundation
 import Testing
 

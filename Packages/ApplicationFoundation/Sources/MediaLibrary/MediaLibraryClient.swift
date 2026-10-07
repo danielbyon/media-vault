@@ -21,7 +21,6 @@ public struct MediaLibraryClient: Sendable {
     public var resourceData: @Sendable (MediaResource) async throws -> Data
 
     /// Creates an explicit media-library dependency.
-    @preconcurrency
     public init(
         loadAssets: @escaping @Sendable () async throws -> [MediaAsset],
         importFile: @escaping @Sendable (URL) async throws -> MediaAsset,

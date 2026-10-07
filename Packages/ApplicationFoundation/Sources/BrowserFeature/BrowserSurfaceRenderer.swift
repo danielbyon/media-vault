@@ -5,6 +5,10 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
+import ObjectiveC
+import QuartzCore
 import UIKit
 
 /// Renders one already-mounted Browser surface into an in-memory image.

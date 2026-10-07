@@ -5,10 +5,11 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import ComposableArchitecture
 import CoreFoundation
 import Darwin
+import Dependencies
 import Foundation
+import ObjectiveC
 
 /// Describes whether storage inspection found a usable session, no session, or an unsafe read.
 enum BrowserOpenTabsSessionLoadOutcome: Equatable, Sendable {
@@ -128,8 +129,8 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
 
     /// Projects tab state while discarding WebKit and presentation-only data.
     static func project(from tabs: [BrowserTab], selectedTabID: BrowserTabID) -> Self {
-        let selectedPosition = tabs.firstIndex(where: { $0.id == selectedTabID }) ?? 0
-        let entries = tabs.enumerated().compactMap { position, tab -> Entry? in
+        let projectedSelectedPosition = tabs.firstIndex(where: { $0.id == selectedTabID }) ?? 0
+        let projectedEntries = tabs.enumerated().compactMap { position, tab -> Entry? in
             if tab.isStartPage {
                 return Entry(position: position, kind: .startPage)
             }
@@ -139,7 +140,7 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
 
             return Entry(position: position, kind: .web(url))
         }
-        return Self(selectedPosition: selectedPosition, entries: entries)
+        return Self(selectedPosition: projectedSelectedPosition, entries: projectedEntries)
     }
 
     /// Encodes the versioned session envelope without runtime tab identities or transient state.
@@ -170,19 +171,19 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
         guard version == currentVersion else {
             return .unsupportedVersion
         }
-        guard let selectedPosition = integer(envelope["selectedPosition"]),
-              selectedPosition >= 0,
+        guard let decodedSelectedPosition = integer(envelope["selectedPosition"]),
+              decodedSelectedPosition >= 0,
               let rawEntries = envelope["entries"] as? [Any]
         else {
             return .invalid
         }
 
         var seenPositions: Set<Int> = []
-        let entries = rawEntries.compactMap { rawEntry -> Entry? in
-            guard let rawEntry = rawEntry as? [String: Any],
-                  let position = integer(rawEntry["position"]),
+        let decodedEntries = rawEntries.compactMap { rawEntryValue -> Entry? in
+            guard let rawEntryObject = rawEntryValue as? [String: Any],
+                  let position = integer(rawEntryObject["position"]),
                   position >= 0,
-                  let kind = rawEntry["kind"] as? String
+                  let kind = rawEntryObject["kind"] as? String
             else {
                 return nil
             }
@@ -192,7 +193,7 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
             case "startPage":
                 entry = Entry(position: position, kind: .startPage)
             case "web":
-                guard let rawURL = rawEntry["url"] as? String,
+                guard let rawURL = rawEntryObject["url"] as? String,
                       let url = BrowserNavigation.bookmarkURL(rawURL)
                 else {
                     return nil
@@ -210,11 +211,11 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
         }
         .sorted { $0.position < $1.position }
 
-        guard !entries.isEmpty else {
+        guard !decodedEntries.isEmpty else {
             return .invalid
         }
 
-        return .decoded(Self(selectedPosition: selectedPosition, entries: entries))
+        return .decoded(Self(selectedPosition: decodedSelectedPosition, entries: decodedEntries))
     }
 
     /// Reconstructs ordinary tabs with fresh identities and marks unselected web tabs for lazy loading.
@@ -223,7 +224,7 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
             return .freshStartPage(uuid: uuid)
         }
 
-        let selectedPosition = selectedEntryPosition ?? entries[0].position
+        let restoredSelectedPosition = selectedEntryPosition ?? entries[0].position
         var selectedTabID: BrowserTabID?
         var selectedURL: URL?
         var tabs: [BrowserTab] = []
@@ -237,13 +238,13 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
                 tab = .startPage(id: id)
             case let .web(url):
                 tab = .web(id: id, url: url)
-                if entry.position == selectedPosition {
+                if entry.position == restoredSelectedPosition {
                     selectedURL = url
                 } else {
                     lazyWebTabURLs[id] = url
                 }
             }
-            if entry.position == selectedPosition {
+            if entry.position == restoredSelectedPosition {
                 selectedTabID = id
             }
             tabs.append(tab)
@@ -295,15 +296,25 @@ struct BrowserOpenTabsSession: Equatable, Sendable {
     }
 
     private static func integer(_ value: Any?) -> Int? {
-        guard let number = value as? NSNumber,
-              CFGetTypeID(number) != CFBooleanGetTypeID(),
-              number.doubleValue.isFinite,
-              number.doubleValue.rounded(.towardZero) == number.doubleValue
+        guard let value,
+              CFGetTypeID(value as CFTypeRef) != CFBooleanGetTypeID()
         else {
             return nil
         }
 
-        return number.intValue
+        if let integer = value as? Int {
+            return integer
+        }
+        guard let number = value as? Double,
+              number.isFinite,
+              number.rounded(.towardZero) == number
+        else {
+            return nil
+        }
+
+        // `Double(Int.max)` rounds up to 2^63, so a range comparison admits a double that
+        // `Int(_:)` traps on. `Int(exactly:)` reports out-of-range values as `nil` instead.
+        return Int(exactly: number)
     }
 }
 

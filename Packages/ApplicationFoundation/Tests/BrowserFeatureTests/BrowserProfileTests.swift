@@ -6,40 +6,12 @@
 //
 
 import ComposableArchitecture
-@preconcurrency import Foundation
-import SwiftUI
+import ConcurrencyExtras
+import Dependencies
+import Foundation
 import Testing
-import UIKit
 import WebKit
 @testable import BrowserFeature
-
-extension BrowserFeature.State {
-    /// Creates a logical Browser state whose stored profile has already been configured.
-    static func readyForTesting(initialTabID: BrowserTabID = .init()) -> Self {
-        var state = Self(initialTabID: initialTabID)
-        state.profileLifecycle = .ready
-        return state
-    }
-
-    /// Creates a tabbed Browser state whose stored profile has already been configured.
-    static func readyForTesting(
-        tabs: [BrowserTab],
-        selectedTabID: BrowserTabID,
-        presentation: BrowserPresentation = .browsing,
-        focusedField: BrowserFocusedField = .none,
-        omniboxDraft: String = "",
-    ) -> Self {
-        var state = Self(
-            tabs: tabs,
-            selectedTabID: selectedTabID,
-            presentation: presentation,
-            focusedField: focusedField,
-            omniboxDraft: omniboxDraft,
-        )
-        state.profileLifecycle = .ready
-        return state
-    }
-}
 
 @Suite("Browser profile transitions")
 @MainActor
@@ -47,11 +19,12 @@ struct BrowserProfileTests {
     @Test("Startup waits for the stored Ephemeral profile before creating a context")
     func startupConfigurationGatesNavigation() async throws {
         let gate = BrowserProfileConfigurationGate()
-        let createdStores = LockIsolated<[WKWebsiteDataStore]>([])
+        let createdStoreIDs = LockIsolated<[ObjectIdentifier]>([])
         let adapter = BrowserWebKitAdapter(
             requiresProfileConfiguration: true,
             makeWebView: { frame, configuration in
-                createdStores.withValue { $0.append(configuration.websiteDataStore) }
+                let websiteDataStoreID = ObjectIdentifier(configuration.websiteDataStore)
+                createdStoreIDs.withValue { $0.append(websiteDataStoreID) }
                 return WKWebView(frame: frame, configuration: configuration)
             },
         )
@@ -80,7 +53,7 @@ struct BrowserProfileTests {
         #expect(store.state.pendingWebAction == .navigate(tabID: store.state.selectedTabID, url: destination))
         #expect(store.state.selectedTab?.isStartPage == true)
         #expect(adapter.contextCount == 0)
-        #expect(createdStores.value.isEmpty)
+        #expect(createdStoreIDs.value.isEmpty)
         adapter.execute(.ensureContext(tabID: store.state.selectedTabID))
         adapter.execute(.load(
             tabID: store.state.selectedTabID,
@@ -89,7 +62,7 @@ struct BrowserProfileTests {
         ))
         #expect(adapter.ensureActiveContext(for: store.state.selectedTabID) == nil)
         #expect(adapter.contextCount == 0)
-        #expect(createdStores.value.isEmpty)
+        #expect(createdStoreIDs.value.isEmpty)
 
         await gate.release()
         await store.receive(.loaded(
@@ -102,7 +75,7 @@ struct BrowserProfileTests {
 
         let selectedTabID = store.state.selectedTabID
         let webView = try #require(adapter.webView(for: selectedTabID))
-        #expect(webView.configuration.websiteDataStore === createdStores.value.last)
+        #expect(ObjectIdentifier(webView.configuration.websiteDataStore) == createdStoreIDs.value.last)
         #expect(webView.configuration.websiteDataStore !== WKWebsiteDataStore.default())
         #expect(store.state.tabs.count == 1)
         #expect(store.state.tabs[0].content == .web(requestedURL: destination))
@@ -113,9 +86,9 @@ struct BrowserProfileTests {
     @Test("Confirmed switching cancels cleanly, resets the session, and gates immediate navigation")
     func confirmedTransitionGatesNavigationAndPreservesLibrary() async throws {
         let gate = BrowserProfileConfigurationGate()
-        let createdStores = LockIsolated<[WKWebsiteDataStore]>([])
+        let createdWebViewCount = LockIsolated(0)
         let adapter = BrowserWebKitAdapter(makeWebView: { frame, configuration in
-            createdStores.withValue { $0.append(configuration.websiteDataStore) }
+            createdWebViewCount.withValue { $0 += 1 }
             return WKWebView(frame: frame, configuration: configuration)
         })
         adapter.execute(.configureProfile(profile: .ephemeral, retiringTabIDs: []))
@@ -224,7 +197,7 @@ struct BrowserProfileTests {
         #expect(store.state.selectedTab?.isStartPage == true)
         #expect(adapter.hasContext(for: oldTabID))
         #expect(adapter.hasContext(for: adapterOnlyTabID))
-        #expect(createdStores.value.count == 2)
+        #expect(createdWebViewCount.value == 2)
 
         await gate.release()
         await store.receive(.profileConfigurationCompleted(
@@ -239,7 +212,7 @@ struct BrowserProfileTests {
         #expect(oldWebsiteDataStore !== WKWebsiteDataStore.default())
         let newWebView = try #require(adapter.webView(for: store.state.selectedTabID))
         #expect(newWebView.configuration.websiteDataStore === WKWebsiteDataStore.default())
-        #expect(createdStores.value.count == 3)
+        #expect(createdWebViewCount.value == 3)
         #expect(savedSettings.value == [store.state.settings])
         #expect(store.state.bookmarks == [bookmark])
         #expect(store.state.history == [historyEntry])
@@ -381,131 +354,6 @@ struct BrowserProfileTests {
         await store.finish()
         #expect(savedSettings.value.count == 1)
         #expect(savedSettings.value.allSatisfy { $0.browsingProfile == .ephemeral })
-    }
-
-    @Test("Settings initialization survives dismissal and reopening")
-    func settingsInitializationSurvivesDismissalAndReopening() async {
-        let gate = BrowserProfileConfigurationGate()
-        let adapter = BrowserWebKitAdapter(requiresProfileConfiguration: true)
-        let fixture = BrowserProfileWebKitFixture(adapter: adapter, gate: gate)
-        let persistedSettings = BrowserSettings(browsingProfile: .ephemeral)
-        let sessionLoadCount = LockIsolated(0)
-        let store = Store(initialState: BrowserFeature.State()) {
-            BrowserFeature()
-        } withDependencies: {
-            $0.uuid = .incrementing
-            $0.browserSettings.load = { persistedSettings }
-            $0.browserLibrary.loadBookmarks = { [] }
-            $0.browserLibrary.loadHistory = { [] }
-            $0.browserOpenTabsSession.load = {
-                sessionLoadCount.withValue { $0 += 1 }
-                return .missing
-            }
-            $0.browserWebKit = BrowserWebKitClient(
-                execute: { command in await fixture.execute(command) },
-                events: { AsyncStream { $0.finish() } },
-            )
-        }
-        let firstPresentation = BrowserLifecycleReadinessObserver()
-        let firstController = UIHostingController(
-            rootView: BrowserSettingsReadinessProbe(store: store, readiness: firstPresentation),
-        )
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        window.rootViewController = firstController
-        window.makeKeyAndVisible()
-        firstController.view.frame = window.bounds
-        firstController.view.layoutIfNeeded()
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
-        }
-
-        #expect(await gate.waitUntilStarted() == .ephemeral)
-        #expect(store.withState { !$0.canCreateWebKitContext })
-        #expect(await gate.requestedProfiles() == [.ephemeral])
-
-        window.isHidden = true
-        window.rootViewController = nil
-        #expect(await firstPresentation.waitUntilDismissed(timeout: .seconds(1)))
-
-        let reopenedPresentation = BrowserLifecycleReadinessObserver()
-        let reopenedController = UIHostingController(
-            rootView: BrowserSettingsReadinessProbe(store: store, readiness: reopenedPresentation),
-        )
-        window.rootViewController = reopenedController
-        window.isHidden = false
-        window.makeKeyAndVisible()
-        reopenedController.view.frame = window.bounds
-        reopenedController.view.layoutIfNeeded()
-        #expect(await gate.requestedProfiles() == [.ephemeral])
-
-        await gate.release()
-        #expect(await reopenedPresentation.waitUntilReady(timeout: .seconds(1)))
-
-        #expect(store.withState { $0.canCreateWebKitContext })
-        #expect(store.withState { $0.settings.browsingProfile == .ephemeral })
-        #expect(sessionLoadCount.value == 0)
-    }
-
-    @Test("Mounting authenticated Browser restores the selected tab and leaves background tabs lazy")
-    func browserMountRestoresSelectedTabAfterEntry() async throws {
-        let backgroundURL = try #require(URL(string: "https://background.example"))
-        let selectedURL = try #require(URL(string: "https://selected.example"))
-        let session = BrowserOpenTabsSession(
-            selectedPosition: 1,
-            entries: [
-                .init(position: 0, kind: .web(backgroundURL)),
-                .init(position: 1, kind: .web(selectedURL)),
-            ],
-        )
-        let data = try session.encoded()
-        let loadCount = LockIsolated(0)
-        let commands = LockIsolated<[BrowserWebKitCommand]>([])
-        let store = withDependencies {
-            $0.uuid = .incrementing
-            $0.browserOpenTabsSession.load = {
-                loadCount.withValue { $0 += 1 }
-                return .loaded(data)
-            }
-            $0.browserWebKit = BrowserWebKitClient(
-                execute: { command in commands.withValue { $0.append(command) } },
-                events: { AsyncStream { $0.finish() } },
-            )
-        } operation: {
-            Store(initialState: BrowserFeature.State.readyForTesting()) {
-                BrowserFeature()
-            }
-        }
-        let readiness = BrowserLifecycleReadinessObserver()
-        let controller = UIHostingController(
-            rootView: BrowserEntryReadinessProbe(store: store, readiness: readiness),
-        )
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        window.rootViewController = controller
-        window.makeKeyAndVisible()
-        controller.view.frame = window.bounds
-        controller.view.layoutIfNeeded()
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
-        }
-
-        #expect(await readiness.waitUntilReady(timeout: .seconds(3)))
-
-        let state = store.withState { $0 }
-        #expect(loadCount.value == 1)
-        #expect(state.openTabsEntryLifecycle == .completed)
-        #expect(state.tabs.count == 2)
-        #expect(state.selectedTabID == state.tabs[1].id)
-        #expect(state.lazyRestoredWebTabURLs[state.tabs[0].id] == backgroundURL)
-        #expect(await waitForLoadCommand(selectedURL, in: commands))
-        let loadedURLs = commands.value.compactMap { command -> URL? in
-            if case let .load(_, url, _) = command {
-                return url
-            }
-            return nil
-        }
-        #expect(loadedURLs == [selectedURL])
     }
 
     @Test("A repeated Browser task cannot supersede a blocked profile transition")
@@ -687,219 +535,5 @@ struct BrowserProfileTests {
         #expect(loads.count == 1)
         #expect(loads.first?.0 == originalTabID)
         #expect(loads.first?.1 == destination)
-    }
-}
-
-private func waitForLoadCommand(
-    _ expectedURL: URL,
-    in commands: LockIsolated<[BrowserWebKitCommand]>,
-) async -> Bool {
-    for _ in 0 ..< 200 {
-        if commands.value.contains(where: { command in
-            guard case let .load(_, url, _) = command else {
-                return false
-            }
-
-            return url == expectedURL
-        }) {
-            return true
-        }
-
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-
-    return commands.value.contains(where: { command in
-        guard case let .load(_, url, _) = command else {
-            return false
-        }
-
-        return url == expectedURL
-    })
-}
-
-private actor BrowserProfileConfigurationGate {
-    private var startedProfile: BrowserBrowsingProfile?
-    private var startContinuation: CheckedContinuation<BrowserBrowsingProfile, Never>?
-    private var releaseContinuation: CheckedContinuation<Void, Never>?
-    private var releasedBeforeSuspension = false
-    private var shouldPauseNextConfiguration = true
-    private var requestedProfileConfigurations: [BrowserBrowsingProfile] = []
-
-    func pause(_ profile: BrowserBrowsingProfile) async {
-        requestedProfileConfigurations.append(profile)
-        guard shouldPauseNextConfiguration else {
-            return
-        }
-
-        shouldPauseNextConfiguration = false
-
-        if let startContinuation {
-            self.startContinuation = nil
-            startContinuation.resume(returning: profile)
-        } else {
-            startedProfile = profile
-        }
-
-        await withCheckedContinuation { continuation in
-            if releasedBeforeSuspension {
-                releasedBeforeSuspension = false
-                continuation.resume()
-            } else {
-                releaseContinuation = continuation
-            }
-        }
-    }
-
-    func requestedProfiles() -> [BrowserBrowsingProfile] {
-        requestedProfileConfigurations
-    }
-
-    func waitUntilStarted() async -> BrowserBrowsingProfile {
-        if let startedProfile {
-            self.startedProfile = nil
-            return startedProfile
-        }
-
-        return await withCheckedContinuation { continuation in
-            startContinuation = continuation
-        }
-    }
-
-    func release() {
-        if let releaseContinuation {
-            self.releaseContinuation = nil
-            releaseContinuation.resume()
-        } else {
-            releasedBeforeSuspension = true
-        }
-    }
-}
-
-@MainActor
-private final class BrowserLifecycleReadinessObserver {
-    private var isReady = false
-    private var isDismissed = false
-    private var readinessContinuation: CheckedContinuation<Bool, Never>?
-    private var dismissalContinuation: CheckedContinuation<Bool, Never>?
-    private var readinessTimeout: Task<Void, Never>?
-    private var dismissalTimeout: Task<Void, Never>?
-
-    func waitUntilReady(timeout: Duration) async -> Bool {
-        guard !isReady else {
-            return true
-        }
-
-        return await withCheckedContinuation { continuation in
-            readinessContinuation = continuation
-            readinessTimeout = Task { @MainActor [weak self] in
-                do {
-                    try await Task.sleep(for: timeout)
-                } catch {
-                    return
-                }
-
-                self?.finishReadinessWait(result: false)
-            }
-        }
-    }
-
-    func waitUntilDismissed(timeout: Duration) async -> Bool {
-        guard !isDismissed else {
-            return true
-        }
-
-        return await withCheckedContinuation { continuation in
-            dismissalContinuation = continuation
-            dismissalTimeout = Task { @MainActor [weak self] in
-                do {
-                    try await Task.sleep(for: timeout)
-                } catch {
-                    return
-                }
-
-                self?.finishDismissalWait(result: false)
-            }
-        }
-    }
-
-    func markReady() {
-        isReady = true
-        finishReadinessWait(result: true)
-    }
-
-    func markDismissed() {
-        isDismissed = true
-        finishDismissalWait(result: true)
-    }
-
-    private func finishReadinessWait(result: Bool) {
-        readinessTimeout?.cancel()
-        readinessTimeout = nil
-        readinessContinuation?.resume(returning: result)
-        readinessContinuation = nil
-    }
-
-    private func finishDismissalWait(result: Bool) {
-        dismissalTimeout?.cancel()
-        dismissalTimeout = nil
-        dismissalContinuation?.resume(returning: result)
-        dismissalContinuation = nil
-    }
-}
-
-@MainActor
-private struct BrowserSettingsReadinessProbe: View {
-    let store: StoreOf<BrowserFeature>
-    let readiness: BrowserLifecycleReadinessObserver
-
-    var body: some View {
-        NavigationStack {
-            BrowserSettingsView(store: store)
-        }
-        .onChange(of: store.canCreateWebKitContext) { _, isReady in
-            if isReady {
-                readiness.markReady()
-            }
-        }
-        .onDisappear {
-            readiness.markDismissed()
-        }
-    }
-}
-
-@MainActor
-private struct BrowserEntryReadinessProbe: View {
-    let store: StoreOf<BrowserFeature>
-    let readiness: BrowserLifecycleReadinessObserver
-
-    var body: some View {
-        BrowserView(store: store)
-            .onChange(of: store.openTabsEntryLifecycle) { _, lifecycle in
-                if lifecycle == .completed {
-                    readiness.markReady()
-                }
-            }
-    }
-}
-
-@MainActor
-private final class BrowserProfileWebKitFixture {
-    private let adapter: BrowserWebKitAdapter
-    private let gate: BrowserProfileConfigurationGate
-
-    init(adapter: BrowserWebKitAdapter, gate: BrowserProfileConfigurationGate) {
-        self.adapter = adapter
-        self.gate = gate
-    }
-
-    func execute(_ command: BrowserWebKitCommand) async {
-        if case let .configureProfile(profile, _) = command {
-            await gate.pause(profile)
-            adapter.execute(command)
-        } else if case .load = command {
-            // Keep the test at the context-creation boundary without issuing a network request.
-        } else {
-            adapter.execute(command)
-        }
     }
 }

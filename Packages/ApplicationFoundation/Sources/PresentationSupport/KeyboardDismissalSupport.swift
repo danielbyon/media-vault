@@ -5,12 +5,12 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import ObjectiveC
 import SwiftUI
 import UIKit
 
 /// The small UIKit mapping required by the shared keyboard-dismissal convention.
 @MainActor
-@preconcurrency
 public enum KeyboardDismissalSupport {
     /// Applies or removes the shared interactive scroll policy on a UIKit scroll view.
     ///
@@ -29,14 +29,12 @@ extension View {
     /// recognizer allows an outside button, scroll view, or WebKit surface to process its own touch.
     /// Omitting the modifier leaves the surrounding presentation unchanged.
     @MainActor
-    @preconcurrency
     public func keyboardDismissal(focus: FocusState<(some Hashable)?>.Binding) -> some View {
         modifier(KeyboardDismissalModifier(focus: focus))
     }
 }
 
 @MainActor
-@preconcurrency
 private struct KeyboardDismissalModifier<Focus: Hashable>: ViewModifier {
     let focus: FocusState<Focus?>.Binding
 
@@ -50,7 +48,6 @@ private struct KeyboardDismissalModifier<Focus: Hashable>: ViewModifier {
 }
 
 @MainActor
-@preconcurrency
 private struct KeyboardDismissalTapObserver<Focus: Hashable>: UIViewRepresentable {
     let focus: FocusState<Focus?>.Binding
 
@@ -79,7 +76,6 @@ private struct KeyboardDismissalTapObserver<Focus: Hashable>: UIViewRepresentabl
 }
 
 @MainActor
-@preconcurrency
 private final class KeyboardDismissalAnchorView: UIView {
     var onSuperviewChange: (() -> Void)?
 

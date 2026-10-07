@@ -6,6 +6,7 @@
 //
 
 import AppFeature
+import CalculatorFeature
 import ComposableArchitecture
 import Dependencies
 import FoundationTestSupport

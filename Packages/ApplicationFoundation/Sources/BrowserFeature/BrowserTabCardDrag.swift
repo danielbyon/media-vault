@@ -5,8 +5,9 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import ComposableArchitecture
+import CoreFoundation
 import Foundation
+import ObjectiveC
 import SwiftUI
 import UIKit
 
@@ -192,7 +193,6 @@ struct BrowserContentViewportProbe: View {
 }
 
 @MainActor
-@preconcurrency
 struct BrowserPresentationKeyboardDismissalModifier: ViewModifier {
     let isEnabled: Bool
     let focus: FocusState<BrowserFocusedField?>.Binding
@@ -211,7 +211,6 @@ struct BrowserPresentationKeyboardDismissalModifier: ViewModifier {
 /// complex safe-area presentation, so this Browser-owned observer deliberately resolves the
 /// hosting view as its gesture owner and covers both page content and chrome.
 @MainActor
-@preconcurrency
 struct BrowserPresentationTapObserver: UIViewRepresentable {
     let focus: FocusState<BrowserFocusedField?>.Binding
     let isEnabled: Bool
@@ -258,7 +257,6 @@ struct BrowserPresentationTapObserver: UIViewRepresentable {
 }
 
 @MainActor
-@preconcurrency
 final class BrowserPresentationTapAnchorView: UIView {
     var onHierarchyChange: (() -> Void)?
 
@@ -276,7 +274,6 @@ final class BrowserPresentationTapAnchorView: UIView {
 /// Coordinates the single Browser-wide tap recognizer while leaving the tapped control's own
 /// interaction intact.
 @MainActor
-@preconcurrency
 final class BrowserPresentationTapCoordinator: NSObject, UIGestureRecognizerDelegate {
     private let isFocused: () -> Bool
     private let dismiss: () -> Void

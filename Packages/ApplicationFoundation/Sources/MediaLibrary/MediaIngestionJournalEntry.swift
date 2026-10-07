@@ -8,6 +8,8 @@
 import Foundation
 import GRDB
 import SQLiteData
+import StructuredQueries
+import StructuredQueriesCore
 
 /// The durable record that connects accepted staging bytes to a canonical asset.
 ///
@@ -315,13 +317,13 @@ actor SQLiteMediaLibraryIngestionJournal {
             let sha256Value: DatabaseValue = row[7]
             let capturedAtValue: DatabaseValue = row[8]
 
-            let assetID = Self.textValue(assetIDValue).flatMap { UUID(uuidString: $0) }
-            let resourceID = Self.textValue(resourceIDValue).flatMap { UUID(uuidString: $0) }
-            self.assetID = assetID
-            self.resourceID = resourceID
+            let decodedAssetID = Self.textValue(assetIDValue).flatMap { UUID(uuidString: $0) }
+            let decodedResourceID = Self.textValue(resourceIDValue).flatMap { UUID(uuidString: $0) }
+            assetID = decodedAssetID
+            resourceID = decodedResourceID
 
-            guard let assetID,
-                  let resourceID,
+            guard let decodedAssetID,
+                  let decodedResourceID,
                   let stateRawValue = Self.textValue(stateValue),
                   let state = MediaIngestionState(rawValue: stateRawValue),
                   let sourceFilename = Self.textValue(sourceFilenameValue),
@@ -362,8 +364,8 @@ actor SQLiteMediaLibraryIngestionJournal {
             }
 
             entry = MediaIngestionJournalEntry(
-                id: assetID,
-                resourceID: resourceID,
+                id: decodedAssetID,
+                resourceID: decodedResourceID,
                 state: state,
                 sourceFilename: sourceFilename,
                 importedAt: Date(timeIntervalSince1970: importedAt),

@@ -5,7 +5,12 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
+import Dispatch
 import Foundation
+import ObjectiveC
+import Synchronization
 import UIKit
 import WebKit
 
@@ -396,6 +401,40 @@ private final class BrowserWebKitNavigationReference {
     }
 }
 
+/// A consistent snapshot of one WebKit context's navigation correlation state.
+///
+/// WebKit KVO change handlers are not main-actor-isolated, so they cannot read the correlation
+/// tracker directly. They capture this snapshot instead and re-validate it on the main actor before
+/// emitting metadata, which keeps a delayed observation from being attributed to a later navigation.
+private struct BrowserWebKitMetadataEpoch: Sendable {
+    /// Correlation generation that was current when the observation was delivered.
+    let generation: Int
+
+    /// Reducer operation that supplied metadata for that generation, when one was active.
+    let operationID: BrowserNavigationOperationID?
+}
+
+/// Publishes the metadata epoch of one WebKit context to nonisolated observers.
+///
+/// The correlation tracker changes only on the main actor and republishes the resulting epoch after
+/// every change. Nonisolated WebKit observations read the latest published epoch without touching
+/// main-actor state.
+private final class BrowserWebKitMetadataEpochStore: Sendable {
+    private let epoch = Mutex(BrowserWebKitMetadataEpoch(generation: 0, operationID: nil))
+
+    /// Records the epoch that matches the tracker state after a correlation change.
+    func publish(generation: Int, operationID: BrowserNavigationOperationID?) {
+        epoch.withLock {
+            $0 = BrowserWebKitMetadataEpoch(generation: generation, operationID: operationID)
+        }
+    }
+
+    /// Returns the epoch the main actor published most recently.
+    func snapshot() -> BrowserWebKitMetadataEpoch {
+        epoch.withLock { $0 }
+    }
+}
+
 /// Keeps one WebKit context's reducer-operation identity and delegate-navigation lifecycle together.
 ///
 /// WebKit may deliver callbacks for an older navigation after a newer command has been issued, and
@@ -417,6 +456,14 @@ private struct BrowserWebKitNavigationCorrelation {
     private var activeNavigationReference: BrowserWebKitNavigationReference?
     private var supersededNavigations: [BrowserWebKitNavigationReference] = []
     private(set) var generation = 0
+
+    /// Lock-protected mirror of this tracker's epoch, read by nonisolated WebKit observations.
+    private let metadataEpoch: BrowserWebKitMetadataEpochStore
+
+    init(metadataEpoch: BrowserWebKitMetadataEpochStore) {
+        self.metadataEpoch = metadataEpoch
+        publishMetadataEpoch()
+    }
 
     private mutating func pruneSupersededNavigations() {
         supersededNavigations.removeAll { $0.value == nil }
@@ -441,6 +488,7 @@ private struct BrowserWebKitNavigationCorrelation {
         hasActiveUnidentifiedNavigation = false
         operationIDs.removeAll(keepingCapacity: true)
         generation &+= 1
+        publishMetadataEpoch()
     }
 
     /// Registers the navigation returned by a command. Returns `false` for a synchronous no-op.
@@ -452,6 +500,7 @@ private struct BrowserWebKitNavigationCorrelation {
         generation &+= 1
         guard let navigation else {
             hasCommittedDocument = wasCommittedBeforeNavigation
+            publishMetadataEpoch()
             return false
         }
 
@@ -461,6 +510,7 @@ private struct BrowserWebKitNavigationCorrelation {
         activeNavigationReference = .init(navigation)
         operationIDs[navigationIdentifier] = operationID
         hasActiveUnidentifiedNavigation = false
+        publishMetadataEpoch()
         return true
     }
 
@@ -483,6 +533,7 @@ private struct BrowserWebKitNavigationCorrelation {
             activeNavigationReference = nil
             hasActiveUnidentifiedNavigation = true
             generation &+= 1
+            publishMetadataEpoch()
             return true
         }
         guard let navigation else {
@@ -505,6 +556,7 @@ private struct BrowserWebKitNavigationCorrelation {
         activeNavigationReference = .init(navigation)
         hasActiveUnidentifiedNavigation = false
         generation &+= 1
+        publishMetadataEpoch()
         return true
     }
 
@@ -564,6 +616,13 @@ private struct BrowserWebKitNavigationCorrelation {
         return operationIDs[activeNavigationIdentifier]
     }
 
+    /// Republishes the epoch that nonisolated WebKit observations capture before hopping onto the
+    /// main actor. Every change that moves the generation or the active operation calls this, so the
+    /// published snapshot always describes the state the main actor validates against.
+    private func publishMetadataEpoch() {
+        metadataEpoch.publish(generation: generation, operationID: currentOperationID())
+    }
+
     mutating func consumeOperationID(for navigation: WKNavigation?) -> BrowserNavigationOperationID? {
         guard let navigation else {
             return nil
@@ -573,6 +632,7 @@ private struct BrowserWebKitNavigationCorrelation {
         }
 
         generation &+= 1
+        publishMetadataEpoch()
         return operationID
     }
 
@@ -584,6 +644,7 @@ private struct BrowserWebKitNavigationCorrelation {
         if navigation == nil {
             hasActiveUnidentifiedNavigation = false
             generation &+= 1
+            publishMetadataEpoch()
             return
         }
 
@@ -594,6 +655,7 @@ private struct BrowserWebKitNavigationCorrelation {
         rememberSupersededNavigation(activeNavigationReference?.value)
         activeNavigationIdentifier = nil
         activeNavigationReference = nil
+        publishMetadataEpoch()
     }
 
     mutating func discardSupersededNavigation(_ navigation: WKNavigation?) {
@@ -613,6 +675,7 @@ private struct BrowserWebKitNavigationCorrelation {
         activeNavigationReference = nil
         supersededNavigations.removeAll(keepingCapacity: true)
         generation &+= 1
+        publishMetadataEpoch()
     }
 }
 
@@ -627,33 +690,37 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private var pendingDialogResolution: (() -> Void)?
     private var observations: [NSKeyValueObservation] = []
-    private var navigationCorrelation = BrowserWebKitNavigationCorrelation()
+    private nonisolated let metadataEpoch: BrowserWebKitMetadataEpochStore
+    private var navigationCorrelation: BrowserWebKitNavigationCorrelation
     private var committedURLProjection = BrowserWebKitCommittedURLProjection()
     private let backForwardTokens = BrowserBackForwardTokenRegistry<WKBackForwardListItem>()
 
     init(tabID: BrowserTabID, webView: WKWebView, adapter: BrowserWebKitAdapter) {
+        let metadataEpochStore = BrowserWebKitMetadataEpochStore()
+        metadataEpoch = metadataEpochStore
         self.tabID = tabID
         self.webView = webView
         self.adapter = adapter
+        navigationCorrelation = BrowserWebKitNavigationCorrelation(metadataEpoch: metadataEpochStore)
         super.init()
         observations = [
             webView.observe(\.isLoading, options: [.initial, .new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                _ = self?.scheduleMetadataEmission()
             },
             webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                _ = self?.scheduleMetadataEmission()
             },
             webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                _ = self?.scheduleMetadataEmission()
             },
             webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                _ = self?.scheduleMetadataEmission()
             },
             webView.observe(\.title, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                _ = self?.scheduleMetadataEmission()
             },
             webView.observe(\.url, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                _ = self?.scheduleMetadataEmission()
             },
         ]
     }
@@ -927,27 +994,35 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         adapter?.emit(.javaScriptDialogChanged(tabID: tabID, isPresented: false))
     }
 
+    /// Testing seam: schedules the metadata emission a WebKit observation would schedule now.
+    ///
+    /// The captured epoch matches what a nonisolated WebKit observation reads from `metadataEpoch`,
+    /// so a test can invalidate the correlation afterwards and observe the emission being discarded.
     fileprivate func scheduleMetadataEmissionForTesting() -> Task<Bool, Never> {
-        scheduleMetadataEmissionTask()
+        scheduleMetadataEmission()
     }
 
-    private func scheduleMetadataEmission() {
-        _ = scheduleMetadataEmissionTask()
-    }
-
-    private func scheduleMetadataEmissionTask() -> Task<Bool, Never> {
-        let generation = navigationCorrelation.generation
-        let operationID = navigationCorrelation.currentOperationID()
+    /// Schedules a metadata emission for the correlation epoch that is current when it is called.
+    ///
+    /// WebKit delivers KVO change notifications to nonisolated handlers, so the epoch is captured
+    /// through the context's thread-safe store before the work crosses onto the main actor. The
+    /// emission is discarded unless the captured generation is still current, which keeps a delayed
+    /// notification from being attributed to a later navigation.
+    private nonisolated func scheduleMetadataEmission() -> Task<Bool, Never> {
+        let epoch = metadataEpoch.snapshot()
         return Task { @MainActor [weak self] in
-            guard let self,
-                  navigationCorrelation.generation == generation
-            else {
-                return false
-            }
-
-            emitMetadata(operationID: operationID)
-            return true
+            self?.performMetadataEmission(for: epoch) ?? false
         }
+    }
+
+    /// Emits metadata for an observation epoch unless its generation is no longer current.
+    private func performMetadataEmission(for epoch: BrowserWebKitMetadataEpoch) -> Bool {
+        guard navigationCorrelation.generation == epoch.generation else {
+            return false
+        }
+
+        emitMetadata(operationID: epoch.operationID)
+        return true
     }
 
     private func emitMetadata(operationID: BrowserNavigationOperationID? = nil) {

@@ -1,5 +1,14 @@
+//
+//  CalculatorHardwareKeyboardUITests.swift
+//  MediaVault
+//
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
+
+import Foundation
 import GameController
 import XCTest
+import XCUIAutomation
 
 @MainActor
 final class CalculatorHardwareKeyboardUITests: XCTestCase {
@@ -24,7 +33,7 @@ final class CalculatorHardwareKeyboardUITests: XCTestCase {
         XCTAssertTrue(clearHistory.waitForExistence(timeout: 10))
 
         var tabCount = 0
-        while !clearHistory.hasFocus && tabCount < 40 {
+        while !clearHistory.hasFocus, tabCount < 40 {
             app.typeKey(XCUIKeyboardKey.tab, modifierFlags: [])
             tabCount += 1
         }

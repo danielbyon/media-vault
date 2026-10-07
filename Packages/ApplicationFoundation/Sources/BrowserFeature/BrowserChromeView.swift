@@ -6,6 +6,8 @@
 //
 
 import ComposableArchitecture
+import CoreFoundation
+import Foundation
 import SwiftUI
 import UIKit
 
@@ -13,7 +15,6 @@ import UIKit
 ///
 /// Literal URL and search entry should not be changed by system autocorrection.
 @MainActor
-@preconcurrency
 struct BrowserOmniboxView: View {
     let store: StoreOf<BrowserFeature>
     @FocusState.Binding
@@ -105,7 +106,6 @@ struct BrowserOmniboxView: View {
 
 /// Native Start Page content, kept separate from browser lifecycle and transition orchestration.
 @MainActor
-@preconcurrency
 struct BrowserStartPageView: View {
     let store: StoreOf<BrowserFeature>
     @FocusState.Binding
@@ -193,7 +193,6 @@ struct BrowserStartPageView: View {
 
 /// Browser navigation chrome isolated from the page and transition lifecycle.
 @MainActor
-@preconcurrency
 struct BrowserChromeView: View {
     let store: StoreOf<BrowserFeature>
     @FocusState.Binding
@@ -354,7 +353,6 @@ struct BrowserChromeView: View {
 
 /// Find-on-page controls kept outside the browser root view's lifecycle concerns.
 @MainActor
-@preconcurrency
 struct BrowserFindBar: View {
     let store: StoreOf<BrowserFeature>
 

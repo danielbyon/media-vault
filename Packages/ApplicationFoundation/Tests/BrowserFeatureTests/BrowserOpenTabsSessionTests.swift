@@ -5,9 +5,9 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import ComposableArchitecture
 import ConcurrencyExtras
-@preconcurrency import Foundation
+import Dispatch
+import Foundation
 import Testing
 @testable import BrowserFeature
 
@@ -40,7 +40,7 @@ struct BrowserOpenTabsSessionTests {
             BrowserTab(id: invalidID, content: .web(requestedURL: invalid)),
         ]
 
-        let session = try #require(BrowserOpenTabsSession.project(from: tabs, selectedTabID: committedID))
+        let session = BrowserOpenTabsSession.project(from: tabs, selectedTabID: committedID)
 
         #expect(session.entries.map(\.position) == [0, 1, 2, 3])
         #expect(session.entries[0].kind == .startPage)
@@ -81,8 +81,16 @@ struct BrowserOpenTabsSessionTests {
             "{\"version\":\(BrowserOpenTabsSession.currentVersion),\"selectedPosition\":0,\"entries\":[]}".utf8,
         )
 
+        // A double that only rounds up to 2^63 must be rejected instead of trapping in `Int(_:)`.
+        let unrepresentablePosition = Data(
+            """
+            {"version":\(BrowserOpenTabsSession.currentVersion),"selectedPosition":9223372036854775808.0,"entries":[{"position":0,"kind":"startPage"}]}
+            """.utf8,
+        )
+
         #expect(BrowserOpenTabsSession.decode(unsupported) == .unsupportedVersion)
         #expect(BrowserOpenTabsSession.decode(malformedCurrent) == .invalid)
+        #expect(BrowserOpenTabsSession.decode(unrepresentablePosition) == .invalid)
     }
 
     @Test("Restoration creates fresh ordinary tabs and tracks background web URLs")
@@ -115,14 +123,23 @@ struct BrowserOpenTabsSessionTests {
         let gate = BrowserPersistenceRevisionGate()
         let operationStarted = DispatchSemaphore(value: 0)
         let releaseOperation = DispatchSemaphore(value: 0)
+        let operationFinished = LockIsolated(false)
         let mutation = Task.detached {
             gate.perform(revision: 1) {
                 operationStarted.signal()
-                _ = releaseOperation.wait(timeout: .now() + 5)
+                // The mutation stays in flight until this test releases it, so a
+                // reservation made below runs against a mutation that has not
+                // finished. The bounded wait only keeps a failing run from
+                // blocking forever; it never gates a passing run.
+                _ = releaseOperation.wait(timeout: .now() + 30)
+                operationFinished.setValue(true)
             }
         }
 
-        let didStartOperation = waitForSignal(operationStarted)
+        // Starting the detached fixture is test setup rather than product
+        // behavior, so it gets a wide budget: scheduler latency on a loaded
+        // machine must not be mistaken for latency inside the revision gate.
+        let didStartOperation = waitForSignal(operationStarted, timeout: 30)
         #expect(didStartOperation)
         guard didStartOperation else {
             releaseOperation.signal()
@@ -130,24 +147,18 @@ struct BrowserOpenTabsSessionTests {
             return
         }
 
-        let reservationStarted = DispatchSemaphore(value: 0)
-        let reservationFinished = DispatchSemaphore(value: 0)
-        let reservation = Task.detached {
-            reservationStarted.signal()
-            let revision = gate.reserve(after: 1)
-            reservationFinished.signal()
-            return revision
-        }
-
-        let didStartReservation = waitForSignal(reservationStarted)
-        #expect(didStartReservation)
-        let reservedDuringMutation = waitForSignal(reservationFinished, timeout: 0.5)
+        // The mutation cannot finish before this test signals
+        // `releaseOperation`, so a reservation that returns while the mutation
+        // is still blocked provably did not wait for it. Asserting that order
+        // replaces an elapsed-time budget, which previously counted scheduler
+        // latency as if it were gate latency and failed on loaded machines.
+        let revision = gate.reserve(after: 1)
+        let reservedDuringMutation = operationFinished.value == false
         releaseOperation.signal()
 
         let mutationWasAccepted = await mutation.value
-        let revision = await reservation.value
-        #expect(mutationWasAccepted)
         #expect(reservedDuringMutation)
+        #expect(mutationWasAccepted)
         #expect(revision == 2)
     }
 
@@ -420,7 +431,9 @@ struct BrowserOpenTabsSessionTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let protectedNames = LockIsolated<Set<String>>([])
         let storage = makeStorage(directory: directory) { url in
-            protectedNames.withValue { $0.insert(url.lastPathComponent) }
+            protectedNames.withValue { names in
+                _ = names.insert(url.lastPathComponent)
+            }
             return try Self.applyTestStorageProtection(url)
         }
         let url = try #require(URL(string: "https://private.example"))
@@ -460,7 +473,9 @@ struct BrowserOpenTabsSessionTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let protectedNames = LockIsolated<Set<String>>([])
         let storage = makeStorage(directory: directory) { url in
-            protectedNames.withValue { $0.insert(url.lastPathComponent) }
+            protectedNames.withValue { names in
+                _ = names.insert(url.lastPathComponent)
+            }
             return try Self.applyTestStorageProtection(url)
         }
         let committed = try session("https://last-committed.example")

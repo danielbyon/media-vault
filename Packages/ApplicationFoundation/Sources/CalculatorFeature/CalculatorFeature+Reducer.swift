@@ -6,6 +6,7 @@
 //
 
 import ComposableArchitecture
+import Foundation
 
 extension CalculatorFeature {
     func handle(into state: inout State, action: Action) -> Effect<Action> {

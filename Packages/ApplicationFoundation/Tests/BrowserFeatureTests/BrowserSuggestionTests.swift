@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import Dependencies
 import Foundation
 import Testing
 @testable import BrowserFeature

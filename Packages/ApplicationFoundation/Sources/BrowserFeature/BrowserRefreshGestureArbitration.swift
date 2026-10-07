@@ -5,9 +5,13 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
 import Foundation
+import ObjectiveC
 import SwiftUI
 import UIKit
+import UIUtilities
 
 /// Identifies one mounted Browser refresh surface independently of its logical tab.
 struct BrowserRefreshSurfaceID: Hashable {
@@ -328,10 +332,6 @@ struct BrowserRefreshGestureArbitration {
 final class BrowserRefreshGestureArbitrator {
     private var state = BrowserRefreshGestureArbitration()
 
-    var mountedSurfaceID: BrowserRefreshSurfaceID? {
-        state.activeSurfaceID
-    }
-
     func mount(_ surfaceID: BrowserRefreshSurfaceID) {
         state.mount(surfaceID)
     }
@@ -377,7 +377,6 @@ final class BrowserSoftwareKeyboardPresence {
 
 /// Observes only keyboard notifications whose local frame belongs to the Browser's current window.
 @MainActor
-@preconcurrency
 struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
     private let presence: BrowserSoftwareKeyboardPresence
     private let notificationCenter: NotificationCenter
@@ -412,7 +411,6 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
 
     /// Reports UIKit window changes so pending keyboard frames can be reconciled without a delay.
     @MainActor
-    @preconcurrency
     final class AnchorView: UIView {
         var onWindowChange: (() -> Void)?
 
@@ -424,7 +422,6 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
 
     /// Owns notification registration separately from the pure keyboard and gesture state models.
     @MainActor
-    @preconcurrency
     final class Coordinator: NSObject {
         private struct NotificationScope: Equatable {
             let screenID: ObjectIdentifier?
@@ -480,8 +477,8 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
                 anchorView = view
             }
 
-            if let anchorView = view as? BrowserSoftwareKeyboardPresenceObserver.AnchorView {
-                anchorView.onWindowChange = { [weak self] in
+            if let typedAnchorView = view as? BrowserSoftwareKeyboardPresenceObserver.AnchorView {
+                typedAnchorView.onWindowChange = { [weak self] in
                     self?.anchorViewDidMoveToWindow()
                 }
             }
@@ -512,8 +509,8 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
         func stopObserving() {
             notificationCenter.removeObserver(self)
             isObserving = false
-            if let anchorView = anchorView as? BrowserSoftwareKeyboardPresenceObserver.AnchorView {
-                anchorView.onWindowChange = nil
+            if let typedAnchorView = anchorView as? BrowserSoftwareKeyboardPresenceObserver.AnchorView {
+                typedAnchorView.onWindowChange = nil
             }
             anchorView = nil
             observedWindow = nil
@@ -573,8 +570,8 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
         }
 
         private func notificationScope(for notification: Notification) -> NotificationScope? {
-            if let localValue = notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? NSNumber,
-               !localValue.boolValue {
+            if let isLocal = notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool,
+               !isLocal {
                 return nil
             }
 
@@ -655,8 +652,8 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
                 named: pendingKeyboardNotification.name,
                 beginFrame: pendingKeyboardNotification.beginFrame,
                 endFrame: pendingKeyboardNotification.endFrame,
-                visibleFrameEvidence: pendingKeyboardNotification.visibleFrame,
                 window: window,
+                visibleFrameEvidence: pendingKeyboardNotification.visibleFrame,
             )
         }
 
@@ -664,8 +661,8 @@ struct BrowserSoftwareKeyboardPresenceObserver: UIViewRepresentable {
             named name: Notification.Name,
             beginFrame: CGRect?,
             endFrame: CGRect?,
-            visibleFrameEvidence: CGRect? = nil,
             window: UIWindow,
+            visibleFrameEvidence: CGRect? = nil,
         ) {
             let beginIntersects = intersectsWindow(beginFrame, window: window)
             let endIntersects = intersectsWindow(endFrame, window: window)

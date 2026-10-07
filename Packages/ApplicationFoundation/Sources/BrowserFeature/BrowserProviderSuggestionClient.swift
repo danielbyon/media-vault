@@ -5,7 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import ComposableArchitecture
+import Dependencies
 import Foundation
 
 /// Stable failure reported by the optional provider-suggestion boundary.

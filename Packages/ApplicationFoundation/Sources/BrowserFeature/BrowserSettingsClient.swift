@@ -5,9 +5,10 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import ComposableArchitecture
 import CoreFoundation
-@preconcurrency import Foundation
+import Dependencies
+import Foundation
+import Sharing
 
 /// Namespaced persistence dependency for authenticated Browser preferences.
 struct BrowserSettingsClient: Sendable {
@@ -83,14 +84,14 @@ actor BrowserSettingsStorage {
 
     /// Loads Browser preferences, applying the documented defaults for absent or invalid values.
     func load() -> BrowserSettings {
-        let preserveOpenTabs: Bool =
-            if let value = userDefaults
-                .object(forKey: BrowserSettingsStorageKeys.preserveOpenTabs) as? NSNumber,
-                CFGetTypeID(value) == CFBooleanGetTypeID() {
-                value.boolValue
-            } else {
-                true
+        let storedPreserveOpenTabsValue = userDefaults.object(forKey: BrowserSettingsStorageKeys.preserveOpenTabs)
+        let preserveOpenTabs = storedPreserveOpenTabsValue.flatMap { value -> Bool? in
+            guard CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() else {
+                return nil
             }
+
+            return value as? Bool
+        } ?? true
         return BrowserSettings(
             searchProvider: userDefaults.string(forKey: BrowserSettingsStorageKeys.searchProvider)
                 .flatMap(BrowserSearchProvider.init(rawValue:)) ?? .duckDuckGo,

@@ -5,6 +5,9 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
+import Foundation
 import PresentationSupport
 import SwiftUI
 import UIKit
@@ -66,7 +69,6 @@ final class BrowserNativePreviewCaptureController {
 
 /// Hosts one app-owned native Browser surface in a named UIKit boundary.
 @MainActor
-@preconcurrency
 struct BrowserNativePreviewCapture<Content: View>: UIViewControllerRepresentable {
     let content: Content
     let controller: BrowserNativePreviewCaptureController

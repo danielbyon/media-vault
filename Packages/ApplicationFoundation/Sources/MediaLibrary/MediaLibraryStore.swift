@@ -6,7 +6,10 @@
 //
 
 import Foundation
+import GRDB
 import SQLiteData
+import StructuredQueries
+import StructuredQueriesCore
 
 /// The persistence seam used by media import and Library presentation.
 public protocol MediaLibraryStore: Sendable {
@@ -148,7 +151,7 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
             try await prepareSchema()
             try await database.write { db in
                 let storedAsset = try #sql(
-                    "SELECT kind, imported_at, captured_at FROM media_assets WHERE id = \(asset.id.uuidString)",
+                    "SELECT kind, imported_at, captured_at FROM media_assets WHERE id = \(bind: asset.id.uuidString)",
                     as: (String, Double, Double?).self,
                 ).fetchOne(db)
 
@@ -163,7 +166,7 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
                     let storedResources = try #sql(
                         """
                         SELECT id, asset_id, role, relative_path, source_filename, source_uti, byte_count, sha256
-                        FROM media_resources WHERE asset_id = \(asset.id.uuidString) ORDER BY id
+                        FROM media_resources WHERE asset_id = \(bind: asset.id.uuidString) ORDER BY id
                         """,
                         as: (String, String, String, String, String, String, Int64, String).self,
                     ).fetchAll(db)
@@ -187,7 +190,7 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
                 }
 
                 let journalState = try #sql(
-                    "SELECT state FROM media_ingestion_journal WHERE id = \(assetID.uuidString)",
+                    "SELECT state FROM media_ingestion_journal WHERE id = \(bind: assetID.uuidString)",
                     as: String.self,
                 ).fetchOne(db)
                 guard journalState == MediaIngestionState.committing.rawValue

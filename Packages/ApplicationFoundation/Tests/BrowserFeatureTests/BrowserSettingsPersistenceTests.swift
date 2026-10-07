@@ -5,8 +5,9 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import ComposableArchitecture
-@preconcurrency import Foundation
+import Dependencies
+import Foundation
+import Sharing
 import Testing
 @testable import BrowserFeature
 

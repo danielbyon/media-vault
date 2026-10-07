@@ -7,10 +7,16 @@
 
 import Clocks
 import ComposableArchitecture
+import CoreFoundation
+import CoreGraphics
+import Dependencies
 import Foundation
+import ObjectiveC
+import QuartzCore
 import SwiftUI
 import Testing
 import UIKit
+import UIUtilities
 import WebKit
 @testable import BrowserFeature
 
@@ -1643,7 +1649,7 @@ struct BrowserViewInteractionTests {
     }
 
     private func mount(_ controller: UIViewController, size: CGSize) -> UIWindow {
-        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        let window = UIKitTestSupport.makeWindow(frame: CGRect(origin: .zero, size: size))
         window.rootViewController = controller
         window.makeKeyAndVisible()
         controller.view.frame = window.bounds

@@ -7,6 +7,8 @@
 
 import Clocks
 import ComposableArchitecture
+import ConcurrencyExtras
+import Dependencies
 import Foundation
 import Testing
 @testable import BrowserFeature

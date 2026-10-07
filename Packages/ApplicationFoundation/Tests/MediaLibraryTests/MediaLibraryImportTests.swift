@@ -5,11 +5,13 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
 import CryptoKit
 import Foundation
+import GRDB
 import ImageIO
+import ObjectiveC
 import PersistenceSupport
-import SQLiteData
 import Testing
 import UniformTypeIdentifiers
 @_spi(Testing) @testable import MediaLibrary

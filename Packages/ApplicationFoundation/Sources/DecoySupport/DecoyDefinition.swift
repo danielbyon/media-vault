@@ -15,7 +15,6 @@ public struct DecoySessionContext: Sendable {
     /// The trigger declarations and enablement currently supplied by application policy.
     public let triggerConfiguration: DecoyHiddenEntryTriggerConfiguration
 
-    @preconcurrency
     private let attemptSink: @MainActor @Sendable (DecoyHiddenEntryAttempt) -> Void
 
     /// Creates a context for one active decoy session.
@@ -24,7 +23,6 @@ public struct DecoySessionContext: Sendable {
     ///   - triggerConfiguration: The active definition's declared triggers and their current
     ///     enablement.
     ///   - attemptSink: The application host's receiver for normalized attempts.
-    @preconcurrency
     public init(
         triggerConfiguration: DecoyHiddenEntryTriggerConfiguration,
         attemptSink: @escaping @MainActor @Sendable (DecoyHiddenEntryAttempt) -> Void,
@@ -46,7 +44,6 @@ public struct DecoySessionContext: Sendable {
 /// A session owns its feature state and root view. The host can update only hidden-entry trigger
 /// configuration and deliver correlated hidden-entry completions.
 @MainActor
-@preconcurrency
 public final class AnyDecoySession {
     /// The root surface rendered while this decoy is active.
     public let rootView: AnyView
@@ -60,7 +57,6 @@ public final class AnyDecoySession {
     ///   - rootView: The decoy-owned root surface.
     ///   - updateTriggerConfiguration: Applies current host policy to the session.
     ///   - deliverCompletion: Delivers a normalized result to the owning decoy.
-    @preconcurrency
     public init(
         rootView: some View,
         updateTriggerConfiguration: @escaping (DecoyHiddenEntryTriggerConfiguration) -> Void,
@@ -107,7 +103,6 @@ public struct DecoyDefinition: Identifiable, Sendable {
     ///   - displayName: A human-readable name for the decoy.
     ///   - declaredTriggers: The triggers this decoy recognizes.
     ///   - makeSession: Creates the long-lived session for the supplied host context.
-    @preconcurrency
     public init(
         id: String,
         displayName: String,
@@ -125,7 +120,6 @@ public struct DecoyDefinition: Identifiable, Sendable {
     /// - Parameter context: The host configuration and normalized-attempt sink for the session.
     /// - Returns: The type-erased decoy session.
     @MainActor
-    @preconcurrency
     public func makeSession(_ context: DecoySessionContext) -> AnyDecoySession {
         sessionFactory(context)
     }

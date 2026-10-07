@@ -5,7 +5,9 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreGraphics
 import UIKit
+import UIUtilities
 import WebKit
 
 /// Provides presentation-state checks for an adapter-owned WebKit boundary.

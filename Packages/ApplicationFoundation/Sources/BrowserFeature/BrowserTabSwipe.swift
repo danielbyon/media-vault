@@ -5,7 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import CoreGraphics
+import CoreFoundation
 
 /// Classifies Tab Overview drags without owning tab identity, gesture state, or reducer behavior.
 enum BrowserTabSwipe {

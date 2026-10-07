@@ -5,7 +5,11 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
+import QuartzCore
 import UIKit
+import UIUtilities
 import WebKit
 
 @MainActor
@@ -207,16 +211,16 @@ extension BrowserTabTransitionUIKitCoordinator {
     }
 
     func animate(to destinationView: UIView, destinationFrame: CGRect) {
-        guard let session else {
+        guard let activeSession = session else {
             return
         }
 
-        if session.liveSurface != nil {
+        if activeSession.liveSurface != nil {
             animateLiveSurface(to: destinationView, destinationFrame: destinationFrame)
             return
         }
 
-        guard let frozenSurface = session.frozenSurface,
+        guard let frozenSurface = activeSession.frozenSurface,
               destinationFrame.width > 0,
               frozenSurface.bounds.width > 0
         else {
@@ -224,11 +228,11 @@ extension BrowserTabTransitionUIKitCoordinator {
             return
         }
 
-        session.generation += 1
-        session.animator?.stopAnimation(true)
+        activeSession.generation += 1
+        activeSession.animator?.stopAnimation(true)
         let destinationScale = destinationFrame.width / frozenSurface.bounds.width
         let destinationRadius = BrowserTabTransitionPresentation(
-            direction: session.direction,
+            direction: activeSession.direction,
         ).destinationCornerRadius
         let localDestinationRadius = destinationRadius / max(destinationScale, 0.001)
 
@@ -247,20 +251,20 @@ extension BrowserTabTransitionUIKitCoordinator {
             )
             frozenSurface.layer.cornerRadius = localDestinationRadius
         }
-        let generation = session.generation
-        let transitionToken = session.token
-        nextAnimator.addCompletion { [weak self, weak session, weak destinationView] _ in
-            guard let self, let session else {
+        let generation = activeSession.generation
+        let transitionToken = activeSession.token
+        nextAnimator.addCompletion { [weak self, weak activeSession, weak destinationView] _ in
+            guard let self, let activeSession else {
                 return
             }
-            guard session.generation == generation,
-                  session.token == transitionToken
+            guard activeSession.generation == generation,
+                  activeSession.token == transitionToken
             else {
                 return
             }
 
-            session.animator = nil
-            if session.direction == .toOverview, let destinationView {
+            activeSession.animator = nil
+            if activeSession.direction == .toOverview, let destinationView {
                 parkFrozenSurface(in: destinationView)
                 revealDestination()
             } else {
@@ -269,8 +273,8 @@ extension BrowserTabTransitionUIKitCoordinator {
             }
             finish()
         }
-        session.animator = nextAnimator
-        registry.report(.geometryAnimatorCreated(session.tabID))
+        activeSession.animator = nextAnimator
+        registry.report(.geometryAnimatorCreated(activeSession.tabID))
         diagnostics.onAnimatorCreated?(nextAnimator)
         nextAnimator.startAnimation()
     }
@@ -296,8 +300,8 @@ extension BrowserTabTransitionUIKitCoordinator {
     }
 
     func animateLiveSurface(to destinationView: UIView, destinationFrame: CGRect) {
-        guard let session,
-              let liveSurface = session.liveSurface,
+        guard let activeSession = session,
+              let liveSurface = activeSession.liveSurface,
               let overlay,
               let superview = liveSurface.superview,
               destinationFrame.width > 0,
@@ -313,8 +317,8 @@ extension BrowserTabTransitionUIKitCoordinator {
             return
         }
 
-        session.generation += 1
-        session.animator?.stopAnimation(true)
+        activeSession.generation += 1
+        activeSession.animator?.stopAnimation(true)
         let sourceFrame = liveSurface.convert(liveSurface.bounds, to: overlay)
         let sourceCenter = liveSurface.convert(
             CGPoint(x: liveSurface.bounds.midX, y: liveSurface.bounds.midY),
@@ -326,10 +330,10 @@ extension BrowserTabTransitionUIKitCoordinator {
         )
         let destinationScale = destinationFrame.width / max(sourceFrame.width, 0.001)
         let destinationRadius = BrowserTabTransitionPresentation(
-            direction: session.direction,
+            direction: activeSession.direction,
         ).destinationCornerRadius
         let localDestinationRadius = destinationRadius / max(destinationScale, 0.001)
-        let originalTransform = session.originalTransform ?? .identity
+        let originalTransform = activeSession.originalTransform ?? .identity
         let destinationTransform = CGAffineTransform(
             translationX: destinationCenter.x - sourceCenter.x,
             y: destinationCenter.y - sourceCenter.y,
@@ -353,23 +357,23 @@ extension BrowserTabTransitionUIKitCoordinator {
             liveSurface.transform = destinationTransform
             liveSurface.layer.cornerRadius = localDestinationRadius
         }
-        let generation = session.generation
-        let transitionToken = session.token
-        nextAnimator.addCompletion { [weak self, weak session] (_: UIViewAnimatingPosition) in
-            guard let self, let session,
-                  session.generation == generation,
-                  session.token == transitionToken
+        let generation = activeSession.generation
+        let transitionToken = activeSession.token
+        nextAnimator.addCompletion { [weak self, weak activeSession] (_: UIViewAnimatingPosition) in
+            guard let self, let activeSession,
+                  activeSession.generation == generation,
+                  activeSession.token == transitionToken
             else {
                 return
             }
 
-            session.animator = nil
-            if session.direction == .toOverview,
+            activeSession.animator = nil
+            if activeSession.direction == .toOverview,
                let exactCardSurface = makeRenderedSurface(from: liveSurface) {
                 // snapshotView(afterScreenUpdates: false) is a fast path for ordinary UIKit
                 // surfaces, but WebKit may return an uncommitted replica. Capture the already
                 // composited live layer instead, before restoring the page to its full viewport.
-                session.frozenSurface = exactCardSurface
+                activeSession.frozenSurface = exactCardSurface
                 parkFrozenSurface(in: destinationView)
                 revealDestination()
             } else {
@@ -378,8 +382,8 @@ extension BrowserTabTransitionUIKitCoordinator {
             restoreLiveSurface()
             finish()
         }
-        session.animator = nextAnimator
-        registry.report(.geometryAnimatorCreated(session.tabID))
+        activeSession.animator = nextAnimator
+        registry.report(.geometryAnimatorCreated(activeSession.tabID))
         diagnostics.onAnimatorCreated?(nextAnimator)
         nextAnimator.startAnimation()
     }

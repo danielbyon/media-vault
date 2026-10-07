@@ -5,7 +5,11 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
 import Foundation
+import ObjectiveC
+import QuartzCore
 import Testing
 import UIKit
 @testable import BrowserFeature
@@ -1040,7 +1044,7 @@ private final class BrowserTabTransitionUIKitHarness {
         diagnostics: BrowserTabTransitionDiagnostics = .init(),
         renderedSurfaceFactory: ((UIView) -> UIView?)? = nil,
     ) {
-        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window = UIKitTestSupport.makeWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         rootViewController = UIViewController()
         overlay = BrowserTabTransitionOverlayView(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         registry = BrowserTabTransitionSurfaceRegistry()

@@ -5,7 +5,10 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import SwiftUI
+import CoreFoundation
+import CoreGraphics
+import Foundation
+import QuartzCore
 import UIKit
 
 /// Records the visual boundaries crossed by the most recently completed transition session.
@@ -257,13 +260,6 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
     func attach(overlay: BrowserTabTransitionOverlayView) {
         self.overlay = overlay
         surfaceChanged()
-    }
-
-    /// Releases an overlay without touching a parked exact card representation.
-    func detach(overlay: BrowserTabTransitionOverlayView) {
-        if self.overlay === overlay {
-            self.overlay = nil
-        }
     }
 
     /// Starts or retargets a handoff after preparing the exact source representation.

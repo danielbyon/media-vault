@@ -8,8 +8,6 @@
 import AppFeature
 import ComposableArchitecture
 import DecoySupport
-import Dependencies
-import Foundation
 import SwiftUI
 import VaultFeature
 

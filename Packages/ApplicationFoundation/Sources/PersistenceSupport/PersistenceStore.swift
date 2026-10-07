@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SQLiteData
+import GRDB
 
 /// Creates isolated SQLiteData connections for deterministic tests.
 ///

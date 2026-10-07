@@ -7,7 +7,12 @@
 
 import Clocks
 import ComposableArchitecture
+import ConcurrencyExtras
+import CoreFoundation
+import CoreGraphics
+import Dependencies
 import Foundation
+import SwiftUI
 import Testing
 @testable import BrowserFeature
 
