@@ -33,15 +33,17 @@ struct BrowserViewInteractionTests {
         ))
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
+        defer {
+            BrowserWebKitAdapter.shared.destroyContext(for: tab.id)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         #expect(descendants(of: hostingController.view, matching: UITextField.self).count == 1)
         let textField = try #require(descendants(of: hostingController.view, matching: UITextField.self).first)
         #expect(textField.autocorrectionType == .no)
         #expect(textField.autocapitalizationType == .none)
         #expect(textField.keyboardType == .webSearch)
-
-        window.isHidden = true
-        window.rootViewController = nil
     }
 
     @Test("Mounted card surface is inside an enabled overflowing Tab Overview scroll surface")
@@ -151,6 +153,11 @@ struct BrowserViewInteractionTests {
         let store = makeBrowserViewStore(initialState: initialState)
         let hostingController = UIHostingController(rootView: BrowserView(store: store))
         let window = mount(hostingController, size: CGSize(width: 390, height: 844))
+        defer {
+            BrowserWebKitAdapter.shared.destroyContext(for: tab.id)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         let pageSurface = try #require(allViews(in: hostingController.view).compactMap { $0 as? WKWebView }.first)
         let chromeControl = try #require(allViews(in: hostingController.view).compactMap { $0 as? UIButton }.first)
@@ -165,9 +172,6 @@ struct BrowserViewInteractionTests {
         #expect(pageSurface.scrollView.keyboardDismissMode == .interactive)
         #expect(hostingController.view.bounds.contains(center(of: pageSurface, in: hostingController.view)))
         #expect(hostingController.view.bounds.contains(center(of: chromeControl, in: hostingController.view)))
-
-        window.isHidden = true
-        window.rootViewController = nil
     }
 
     @Test("Start Page native host receives interactive keyboard dismissal")
