@@ -123,14 +123,23 @@ struct BrowserOpenTabsSessionTests {
         let gate = BrowserPersistenceRevisionGate()
         let operationStarted = DispatchSemaphore(value: 0)
         let releaseOperation = DispatchSemaphore(value: 0)
+        let operationFinished = LockIsolated(false)
         let mutation = Task.detached {
             gate.perform(revision: 1) {
                 operationStarted.signal()
-                _ = releaseOperation.wait(timeout: .now() + 5)
+                // The mutation stays in flight until this test releases it, so a
+                // reservation made below runs against a mutation that has not
+                // finished. The bounded wait only keeps a failing run from
+                // blocking forever; it never gates a passing run.
+                _ = releaseOperation.wait(timeout: .now() + 30)
+                operationFinished.setValue(true)
             }
         }
 
-        let didStartOperation = waitForSignal(operationStarted)
+        // Starting the detached fixture is test setup rather than product
+        // behavior, so it gets a wide budget: scheduler latency on a loaded
+        // machine must not be mistaken for latency inside the revision gate.
+        let didStartOperation = waitForSignal(operationStarted, timeout: 30)
         #expect(didStartOperation)
         guard didStartOperation else {
             releaseOperation.signal()
@@ -138,24 +147,18 @@ struct BrowserOpenTabsSessionTests {
             return
         }
 
-        let reservationStarted = DispatchSemaphore(value: 0)
-        let reservationFinished = DispatchSemaphore(value: 0)
-        let reservation = Task.detached {
-            reservationStarted.signal()
-            let revision = gate.reserve(after: 1)
-            reservationFinished.signal()
-            return revision
-        }
-
-        let didStartReservation = waitForSignal(reservationStarted)
-        #expect(didStartReservation)
-        let reservedDuringMutation = waitForSignal(reservationFinished, timeout: 0.5)
+        // The mutation cannot finish before this test signals
+        // `releaseOperation`, so a reservation that returns while the mutation
+        // is still blocked provably did not wait for it. Asserting that order
+        // replaces an elapsed-time budget, which previously counted scheduler
+        // latency as if it were gate latency and failed on loaded machines.
+        let revision = gate.reserve(after: 1)
+        let reservedDuringMutation = operationFinished.value == false
         releaseOperation.signal()
 
         let mutationWasAccepted = await mutation.value
-        let revision = await reservation.value
-        #expect(mutationWasAccepted)
         #expect(reservedDuringMutation)
+        #expect(mutationWasAccepted)
         #expect(revision == 2)
     }
 
