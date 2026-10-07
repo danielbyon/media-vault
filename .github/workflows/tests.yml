@@ -27,6 +27,28 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Show toolchain
+        id: toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          toolchain_id=$( { xcodebuild -version; swift --version | sed -n '1p'; } | shasum -a 256 | cut -c 1-16 )
+          echo "Toolchain cache id: $toolchain_id"
+          echo "id=$toolchain_id" >> "$GITHUB_OUTPUT"
+
+      # Swift tooling bootstraps Mint packages under .tools/mint. Keep compiled
+      # tools isolated by runner OS/architecture, exact Xcode/Swift toolchain,
+      # and the swift-tooling release lock. Do not use restore-keys: a compiled
+      # tool from a different toolchain must never be restored opportunistically.
+      - name: Cache Mint tools
+        uses: actions/cache@v6
+        with:
+          path: .tools/mint
+          key: mint-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Scripts/swift-tools.lock') }}
+
+      - name: Bootstrap Swift tools
+        run: make tools
+
       - name: Cache Swift package checkouts
         uses: actions/cache@v6
         with:
