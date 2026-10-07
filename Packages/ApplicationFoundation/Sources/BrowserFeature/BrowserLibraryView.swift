@@ -6,11 +6,12 @@
 //
 
 import ComposableArchitecture
+import CoreFoundation
 import Foundation
 import SwiftUI
+import UIKit
 
 @MainActor
-@preconcurrency
 struct BrowserLibraryView: View {
     let store: StoreOf<BrowserFeature>
     var body: some View {
@@ -163,7 +164,6 @@ struct BrowserLibraryView: View {
 }
 
 @MainActor
-@preconcurrency
 struct BrowserBookmarkEditorView: View {
     let store: StoreOf<BrowserFeature>
 

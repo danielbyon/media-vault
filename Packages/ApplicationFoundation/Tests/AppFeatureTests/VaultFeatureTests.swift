@@ -8,7 +8,6 @@
 import ComposableArchitecture
 import ConcurrencyExtras
 import DecoySupport
-import Dependencies
 import Foundation
 import Testing
 @testable import VaultFeature

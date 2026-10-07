@@ -6,13 +6,13 @@
 //
 
 import ComposableArchitecture
+import CoreFoundation
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
 /// The minimal authenticated Library presentation for the first still-image tracer.
 @MainActor
-@preconcurrency
 public struct MediaLibraryView: View {
     private let store: StoreOf<MediaLibraryFeature>
     private let loadsOnAppear: Bool

@@ -6,13 +6,13 @@
 //
 
 import ComposableArchitecture
+import CoreFoundation
 import Foundation
 import SwiftUI
 import UIKit
 
 /// Authenticated native browser presentation.
 @MainActor
-@preconcurrency
 public struct BrowserView: View {
     private let store: StoreOf<BrowserFeature>
     private let reduceMotionOverride: Bool?
@@ -926,7 +926,6 @@ private struct BrowserErrorSurface: View {
 
 /// Presents the system share sheet for a link selected from WebKit's public context menu.
 @MainActor
-@preconcurrency
 private struct BrowserShareSheet: UIViewControllerRepresentable {
     let url: URL
 

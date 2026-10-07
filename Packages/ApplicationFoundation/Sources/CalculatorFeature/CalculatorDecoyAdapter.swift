@@ -7,7 +7,7 @@
 
 import ComposableArchitecture
 import DecoySupport
-import Foundation
+import Dependencies
 
 /// Adapts calculator surface input to normalized hidden-entry attempts.
 ///
@@ -15,7 +15,6 @@ import Foundation
 /// arithmetic and persistence reducer without exposing calculator input policy to the application
 /// host. The host receives attempts through ``Action/delegate(_:)`` and returns correlated
 /// completions through ``Action/completion(_:)``.
-@preconcurrency
 @Reducer
 public struct CalculatorDecoyAdapter {
     /// The stable trigger descriptor for long-pressing the equals control.

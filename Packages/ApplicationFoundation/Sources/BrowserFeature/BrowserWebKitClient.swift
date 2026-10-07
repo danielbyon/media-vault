@@ -177,7 +177,6 @@ struct BrowserWebKitClient: Sendable {
     var events: @Sendable () async -> AsyncStream<BrowserWebKitEvent>
 
     /// Creates a reducer-facing WebKit client.
-    @preconcurrency
     init(
         execute: @escaping @Sendable (BrowserWebKitCommand) async -> Void,
         events: @escaping @Sendable () async -> AsyncStream<BrowserWebKitEvent>,

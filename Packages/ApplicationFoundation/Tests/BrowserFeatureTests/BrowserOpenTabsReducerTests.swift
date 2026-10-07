@@ -6,7 +6,9 @@
 //
 
 import ComposableArchitecture
-@preconcurrency import Foundation
+import ConcurrencyExtras
+import Dependencies
+import Foundation
 import Testing
 @testable import BrowserFeature
 
@@ -86,7 +88,6 @@ struct BrowserOpenTabsReducerTests {
 
     @Test("A confirmed missing session seeds the current logical Browser workspace")
     func missingSessionSeedsCurrentWorkspace() async throws {
-        let firstURL = try #require(URL(string: "https://current.example/first"))
         let selectedURL = try #require(URL(string: "https://current.example/selected"))
         let firstID = BrowserTabID()
         let selectedID = BrowserTabID()

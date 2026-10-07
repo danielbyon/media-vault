@@ -5,8 +5,14 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
+import Foundation
+import ObjectiveC
+import QuartzCore
 import SwiftUI
 import UIKit
+import UIUtilities
 
 /// A weak registration for one exact Browser transition boundary.
 @MainActor
@@ -197,7 +203,6 @@ final class BrowserTabTransitionSurfaceRegistry {
 
 /// Hosts SwiftUI preview content in the exact UIKit boundary used for card snapshots.
 @MainActor
-@preconcurrency
 struct BrowserTabTransitionSurfaceHost<Content: View>: UIViewControllerRepresentable {
     let role: BrowserTabTransitionSurfaceRole
     let registry: BrowserTabTransitionSurfaceRegistry
@@ -301,7 +306,6 @@ final class BrowserTabTransitionSurfaceHostController<Content: View>: UIViewCont
 
 /// A transparent, non-interactive overlay that shares one coordinate space with all boundaries.
 @MainActor
-@preconcurrency
 struct BrowserTabTransitionOverlay: UIViewRepresentable {
     let coordinator: BrowserTabTransitionUIKitCoordinator
 

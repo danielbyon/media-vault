@@ -6,6 +6,7 @@
 //
 
 import ComposableArchitecture
+import CoreFoundation
 import DecoySupport
 import SwiftUI
 import VaultFeature
@@ -228,7 +229,6 @@ public struct RootFeature {
 
 /// Creates the active decoy session and root store once for the application lifetime.
 @MainActor
-@preconcurrency
 public enum RootComposition {
     /// Composes the root around the shipping decoy's statically registered definition.
     ///
@@ -273,7 +273,6 @@ private final class DecoyAttemptRelay {
 
 /// The surface selected by the application's lifecycle state.
 @MainActor
-@preconcurrency
 public struct RootView: View {
     private let store: StoreOf<RootFeature>
 

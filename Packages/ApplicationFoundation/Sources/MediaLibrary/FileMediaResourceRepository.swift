@@ -5,9 +5,12 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
 import CryptoKit
 import Foundation
 import ImageIO
+import ObjectiveC
 import UniformTypeIdentifiers
 
 /// Provides the protected app-controlled filesystem boundary for canonical resources.
@@ -28,7 +31,6 @@ public struct FileMediaResourceRepository: Sendable {
     }
 
     /// Creates a repository with injected filesystem operations for deterministic failure tests.
-    @preconcurrency
     @_spi(Testing)
     public init(
         rootURL: URL,
@@ -256,7 +258,6 @@ public struct MediaSourceClient: Sendable {
     private let copyOperation: @Sendable (URL, URL) throws -> Void
 
     /// Creates a source client from a caller-owned copy operation.
-    @preconcurrency
     public init(copyOperation: @escaping @Sendable (URL, URL) throws -> Void) {
         self.copyOperation = copyOperation
     }
@@ -317,7 +318,6 @@ public actor MediaLibraryImporter {
     }
 
     /// Creates an importer with explicit storage and source-access seams.
-    @preconcurrency
     public init(
         store: SQLiteMediaLibraryStore,
         resources: FileMediaResourceRepository,
@@ -522,7 +522,7 @@ public actor MediaLibraryImporter {
                         throw AcceptedResourceReadError()
                     }
                 } catch let error as MediaImportError {
-                    try? await store.ingestionJournal.transition(entry, to: .failed)
+                    _ = try? await store.ingestionJournal.transition(entry, to: .failed)
                     throw error
                 }
                 entry = try await store.ingestionJournal.transition(

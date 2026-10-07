@@ -6,6 +6,7 @@
 //
 
 import ComposableArchitecture
+import Dependencies
 import Foundation
 
 /// Keeps all transient preview lifecycle values in one tab-keyed state owner.

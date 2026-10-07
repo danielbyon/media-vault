@@ -69,7 +69,6 @@ public enum DeterministicTestSupport {
     /// application production code must not use it as a scheduling policy.
     ///
     /// - Parameter operation: Work that should observe the deterministic dependency values.
-    @preconcurrency
     @MainActor
     public static func withDeterministicDependencies(
         _ operation: @isolated(any) () async throws -> Void,
@@ -88,7 +87,6 @@ public enum DeterministicTestSupport {
     /// `\.continuousClock` remains suspended until the operation advances the supplied clock.
     ///
     /// - Parameter operation: Work that should use the isolated controllable clock.
-    @preconcurrency
     @MainActor
     public static func withControllableClock(
         _ operation: @isolated(any) (ControllableClock) async throws -> Void,

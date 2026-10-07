@@ -5,7 +5,11 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
+import Foundation
 import XCTest
+import XCUIAutomation
 
 @MainActor
 final class BrowserTabOverviewScrollUITests: XCTestCase {
@@ -92,5 +96,4 @@ final class BrowserTabOverviewScrollUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [reconciliationSettled], timeout: 10), .completed)
         XCTAssertEqual(savedAnchor.label, "anchor-38|commits-0")
     }
-
 }

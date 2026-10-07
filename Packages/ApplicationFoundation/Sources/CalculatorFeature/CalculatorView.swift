@@ -6,8 +6,11 @@
 //
 
 import ComposableArchitecture
+import CoreFoundation
 import Dependencies
+import Foundation
 import SwiftUI
+import UIKit
 
 /// A calculator surface that adapts its basic keypad and history to the available width.
 ///
@@ -15,7 +18,6 @@ import SwiftUI
 /// vertical reading order. Regular-width layouts place the keypad beside history when both columns
 /// fit. Hardware-keyboard input enters through the same button actions as touch input.
 @MainActor
-@preconcurrency
 public struct CalculatorView: View {
     @Environment(\.horizontalSizeClass)
     private var horizontalSizeClass

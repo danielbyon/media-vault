@@ -7,6 +7,8 @@
 
 import Combine
 import ComposableArchitecture
+import CoreFoundation
+import CoreGraphics
 import SwiftUI
 import UIKit
 
@@ -521,7 +523,6 @@ final class BrowserTabOverviewScrollVisibility: ObservableObject {
 /// Transition callbacks remain owned by `BrowserView`, while this view owns only overview layout,
 /// card interaction, preview selection, and the direct-manipulation state for one card.
 @MainActor
-@preconcurrency
 struct BrowserTabOverviewView: View {
     let store: StoreOf<BrowserFeature>
     let transitionRegistry: BrowserTabTransitionSurfaceRegistry

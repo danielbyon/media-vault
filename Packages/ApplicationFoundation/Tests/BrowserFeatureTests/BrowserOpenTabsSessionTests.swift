@@ -5,9 +5,9 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import ComposableArchitecture
 import ConcurrencyExtras
-@preconcurrency import Foundation
+import Dispatch
+import Foundation
 import Testing
 @testable import BrowserFeature
 
@@ -40,7 +40,7 @@ struct BrowserOpenTabsSessionTests {
             BrowserTab(id: invalidID, content: .web(requestedURL: invalid)),
         ]
 
-        let session = try #require(BrowserOpenTabsSession.project(from: tabs, selectedTabID: committedID))
+        let session = BrowserOpenTabsSession.project(from: tabs, selectedTabID: committedID)
 
         #expect(session.entries.map(\.position) == [0, 1, 2, 3])
         #expect(session.entries[0].kind == .startPage)
@@ -81,8 +81,16 @@ struct BrowserOpenTabsSessionTests {
             "{\"version\":\(BrowserOpenTabsSession.currentVersion),\"selectedPosition\":0,\"entries\":[]}".utf8,
         )
 
+        // A double that only rounds up to 2^63 must be rejected instead of trapping in `Int(_:)`.
+        let unrepresentablePosition = Data(
+            """
+            {"version":\(BrowserOpenTabsSession.currentVersion),"selectedPosition":9223372036854775808.0,"entries":[{"position":0,"kind":"startPage"}]}
+            """.utf8,
+        )
+
         #expect(BrowserOpenTabsSession.decode(unsupported) == .unsupportedVersion)
         #expect(BrowserOpenTabsSession.decode(malformedCurrent) == .invalid)
+        #expect(BrowserOpenTabsSession.decode(unrepresentablePosition) == .invalid)
     }
 
     @Test("Restoration creates fresh ordinary tabs and tracks background web URLs")
@@ -420,7 +428,9 @@ struct BrowserOpenTabsSessionTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let protectedNames = LockIsolated<Set<String>>([])
         let storage = makeStorage(directory: directory) { url in
-            protectedNames.withValue { $0.insert(url.lastPathComponent) }
+            protectedNames.withValue { names in
+                _ = names.insert(url.lastPathComponent)
+            }
             return try Self.applyTestStorageProtection(url)
         }
         let url = try #require(URL(string: "https://private.example"))
@@ -460,7 +470,9 @@ struct BrowserOpenTabsSessionTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let protectedNames = LockIsolated<Set<String>>([])
         let storage = makeStorage(directory: directory) { url in
-            protectedNames.withValue { $0.insert(url.lastPathComponent) }
+            protectedNames.withValue { names in
+                _ = names.insert(url.lastPathComponent)
+            }
             return try Self.applyTestStorageProtection(url)
         }
         let committed = try session("https://last-committed.example")

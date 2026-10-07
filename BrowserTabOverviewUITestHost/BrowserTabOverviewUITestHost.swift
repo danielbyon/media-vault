@@ -7,11 +7,13 @@
 
 import CalculatorFeature
 import ComposableArchitecture
+import CoreFoundation
+import Foundation
 import SwiftUI
 @testable import BrowserFeature
 
 @main
-struct BrowserTabOverviewUITestHostApp: App {
+struct BrowserTabOverviewUITestHost: App {
     var body: some Scene {
         WindowGroup {
             if ProcessInfo.processInfo.arguments.contains("--calculator-basic") {
@@ -83,9 +85,9 @@ private struct BrowserTabOverviewUITestHostView: View {
             BrowserFeature()
         }
         transitionRegistry = BrowserTabTransitionSurfaceRegistry()
-        let scrollPosition = BrowserTabOverviewScrollPosition()
-        scrollPosition.restore(with: initialAnchor, liveTabIDs: Set(tabs.map(\.id)))
-        _scrollPosition = StateObject(wrappedValue: scrollPosition)
+        let restoredScrollPosition = BrowserTabOverviewScrollPosition()
+        restoredScrollPosition.restore(with: initialAnchor, liveTabIDs: Set(tabs.map(\.id)))
+        _scrollPosition = StateObject(wrappedValue: restoredScrollPosition)
     }
 
     var body: some View {
@@ -150,7 +152,6 @@ private struct BrowserTabOverviewUITestHostView: View {
 
         BrowserView.synchronizeTabOverviewScrollPosition(store: store, adapter: scrollPosition)
     }
-
 }
 
 /// Exposes the production scroll-state snapshot to UI-test synchronization.

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ObjectiveC
 import PresentationSupport
 import SwiftUI
 import UIKit
@@ -13,7 +14,6 @@ import WebKit
 
 /// UIKit bridge that mounts the selected adapter-owned WebKit surface.
 @MainActor
-@preconcurrency
 public struct BrowserWebView: UIViewRepresentable {
     /// Stable logical identity of the surface to attach.
     public let tabID: BrowserTabID
@@ -64,7 +64,6 @@ public struct BrowserWebView: UIViewRepresentable {
 
     /// Tracks which adapter surface is currently mounted in the UIKit container.
     @MainActor
-    @preconcurrency
     public final class Coordinator: NSObject {
         var tabID: BrowserTabID?
         private var onRefresh: () -> Void

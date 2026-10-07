@@ -6,6 +6,8 @@
 //
 
 import ComposableArchitecture
+import ConcurrencyExtras
+import Dependencies
 import Foundation
 import Testing
 @testable import BrowserFeature
@@ -422,8 +424,8 @@ struct BrowserBehaviorTests {
         #expect(store.state.selectedTabID == openerID)
         #expect(store.state.pendingNewTab == nil)
         #expect(commands.value.map(\.route) == [
-            .ensureContext(tabID: newTab.id),
-            .load(tabID: newTab.id, url: destination),
+            BrowserCommandRoute.ensureContext(tabID: newTab.id),
+            BrowserCommandRoute.load(tabID: newTab.id, url: destination),
         ])
     }
 

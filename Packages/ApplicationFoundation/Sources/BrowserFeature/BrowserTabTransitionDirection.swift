@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
 import Foundation
 
 /// Opaque equality token for one logical tab's current previewable document.

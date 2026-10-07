@@ -1,6 +1,16 @@
 # Repository-specific SwiftLint overlay. The shared swift-tooling release
 # supplies the baseline rules and severities before this file is applied.
 
+# Keep strictness explicit in the consumer overlay because SwiftLint is invoked
+# with the shared baseline and this file as separate layered configurations.
+# Every enabled rule violation must fail lint, regardless of its rule severity.
+strict: true
+
+# This project is Swift 6-only. Requiring @preconcurrency solely to preserve
+# Swift 5 compatibility hides concurrency issues instead of fixing them.
+disabled_rules:
+  - incompatible_concurrency_annotation
+
 # Repository-generated and build-system paths are not lint inputs.
 excluded:
   - .build
@@ -22,5 +32,13 @@ unused_declaration:
 
 unused_import:
   require_explicit_imports: true
-  allowed_transitive_imports: []
+  # Foundation re-exports the underscored Darwin implementation modules on Apple
+  # platforms. A file that reaches their symbols through Foundation must reference the
+  # public module instead of importing the implementation module directly.
+  allowed_transitive_imports:
+    - module: Foundation
+      allowed_transitive_imports:
+        - _DarwinFoundation1
+        - _DarwinFoundation2
+        - _DarwinFoundation3
   always_keep_imports: []

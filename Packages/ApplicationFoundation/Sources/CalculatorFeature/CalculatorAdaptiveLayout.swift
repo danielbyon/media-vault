@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
 import SwiftUI
 
 /// Selects the calculator layout that fits the available width and text size.

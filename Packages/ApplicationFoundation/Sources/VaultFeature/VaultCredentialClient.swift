@@ -6,6 +6,7 @@
 //
 
 import CommonCrypto
+import CoreFoundation
 import Dependencies
 import DependenciesMacros
 import Foundation

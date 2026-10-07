@@ -186,7 +186,7 @@ extension BrowserFeature {
             }
             discardDraft(in: &state)
             let lazyURL = state.lazyRestoredWebTabURLs.removeValue(forKey: id)
-            let restoreEffect = lazyURL.map { navigate(url: $0, tabID: id, state: &state) } ?? .none
+            let restoreEffect = lazyURL.map { navigate(url: $0, state: &state, tabID: id) } ?? .none
             return .merge(dismissalEffect, commands(closedIDs.map { .destroyContext(tabID: $0) }), restoreEffect)
         case .showStartPageTapped:
             let dismissalEffect = dismissPageUI(in: &state)
@@ -565,8 +565,8 @@ extension BrowserFeature {
 
             state.openTabsEntryLifecycle = .completed
             guard let data else {
-                let revision = advanceOpenTabsRevision(state: &state)
-                return saveOpenTabsSession(state: state, revision: revision)
+                let nextRevision = advanceOpenTabsRevision(state: &state)
+                return saveOpenTabsSession(state: state, revision: nextRevision)
             }
 
             switch BrowserOpenTabsSession.decode(data) {
@@ -576,8 +576,8 @@ extension BrowserFeature {
                 return .none
             case .invalid:
                 let restoreEffect = restoreOpenTabsSession(nil, state: &state)
-                let revision = advanceOpenTabsRevision(state: &state)
-                return .merge(restoreEffect, saveOpenTabsSession(state: state, revision: revision))
+                let nextRevision = advanceOpenTabsRevision(state: &state)
+                return .merge(restoreEffect, saveOpenTabsSession(state: state, revision: nextRevision))
             }
         case let .navigate(url):
             return navigate(url: url, state: &state)

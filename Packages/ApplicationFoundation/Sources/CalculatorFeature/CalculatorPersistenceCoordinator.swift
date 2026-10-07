@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ObjectiveC
 
 /// Serializes calculator saves and keeps only the newest pending snapshot.
 ///

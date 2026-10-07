@@ -5,7 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-import ComposableArchitecture
+import Dependencies
 import Foundation
 import UIKit
 

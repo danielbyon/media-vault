@@ -5,7 +5,11 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
+import QuartzCore
 import UIKit
+import UIUtilities
 import WebKit
 
 @MainActor
@@ -30,12 +34,12 @@ extension BrowserTabTransitionUIKitCoordinator {
     }
 
     func completeWithOpacityOnly(destinationView: UIView) {
-        guard let session else {
+        guard let activeSession = session else {
             return
         }
 
-        if let liveSurface = session.liveSurface {
-            if session.direction == .toOverview {
+        if let liveSurface = activeSession.liveSurface {
+            if activeSession.direction == .toOverview {
                 guard let exactCardSurface = makeRenderedSurface(from: liveSurface) else {
                     // A reduced-motion overview transition must not reveal a card that was not
                     // proven to contain the live page pixels. The live WebKit surface remains
@@ -46,27 +50,27 @@ extension BrowserTabTransitionUIKitCoordinator {
 
                 // Reduced Motion removes the geometry animation, but the overview still receives
                 // the exact rendered page rather than exposing a cached or placeholder preview.
-                session.frozenSurface = exactCardSurface
+                activeSession.frozenSurface = exactCardSurface
                 parkFrozenSurface(in: destinationView)
             }
 
             revealDestination()
             restoreLiveSurface()
-            session.animator = nil
+            activeSession.animator = nil
             finish()
             return
         }
 
-        guard let frozenSurface = session.frozenSurface
+        guard let frozenSurface = activeSession.frozenSurface
         else {
             finish()
             return
         }
 
-        if session.direction == .toOverview {
+        if activeSession.direction == .toOverview {
             revealDestination()
             parkFrozenSurface(in: destinationView)
-            session.animator = nil
+            activeSession.animator = nil
             finish()
             return
         }
@@ -78,12 +82,12 @@ extension BrowserTabTransitionUIKitCoordinator {
         let fade = UIViewPropertyAnimator(duration: 0.15, curve: .easeOut) { [weak frozenSurface] in
             frozenSurface?.alpha = 0
         }
-        let generation = session.generation
-        let transitionToken = session.token
-        fade.addCompletion { [weak self, weak session] _ in
-            guard let self, let session,
-                  session.generation == generation,
-                  session.token == transitionToken
+        let generation = activeSession.generation
+        let transitionToken = activeSession.token
+        fade.addCompletion { [weak self, weak activeSession] _ in
+            guard let self, let activeSession,
+                  activeSession.generation == generation,
+                  activeSession.token == transitionToken
             else {
                 return
             }
@@ -91,7 +95,7 @@ extension BrowserTabTransitionUIKitCoordinator {
             removeFrozenSurface()
             finish()
         }
-        session.animator = fade
+        activeSession.animator = fade
         diagnostics.onAnimatorCreated?(fade)
         fade.startAnimation()
     }
@@ -194,31 +198,31 @@ extension BrowserTabTransitionUIKitCoordinator {
     /// The clone remains visible during this bounded wait; it is never retained as a second
     /// transition lifecycle.
     func scheduleDestinationAbort() {
-        guard let session,
-              session.destinationWaitProbe == nil
+        guard let activeSession = session,
+              activeSession.destinationWaitProbe == nil
         else {
             return
         }
 
-        let generation = session.generation
-        let transitionToken = session.token
-        let probe = BrowserTabTransitionDisplayTurnProbe { [weak self, weak session] in
-            guard let self, let session,
-                  self.session === session,
-                  session.generation == generation,
-                  session.token == transitionToken
+        let generation = activeSession.generation
+        let transitionToken = activeSession.token
+        let probe = BrowserTabTransitionDisplayTurnProbe { [weak self, weak activeSession] in
+            guard let self, let activeSession,
+                  session === activeSession,
+                  activeSession.generation == generation,
+                  activeSession.token == transitionToken
             else {
                 return true
             }
-            guard session.destinationWaitTurnsRemaining > 0 else {
+            guard activeSession.destinationWaitTurnsRemaining > 0 else {
                 abortUnprovableTransition()
                 return true
             }
 
-            session.destinationWaitTurnsRemaining -= 1
+            activeSession.destinationWaitTurnsRemaining -= 1
             return false
         }
-        session.destinationWaitProbe = probe
+        activeSession.destinationWaitProbe = probe
         probe.start()
     }
 

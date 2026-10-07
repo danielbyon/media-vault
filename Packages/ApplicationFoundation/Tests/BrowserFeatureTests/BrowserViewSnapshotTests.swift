@@ -6,6 +6,7 @@
 //
 
 import ComposableArchitecture
+import Dependencies
 import Foundation
 import FoundationTestSupport
 import SnapshotTesting

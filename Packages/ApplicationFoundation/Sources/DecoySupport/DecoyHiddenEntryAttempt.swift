@@ -108,7 +108,6 @@ public struct DecoyHiddenEntryCredentialCandidate:
     ///
     /// - Parameter operation: Evaluates the plaintext and returns a normalized result.
     /// - Returns: The accepted, rejected, or unavailable evaluation result.
-    @preconcurrency
     public func evaluate(
         _ operation: @Sendable (String) async -> Result<Bool, DecoyHiddenEntryError>,
     ) async -> Result<Bool, DecoyHiddenEntryError> {

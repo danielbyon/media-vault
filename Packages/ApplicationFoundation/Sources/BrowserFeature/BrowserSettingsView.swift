@@ -10,7 +10,6 @@ import SwiftUI
 
 /// Authenticated Browser preferences and the profile confirmation boundary.
 @MainActor
-@preconcurrency
 public struct BrowserSettingsView: View {
     let store: StoreOf<BrowserFeature>
     /// Creates authenticated Browser settings bound to the browser feature.

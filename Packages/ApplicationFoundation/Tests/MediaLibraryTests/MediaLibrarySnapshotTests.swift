@@ -6,8 +6,10 @@
 //
 
 import ComposableArchitecture
+import Dependencies
 import Foundation
 import FoundationTestSupport
+import ObjectiveC
 import PersistenceSupport
 import SnapshotTesting
 import SnapshotTestingCustomDump

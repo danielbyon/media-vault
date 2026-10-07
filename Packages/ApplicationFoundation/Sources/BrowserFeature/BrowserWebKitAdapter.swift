@@ -5,7 +5,11 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
+import Dispatch
 import Foundation
+import ObjectiveC
 import UIKit
 import WebKit
 
@@ -638,22 +642,34 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         super.init()
         observations = [
             webView.observe(\.isLoading, options: [.initial, .new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                MainActor.assumeIsolated {
+                    self?.scheduleMetadataEmission()
+                }
             },
             webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                MainActor.assumeIsolated {
+                    self?.scheduleMetadataEmission()
+                }
             },
             webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                MainActor.assumeIsolated {
+                    self?.scheduleMetadataEmission()
+                }
             },
             webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                MainActor.assumeIsolated {
+                    self?.scheduleMetadataEmission()
+                }
             },
             webView.observe(\.title, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                MainActor.assumeIsolated {
+                    self?.scheduleMetadataEmission()
+                }
             },
             webView.observe(\.url, options: [.new]) { [weak self] _, _ in
-                self?.scheduleMetadataEmission()
+                MainActor.assumeIsolated {
+                    self?.scheduleMetadataEmission()
+                }
             },
         ]
     }
