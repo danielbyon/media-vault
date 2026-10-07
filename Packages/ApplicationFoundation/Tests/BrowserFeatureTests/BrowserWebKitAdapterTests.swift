@@ -188,6 +188,62 @@ struct BrowserWebKitAdapterTests {
         }
 
         #expect(await metadataTask.value == false)
+
+        // The invalidation must not poison later observations: a fresh observation still emits
+        // with the current untracked correlation.
+        let freshMetadataTask = try #require(adapter.scheduleMetadataEmissionForTesting(for: tabID))
+        #expect(await freshMetadataTask.value == true)
+
+        guard case let .metadata(freshTabID, _, .untracked) = await events.next() else {
+            Issue.record("A fresh observation after the invalidation did not emit metadata")
+            return
+        }
+
+        #expect(freshTabID == tabID)
+    }
+
+    @Test("A queued observation cannot be attributed to a later navigation's operation")
+    func queuedObservationDoesNotInheritLaterNavigationOperation() async throws {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        _ = adapter.ensureContext(for: tabID)
+        let firstOperationID = BrowserNavigationOperationID()
+        let secondOperationID = BrowserNavigationOperationID()
+        let firstURL = try #require(URL(string: "about:blank"))
+        let secondURL = try #require(URL(string: "about:blank#superseding"))
+        defer { adapter.destroyContext(for: tabID) }
+
+        // The first tagged load registers its navigation synchronously, so the queued epoch
+        // belongs to the first operation. The second tagged load supersedes that correlation
+        // before the queued emission runs, and the emission must be discarded instead of
+        // inheriting the later navigation's operation.
+        adapter.execute(.load(tabID: tabID, url: firstURL, operationID: firstOperationID))
+        let queuedEmission = try #require(adapter.scheduleMetadataEmissionForTesting(for: tabID))
+        adapter.execute(.load(tabID: tabID, url: secondURL, operationID: secondOperationID))
+
+        #expect(await queuedEmission.value == false)
+    }
+
+    @Test("A WebKit property observation emits metadata for its tab through the main actor")
+    func webKitPropertyObservationEmitsMetadata() async {
+        let adapter = BrowserWebKitAdapter()
+        let tabID = BrowserTabID()
+        let stream = adapter.makeEventStream()
+        var events = stream.makeAsyncIterator()
+        defer { adapter.destroyContext(for: tabID) }
+
+        // Registering a context delivers the initial `isLoading` observation synchronously. The
+        // nonisolated handler must cross onto the main actor, and the emission must reach the
+        // stream the reducer consumes.
+        _ = adapter.ensureContext(for: tabID)
+
+        guard case let .metadata(eventTabID, metadata, .untracked) = await events.next() else {
+            Issue.record("The initial WebKit observation did not emit metadata")
+            return
+        }
+
+        #expect(eventTabID == tabID)
+        #expect(metadata.isLoading == false)
     }
 
     @Test("Preview capture uses the current viewport and projects success or failure as Sendable data")
