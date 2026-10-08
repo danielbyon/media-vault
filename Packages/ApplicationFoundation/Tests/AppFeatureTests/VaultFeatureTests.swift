@@ -369,26 +369,95 @@ struct VaultCredentialPersistenceTests {
         #expect(await storage.loadCount == 0)
     }
 
-    @Test("A failed verification persists a retry throttle")
+    @Test("A failed verification persists and expires a retry throttle")
     func failedVerificationPersistsRetryThrottle() async throws {
         let storage = TestCredentialStorage()
-        let client = VaultCredentialLiveAdapter(
+        let initialDate = Date(timeIntervalSince1970: 1_800_000_000)
+        let clock = LockIsolated(initialDate)
+        let adapter = VaultCredentialLiveAdapter(
             storage: storage,
             randomBytes: { count in Data(repeating: 0xa5, count: count) },
+            now: { clock.value },
         ).client
 
-        _ = try await client.configure(.pin, "1234", false)
-        #expect(await client.verify("0000") == .incorrect)
+        _ = try await adapter.configure(.pin, "1234", false)
+        let initialResult = await adapter.verify("0000")
+        #expect(initialResult == .incorrect)
+
+        let persisted = try #require(await storage.data)
+        let persistedRetryAfter = try #require(
+            JSONDecoder().decode(PersistedCredentialCooldown.self, from: persisted).retryAfter,
+        )
+        #expect(abs(persistedRetryAfter.timeIntervalSince(initialDate.addingTimeInterval(1))) < 0.001)
 
         let reloadedClient = VaultCredentialLiveAdapter(
             storage: storage,
             randomBytes: { count in Data(repeating: 0xa5, count: count) },
+            now: { clock.value },
         ).client
-        #expect(await reloadedClient.verify("1111") == .unavailable)
+        let activeCooldownResult = await reloadedClient.verify("1111")
+        #expect(activeCooldownResult == .unavailable)
+
+        clock.withValue { $0 = persistedRetryAfter.addingTimeInterval(0.001) }
+        let resumedResult = await reloadedClient.verify("1234")
+        #expect(resumedResult == .succeeded)
+
+        let clearedRecord = try #require(await storage.data)
+        let clearedRetryAfter = try JSONDecoder()
+            .decode(
+                PersistedCredentialCooldown.self,
+                from: clearedRecord,
+            )
+            .retryAfter
+        #expect(clearedRetryAfter == nil)
+    }
+
+    @Test("A failed derivation starts the full retry cooldown after verification completes")
+    func failedDerivationStartsRetryCooldownAfterVerificationCompletes() async throws {
+        let storage = TestCredentialStorage()
+        let startDate = Date(timeIntervalSince1970: 1_800_000_000)
+        let clock = LockIsolated(startDate)
+        let advancesClockAfterInitialRead = LockIsolated(false)
+        let adapter = VaultCredentialLiveAdapter(
+            storage: storage,
+            randomBytes: { count in Data(repeating: 0xa5, count: count) },
+            now: {
+                let sampledDate = clock.value
+                // Model slow derivation by advancing independent time after the attempt's initial sample.
+                let shouldAdvanceClock = advancesClockAfterInitialRead.withValue { hasAdvanced in
+                    guard !hasAdvanced else {
+                        return false
+                    }
+
+                    hasAdvanced = true
+                    return true
+                }
+                if shouldAdvanceClock {
+                    clock.withValue { $0 = sampledDate.addingTimeInterval(2) }
+                }
+                return sampledDate
+            },
+        ).client
+
+        _ = try await adapter.configure(.pin, "1234", false)
+        let initialResult = await adapter.verify("0000")
+        #expect(initialResult == .incorrect)
 
         let persisted = try #require(await storage.data)
-        let record = try #require(JSONSerialization.jsonObject(with: persisted) as? [String: Any])
-        #expect(record["retryAfter"] != nil)
+        let persistedRetryAfter = try #require(
+            JSONDecoder().decode(PersistedCredentialCooldown.self, from: persisted).retryAfter,
+        )
+        let expectedDeadline = startDate.addingTimeInterval(3)
+        #expect(abs(persistedRetryAfter.timeIntervalSince(expectedDeadline)) < 0.001)
+        #expect(persistedRetryAfter > clock.value)
+
+        let reloadedClient = VaultCredentialLiveAdapter(
+            storage: storage,
+            randomBytes: { count in Data(repeating: 0xa5, count: count) },
+            now: { clock.value },
+        ).client
+        let reconstructedResult = await reloadedClient.verify("1111")
+        #expect(reconstructedResult == .unavailable)
     }
 
     @Test("Password validation rejects only an empty string")
@@ -454,6 +523,10 @@ private actor TestCredentialStorage: VaultCredentialStorage {
     func update(_ data: Data) async throws {
         self.data = data
     }
+}
+
+private struct PersistedCredentialCooldown: Decodable {
+    let retryAfter: Date?
 }
 
 private func containsSubsequence(_ haystack: [UInt8], _ needle: [UInt8]) -> Bool {
