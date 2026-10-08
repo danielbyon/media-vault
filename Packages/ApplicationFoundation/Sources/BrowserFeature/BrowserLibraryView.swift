@@ -14,6 +14,19 @@ import UIKit
 @MainActor
 struct BrowserLibraryView: View {
     let store: StoreOf<BrowserFeature>
+
+    /// The calendar that defines History day boundaries. Defaults to the reader's current calendar.
+    @Environment(\.calendar)
+    private var calendar
+
+    /// The locale that selects History date and time conventions. Defaults to the reader's locale.
+    @Environment(\.locale)
+    private var locale
+
+    /// The time zone that interprets History visit instants. Defaults to the reader's time zone.
+    @Environment(\.timeZone)
+    private var timeZone
+
     var body: some View {
         NavigationStack {
             VStack {
@@ -103,7 +116,14 @@ struct BrowserLibraryView: View {
                         Section(group.title) {
                             ForEach(group.entries) { item in
                                 Button { store.send(.navigate(item.url)) } label: {
-                                    row(item.title, BrowserHistoryGrouping.metadata(for: item, group: group))
+                                    row(
+                                        item.title,
+                                        BrowserHistoryGrouping.metadata(
+                                            for: item,
+                                            group: group,
+                                            context: historyPresentationContext,
+                                        ),
+                                    )
                                 }
                                 .id(item.id)
                                 .swipeActions {
@@ -152,8 +172,17 @@ struct BrowserLibraryView: View {
         BrowserHistoryGrouping.groups(
             BrowserLibrarySearch.history(store.history, query: store.library?.historySearch ?? ""),
             referenceDate: store.library?.referenceDate ?? Date(timeIntervalSinceReferenceDate: 0),
-            calendar: .autoupdatingCurrent,
+            context: historyPresentationContext,
         )
+    }
+
+    /// The single formatting configuration shared by the History sections and their rows.
+    ///
+    /// Production reads the reader's own settings from the environment, so the presentation stays
+    /// localized. A caller that needs a fixed rendering, such as a snapshot test, supplies calendar,
+    /// locale, and time zone environment values and receives a presentation that honors them.
+    private var historyPresentationContext: BrowserHistoryPresentationContext {
+        BrowserHistoryPresentationContext(calendar: calendar, locale: locale, timeZone: timeZone)
     }
 
     private func row(_ title: String, _ host: String?) -> some View {

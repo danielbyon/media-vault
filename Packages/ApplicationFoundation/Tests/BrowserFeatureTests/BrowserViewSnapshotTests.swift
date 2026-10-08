@@ -291,7 +291,10 @@ struct BrowserViewSnapshotTests {
     private func librarySnapshot(_ state: BrowserFeature.State, named name: String) {
         let store = Store(initialState: state) { BrowserFeature() }
         presentationSnapshot(
-            BrowserLibraryView(store: store),
+            BrowserLibraryView(store: store)
+                .environment(\.calendar, DeterministicTestSupport.referenceCalendar)
+                .environment(\.locale, DeterministicTestSupport.referenceLocale)
+                .environment(\.timeZone, DeterministicTestSupport.referenceTimeZone),
             named: name,
             config: DeterministicTestSupport.regularWidthIPad,
         )
