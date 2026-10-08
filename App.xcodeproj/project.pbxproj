@@ -27,6 +27,7 @@
 			A10000000000000000000036 /* AppHostedRootFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* AppHostedRootFeatureTests.swift */; };
 			A10000000000000000000037 /* BrowserTabTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* BrowserTabTransitionTests.swift */; };
 			A10000000000000000000038 /* BrowserViewInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* BrowserViewInteractionTests.swift */; };
+		A1000000000000000000003F /* AppHostedUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* AppHostedUITests.swift */; };
 			A10000000000000000000039 /* BrowserProfileConfigurationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* BrowserProfileConfigurationGate.swift */; };
 			A1000000000000000000003A /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
 			A1000000000000000000003B /* BrowserFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000005 /* BrowserFeature */; };
@@ -57,6 +58,7 @@
 			B10000000000000000000013 /* AppHostedRootFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHostedRootFeatureTests.swift; sourceTree = "<group>"; };
 			B10000000000000000000014 /* BrowserTabTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabTransitionTests.swift; sourceTree = "<group>"; };
 			B10000000000000000000015 /* BrowserViewInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserViewInteractionTests.swift; sourceTree = "<group>"; };
+		B10000000000000000000019 /* AppHostedUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHostedUITests.swift; sourceTree = "<group>"; };
 			B10000000000000000000016 /* BrowserProfileConfigurationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserProfileConfigurationGate.swift; sourceTree = "<group>"; };
 			B10000000000000000000017 /* AppHostedTestHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppHostedTestHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 			B10000000000000000000018 /* AppHostedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppHostedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -226,6 +228,7 @@
 					B10000000000000000000013 /* AppHostedRootFeatureTests.swift */,
 					B10000000000000000000014 /* BrowserTabTransitionTests.swift */,
 					B10000000000000000000015 /* BrowserViewInteractionTests.swift */,
+				B10000000000000000000019 /* AppHostedUITests.swift */,
 				);
 				path = AppHostedTests;
 				sourceTree = "<group>";
@@ -515,6 +518,7 @@
 					A10000000000000000000036,
 					A10000000000000000000037,
 					A10000000000000000000038,
+				A1000000000000000000003F,
 					A10000000000000000000039,
 				);
 				runOnlyForDeploymentPostprocessing = 0;

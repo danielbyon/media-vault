@@ -44,6 +44,19 @@ public enum DeterministicTestSupport {
     /// A stable identifier for tests that generate UUIDs.
     public static let referenceUUID = makeReferenceUUID()
 
+    /// The locale used where a test renders text that would otherwise follow the host machine.
+    public static let referenceLocale = Locale(identifier: "en_US")
+
+    /// The time zone used where a test renders dates that would otherwise follow the host machine.
+    ///
+    /// Snapshots recorded in this time zone render the same image everywhere: a machine running in
+    /// UTC, and a continuous integration runner whose clock settings differ from a developer's,
+    /// both produce identical output because the rendering never consults the machine's own zone.
+    public static let referenceTimeZone = makeReferenceTimeZone()
+
+    /// The calendar used where a test renders chronology that would otherwise follow the host machine.
+    public static let referenceCalendar: Calendar = makeReferenceCalendar()
+
     /// The standard generic fixture for foundation-level tests.
     public static let referenceFixture = DeterministicFixture(
         date: referenceDate,
@@ -112,6 +125,21 @@ public enum DeterministicTestSupport {
         }
 
         return uuid
+    }
+
+    private static func makeReferenceTimeZone() -> TimeZone {
+        guard let timeZone = TimeZone(identifier: "America/Los_Angeles") else {
+            preconditionFailure("The deterministic reference time zone must exist.")
+        }
+
+        return timeZone
+    }
+
+    private static func makeReferenceCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = referenceLocale
+        calendar.timeZone = referenceTimeZone
+        return calendar
     }
 
     /// The compact iPhone configuration used by the root surface snapshots.

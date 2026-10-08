@@ -20,90 +20,92 @@ import VaultFeature
 @testable import AppFeature
 @testable import BrowserFeature
 
-@Suite("Root feature window mount (app hosted)")
-@MainActor
-struct AppHostedRootFeatureTests {
-    @Test("The Browser surface is mounted only after authentication and Browser entry")
+extension AppHostedUITests {
+    @Suite("Root feature window mount (app hosted)")
     @MainActor
-    func browserSurfaceRespectsTheVaultCompositionBoundary() async throws {
-        let suiteName = "RootFeatureTests.BrowserBoundary.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        defaults.set(true, forKey: "browser.preserveOpenTabs")
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+    struct AppHostedRootFeatureTests {
+        @Test("The Browser surface is mounted only after authentication and Browser entry")
+        @MainActor
+        func browserSurfaceRespectsTheVaultCompositionBoundary() async throws {
+            let suiteName = "RootFeatureTests.BrowserBoundary.\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suiteName))
+            defaults.removePersistentDomain(forName: suiteName)
+            defaults.set(true, forKey: "browser.preserveOpenTabs")
+            defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let savedURL = try #require(URL(string: "https://restored-after-authentication.example"))
-        let savedData = try BrowserOpenTabsSession(
-            selectedPosition: 0,
-            entries: [.init(position: 0, kind: .web(savedURL))],
-        ).encoded()
-        let loadCount = LockIsolated(0)
-        let webKitCommands = LockIsolated<[BrowserWebKitCommand]>([])
-        let sessionLoad: @Sendable ()
-            async -> BrowserOpenTabsSessionLoadOutcome = {
-                loadCount.withValue { $0 += 1 }
-                return .loaded(savedData)
+            let savedURL = try #require(URL(string: "https://restored-after-authentication.example"))
+            let savedData = try BrowserOpenTabsSession(
+                selectedPosition: 0,
+                entries: [.init(position: 0, kind: .web(savedURL))],
+            ).encoded()
+            let loadCount = LockIsolated(0)
+            let webKitCommands = LockIsolated<[BrowserWebKitCommand]>([])
+            let sessionLoad: @Sendable ()
+                async -> BrowserOpenTabsSessionLoadOutcome = {
+                    loadCount.withValue { $0 += 1 }
+                    return .loaded(savedData)
+                }
+            let webKitExecute: @Sendable (BrowserWebKitCommand) -> Void = { command in
+                webKitCommands.withValue { $0.append(command) }
             }
-        let webKitExecute: @Sendable (BrowserWebKitCommand) -> Void = { command in
-            webKitCommands.withValue { $0.append(command) }
-        }
 
-        let gatedPhases = [
-            VaultFeature.State(phase: .loading),
-            VaultFeature.State(phase: .unconfigured),
-            VaultFeature.State(phase: .locked, configuredKind: .password),
-            VaultFeature.State(phase: .setup),
-            VaultFeature.State(phase: .authentication, configuredKind: .password),
-        ]
-        for vault in gatedPhases {
-            let store = compositionStore(
-                vault: vault,
+            let gatedPhases = [
+                VaultFeature.State(phase: .loading),
+                VaultFeature.State(phase: .unconfigured),
+                VaultFeature.State(phase: .locked, configuredKind: .password),
+                VaultFeature.State(phase: .setup),
+                VaultFeature.State(phase: .authentication, configuredKind: .password),
+            ]
+            for vault in gatedPhases {
+                let store = compositionStore(
+                    vault: vault,
+                    defaults: defaults,
+                    sessionLoad: sessionLoad,
+                    webKitExecute: webKitExecute,
+                )
+                let (controller, window) = mountRootView(store)
+                await settle(controller)
+
+                #expect(!hasBrowserOmnibox(in: controller.view))
+                #expect(loadCount.value == 0)
+                #expect(navigatedURLs(in: webKitCommands.value).isEmpty)
+
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            var authenticatedShell = VaultFeature.State(phase: .authenticated)
+            authenticatedShell.shell.selectedTab = .collections
+            let beforeBrowserEntry = compositionStore(
+                vault: authenticatedShell,
                 defaults: defaults,
                 sessionLoad: sessionLoad,
                 webKitExecute: webKitExecute,
             )
-            let (controller, window) = mountRootView(store)
-            await settle(controller)
-
-            #expect(!hasBrowserOmnibox(in: controller.view))
+            let (shellController, shellWindow) = mountRootView(beforeBrowserEntry)
+            await settle(shellController)
+            #expect(!hasBrowserOmnibox(in: shellController.view))
             #expect(loadCount.value == 0)
             #expect(navigatedURLs(in: webKitCommands.value).isEmpty)
+            shellWindow.isHidden = true
+            shellWindow.rootViewController = nil
 
-            window.isHidden = true
-            window.rootViewController = nil
+            authenticatedShell.shell.selectedTab = .browser
+            let browserEntry = compositionStore(
+                vault: authenticatedShell,
+                defaults: defaults,
+                sessionLoad: sessionLoad,
+                webKitExecute: webKitExecute,
+            )
+            let (browserController, browserWindow) = mountRootView(browserEntry)
+            await settleUntilBrowserEntryCompletes(browserEntry, browserController)
+            #expect(hasBrowserOmnibox(in: browserController.view))
+            #expect(browserEntry.state.vault.shell.browser.profileLifecycle == .ready)
+            #expect(browserEntry.state.vault.shell.browser.openTabsEntryLifecycle == .completed)
+            #expect(loadCount.value == 1)
+            browserWindow.isHidden = true
+            browserWindow.rootViewController = nil
         }
-
-        var authenticatedShell = VaultFeature.State(phase: .authenticated)
-        authenticatedShell.shell.selectedTab = .collections
-        let beforeBrowserEntry = compositionStore(
-            vault: authenticatedShell,
-            defaults: defaults,
-            sessionLoad: sessionLoad,
-            webKitExecute: webKitExecute,
-        )
-        let (shellController, shellWindow) = mountRootView(beforeBrowserEntry)
-        await settle(shellController)
-        #expect(!hasBrowserOmnibox(in: shellController.view))
-        #expect(loadCount.value == 0)
-        #expect(navigatedURLs(in: webKitCommands.value).isEmpty)
-        shellWindow.isHidden = true
-        shellWindow.rootViewController = nil
-
-        authenticatedShell.shell.selectedTab = .browser
-        let browserEntry = compositionStore(
-            vault: authenticatedShell,
-            defaults: defaults,
-            sessionLoad: sessionLoad,
-            webKitExecute: webKitExecute,
-        )
-        let (browserController, browserWindow) = mountRootView(browserEntry)
-        await settleUntilBrowserEntryCompletes(browserEntry, browserController)
-        #expect(hasBrowserOmnibox(in: browserController.view))
-        #expect(browserEntry.state.vault.shell.browser.profileLifecycle == .ready)
-        #expect(browserEntry.state.vault.shell.browser.openTabsEntryLifecycle == .completed)
-        #expect(loadCount.value == 1)
-        browserWindow.isHidden = true
-        browserWindow.rootViewController = nil
     }
 }
 
