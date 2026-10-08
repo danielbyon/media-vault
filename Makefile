@@ -13,7 +13,7 @@ PACKAGE_SCHEME := ApplicationFoundation-Package
 # shared; build products stay in the per-run temporary DerivedData directory.
 SOURCE_PACKAGES_DIRECTORY := $(CURDIR)/.build/SourcePackages
 
-.PHONY: all build format lint lint-analyze test tools
+.PHONY: all build clean format lint lint-analyze test tools
 
 all: lint build test
 
@@ -57,3 +57,17 @@ lint: tools
 
 lint-analyze: tools
 	bash ./Scripts/run-swiftlint-analysis.sh
+
+# Delete build output and regenerable caches: per-run DerivedData and the
+# shared package checkout cache under .build, SwiftPM/Xcode build directories
+# inside packages, per-user Xcode state, and Finder metadata. None of it is
+# tracked by git, and `make all` recreates whatever it needs. The toolchain
+# bootstrap in .tools, the CodeGraph index in .codegraph, .chatgpt
+# orchestration state, and linked worktrees in .worktrees are left in place.
+clean:
+	@set -euo pipefail; \
+	rm -rf -- "$(CURDIR)/.build"; \
+	rm -rf -- "$(CURDIR)"/Packages/*/.build "$(CURDIR)"/Packages/*/build; \
+	find "$(CURDIR)" -type d \( -name .git -o -name .worktrees \) -prune \
+		-o -type d -name xcuserdata -prune -exec rm -rf -- {} + \
+		-o -type f -name .DS_Store -exec rm -f -- {} +
