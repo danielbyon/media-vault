@@ -1,0 +1,22 @@
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultCredentialClient.swift
+  s_0b44561975def9::t_5c76ebf30e0082 221,256
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureTests.swift
+  s_0b44561975def9::t_5c76ebf30e0082 372,375-377,380,383-391,396-439,441-444,447-455,457
+  s_0b44561975def9::t_5600d6bebdc320 456,458-460,528-531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e68e9a4b71e3cb6a6f5fd3c95d1410a7a361234d",
+  "prompts": {},
+  "sessions": {
+    "s_0b44561975def9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a11dc1-e83b-7fe1-926a-797edd29e41d",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
