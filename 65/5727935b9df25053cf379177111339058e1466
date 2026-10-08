@@ -1,0 +1,19 @@
+Makefile
+  s_b5f51411ae2153::t_547fefd0286482 16,60-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "655727935b9df25053cf379177111339058e1466",
+  "prompts": {},
+  "sessions": {
+    "s_b5f51411ae2153": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1191a-82ef-7480-8cd1-49da77b60f94",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
