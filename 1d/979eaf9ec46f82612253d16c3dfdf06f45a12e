@@ -1,0 +1,35 @@
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserHistoryGroupingTests.swift
+  s_8059ebd657f214::t_067a666ef6fa1b 9,15-26,29,49,55-115,118-129,157-187,190,192
+  s_8059ebd657f214::t_8ba7166542da8f 191
+  s_8059ebd657f214::t_8fccf85d560a4b 130-156
+  s_8059ebd657f214::t_ec5d6c399c9bdb 116-117,188-189
+Packages/ApplicationFoundation/Sources/FoundationTestSupport/DeterministicTestSupport.swift
+  s_8059ebd657f214::t_5e9530252c0162 47-59,130-143
+  s_8059ebd657f214::t_1a4012197f0cac 144
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserLibraryView.swift
+  s_8059ebd657f214::t_d75ad0866b0d67 17-18,21-22,25-26,29,119-126,175,179-185
+  s_8059ebd657f214::t_270ef48440a5cd 19-20,23-24,27-28
+  s_8059ebd657f214::t_5947549cff0f79 186-187
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserHistoryGrouping.swift
+  s_8059ebd657f214::t_e393b86481a821 47-49
+  s_8059ebd657f214::t_3dfd80f5f7747f 23-25,38-41,43
+  s_8059ebd657f214::t_183a9a2d7624df 17-22,26-37,42,44-46,50-55,58-64,68,70,83,89-100,102,104-126
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewSnapshotTests.swift
+  s_8059ebd657f214::t_0c5893a388b88b 294-297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1d979eaf9ec46f82612253d16c3dfdf06f45a12e",
+  "prompts": {},
+  "sessions": {
+    "s_8059ebd657f214": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10a5b-66d7-71f2-9b7f-4da19642f65f",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
