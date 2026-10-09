@@ -218,7 +218,7 @@ struct VaultCredentialLiveAdapter: Sendable {
     }
 }
 
-/// Serializes verification and persists a short retry cooldown in the credential record.
+/// Serializes credential verification and starts a one-second retry cooldown after an incorrect attempt completes.
 private actor VaultCredentialVerificationCoordinator {
     private static let retryDelay: TimeInterval = 1
 
@@ -253,7 +253,7 @@ private actor VaultCredentialVerificationCoordinator {
             )
             guard CredentialDerivation.constantTimeEqual(verifier, record.verifier) else {
                 let throttledRecord = record.withRetryAfter(
-                    currentDate.addingTimeInterval(Self.retryDelay),
+                    now().addingTimeInterval(Self.retryDelay),
                 )
                 do {
                     try await storage.update(throttledRecord.encoded())
