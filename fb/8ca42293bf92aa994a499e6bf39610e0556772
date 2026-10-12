@@ -1,0 +1,239 @@
+Prototypes/BrowserWKDownloadSpike/test_fixture_server.py
+  s_580f932c955f7c::t_83d4700b7d5aaf 1-33
+BrowserURLSessionSpikeHost/SpikeTransferCoordinator.swift
+  s_580f932c955f7c::t_619c26148dd152 507-522
+  s_580f932c955f7c::t_16d10c06ed1c13 227,467,523,525-529,537,541,549
+  s_580f932c955f7c::t_7980e112e43805 855-857
+  s_580f932c955f7c::t_35e61f695009ca 1-226,228,232-291,297-345,353,429-466,470-492,553,560,562-809,815-854,858-928,930-1095
+  s_580f932c955f7c::t_1eb9c6be00e4e2 229-231,468-469,493-506,524,530-536,538-540,542-548,550-552,554-559,561,929
+  s_580f932c955f7c::t_168269b7bff3a6 292-296
+  s_580f932c955f7c::t_5f26dc80b0e623 346-352,354-428
+  s_580f932c955f7c::t_ea3bbd155034e5 810-814
+BrowserInlineMediaSpikeHost/BrowserInlineMediaSpikeApp.swift
+  s_580f932c955f7c::t_9c5666bddd4a59 28-31,114,117-118,252,258,286-300,302
+  s_580f932c955f7c::t_4c97c5532c5af4 1-27,32-50,52-66,69-96,100-103,112-113,119-251,253-257,259-285,301,303-304
+  s_580f932c955f7c::t_ef6082bbb5e610 51,67-68,97-99,104-111
+  s_580f932c955f7c::t_7425231313e70f 115-116
+  s_580f932c955f7c::t_91d590edd07b3b 305-308
+Prototypes/BrowserInlineMediaSpike/summarize_evidence.py
+  s_580f932c955f7c::t_2dce9e64a9d2d8 1-22,25-30,36-65,69-100
+  s_580f932c955f7c::t_6bae9ebf6c9424 23-24,31-35,66-68
+WebPageDownloadSpikeTests/WebPageDownloadSpikeUITests.swift
+  s_580f932c955f7c::t_dd6e86e072ea7b 1-843
+Prototypes/BrowserInlineMediaSpike/run-spike.sh
+  s_580f932c955f7c::t_d3880442995d78 1-23,25-120
+  s_580f932c955f7c::t_26dea53874e63b 24
+BrowserURLSessionSpikeHost/SpikeHostApp.swift
+  s_580f932c955f7c::t_aa19510d6b05cd 1-855
+Prototypes/BrowserReceiptLifecycleSpike/test_fixture_server.py
+  s_580f932c955f7c::t_8c89cd71998a38 1-102
+Prototypes/BrowserWKDownloadSpike/fixture_server.py
+  s_580f932c955f7c::t_32c9b329b0f45f 1-22,24-99,125-205,211-490,499-602,604-608,610,612-624,631-644
+  s_580f932c955f7c::t_f49d9be18259ba 100-124,491-498
+  s_580f932c955f7c::t_13604cc52015bc 23,206-210,603,609,611,625-630
+BrowserInlineMediaSpikeUITests/BrowserInlineMediaSpikeUITests.swift
+  s_580f932c955f7c::t_96374b2176d49b 278
+  s_580f932c955f7c::t_0882d82e96b890 279-286
+  s_580f932c955f7c::t_16628d671f5e0d 1-277,287-353
+Prototypes/BrowserReceiptLifecycleSpike/validate_evidence.py
+  s_580f932c955f7c::t_940c3828a5c091 116-122
+  s_580f932c955f7c::t_e3813b99bf341b 1-115,123-174
+App.xcodeproj/project.pbxproj
+  s_580f932c955f7c::t_0bf85260f211ec 37-64,93-130,189-236,251-263,276-287,375-478,608-778,807-827,855-866,914-961,1021-1088,1361-1847,1903-2010,2088-2129,2143-2172
+Prototypes/BrowserReceiptLifecycleSpike/test_validate_evidence.py
+  s_580f932c955f7c::t_53d8eec7c68813 1-83,97-99
+  s_580f932c955f7c::t_fa66208e32338c 84-96
+Makefile
+  s_580f932c955f7c::t_6d6f3ac230ba30 16,51-84
+  s_580f932c955f7c::t_5a7743f7d2fa3e 85
+BrowserSaveToVaultSpikeHost/BrowserSaveToVaultSpikeApp.swift
+  s_580f932c955f7c::t_db350b08517508 849-852,856-889,891-892,895,898-906
+  s_580f932c955f7c::t_f0b7a4965e5c47 1-848,853-855,907-947,949-1008
+  s_580f932c955f7c::t_b1eac4fb0a2dfd 948
+  s_580f932c955f7c::t_c2ae485b643be4 890,893-894,896-897
+Prototypes/BrowserSaveToVaultSpike/run-spike.sh
+  s_580f932c955f7c::t_2c8e31f85a5a82 121-124
+  s_580f932c955f7c::t_e622c662d117a1 1-120,125-151
+BrowserURLSessionSpikeTests/BrowserURLSessionSpikeUITests.swift
+  s_580f932c955f7c::t_bb39bd4be8c10f 1060-1062,1066-1067,1070
+  s_580f932c955f7c::t_b2b0a0bf54f7c1 1625,1644-1648,1655-1656,1659
+  s_580f932c955f7c::t_7466d07c4e9d8a 862-869,871
+  s_580f932c955f7c::t_7e7a86dc5e6892 1902-1904,1908,1939-1943
+  s_580f932c955f7c::t_f3ff1878f6700d 1897-1901,1905-1907
+  s_580f932c955f7c::t_feefd3c974166f 1542-1543,1545-1576,1596-1599,1603-1605,1607-1609,1622,1628,1630-1633,1635,1651-1652,1662-1663
+  s_580f932c955f7c::t_8bc703b9a857fb 1577-1595,1611-1620,1623-1624,1626-1627,1629,1639-1643,1653-1654,1657-1658,1660-1661
+  s_580f932c955f7c::t_caa60466b3867a 1544,1600-1602,1606,1621,1634
+  s_580f932c955f7c::t_31dbeb713854bf 1610,1636-1638,1649-1650
+  s_580f932c955f7c::t_4d62b3257e780e 1-861,870,872-1059,1071-1541,1664-1802,1804-1843,1845-1896,1909-1938,1944-2036
+  s_580f932c955f7c::t_a49f9fa5dda3ef 1063-1065,1068-1069
+  s_580f932c955f7c::t_79e2831888f831 1803,1844
+Prototypes/BrowserReceiptLifecycleSpike/run-spike.sh
+  s_580f932c955f7c::t_e555164d9fb8c0 1-72,74-112,117-128
+  s_580f932c955f7c::t_7e019122a3cdd9 73
+  s_580f932c955f7c::t_d3fbc6d7b51394 113-116
+Prototypes/BrowserWKDownloadSpike/run-spike.sh
+  s_580f932c955f7c::t_d410ce4792bc67 28-31
+  s_580f932c955f7c::t_a68672e1b28486 1-27,32-131
+BrowserSaveToVaultSpikeTests/BrowserSaveToVaultSpikeUITests.swift
+  s_580f932c955f7c::t_00b7c88e446c16 118
+  s_580f932c955f7c::t_477ee29376c79b 369
+  s_580f932c955f7c::t_6b718b40b9ed7e 68-70
+  s_580f932c955f7c::t_d383e455672fcf 1-67,71-117,119-368,370-477
+Prototypes/BrowserURLSessionSpike/Shared/SpikeFixtureContract.swift
+  s_580f932c955f7c::t_caa60466b3867a 1-420
+BrowserReceiptLifecycleSpikeTests/BrowserReceiptLifecycleSpikeUITests.swift
+  s_580f932c955f7c::t_3bb074d44e6514 32-47
+  s_580f932c955f7c::t_9dd7947bd65da3 1-31,48-146
+Prototypes/BrowserInlineMediaSpike/test_summarize_evidence.py
+  s_580f932c955f7c::t_99c48bf196e783 1-5,7-17,23-30,58-60
+  s_580f932c955f7c::t_56bb8f3adc505e 19,21-22
+  s_580f932c955f7c::t_d0d5387af36d58 6,18,20
+  s_580f932c955f7c::t_6fd5608046840c 31-57
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureHTML.swift
+  s_580f932c955f7c::t_0d75fb1e450dd6 1-217
+BrowserWKDownloadSpikeTests/BrowserWKDownloadSpikeUITests.swift
+  s_580f932c955f7c::t_1dc3ee6e395135 1-14,16-789
+  s_580f932c955f7c::t_d338054c29996a 15
+BrowserWKDownloadSpikeHost/WKDownloadOriginPolicy.swift
+  s_580f932c955f7c::t_b1eac4fb0a2dfd 1-60
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureConnection.swift
+  s_580f932c955f7c::t_74fdecdec7f19a 1-180
+BrowserURLSessionSpikeHost/SpikeScratchStore.swift
+  s_580f932c955f7c::t_2d5e8ca6c65e3d 1-71
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureServer.swift
+  s_580f932c955f7c::t_15400a03a165af 30
+  s_580f932c955f7c::t_2d501c94a51bf9 1-29,31-106
+Prototypes/BrowserInlineMediaSpike/Sources/BridgeMessageDecoder.swift
+  s_580f932c955f7c::t_55c61694400bff 117,189,195-203
+  s_580f932c955f7c::t_2db1d1b308e961 188
+  s_580f932c955f7c::t_2a4b30e0a1fb03 1-116,118-187,190-194,204-229
+  s_580f932c955f7c::t_0a4c4a5a12f76e 230
+Prototypes/BrowserInlineMediaSpike/fixture_server.py
+  s_580f932c955f7c::t_3d4abad3f210b5 15,20,100,116-122,143,153-157,167
+  s_580f932c955f7c::t_a7c9bb8df811d9 176,185-187
+  s_580f932c955f7c::t_a7627117c56712 1-14,16-19,21-99,101-115,123-142,144-152,158-166,168-175,177-184,188-221
+BrowserReceiptLifecycleSpikeHost/BrowserReceiptLifecycleSpikeApp.swift
+  s_580f932c955f7c::t_73ef47d7e2ec33 1-14,17-74,76-77,79-80,82-132,135-188,193-195,199-204,211-214,216-230,236-411,415-474
+  s_580f932c955f7c::t_35138fcc28c561 15-16,75,78,81,189-192,196,198,205-207,231-235
+  s_580f932c955f7c::t_fe8d37749333ed 197
+  s_580f932c955f7c::t_ce6eec1998e667 412-414
+  s_580f932c955f7c::t_d6022674f4ced3 133-134
+  s_580f932c955f7c::t_7e8c98b1f438bc 208-210,215
+Prototypes/BrowserInlineMediaSpike/Tests/BridgePayloadTests.swift
+  s_580f932c955f7c::t_188c4321087d03 1-249
+Prototypes/BrowserSaveToVaultSpike/fixture_server.py
+  s_580f932c955f7c::t_6b718b40b9ed7e 1-627
+BrowserURLSessionSpikeHost/SpikeRequestBuilder.swift
+  s_580f932c955f7c::t_ddba7b586aa7d2 1-66,68-120
+  s_580f932c955f7c::t_1f4f2da7f134df 67
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/BrowserReceiptLifecycleSpikeTests.swift
+  s_580f932c955f7c::t_3689da20933923 1-83,88-260
+  s_580f932c955f7c::t_a1e9ec8ea38725 84-87
+Prototypes/BrowserInlineMediaSpike/test_fixture_server.py
+  s_580f932c955f7c::t_08af0dec55ce5e 22-24,34,41-46,105-109,111
+  s_580f932c955f7c::t_917376f138dc0e 1-21,25-33,35-40,47-104,110,112-122,136-151
+  s_580f932c955f7c::t_2970eff049c27e 123-135
+BrowserWKDownloadSpikeHost/SpikeHostApp.swift
+  s_580f932c955f7c::t_a3e79c1150a890 294-304,625-628,631-635
+  s_580f932c955f7c::t_4395c8a69de2b0 1-293,305-624,629-630,636-1240
+App.xcodeproj/xcshareddata/xcschemes/BrowserInlineMediaSpike.xcscheme
+  s_580f932c955f7c::t_047add6927b623 1-35
+App.xcodeproj/xcshareddata/xcschemes/BrowserReceiptLifecycleSpike.xcscheme
+  s_580f932c955f7c::t_46f14959779130 1-35
+App.xcodeproj/xcshareddata/xcschemes/BrowserSaveToVaultSpike.xcscheme
+  s_580f932c955f7c::t_d4a19d9e6bbbd4 1-35
+App.xcodeproj/xcshareddata/xcschemes/BrowserURLSessionSpike.xcscheme
+  s_580f932c955f7c::t_a3a75b0a9e6f48 1-92
+App.xcodeproj/xcshareddata/xcschemes/BrowserWKDownloadSpike.xcscheme
+  s_580f932c955f7c::t_55097148aebc1a 1-30
+App.xcodeproj/xcshareddata/xcschemes/WebPageDownloadSpike.xcscheme
+  s_580f932c955f7c::t_5a4bd6d766faae 1-92
+BrowserURLSessionSpikeHost/SpikeCookieBridge.swift
+  s_580f932c955f7c::t_45538a848e55c7 1-134
+BrowserURLSessionSpikeHost/SpikeEvidenceLog.swift
+  s_580f932c955f7c::t_275e6eb9f5cb75 1-131
+BrowserURLSessionSpikeHost/SpikeHash.swift
+  s_580f932c955f7c::t_493ccdc644ec60 1-21
+BrowserURLSessionSpikeHost/SpikeInterceptionPolicy.swift
+  s_580f932c955f7c::t_e1db8e23f8643d 1-66
+BrowserWKDownloadSpikeHost/SpikeEvidence.swift
+  s_580f932c955f7c::t_dbbe96b6866ee1 1-157
+BrowserWKDownloadSpikeHost/WKDownloadCoordinator.swift
+  s_580f932c955f7c::t_ec4e3b4a6f9562 1-700
+Packages/ApplicationFoundation/Tests/MediaLibraryTests/BrowserReceiptIngestionTests.swift
+  s_580f932c955f7c::t_efba04e397a6a6 1-136
+Prototypes/BrowserInlineMediaSpike/.gitignore
+  s_580f932c955f7c::t_4dd89c6e5b5d6d 1
+Prototypes/BrowserInlineMediaSpike/Package.swift
+  s_580f932c955f7c::t_c36ecdebb3c8d2 1-12
+Prototypes/BrowserInlineMediaSpike/README.md
+  s_580f932c955f7c::t_42b9d289085bb5 1-73
+Prototypes/BrowserInlineMediaSpike/evidence/README.md
+  s_580f932c955f7c::t_692e6a583904ba 1-132
+Prototypes/BrowserInlineMediaSpike/evidence/ipad-evidence.json
+  s_580f932c955f7c::t_95a09b0397ddf7 1-1218
+Prototypes/BrowserInlineMediaSpike/evidence/ipad-focused-evidence.json
+  s_580f932c955f7c::t_1be79a8e1f16ff 1-649
+Prototypes/BrowserInlineMediaSpike/evidence/ipad-focused-matrix.md
+  s_580f932c955f7c::t_124c2bd22ae078 1-18
+Prototypes/BrowserInlineMediaSpike/evidence/ipad-matrix.md
+  s_580f932c955f7c::t_0f3a1476e2957f 1-40
+Prototypes/BrowserInlineMediaSpike/evidence/iphone-evidence.json
+  s_580f932c955f7c::t_8bc8c5acb1a66e 1-1178
+Prototypes/BrowserInlineMediaSpike/evidence/iphone-focused-evidence.json
+  s_580f932c955f7c::t_5d200cdb436372 1-609
+Prototypes/BrowserInlineMediaSpike/evidence/iphone-focused-matrix.md
+  s_580f932c955f7c::t_c2faef0e8ccca5 1-18
+Prototypes/BrowserInlineMediaSpike/evidence/iphone-matrix.md
+  s_580f932c955f7c::t_f3c5c550b35ff5 1-40
+Prototypes/BrowserInlineMediaSpike/evidence/native-api-probe.swift
+  s_580f932c955f7c::t_86e927c4b26ad5 1-16
+Prototypes/BrowserReceiptLifecycleSpike/Package.swift
+  s_580f932c955f7c::t_ae5b9303006eb5 1-12
+Prototypes/BrowserReceiptLifecycleSpike/README.md
+  s_580f932c955f7c::t_e7909681ebba7b 1-37
+Prototypes/BrowserReceiptLifecycleSpike/Sources/ReceiptStore.swift
+  s_580f932c955f7c::t_cdb3d6fca30297 1-467
+Prototypes/BrowserReceiptLifecycleSpike/Tests/ReceiptStoreTests.swift
+  s_580f932c955f7c::t_1655d084b0eef3 1-240
+Prototypes/BrowserReceiptLifecycleSpike/fixture_server.py
+  s_580f932c955f7c::t_70f4d347170ede 1-127
+Prototypes/BrowserReceiptLifecycleSpike/select_handoff.py
+  s_580f932c955f7c::t_2f0a1f1f14c333 1-40
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureDiagnostics.swift
+  s_580f932c955f7c::t_64085780cfac9b 1-7
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureEvidence.swift
+  s_580f932c955f7c::t_75facfc2372c8b 1-337
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureHTTP.swift
+  s_580f932c955f7c::t_472a8ab5f06da0 1-193
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureRouter.swift
+  s_580f932c955f7c::t_e8af4238316783 1-141
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureRouterSupport.swift
+  s_580f932c955f7c::t_35e63475aca26a 1-622
+Prototypes/BrowserURLSessionSpike/FixtureServer/SpikeFixtureState.swift
+  s_580f932c955f7c::t_1982aa20db835b 1-38
+Prototypes/BrowserURLSessionSpike/FixtureServer/main.swift
+  s_580f932c955f7c::t_794244170c8123 1-87
+Prototypes/BrowserURLSessionSpike/run-spike.sh
+  s_580f932c955f7c::t_e748dc6d7e470b 1-138
+WebPageDownloadSpikeHost/LoopbackFixtureServer.swift
+  s_580f932c955f7c::t_0561940fab2066 1-432
+WebPageDownloadSpikeHost/SpikeHostApp.swift
+  s_580f932c955f7c::t_be0f5bcda4bc86 1-419
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fb8ca42293bf92aa994a499e6bf39610e0556772",
+  "prompts": {},
+  "sessions": {
+    "s_580f932c955f7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12f1b-7318-7983-bcc2-8f318e6aa6a9",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
