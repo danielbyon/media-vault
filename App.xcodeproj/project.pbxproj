@@ -34,6 +34,34 @@
 			A1000000000000000000003C /* FoundationTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000003 /* FoundationTestSupport */; };
 			A1000000000000000000003D /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000002 /* ComposableArchitecture */; };
 			A1000000000000000000003E /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
+		A20000000000000000000001 /* SpikeHostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* SpikeHostApp.swift */; };
+		A20000000000000000000002 /* LoopbackFixtureServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* LoopbackFixtureServer.swift */; };
+		A20000000000000000000003 /* WebPageDownloadSpikeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* WebPageDownloadSpikeUITests.swift */; };
+		A30000000000000000000001 /* SpikeHostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000001 /* SpikeHostApp.swift */; };
+		A30000000000000000000002 /* SpikeEvidenceLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000002 /* SpikeEvidenceLog.swift */; };
+		A30000000000000000000003 /* SpikeScratchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000003 /* SpikeScratchStore.swift */; };
+		A30000000000000000000004 /* SpikeHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000004 /* SpikeHash.swift */; };
+		A30000000000000000000005 /* SpikeCookieBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000005 /* SpikeCookieBridge.swift */; };
+		A30000000000000000000006 /* SpikeInterceptionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000006 /* SpikeInterceptionPolicy.swift */; };
+		A30000000000000000000007 /* SpikeTransferCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000007 /* SpikeTransferCoordinator.swift */; };
+		A30000000000000000000008 /* SpikeRequestBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000008 /* SpikeRequestBuilder.swift */; };
+		A30000000000000000000009 /* SpikeFixtureContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000009 /* SpikeFixtureContract.swift */; };
+		A3000000000000000000000A /* BrowserURLSessionSpikeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3000000000000000000000A /* BrowserURLSessionSpikeUITests.swift */; };
+		A3000000000000000000000B /* SpikeFixtureContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000009 /* SpikeFixtureContract.swift */; };
+		A40000000000000000000001 /* SpikeHostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000001 /* SpikeHostApp.swift */; };
+		A40000000000000000000002 /* WKDownloadOriginPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000002 /* WKDownloadOriginPolicy.swift */; };
+		A40000000000000000000003 /* SpikeEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000003 /* SpikeEvidence.swift */; };
+		A40000000000000000000004 /* WKDownloadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000004 /* WKDownloadCoordinator.swift */; };
+		A40000000000000000000005 /* BrowserWKDownloadSpikeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000005 /* BrowserWKDownloadSpikeUITests.swift */; };
+		A40000000000000000000006 /* WKDownloadOriginPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000002 /* WKDownloadOriginPolicy.swift */; };
+		A50000000000000000000001 /* BrowserSaveToVaultSpikeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50000000000000000000003 /* BrowserSaveToVaultSpikeApp.swift */; };
+		A50000000000000000000002 /* BrowserSaveToVaultSpikeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50000000000000000000004 /* BrowserSaveToVaultSpikeUITests.swift */; };
+		A60000000000000000000001 /* BrowserInlineMediaSpikeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000003 /* BrowserInlineMediaSpikeApp.swift */; };
+		A60000000000000000000002 /* BrowserInlineMediaSpikeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000004 /* BrowserInlineMediaSpikeUITests.swift */; };
+		A60000000000000000000003 /* BridgeMessageDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000005 /* BridgeMessageDecoder.swift */; };
+		A70000000000000000000001 /* BrowserReceiptLifecycleSpikeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70000000000000000000003 /* BrowserReceiptLifecycleSpikeApp.swift */; };
+		A70000000000000000000003 /* ReceiptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70000000000000000000005 /* ReceiptStore.swift */; };
+		A70000000000000000000002 /* BrowserReceiptLifecycleSpikeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70000000000000000000004 /* BrowserReceiptLifecycleSpikeUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -62,6 +90,44 @@
 			B10000000000000000000016 /* BrowserProfileConfigurationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserProfileConfigurationGate.swift; sourceTree = "<group>"; };
 			B10000000000000000000017 /* AppHostedTestHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppHostedTestHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 			B10000000000000000000018 /* AppHostedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppHostedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000001 /* SpikeHostApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeHostApp.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* LoopbackFixtureServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopbackFixtureServer.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* WebPageDownloadSpikeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPageDownloadSpikeUITests.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* WebPageDownloadSpikeHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WebPageDownloadSpikeHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000005 /* WebPageDownloadSpikeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WebPageDownloadSpikeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B30000000000000000000001 /* SpikeHostApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeHostApp.swift; sourceTree = "<group>"; };
+		B30000000000000000000002 /* SpikeEvidenceLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeEvidenceLog.swift; sourceTree = "<group>"; };
+		B30000000000000000000003 /* SpikeScratchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeScratchStore.swift; sourceTree = "<group>"; };
+		B30000000000000000000004 /* SpikeHash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeHash.swift; sourceTree = "<group>"; };
+		B30000000000000000000005 /* SpikeCookieBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeCookieBridge.swift; sourceTree = "<group>"; };
+		B30000000000000000000006 /* SpikeInterceptionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeInterceptionPolicy.swift; sourceTree = "<group>"; };
+		B30000000000000000000007 /* SpikeTransferCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeTransferCoordinator.swift; sourceTree = "<group>"; };
+		B30000000000000000000008 /* SpikeRequestBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeRequestBuilder.swift; sourceTree = "<group>"; };
+		B30000000000000000000009 /* SpikeFixtureContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeFixtureContract.swift; sourceTree = "<group>"; };
+		B3000000000000000000000A /* BrowserURLSessionSpikeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserURLSessionSpikeUITests.swift; sourceTree = "<group>"; };
+		B3000000000000000000000B /* BrowserURLSessionSpikeHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BrowserURLSessionSpikeHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B3000000000000000000000C /* BrowserURLSessionSpikeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrowserURLSessionSpikeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40000000000000000000001 /* SpikeHostApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeHostApp.swift; sourceTree = "<group>"; };
+		B40000000000000000000002 /* WKDownloadOriginPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WKDownloadOriginPolicy.swift; sourceTree = "<group>"; };
+		B40000000000000000000003 /* SpikeEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpikeEvidence.swift; sourceTree = "<group>"; };
+		B40000000000000000000004 /* WKDownloadCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WKDownloadCoordinator.swift; sourceTree = "<group>"; };
+		B40000000000000000000005 /* BrowserWKDownloadSpikeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserWKDownloadSpikeUITests.swift; sourceTree = "<group>"; };
+		B40000000000000000000006 /* BrowserWKDownloadSpikeHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BrowserWKDownloadSpikeHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40000000000000000000007 /* BrowserWKDownloadSpikeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrowserWKDownloadSpikeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B50000000000000000000001 /* BrowserSaveToVaultSpikeHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BrowserSaveToVaultSpikeHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B50000000000000000000002 /* BrowserSaveToVaultSpikeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrowserSaveToVaultSpikeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B50000000000000000000003 /* BrowserSaveToVaultSpikeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSaveToVaultSpikeApp.swift; sourceTree = "<group>"; };
+		B50000000000000000000004 /* BrowserSaveToVaultSpikeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSaveToVaultSpikeUITests.swift; sourceTree = "<group>"; };
+		B60000000000000000000001 /* BrowserInlineMediaSpikeHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BrowserInlineMediaSpikeHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B60000000000000000000002 /* BrowserInlineMediaSpikeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrowserInlineMediaSpikeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B60000000000000000000003 /* BrowserInlineMediaSpikeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserInlineMediaSpikeApp.swift; sourceTree = "<group>"; };
+		B60000000000000000000004 /* BrowserInlineMediaSpikeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserInlineMediaSpikeUITests.swift; sourceTree = "<group>"; };
+		B60000000000000000000005 /* BridgeMessageDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Prototypes/BrowserInlineMediaSpike/Sources/BridgeMessageDecoder.swift; sourceTree = SOURCE_ROOT; };
+		B70000000000000000000001 /* BrowserReceiptLifecycleSpikeHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BrowserReceiptLifecycleSpikeHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B70000000000000000000002 /* BrowserReceiptLifecycleSpikeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrowserReceiptLifecycleSpikeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B70000000000000000000003 /* BrowserReceiptLifecycleSpikeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserReceiptLifecycleSpikeApp.swift; sourceTree = "<group>"; };
+		B70000000000000000000005 /* ReceiptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Prototypes/BrowserReceiptLifecycleSpike/Sources/ReceiptStore.swift; sourceTree = "<group>"; };
+		B70000000000000000000004 /* BrowserReceiptLifecycleSpikeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserReceiptLifecycleSpikeUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,6 +186,54 @@
 				);
 				runOnlyForDeploymentPostprocessing = 0;
 			};
+		C20000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C20000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C30000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C30000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C40000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C40000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C50000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C50000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C60000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C60000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C70000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C70000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -134,6 +248,19 @@
 				E10000000000000000000009 /* BrowserTabOverviewUITests */,
 				E10000000000000000000007 /* Packages */,
 				E10000000000000000000002 /* Products */,
+			E30000000000000000000001,
+			E30000000000000000000002,
+			E30000000000000000000003,
+			E20000000000000000000001,
+			E20000000000000000000002,
+			E40000000000000000000001,
+			E40000000000000000000002,
+			E50000000000000000000001,
+			E50000000000000000000002,
+			E60000000000000000000001,
+			E60000000000000000000002,
+			E70000000000000000000001,
+			E70000000000000000000002,
 			);
 			sourceTree = "<group>";
 		};
@@ -146,6 +273,18 @@
 				B10000000000000000000018 /* AppHostedTests.xctest */,
 				B1000000000000000000000A /* BrowserTabOverviewUITestHost.app */,
 				B1000000000000000000000B /* BrowserTabOverviewUITests.xctest */,
+			B3000000000000000000000B,
+			B3000000000000000000000C,
+			B20000000000000000000004,
+			B20000000000000000000005,
+			B40000000000000000000006,
+			B40000000000000000000007,
+			B50000000000000000000001,
+			B50000000000000000000002,
+			B60000000000000000000001,
+			B60000000000000000000002,
+			B70000000000000000000001,
+			B70000000000000000000002,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -233,6 +372,110 @@
 				path = AppHostedTests;
 				sourceTree = "<group>";
 			};
+		E20000000000000000000001 /* WebPageDownloadSpikeHost */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* SpikeHostApp.swift */,
+				B20000000000000000000002 /* LoopbackFixtureServer.swift */,
+			);
+			path = WebPageDownloadSpikeHost;
+			sourceTree = "<group>";
+		};
+		E20000000000000000000002 /* WebPageDownloadSpikeTests */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000003 /* WebPageDownloadSpikeUITests.swift */,
+			);
+			path = WebPageDownloadSpikeTests;
+			sourceTree = "<group>";
+		};
+		E30000000000000000000001 /* BrowserURLSessionSpikeHost */ = {
+			isa = PBXGroup;
+			children = (
+				B30000000000000000000001 /* SpikeHostApp.swift */,
+				B30000000000000000000002 /* SpikeEvidenceLog.swift */,
+				B30000000000000000000003 /* SpikeScratchStore.swift */,
+				B30000000000000000000004 /* SpikeHash.swift */,
+				B30000000000000000000005 /* SpikeCookieBridge.swift */,
+				B30000000000000000000006 /* SpikeInterceptionPolicy.swift */,
+				B30000000000000000000007 /* SpikeTransferCoordinator.swift */,
+				B30000000000000000000008 /* SpikeRequestBuilder.swift */,
+			);
+			path = BrowserURLSessionSpikeHost;
+			sourceTree = "<group>";
+		};
+		E30000000000000000000002 /* BrowserURLSessionSpikeTests */ = {
+			isa = PBXGroup;
+			children = (
+				B3000000000000000000000A /* BrowserURLSessionSpikeUITests.swift */,
+			);
+			path = BrowserURLSessionSpikeTests;
+			sourceTree = "<group>";
+		};
+		E30000000000000000000003 /* Spike 2 Shared Contract */ = {
+			isa = PBXGroup;
+			children = (
+				B30000000000000000000009 /* SpikeFixtureContract.swift */,
+			);
+			name = "Spike 2 Shared Contract";
+			path = Prototypes/BrowserURLSessionSpike/Shared;
+			sourceTree = "<group>";
+		};
+		E40000000000000000000001 /* BrowserWKDownloadSpikeHost */ = {
+			isa = PBXGroup;
+			children = (
+				B40000000000000000000001 /* SpikeHostApp.swift */,
+				B40000000000000000000002 /* WKDownloadOriginPolicy.swift */,
+				B40000000000000000000003 /* SpikeEvidence.swift */,
+				B40000000000000000000004 /* WKDownloadCoordinator.swift */,
+			);
+			path = BrowserWKDownloadSpikeHost;
+			sourceTree = "<group>";
+		};
+		E40000000000000000000002 /* BrowserWKDownloadSpikeTests */ = {
+			isa = PBXGroup;
+			children = (
+				B40000000000000000000005 /* BrowserWKDownloadSpikeUITests.swift */,
+			);
+			path = BrowserWKDownloadSpikeTests;
+			sourceTree = "<group>";
+		};
+		E50000000000000000000001 /* BrowserSaveToVaultSpikeHost */ = {
+			isa = PBXGroup;
+			children = (B50000000000000000000003 /* BrowserSaveToVaultSpikeApp.swift */,);
+			path = BrowserSaveToVaultSpikeHost;
+			sourceTree = "<group>";
+		};
+		E50000000000000000000002 /* BrowserSaveToVaultSpikeUITests */ = {
+			isa = PBXGroup;
+			children = (B50000000000000000000004 /* BrowserSaveToVaultSpikeUITests.swift */,);
+			path = BrowserSaveToVaultSpikeTests;
+			sourceTree = "<group>";
+		};
+		E60000000000000000000001 /* BrowserInlineMediaSpikeHost */ = {
+			isa = PBXGroup;
+			children = (B60000000000000000000003 /* BrowserInlineMediaSpikeApp.swift */, B60000000000000000000005 /* BridgeMessageDecoder.swift */,);
+			path = BrowserInlineMediaSpikeHost;
+			sourceTree = "<group>";
+		};
+		E60000000000000000000002 /* BrowserInlineMediaSpikeUITests */ = {
+			isa = PBXGroup;
+			children = (B60000000000000000000004 /* BrowserInlineMediaSpikeUITests.swift */,);
+			path = BrowserInlineMediaSpikeUITests;
+			sourceTree = "<group>";
+		};
+		E70000000000000000000001 /* BrowserReceiptLifecycleSpikeHost */ = {
+			isa = PBXGroup;
+			children = (B70000000000000000000003 /* BrowserReceiptLifecycleSpikeApp.swift */, B70000000000000000000005 /* ReceiptStore.swift */,);
+			path = BrowserReceiptLifecycleSpikeHost;
+			sourceTree = "<group>";
+		};
+		E70000000000000000000002 /* BrowserReceiptLifecycleSpikeUITests */ = {
+			isa = PBXGroup;
+			children = (B70000000000000000000004 /* BrowserReceiptLifecycleSpikeUITests.swift */,);
+			path = BrowserReceiptLifecycleSpikeTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -362,6 +605,177 @@
 				productReference = B10000000000000000000018 /* AppHostedTests.xctest */;
 				productType = "com.apple.product-type.bundle.unit-test";
 			};
+		D20000000000000000000001 /* WebPageDownloadSpikeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F20000000000000000000005 /* Build configuration list for PBXNativeTarget "WebPageDownloadSpikeHost" */;
+			buildPhases = (
+				C20000000000000000000001 /* Sources */,
+				C20000000000000000000002 /* Resources */,
+				C20000000000000000000003 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WebPageDownloadSpikeHost;
+			productName = WebPageDownloadSpikeHost;
+			productReference = B20000000000000000000004 /* WebPageDownloadSpikeHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D20000000000000000000002 /* WebPageDownloadSpikeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F20000000000000000000006 /* Build configuration list for PBXNativeTarget "WebPageDownloadSpikeTests" */;
+			buildPhases = (
+				C20000000000000000000004 /* Sources */,
+				C20000000000000000000005 /* Resources */,
+				C20000000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				H20000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = WebPageDownloadSpikeTests;
+			productName = WebPageDownloadSpikeTests;
+			productReference = B20000000000000000000005 /* WebPageDownloadSpikeTests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		D30000000000000000000001 /* BrowserURLSessionSpikeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F31000000000000000000001 /* Build configuration list for PBXNativeTarget "BrowserURLSessionSpikeHost" */;
+			buildPhases = (
+				C30000000000000000000001 /* Sources */,
+				C30000000000000000000002 /* Resources */,
+				C30000000000000000000003 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BrowserURLSessionSpikeHost;
+			productName = BrowserURLSessionSpikeHost;
+			productReference = B3000000000000000000000B /* BrowserURLSessionSpikeHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D30000000000000000000002 /* BrowserURLSessionSpikeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F31000000000000000000002 /* Build configuration list for PBXNativeTarget "BrowserURLSessionSpikeTests" */;
+			buildPhases = (
+				C30000000000000000000004 /* Sources */,
+				C30000000000000000000005 /* Resources */,
+				C30000000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				H30000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = BrowserURLSessionSpikeTests;
+			productName = BrowserURLSessionSpikeTests;
+			productReference = B3000000000000000000000C /* BrowserURLSessionSpikeTests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		D40000000000000000000001 /* BrowserWKDownloadSpikeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F40000000000000000000007 /* Build configuration list for PBXNativeTarget "BrowserWKDownloadSpikeHost" */;
+			buildPhases = (
+				C40000000000000000000001 /* Sources */,
+				C40000000000000000000002 /* Resources */,
+				C40000000000000000000003 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BrowserWKDownloadSpikeHost;
+			productName = BrowserWKDownloadSpikeHost;
+			productReference = B40000000000000000000006 /* BrowserWKDownloadSpikeHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D40000000000000000000002 /* BrowserWKDownloadSpikeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F40000000000000000000008 /* Build configuration list for PBXNativeTarget "BrowserWKDownloadSpikeTests" */;
+			buildPhases = (
+				C40000000000000000000004 /* Sources */,
+				C40000000000000000000005 /* Resources */,
+				C40000000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				H40000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = BrowserWKDownloadSpikeTests;
+			productName = BrowserWKDownloadSpikeTests;
+			productReference = B40000000000000000000007 /* BrowserWKDownloadSpikeTests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		D50000000000000000000001 /* BrowserSaveToVaultSpikeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F50000000000000000000005 /* Build configuration list for PBXNativeTarget "BrowserSaveToVaultSpikeHost" */;
+			buildPhases = (C50000000000000000000003 /* Sources */, C10000000000000000000016 /* BrowserSaveToVaultSpikeHost Resources */, C50000000000000000000001 /* Frameworks */);
+			buildRules = ();
+			dependencies = ();
+			name = BrowserSaveToVaultSpikeHost;
+			productName = BrowserSaveToVaultSpikeHost;
+			productReference = B50000000000000000000001 /* BrowserSaveToVaultSpikeHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D50000000000000000000002 /* BrowserSaveToVaultSpikeUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F50000000000000000000006 /* Build configuration list for PBXNativeTarget "BrowserSaveToVaultSpikeUITests" */;
+			buildPhases = (C50000000000000000000004 /* Sources */, C10000000000000000000017 /* BrowserSaveToVaultSpikeUITests Resources */, C50000000000000000000002 /* Frameworks */);
+			buildRules = ();
+			dependencies = (H50000000000000000000001 /* PBXTargetDependency */);
+			name = BrowserSaveToVaultSpikeUITests;
+			productName = BrowserSaveToVaultSpikeUITests;
+			productReference = B50000000000000000000002 /* BrowserSaveToVaultSpikeUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		D60000000000000000000001 /* BrowserInlineMediaSpikeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F60000000000000000000005 /* Build configuration list for PBXNativeTarget "BrowserInlineMediaSpikeHost" */;
+			buildPhases = (C60000000000000000000003 /* Sources */, C10000000000000000000018 /* BrowserInlineMediaSpikeHost Resources */, C60000000000000000000001 /* Frameworks */);
+			buildRules = ();
+			dependencies = ();
+			name = BrowserInlineMediaSpikeHost;
+			productName = BrowserInlineMediaSpikeHost;
+			productReference = B60000000000000000000001 /* BrowserInlineMediaSpikeHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D60000000000000000000002 /* BrowserInlineMediaSpikeUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F60000000000000000000006 /* Build configuration list for PBXNativeTarget "BrowserInlineMediaSpikeUITests" */;
+			buildPhases = (C60000000000000000000004 /* Sources */, C10000000000000000000019 /* BrowserInlineMediaSpikeUITests Resources */, C60000000000000000000002 /* Frameworks */);
+			buildRules = ();
+			dependencies = (H60000000000000000000001 /* PBXTargetDependency */);
+			name = BrowserInlineMediaSpikeUITests;
+			productName = BrowserInlineMediaSpikeUITests;
+			productReference = B60000000000000000000002 /* BrowserInlineMediaSpikeUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		D70000000000000000000001 /* BrowserReceiptLifecycleSpikeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F70000000000000000000005 /* Build configuration list for PBXNativeTarget "BrowserReceiptLifecycleSpikeHost" */;
+			buildPhases = (C70000000000000000000003 /* Sources */, C10000000000000000000020 /* BrowserReceiptLifecycleSpikeHost Resources */, C70000000000000000000001 /* Frameworks */);
+			buildRules = ();
+			dependencies = ();
+			name = BrowserReceiptLifecycleSpikeHost;
+			productName = BrowserReceiptLifecycleSpikeHost;
+			productReference = B70000000000000000000001 /* BrowserReceiptLifecycleSpikeHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D70000000000000000000002 /* BrowserReceiptLifecycleSpikeUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F70000000000000000000006 /* Build configuration list for PBXNativeTarget "BrowserReceiptLifecycleSpikeUITests" */;
+			buildPhases = (C70000000000000000000004 /* Sources */, C10000000000000000000021 /* BrowserReceiptLifecycleSpikeUITests Resources */, C70000000000000000000002 /* Frameworks */);
+			buildRules = ();
+			dependencies = (H70000000000000000000001 /* PBXTargetDependency */);
+			name = BrowserReceiptLifecycleSpikeUITests;
+			productName = BrowserReceiptLifecycleSpikeUITests;
+			productReference = B70000000000000000000002 /* BrowserReceiptLifecycleSpikeUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -391,6 +805,27 @@
 						CreatedOnToolsVersion = 2700;
 						TestTargetID = D10000000000000000000005;
 					};
+									D50000000000000000000001 = {
+						CreatedOnToolsVersion = 2700;
+					};
+					D50000000000000000000002 = {
+						TestTargetID = D50000000000000000000001;
+						CreatedOnToolsVersion = 2700;
+					};
+					D60000000000000000000001 = {
+						CreatedOnToolsVersion = 2700;
+					};
+					D60000000000000000000002 = {
+						TestTargetID = D60000000000000000000001;
+						CreatedOnToolsVersion = 2700;
+					};
+					D70000000000000000000001 = {
+						CreatedOnToolsVersion = 2700;
+					};
+					D70000000000000000000002 = {
+						TestTargetID = D70000000000000000000001;
+						CreatedOnToolsVersion = 2700;
+					};
 				};
 			};
 			buildConfigurationList = F10000000000000000000007 /* Build configuration list for PBXProject "App" */;
@@ -417,6 +852,18 @@
 				D10000000000000000000004 /* BrowserTabOverviewUITests */,
 				D10000000000000000000005 /* AppHostedTestHost */,
 				D10000000000000000000006 /* AppHostedTests */,
+			D30000000000000000000001,
+			D30000000000000000000002,
+			D20000000000000000000001,
+			D20000000000000000000002,
+			D40000000000000000000001,
+			D40000000000000000000002,
+			D50000000000000000000001,
+			D50000000000000000000002,
+			D60000000000000000000001,
+			D60000000000000000000002,
+			D70000000000000000000001,
+			D70000000000000000000002,
 			);
 		};
 /* End PBXProject section */
@@ -464,6 +911,54 @@
 				);
 				runOnlyForDeploymentPostprocessing = 0;
 			};
+		C20000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C20000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C30000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C30000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C40000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C40000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000016 /* BrowserSaveToVaultSpikeHost Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C10000000000000000000017 /* BrowserSaveToVaultSpikeUITests Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C10000000000000000000018 /* BrowserInlineMediaSpikeHost Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C10000000000000000000019 /* BrowserInlineMediaSpikeUITests Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C10000000000000000000020 /* BrowserReceiptLifecycleSpikeHost Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C10000000000000000000021 /* BrowserReceiptLifecycleSpikeUITests Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -523,6 +1018,74 @@
 				);
 				runOnlyForDeploymentPostprocessing = 0;
 			};
+		C20000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A20000000000000000000001 /* SpikeHostApp.swift in Sources */,
+				A20000000000000000000002 /* LoopbackFixtureServer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C20000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A20000000000000000000003 /* WebPageDownloadSpikeUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C30000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A30000000000000000000001 /* SpikeHostApp.swift in Sources */,
+				A30000000000000000000009 /* SpikeFixtureContract.swift in Sources */,
+				A30000000000000000000002 /* SpikeEvidenceLog.swift in Sources */,
+				A30000000000000000000003 /* SpikeScratchStore.swift in Sources */,
+				A30000000000000000000004 /* SpikeHash.swift in Sources */,
+				A30000000000000000000005 /* SpikeCookieBridge.swift in Sources */,
+				A30000000000000000000006 /* SpikeInterceptionPolicy.swift in Sources */,
+				A30000000000000000000007 /* SpikeTransferCoordinator.swift in Sources */,
+				A30000000000000000000008 /* SpikeRequestBuilder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C30000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A3000000000000000000000A /* BrowserURLSessionSpikeUITests.swift in Sources */,
+				A3000000000000000000000B /* SpikeFixtureContract.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C40000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000001 /* SpikeHostApp.swift in Sources */,
+				A40000000000000000000002 /* WKDownloadOriginPolicy.swift in Sources */,
+				A40000000000000000000003 /* SpikeEvidence.swift in Sources */,
+				A40000000000000000000004 /* WKDownloadCoordinator.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C40000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000005 /* BrowserWKDownloadSpikeUITests.swift in Sources */,
+				A40000000000000000000006 /* WKDownloadOriginPolicy.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C50000000000000000000003 /* BrowserSaveToVaultSpikeHost Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A50000000000000000000001 /* BrowserSaveToVaultSpikeApp.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		C50000000000000000000004 /* BrowserSaveToVaultSpikeUITests Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A50000000000000000000002 /* BrowserSaveToVaultSpikeUITests.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		C60000000000000000000003 /* BrowserInlineMediaSpikeHost Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A60000000000000000000001 /* BrowserInlineMediaSpikeApp.swift in Sources */, A60000000000000000000003 /* BridgeMessageDecoder.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		C60000000000000000000004 /* BrowserInlineMediaSpikeUITests Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A60000000000000000000002 /* BrowserInlineMediaSpikeUITests.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		C70000000000000000000003 /* BrowserReceiptLifecycleSpikeHost Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A70000000000000000000001 /* BrowserReceiptLifecycleSpikeApp.swift in Sources */, A70000000000000000000003 /* ReceiptStore.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		C70000000000000000000004 /* BrowserReceiptLifecycleSpikeUITests Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A70000000000000000000002 /* BrowserReceiptLifecycleSpikeUITests.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -795,6 +1358,482 @@
 				};
 				name = Release;
 			};
+		F20000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.WebPageDownloadSpikeHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F20000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.WebPageDownloadSpikeHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F20000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.WebPageDownloadSpikeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = WebPageDownloadSpikeHost;
+			};
+			name = Debug;
+		};
+		F20000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.WebPageDownloadSpikeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = WebPageDownloadSpikeHost;
+			};
+			name = Release;
+		};
+		F30000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIBackgroundModes = fetch;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.BrowserURLSessionSpikeHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F30000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIBackgroundModes = fetch;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.BrowserURLSessionSpikeHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F30000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.BrowserURLSessionSpikeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserURLSessionSpikeHost;
+			};
+			name = Debug;
+		};
+		F30000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.BrowserURLSessionSpikeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserURLSessionSpikeHost;
+			};
+			name = Release;
+		};
+		F40000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.BrowserWKDownloadSpikeHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F40000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.BrowserWKDownloadSpikeHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F40000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.BrowserWKDownloadSpikeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserWKDownloadSpikeHost;
+			};
+			name = Debug;
+		};
+		F40000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.BrowserWKDownloadSpikeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserWKDownloadSpikeHost;
+			};
+			name = Release;
+		};
+		F50000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to the local Browser Save spike fixture server.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsersavetovaulthost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F50000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to the local Browser Save spike fixture server.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsersavetovaulthost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F50000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks",);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsersavetovaulthost.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserSaveToVaultSpikeHost;
+			};
+			name = Debug;
+		};
+		F50000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks",);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsersavetovaulthost.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserSaveToVaultSpikeHost;
+			};
+			name = Release;
+		};
+		F60000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to the local Inline Media spike fixture server.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browserinlinemediahost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F60000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to the local Inline Media spike fixture server.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browserinlinemediahost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F60000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks",);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browserinlinemediahost.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserInlineMediaSpikeHost;
+			};
+			name = Debug;
+		};
+		F60000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks",);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browserinlinemediahost.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserInlineMediaSpikeHost;
+			};
+			name = Release;
+		};
+		F70000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to the local Browser Save spike fixture server.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browserreceiptlifecyclehost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F70000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to the local Browser Save spike fixture server.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browserreceiptlifecyclehost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F70000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks",);
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browserreceiptlifecyclehost.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserReceiptLifecycleSpikeHost;
+			};
+			name = Debug;
+		};
+		F70000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks",);
+				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browserreceiptlifecyclehost.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BrowserReceiptLifecycleSpikeHost;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -861,6 +1900,114 @@
 				defaultConfigurationIsVisible = 0;
 				defaultConfigurationName = Release;
 			};
+		F20000000000000000000005 /* Build configuration list for PBXNativeTarget "WebPageDownloadSpikeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F20000000000000000000001 /* Debug */,
+				F20000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F20000000000000000000006 /* Build configuration list for PBXNativeTarget "WebPageDownloadSpikeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F20000000000000000000003 /* Debug */,
+				F20000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F31000000000000000000001 /* Build configuration list for PBXNativeTarget "BrowserURLSessionSpikeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F30000000000000000000001 /* Debug */,
+				F30000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F31000000000000000000002 /* Build configuration list for PBXNativeTarget "BrowserURLSessionSpikeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F30000000000000000000003 /* Debug */,
+				F30000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F40000000000000000000007 /* Build configuration list for PBXNativeTarget "BrowserWKDownloadSpikeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F40000000000000000000001 /* Debug */,
+				F40000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F40000000000000000000008 /* Build configuration list for PBXNativeTarget "BrowserWKDownloadSpikeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F40000000000000000000003 /* Debug */,
+				F40000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F50000000000000000000005 /* Build configuration list for PBXNativeTarget "BrowserSaveToVaultSpikeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F50000000000000000000001 /* Debug */,
+				F50000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F50000000000000000000006 /* Build configuration list for PBXNativeTarget "BrowserSaveToVaultSpikeUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F50000000000000000000003 /* Debug */,
+				F50000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F60000000000000000000005 /* Build configuration list for PBXNativeTarget "BrowserInlineMediaSpikeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F60000000000000000000001 /* Debug */,
+				F60000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F60000000000000000000006 /* Build configuration list for PBXNativeTarget "BrowserInlineMediaSpikeUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F60000000000000000000003 /* Debug */,
+				F60000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F70000000000000000000005 /* Build configuration list for PBXNativeTarget "BrowserReceiptLifecycleSpikeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F70000000000000000000001 /* Debug */,
+				F70000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F70000000000000000000006 /* Build configuration list for PBXNativeTarget "BrowserReceiptLifecycleSpikeUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F70000000000000000000003 /* Debug */,
+				F70000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -938,6 +2085,48 @@
 				remoteGlobalIDString = D10000000000000000000005;
 				remoteInfo = AppHostedTestHost;
 			};
+		G20000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D20000000000000000000001;
+			remoteInfo = WebPageDownloadSpikeHost;
+		};
+		G30000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D30000000000000000000001;
+			remoteInfo = BrowserURLSessionSpikeHost;
+		};
+		G40000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D40000000000000000000001;
+			remoteInfo = BrowserWKDownloadSpikeHost;
+		};
+		G50000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D50000000000000000000001;
+			remoteInfo = BrowserSaveToVaultSpikeHost;
+		};
+		G60000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D60000000000000000000001;
+			remoteInfo = BrowserInlineMediaSpikeHost;
+		};
+		G70000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D70000000000000000000001;
+			remoteInfo = BrowserReceiptLifecycleSpikeHost;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXTargetDependency section */
@@ -951,6 +2140,36 @@
 				target = D10000000000000000000005 /* AppHostedTestHost */;
 				targetProxy = G10000000000000000000002 /* PBXContainerItemProxy */;
 			};
+		H20000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D20000000000000000000001 /* WebPageDownloadSpikeHost */;
+			targetProxy = G20000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		H30000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D30000000000000000000001 /* BrowserURLSessionSpikeHost */;
+			targetProxy = G30000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		H40000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D40000000000000000000001 /* BrowserWKDownloadSpikeHost */;
+			targetProxy = G40000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		H50000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D50000000000000000000001 /* BrowserSaveToVaultSpikeHost */;
+			targetProxy = G50000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		H60000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D60000000000000000000001 /* BrowserInlineMediaSpikeHost */;
+			targetProxy = G60000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		H70000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D70000000000000000000001 /* BrowserReceiptLifecycleSpikeHost */;
+			targetProxy = G70000000000000000000001 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 	};
 	rootObject = A10000000000000000000001 /* Project object */;

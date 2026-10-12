@@ -1,0 +1,609 @@
+{
+  "events": [
+    {
+      "fields": {
+        "case": "same-iframe",
+        "mode": "diagnostic"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "same-iframe",
+        "currentSrc": "absent",
+        "event": "pointerdown",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "false",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/frame/same-iframe",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/frame/same-iframe",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "IMG"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "same-iframe",
+        "currentSrc": "absent",
+        "event": "touchstart",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "false",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/frame/same-iframe",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/frame/same-iframe",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "IMG"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "same-iframe",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "2",
+        "menuAccessibilityDetected": "false",
+        "menuLabels": "",
+        "mode": "diagnostic",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "cross-iframe",
+        "mode": "diagnostic"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "cross-iframe",
+        "currentSrc": "absent",
+        "event": "pointerdown",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "false",
+        "nativeOrigin": "http://localhost:18755",
+        "nativeRequest": "http://localhost:18755/frame/cross-iframe",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://localhost:18755",
+        "pageFrameURL": "http://localhost:18755/frame/cross-iframe",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "IMG"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "cross-iframe",
+        "currentSrc": "absent",
+        "event": "touchstart",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "false",
+        "nativeOrigin": "http://localhost:18755",
+        "nativeRequest": "http://localhost:18755/frame/cross-iframe",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://localhost:18755",
+        "pageFrameURL": "http://localhost:18755/frame/cross-iframe",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "IMG"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "cross-iframe",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "2",
+        "menuAccessibilityDetected": "true",
+        "menuLabels": "Copy,Copy Subject,Look Up,Save to Photos,Share\u2026",
+        "mode": "diagnostic",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "video-src",
+        "mode": "diagnostic"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "video-src",
+        "currentSrc": "absent",
+        "event": "pointerdown",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/video-src",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/video-src",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "VIDEO"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "video-src",
+        "currentSrc": "absent",
+        "event": "touchstart",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/video-src",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/video-src",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "VIDEO"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "video-src",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "2",
+        "menuAccessibilityDetected": "false",
+        "menuLabels": "",
+        "mode": "diagnostic",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "video-source",
+        "mode": "diagnostic"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "video-source",
+        "currentSrc": "absent",
+        "event": "pointerdown",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/video-source",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/video-source",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "VIDEO"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "video-source",
+        "currentSrc": "absent",
+        "event": "touchstart",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/video-source",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/video-source",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "VIDEO"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "video-source",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "2",
+        "menuAccessibilityDetected": "false",
+        "menuLabels": "",
+        "mode": "diagnostic",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "cross-iframe",
+        "mode": "native"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "cross-iframe",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "0",
+        "menuAccessibilityDetected": "true",
+        "menuLabels": "Copy,Copy Subject,Look Up,Save to Photos,Share\u2026",
+        "mode": "native",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "cross-iframe",
+        "mode": "native"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "cross-iframe",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "0",
+        "menuAccessibilityDetected": "true",
+        "menuLabels": "Copy,Copy Subject,Look Up,Save to Photos,Share\u2026",
+        "mode": "native",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "css-background",
+        "mode": "diagnostic"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "css-background",
+        "currentSrc": "absent",
+        "event": "pointerdown",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/css-background",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/css-background",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "DIV"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "css-background",
+        "currentSrc": "absent",
+        "event": "touchstart",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/css-background",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/css-background",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "DIV"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "css-background",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "2",
+        "menuAccessibilityDetected": "false",
+        "menuLabels": "",
+        "mode": "diagnostic",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "canvas",
+        "mode": "diagnostic"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "canvas",
+        "currentSrc": "absent",
+        "event": "pointerdown",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/canvas",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/canvas",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "CANVAS"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "canvas",
+        "currentSrc": "absent",
+        "event": "touchstart",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/canvas",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/canvas",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "CANVAS"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "canvas",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "2",
+        "menuAccessibilityDetected": "false",
+        "menuLabels": "",
+        "mode": "diagnostic",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "blob",
+        "mode": "diagnostic"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "blob",
+        "currentSrc": "absent",
+        "event": "pointerdown",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/blob",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/blob",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "IMG"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "blob",
+        "currentSrc": "absent",
+        "event": "touchstart",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/blob",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/blob",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "IMG"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "blob",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "2",
+        "menuAccessibilityDetected": "true",
+        "menuLabels": "Copy,Copy Subject,Look Up,Save to Photos,Share\u2026",
+        "mode": "diagnostic",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    },
+    {
+      "fields": {
+        "case": "data",
+        "mode": "diagnostic"
+      },
+      "kind": "host-started"
+    },
+    {
+      "fields": {
+        "case": "data",
+        "currentSrc": "absent",
+        "event": "pointerdown",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/data",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/data",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "IMG"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "data",
+        "currentSrc": "absent",
+        "event": "touchstart",
+        "linkDestination": "absent",
+        "mediaScheme": "absent",
+        "mode": "diagnostic",
+        "nativeMainFrame": "true",
+        "nativeOrigin": "http://127.0.0.1:18755",
+        "nativeRequest": "http://127.0.0.1:18755/case/data",
+        "nativeWorld": "defaultClient",
+        "pageFrameOrigin": "http://127.0.0.1:18755",
+        "pageFrameURL": "http://127.0.0.1:18755/case/data",
+        "selectedMedia": "absent",
+        "src": "absent",
+        "tag": "IMG"
+      },
+      "kind": "bridge-observation"
+    },
+    {
+      "fields": {
+        "case": "data",
+        "contextmenuMessagesSoFar": "0",
+        "diagnosticMessagesSoFar": "2",
+        "menuAccessibilityDetected": "true",
+        "menuLabels": "Copy,Copy Subject,Look Up,Save to Photos,Share\u2026",
+        "mode": "diagnostic",
+        "pressInvoked": "true"
+      },
+      "kind": "ui-press"
+    }
+  ],
+  "requests": [
+    {
+      "path": "/case/same-iframe",
+      "status": 200
+    },
+    {
+      "path": "/frame/same-iframe",
+      "status": 200
+    },
+    {
+      "path": "/media/image-a.jpg",
+      "status": 200
+    },
+    {
+      "path": "/case/cross-iframe",
+      "status": 200
+    },
+    {
+      "path": "/frame/cross-iframe",
+      "status": 200
+    },
+    {
+      "path": "/media/image-a.jpg",
+      "status": 200
+    },
+    {
+      "path": "/case/video-src",
+      "status": 200
+    },
+    {
+      "path": "/media/image-a.jpg",
+      "status": 200
+    },
+    {
+      "path": "/media/video-a.mp4",
+      "status": 200
+    },
+    {
+      "path": "/case/video-source",
+      "status": 200
+    },
+    {
+      "path": "/media/image-a.jpg",
+      "status": 200
+    },
+    {
+      "path": "/media/video-a.mp4",
+      "status": 200
+    },
+    {
+      "path": "/case/cross-iframe",
+      "status": 200
+    },
+    {
+      "path": "/frame/cross-iframe",
+      "status": 200
+    },
+    {
+      "path": "/media/image-a.jpg",
+      "status": 200
+    },
+    {
+      "path": "/case/cross-iframe",
+      "status": 200
+    },
+    {
+      "path": "/frame/cross-iframe",
+      "status": 200
+    },
+    {
+      "path": "/media/image-a.jpg",
+      "status": 200
+    },
+    {
+      "path": "/case/css-background",
+      "status": 200
+    },
+    {
+      "path": "/media/image-a.jpg",
+      "status": 200
+    },
+    {
+      "path": "/case/canvas",
+      "status": 200
+    },
+    {
+      "path": "/case/blob",
+      "status": 200
+    },
+    {
+      "path": "/case/data",
+      "status": 200
+    }
+  ],
+  "schema_version": 5
+}

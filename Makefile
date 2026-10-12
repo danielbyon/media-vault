@@ -13,7 +13,7 @@ PACKAGE_SCHEME := ApplicationFoundation-Package
 # shared; build products stay in the per-run temporary DerivedData directory.
 SOURCE_PACKAGES_DIRECTORY := $(CURDIR)/.build/SourcePackages
 
-.PHONY: all build clean format lint lint-analyze test tools
+.PHONY: all build clean format lint lint-analyze test tools spike-webpage-download spike-browser-urlsession spike-browser-wkdownload spike-browser-save-to-vault spike-browser-receipt-lifecycle
 
 all: lint build test
 
@@ -47,6 +47,41 @@ test:
 	trap 'exit 143' TERM INT; \
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" test; \
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" test
+
+# Disposable runtime experiment. Keep this scheme outside the shipping App
+# scheme and the normal build/test gates; invoke it only when validating the
+# WebPage download lifecycle spike explicitly. Preserve its test result bundles
+# under ignored .build output so validation evidence survives temporary build cleanup.
+spike-webpage-download:
+	@set -euo pipefail; \
+	mkdir -p "$(CURDIR)/.build"; \
+	derived_data=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-spike-webpage-download.XXXXXX"); \
+	evidence_dir=$$(mktemp -d "$(CURDIR)/.build/browser-spike-1-results.XXXXXX"); \
+	trap 'rm -rf -- "$$derived_data"' EXIT; \
+	trap 'exit 143' TERM INT; \
+	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme WebPageDownloadSpike -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" build; \
+	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme WebPageDownloadSpike -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" -resultBundlePath "$$evidence_dir/iphone.xcresult" test; \
+	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme WebPageDownloadSpike -configuration Debug -destination '$(IPAD_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" -resultBundlePath "$$evidence_dir/ipad.xcresult" test
+
+# Disposable Spike 2 runtime experiment. The dedicated scheme stays outside
+# the shipping App scheme and the normal build/test gates, and the fixture
+# server runs as a separate host process because an in-app server cannot
+# survive app suspension or termination.
+spike-browser-urlsession:
+	./Prototypes/BrowserURLSessionSpike/run-spike.sh
+
+spike-browser-wkdownload:
+	./Prototypes/BrowserWKDownloadSpike/run-spike.sh
+
+# Run the disposable Browser Spike 4 matrix and the real SQLite journal handoff
+# on the supported iPhone and iPadOS 27 simulator runtimes.
+spike-browser-save-to-vault:
+	bash ./Prototypes/BrowserSaveToVaultSpike/run-spike.sh
+
+# Disposable Spike 6: a separate host, fixture, and package-test handoff.
+# The runner writes only sanitized evidence below .build and fails on assertions.
+spike-browser-receipt-lifecycle:
+	./Prototypes/BrowserReceiptLifecycleSpike/run-spike.sh
 
 lint: tools
 	./Scripts/validate-release-identity.sh
