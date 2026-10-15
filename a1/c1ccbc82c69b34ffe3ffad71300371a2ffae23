@@ -1,0 +1,19 @@
+AppHostedTests/BrowserDownloadHTTPTests.swift
+  s_5d62df6b616a0e::t_9dd2881ba6e5a6 376-381,391-394,397,400,403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a1c1ccbc82c69b34ffe3ffad71300371a2ffae23",
+  "prompts": {},
+  "sessions": {
+    "s_5d62df6b616a0e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a131c2-ae01-7141-874c-cf889bf8eb74",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
