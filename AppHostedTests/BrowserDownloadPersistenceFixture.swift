@@ -1,5 +1,5 @@
 //
-//  Issue42DownloadSeparationFixture.swift
+//  BrowserDownloadPersistenceFixture.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,7 +21,7 @@ import UIKit
 /// A fixture installs this recorder as the app's media-library dependency so ordinary
 /// download work can be proven never to reach the library. Assertions read the ordered
 /// transcript of operation names.
-final class Issue42DownloadImportRecorder: Sendable {
+final class BrowserDownloadImportRecorder: Sendable {
     private let transcript = LockIsolated<[String]>([])
 
     /// Ordered names of library operations the application attempted.
@@ -42,10 +42,10 @@ final class Issue42DownloadImportRecorder: Sendable {
 
 /// Runs a real Root composition with isolated app persistence and the shared WebKit adapter.
 @MainActor
-func withIssue42DownloadSeparationFixture(
-    _ body: (Issue42DownloadSeparationFixture) async throws -> Void,
+func withBrowserDownloadPersistenceFixture(
+    _ body: (BrowserDownloadPersistenceFixture) async throws -> Void,
 ) async throws {
-    let fixture = try Issue42DownloadSeparationFixture()
+    let fixture = try BrowserDownloadPersistenceFixture()
     do {
         try await fixture.prepare()
         try await body(fixture)
@@ -64,7 +64,7 @@ func withIssue42DownloadSeparationFixture(
 /// downloads still flow through the production adapter, and the Root download host authorizes
 /// the fixture owner through the ordinary scene-registration path.
 @MainActor
-final class Issue42DownloadSeparationFixture {
+final class BrowserDownloadPersistenceFixture {
     let rootDirectory: URL
     let defaults: UserDefaults
     private let defaultsSuite: String
@@ -74,14 +74,14 @@ final class Issue42DownloadSeparationFixture {
     let sessionGate: BrowserPersistenceRevisionGate
     let settingsWrites = LockIsolated<[String]>([])
     let sessionWrites = LockIsolated<[String]>([])
-    let importRecorder = Issue42DownloadImportRecorder()
+    let importRecorder = BrowserDownloadImportRecorder()
     let initialSettings: BrowserSettings
     let mediaLibraryClient: MediaLibraryClient
     let browserSettingsClient: BrowserSettingsClient
     let browserSessionClient: BrowserOpenTabsSessionClient
     let webKitClient: BrowserWebKitClient
     let downloadClient: BrowserDownloadClient
-    let pdfServer: Issue42LoopbackServer
+    let pdfServer: BrowserDownloadLoopbackServer
     let adapter: BrowserWebKitAdapter
     let owner: BrowserDownloadOwner
     let scratch = BrowserDownloadScratchStore(verifyProtection: { url in
@@ -103,10 +103,10 @@ final class Issue42DownloadSeparationFixture {
     init() throws {
         rootDirectory = FileManager.default
             .temporaryDirectory
-            .appendingPathComponent("Issue42DownloadSeparation-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("BrowserDownloadPersistence-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
 
-        defaultsSuite = "Issue42DownloadSeparation.\(UUID().uuidString)"
+        defaultsSuite = "BrowserDownloadPersistence.\(UUID().uuidString)"
         guard let suite = UserDefaults(suiteName: defaultsSuite) else {
             throw FixtureError.defaultsUnavailable
         }
@@ -129,30 +129,30 @@ final class Issue42DownloadSeparationFixture {
             revisionGate: sessionGate,
         )
 
-        pdfServer = try Issue42LoopbackServer()
+        pdfServer = try BrowserDownloadLoopbackServer()
 
         let fixtureOwner = BrowserDownloadOwner(store: scratch)
         owner = fixtureOwner
         adapter = BrowserWebKitAdapter(requiresProfileConfiguration: true, downloadOwner: fixtureOwner)
 
-        mediaLibraryClient = makeIssue42RecordingMediaLibraryClient(recorder: importRecorder)
+        mediaLibraryClient = makeDownloadRecordingMediaLibraryClient(recorder: importRecorder)
 
-        browserSettingsClient = makeIssue42BrowserSettingsClient(
+        browserSettingsClient = makeBrowserDownloadSettingsClient(
             storage: settingsStorage,
             gate: settingsGate,
             writes: settingsWrites,
         )
-        browserSessionClient = makeIssue42BrowserSessionClient(
+        browserSessionClient = makeBrowserDownloadSessionClient(
             storage: sessionStorage,
             gate: sessionGate,
             writes: sessionWrites,
         )
 
-        let browserClients = makeIssue42BrowserWebKitClients(adapter: adapter, owner: owner)
+        let browserClients = makeBrowserDownloadWebKitClients(adapter: adapter, owner: owner)
         webKitClient = browserClients.webKit
         downloadClient = browserClients.downloads
 
-        initialSettings = makeIssue42InitialSettings()
+        initialSettings = makeBrowserDownloadInitialSettings()
     }
 
     func remove() async {
@@ -401,7 +401,7 @@ enum DefaultsDomainValue: Equatable {
 /// library, so a caller expecting a successful import cannot silently pass. Recording only
 /// the call name keeps the transcript free of source paths and media content.
 @MainActor
-func makeIssue42RecordingMediaLibraryClient(recorder: Issue42DownloadImportRecorder) -> MediaLibraryClient {
+func makeDownloadRecordingMediaLibraryClient(recorder: BrowserDownloadImportRecorder) -> MediaLibraryClient {
     MediaLibraryClient(
         loadAssets: {
             recorder.record("loadAssets")

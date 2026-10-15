@@ -28,11 +28,11 @@ extension AppHostedUITests {
             try await withSinglePageHTTPDownloadFixture { fixture, firstURL in
                 let selectedTab = fixture.store.selectedTab
                 let tab = try #require(selectedTab)
-                let firstRouteRequests = fixture.server.requests.filter { issue42RouteName($0.path) == "first" }
+                let firstRouteRequests = fixture.server.requests.filter { fixtureRouteName($0.path) == "first" }
                 let matchingGET = firstRouteRequests.contains { $0.method == "GET" }
                 let windowSize = fixture.window.bounds.size
                 let webViewSize = fixture.webView.bounds.size
-                let titleMatches = tab.metadata.title == "Issue42 first"
+                let titleMatches = tab.metadata.title == "Browser download first"
                 let committed = fixture.adapter.hasCommittedDocument(for: fixture.tabID)
                 let attached = fixture.webView.window === fixture.window
                 let reducerReady = tab.metadata.committedURL == firstURL && !tab.metadata.isLoading
@@ -157,7 +157,7 @@ extension AppHostedUITests {
     }
 }
 
-private func issue42RouteName(_ requestPath: String) -> String {
+private func fixtureRouteName(_ requestPath: String) -> String {
     let lastComponent = requestPath.split(separator: "/").last ?? ""
     return String(lastComponent.split(separator: "?", maxSplits: 1).first ?? "")
 }
@@ -284,7 +284,7 @@ private final class HTTPDownloadObservations {
 /// still use the real filesystem. Physical runs keep the default native verifier.
 @MainActor
 private final class HTTPDownloadFixture {
-    let server: Issue42LoopbackServer
+    let server: BrowserDownloadLoopbackServer
     let scratchRoot: URL
     let owner: BrowserDownloadOwner
     let adapter: BrowserWebKitAdapter
@@ -298,9 +298,9 @@ private final class HTTPDownloadFixture {
     private var requestedPage: URL?
 
     init(profile: BrowserBrowsingProfile, nativeContentSize: CGSize? = nil) throws {
-        server = try Issue42LoopbackServer()
+        server = try BrowserDownloadLoopbackServer()
         scratchRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "Issue42HTTP-\(UUID().uuidString)",
+            "BrowserDownloadHTTP-\(UUID().uuidString)",
             isDirectory: true,
         )
         let scratch: BrowserDownloadScratchStore
@@ -381,7 +381,7 @@ private final class HTTPDownloadFixture {
         try await waitForDispatchedRequest("first", baseline: requestBaseline)
         try await waitForSinglePageControl("native page committed: first") {
             store.selectedTab?.metadata.committedURL == firstURL
-                && store.selectedTab?.metadata.title == "Issue42 first"
+                && store.selectedTab?.metadata.title == "Browser download first"
                 && store.selectedTab?.metadata.isLoading == false && !webView.isLoading
                 && webView.window === window && adapter.hasCommittedDocument(for: tabID)
         }
@@ -431,7 +431,7 @@ private final class HTTPDownloadFixture {
         try await waitForSinglePageControl("native navigation dispatched: \(route)", timeout: timeout) {
             server.requests.count > baseline
                 && server.requests.suffix(from: baseline).contains {
-                    issue42RouteName($0.path) == route && $0.method == "GET"
+                    fixtureRouteName($0.path) == route && $0.method == "GET"
                 }
         }
     }
@@ -456,7 +456,7 @@ private final class HTTPDownloadFixture {
         store.send(.navigate(url))
         try await waitForDispatchedRequest(route, baseline: requestBaseline)
         try await wait("native page committed: \(route)") {
-            store.selectedTab?.metadata.committedURL == url && store.selectedTab?.metadata.title == "Issue42 \(route)"
+            store.selectedTab?.metadata.committedURL == url && store.selectedTab?.metadata.title == "Browser download \(route)"
                 && store.selectedTab?.metadata.isLoading == false && !webView.isLoading
                 && adapter.hasCommittedDocument(for: tabID)
         }

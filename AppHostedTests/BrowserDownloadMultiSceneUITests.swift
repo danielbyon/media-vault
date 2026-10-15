@@ -1,5 +1,5 @@
 //
-//  Issue42TwoSceneUITests.swift
+//  BrowserDownloadMultiSceneUITests.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -14,7 +14,7 @@ import XCUIAutomation
 /// Confirms that the qualification host creates a new UIKit window-scene session.
 /// Separate cases require real scene transitions, completed-source cleanup and system geometry changes.
 @MainActor
-final class Issue42TwoSceneUITests: XCTestCase {
+final class BrowserDownloadMultiSceneUITests: XCTestCase {
     private typealias Observation = [String: String]
 
     private enum QualificationError: Error {
@@ -135,9 +135,9 @@ final class Issue42TwoSceneUITests: XCTestCase {
         }
         attach(postRequest, named: "actual A-background B-active revocation and source absence")
         try wait(app, milestone: "active B fixture navigation control") {
-            self.hittableButton("issue42OpenFixturePage", in: app) != nil
+            self.hittableButton("downloadQualificationOpenFixturePage", in: app) != nil
         }
-        try XCTUnwrap(hittableButton("issue42OpenFixturePage", in: app)).tap()
+        try XCTUnwrap(hittableButton("downloadQualificationOpenFixturePage", in: app)).tap()
         try assertFreshNavigation(in: app, runID: runID)
         try assertReactivation(
             in: app,
@@ -167,8 +167,8 @@ final class Issue42TwoSceneUITests: XCTestCase {
         )
         let active = try XCTUnwrap(before.connectedWindowScenes.first { $0.activation == "foregroundActive" })
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let cardID = "card:com.danielbyon.mediavault.issue42qualificationhost:sceneID:"
-            + "com.danielbyon.mediavault.issue42qualificationhost-" + active.sessionID
+        let cardID = "card:com.danielbyon.mediavault.browserdownloadqualificationhost:sceneID:"
+            + "com.danielbyon.mediavault.browserdownloadqualificationhost-" + active.sessionID
         // The exact scene-card identifier exceeds XCUI's shorthand string-query limit.
         let card = springboard.otherElements.matching(NSPredicate(format: "identifier == %@", cardID)).element
         let grabber = card.otherElements["resize-grabber"]
@@ -190,7 +190,7 @@ final class Issue42TwoSceneUITests: XCTestCase {
         }
 
         attach(before, named: "actual scene geometry before system resize")
-        try XCTUnwrap(hittableButton("issue42MarkResizeGesture", in: app)).tap()
+        try XCTUnwrap(hittableButton("downloadQualificationMarkResizeGesture", in: app)).tap()
         let marker = try XCTUnwrap(try observations(app)
             .last { $0["event"] == "resizeGestureWillBegin" && $0["runID"] == runID })
         guard marker["sceneSession"] == active.sessionID else {
@@ -256,7 +256,7 @@ final class Issue42TwoSceneUITests: XCTestCase {
         runID: String,
         oldOperation: String?,
     ) throws {
-        try XCTUnwrap(hittableButton("issue42ReactivateBackgroundScene", in: app)).tap()
+        try XCTUnwrap(hittableButton("downloadQualificationReactivateBackgroundScene", in: app)).tap()
         let requested = try XCTUnwrap(try observations(app).last {
             $0["runID"] == runID && $0["event"] == "sceneReactivationRequested"
         })
@@ -291,7 +291,7 @@ final class Issue42TwoSceneUITests: XCTestCase {
         try wait(app, milestone: "loopback readiness before scene request") {
             app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
         }
-        try XCTUnwrap(hittableButton("issue42DownloadAttachment", in: app)).tap()
+        try XCTUnwrap(hittableButton("downloadQualificationDownloadAttachment", in: app)).tap()
         var proof: Observation?
         try wait(app, milestone: "originating WebKit completed PDF before scene request") {
             proof = (try? self.observations(app))?.last { $0["event"] == "completedFileProof" }
@@ -318,9 +318,9 @@ final class Issue42TwoSceneUITests: XCTestCase {
 
     private func requestSecondScene(in app: XCUIApplication) throws -> Observation {
         try wait(app, milestone: "second-scene request control") {
-            self.hittableButton("issue42RequestSecondScene", in: app) != nil
+            self.hittableButton("downloadQualificationRequestSecondScene", in: app) != nil
         }
-        try XCTUnwrap(hittableButton("issue42RequestSecondScene", in: app)).tap()
+        try XCTUnwrap(hittableButton("downloadQualificationRequestSecondScene", in: app)).tap()
 
         let events = try observations(app)
         XCTAssertTrue(events.contains { $0["event"] == "sceneRequested" })
@@ -351,12 +351,12 @@ final class Issue42TwoSceneUITests: XCTestCase {
         var attempts: [Observation] = []
         do {
             try wait(app, milestone: milestone) {
-                guard let scope = self.hittableScope("issue42RefreshSceneCensus", in: app) else {
+                guard let scope = self.hittableScope("downloadQualificationRefreshSceneCensus", in: app) else {
                     return false
                 }
 
                 scope.button.tap()
-                let raw = scope.window.staticTexts["issue42QualificationSceneCensus"].value as? String
+                let raw = scope.window.staticTexts["downloadQualificationSceneCensus"].value as? String
                 attempts.append([
                     "windowFrame": String(describing: scope.window.frame),
                     "buttonFrame": String(describing: scope.button.frame),
@@ -449,20 +449,20 @@ final class Issue42TwoSceneUITests: XCTestCase {
     }
 
     private func launchFixture() throws -> XCUIApplication {
-        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.issue42qualificationhost")
+        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
         app.launchArguments = [
-            "--issue42-production-download-qualification",
-            "--issue42-simulated-protection-readback",
+            "--browser-download-production-qualification",
+            "--browser-download-simulated-protection-readback",
         ]
         app.launch()
-        XCTAssertTrue(app.staticTexts["issue42ProtectionQualificationMode"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["downloadQualificationProtectionQualificationMode"].firstMatch.waitForExistence(timeout: 10))
         try wait(app, milestone: "initial scene browser bridge registration") {
-            guard let scope = self.hittableScope("issue42RefreshSceneCensus", in: app) else {
+            guard let scope = self.hittableScope("downloadQualificationRefreshSceneCensus", in: app) else {
                 return false
             }
 
             scope.button.tap()
-            guard let value = scope.window.staticTexts["issue42QualificationSceneCensus"].value as? String,
+            guard let value = scope.window.staticTexts["downloadQualificationSceneCensus"].value as? String,
                   let census = try? JSONDecoder().decode(SceneCensus.self, from: Data(value.utf8))
             else {
                 return false
@@ -474,13 +474,13 @@ final class Issue42TwoSceneUITests: XCTestCase {
                     && $0["sceneSession"].map(connectedSessions.contains) == true
             }
         }
-        XCTAssertTrue(app.staticTexts["issue42QualificationSceneCensus"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["downloadQualificationSceneCensus"].firstMatch.waitForExistence(timeout: 10))
         return app
     }
 
     private func sceneCensus(_ app: XCUIApplication) -> SceneCensus? {
-        guard let scope = hittableScope("issue42RefreshSceneCensus", in: app),
-              let value = scope.window.staticTexts["issue42QualificationSceneCensus"].value as? String
+        guard let scope = hittableScope("downloadQualificationRefreshSceneCensus", in: app),
+              let value = scope.window.staticTexts["downloadQualificationSceneCensus"].value as? String
         else {
             return nil
         }
@@ -490,11 +490,11 @@ final class Issue42TwoSceneUITests: XCTestCase {
 
     private func observations(_ app: XCUIApplication) throws -> [Observation] {
         try wait(app, milestone: "qualification observation refresh control") {
-            self.hittableScope("issue42RefreshObservations", in: app) != nil
+            self.hittableScope("downloadQualificationRefreshObservations", in: app) != nil
         }
-        let scope = try XCTUnwrap(hittableScope("issue42RefreshObservations", in: app))
+        let scope = try XCTUnwrap(hittableScope("downloadQualificationRefreshObservations", in: app))
         scope.button.tap()
-        guard let value = scope.window.staticTexts["issue42QualificationObservations"].value as? String else {
+        guard let value = scope.window.staticTexts["downloadQualificationObservations"].value as? String else {
             throw QualificationError.missingObservation
         }
 
@@ -519,9 +519,9 @@ final class Issue42TwoSceneUITests: XCTestCase {
 
     private func attachControlDiagnostics(_ app: XCUIApplication) {
         let identifiers = [
-            "issue42RequestSecondScene",
-            "issue42RefreshSceneCensus",
-            "issue42RefreshObservations",
+            "downloadQualificationRequestSecondScene",
+            "downloadQualificationRefreshSceneCensus",
+            "downloadQualificationRefreshObservations",
         ]
         let controls = identifiers.flatMap { identifier in
             app.buttons.matching(identifier: identifier).allElementsBoundByIndex.map {

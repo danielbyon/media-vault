@@ -1,12 +1,12 @@
 //
-//  Issue42BrowserNoticeQualification.swift
+//  BrowserDownloadNoticeQualification.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 import SwiftUI
-#if DEBUG && ISSUE42_STANDALONE_QUALIFICATION
+#if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
 import ComposableArchitecture
 @testable import BrowserFeature
 #endif
@@ -15,22 +15,22 @@ import ComposableArchitecture
 /// package-free unit-test host remains inert. This surface owns no transfers or files;
 /// explicit revisions replace the notice through the same projection consumed by BrowserView.
 @MainActor
-enum Issue42BrowserNoticeQualification {
-    static let argument = "--issue42-browser-notice-qualification"
+enum BrowserDownloadNoticeQualification {
+    static let argument = "--browser-download-notice-qualification"
 
     @ViewBuilder
     static var root: some View {
-        #if DEBUG && ISSUE42_STANDALONE_QUALIFICATION
-        Issue42BrowserNoticeRoot()
+        #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
+        BrowserDownloadNoticeQualificationRoot()
         #else
         Color.clear
         #endif
     }
 }
 
-#if DEBUG && ISSUE42_STANDALONE_QUALIFICATION
+#if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
 @MainActor
-private struct Issue42BrowserNoticeRoot: View {
+private struct BrowserDownloadNoticeQualificationRoot: View {
     private let store: StoreOf<BrowserFeature>
 
     init() {
@@ -57,7 +57,7 @@ private struct Issue42BrowserNoticeRoot: View {
                         snapshot.notice = .retainedRecordLimitReached
                         store.send(.downloadsChanged(snapshot))
                     }
-                    .accessibilityIdentifier("issue42ShowRetainedLimitNotice")
+                    .accessibilityIdentifier("downloadQualificationShowRetainedLimitNotice")
 
                     Button("Replace download notice") {
                         var snapshot = BrowserDownloadSnapshot()
@@ -65,7 +65,7 @@ private struct Issue42BrowserNoticeRoot: View {
                         snapshot.notice = .transferFailed
                         store.send(.downloadsChanged(snapshot))
                     }
-                    .accessibilityIdentifier("issue42ReplaceDownloadNotice")
+                    .accessibilityIdentifier("downloadQualificationReplaceDownloadNotice")
                 }
                 .padding()
             }

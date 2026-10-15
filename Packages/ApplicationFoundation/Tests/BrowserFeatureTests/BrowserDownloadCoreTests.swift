@@ -955,7 +955,7 @@ private final class DownloadCoreFixture {
         faults.authorized = authorized
         control = faults
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "issue42-core-" + UUID().uuidString,
+            "browser-download-core-" + UUID().uuidString,
             isDirectory: true,
         )
         store = BrowserDownloadScratchStore(

@@ -1,5 +1,5 @@
 //
-//  Issue42SeparationTestSupport.swift
+//  DownloadSeparationTestSupport.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -18,21 +18,21 @@ import WebKit
 @testable import AppFeature
 @testable import BrowserFeature
 
-func makeIssue42InitialSettings() -> BrowserSettings {
+func makeBrowserDownloadInitialSettings() -> BrowserSettings {
     var settings = BrowserSettings()
     settings.browsingProfile = .ephemeral
     settings.preserveOpenTabs = true
     return settings
 }
 
-struct Issue42SeparationTestSupport {
+struct DownloadSeparationTestSupport {
     let webKit: BrowserWebKitClient
     let downloads: BrowserDownloadClient
 }
 
 /// Wraps the real isolated settings storage with a revision-aware observation client.
 @MainActor
-func makeIssue42BrowserSettingsClient(
+func makeBrowserDownloadSettingsClient(
     storage: BrowserSettingsStorage,
     gate: BrowserPersistenceRevisionGate,
     writes: LockIsolated<[String]>,
@@ -59,7 +59,7 @@ func makeIssue42BrowserSettingsClient(
 
 /// Wraps the real isolated session storage so tab writes stay observable per revision.
 @MainActor
-func makeIssue42BrowserSessionClient(
+func makeBrowserDownloadSessionClient(
     storage: BrowserOpenTabsSessionStorage,
     gate: BrowserPersistenceRevisionGate,
     writes: LockIsolated<[String]>,
@@ -83,11 +83,11 @@ func makeIssue42BrowserSessionClient(
 }
 
 @MainActor
-func makeIssue42BrowserWebKitClients(
+func makeBrowserDownloadWebKitClients(
     adapter: BrowserWebKitAdapter,
     owner: BrowserDownloadOwner,
-) -> Issue42SeparationTestSupport {
-    Issue42SeparationTestSupport(
+) -> DownloadSeparationTestSupport {
+    DownloadSeparationTestSupport(
         webKit: BrowserWebKitClient(
             execute: { await adapter.execute($0) },
             events: { await adapter.makeEventStream() },
@@ -99,7 +99,7 @@ func makeIssue42BrowserWebKitClients(
     )
 }
 
-extension Issue42DownloadSeparationFixture {
+extension BrowserDownloadPersistenceFixture {
     /// Waits for an authenticated Root to restore, then commits a real WebKit page.
     func prepare() async throws {
         try await pdfServer.start()
@@ -153,7 +153,7 @@ extension Issue42DownloadSeparationFixture {
                 }
 
                 return metadata.committedURL == url
-                    && metadata.title == "Issue42 committed"
+                    && metadata.title == "Browser download committed"
                     && !metadata.isLoading
                     && webView.url == url
                     && !webView.isLoading
@@ -210,7 +210,7 @@ extension Issue42DownloadSeparationFixture {
                 "windowPresent": String(window != nil),
                 "nativeViewPresent": String(view != nil),
                 "reducerURLMatches": String(metadata?.committedURL == expectedURL),
-                "titleMatches": String(metadata?.title == "Issue42 committed"),
+                "titleMatches": String(metadata?.title == "Browser download committed"),
                 "reducerNotLoading": String(metadata?.isLoading == false),
                 "nativeURLMatches": String(view?.url == expectedURL),
                 "nativeNotLoading": String(view?.isLoading == false),
@@ -355,7 +355,7 @@ extension Issue42DownloadSeparationFixture {
         }
 
         #expect(metadata.committedURL == committedURL)
-        #expect(metadata.title == "Issue42 committed")
+        #expect(metadata.title == "Browser download committed")
         #expect(!metadata.isLoading)
         #expect(adapter.hasCommittedDocument(for: tabID))
         #expect(store.vault.shell.browser.previewState.operation(for: tabID) == nil)

@@ -1,5 +1,5 @@
 //
-//  Issue42RootAdapterTests.swift
+//  BrowserDownloadRootAdapterTests.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@ extension AppHostedUITests {
     /// The command adapter and the Root-mounted browser must own the same native WebKit surface.
     @MainActor
     @Suite(.serialized)
-    struct Issue42RootAdapterTests {
+    struct BrowserDownloadRootAdapterTests {
         @Test("Removing a qualification Root leaves another adapter's mounted view attached")
         func removingRootKeepsOtherAdapterAttached() async throws {
             let survivor = try RootAdapterFixture()
@@ -90,7 +90,7 @@ extension AppHostedUITests {
 /// Owns a real Root store and its isolated command/event adapter. It never manually attaches WKView.
 @MainActor
 private final class RootAdapterFixture {
-    let server: Issue42LoopbackServer
+    let server: BrowserDownloadLoopbackServer
     let adapter: BrowserWebKitAdapter
     let hostingAdapter: BrowserWebKitAdapter
     let store: StoreOf<RootFeature>
@@ -104,9 +104,9 @@ private final class RootAdapterFixture {
     var registeredSurfaces: [[String: String]] = []
 
     init(useSeparateHostingAdapter: Bool = false) throws {
-        server = try Issue42LoopbackServer()
+        server = try BrowserDownloadLoopbackServer()
         scratchRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "issue42-root-adapter-\(UUID().uuidString)",
+            "browser-download-root-adapter-\(UUID().uuidString)",
             isDirectory: true,
         )
         let downloadOwner = BrowserDownloadOwner(store: BrowserDownloadScratchStore(root: scratchRoot))
@@ -123,7 +123,7 @@ private final class RootAdapterFixture {
         let coordinator = BrowserDownloadNativeCoordinator(owner: downloadOwner)
         var vault = VaultFeature.State(phase: .authenticated, configuredKind: .pin)
         vault.shell.selectedTab = .browser
-        let defaults = try #require(UserDefaults(suiteName: "Issue42RootAdapter-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "BrowserDownloadRootAdapter-\(UUID().uuidString)"))
         store = withDependencies {
             $0.uuid = .incrementing
             $0.defaultAppStorage = defaults
@@ -232,7 +232,7 @@ private final class RootAdapterFixture {
             "pendingOperation": String(describing: operation),
             "pendingWebAction": String(browser.pendingWebAction != nil),
             "reducerURLMatches": String(requestedURL != nil && tab?.metadata.committedURL == requestedURL),
-            "reducerTitleMatches": String(tab?.metadata.title == "Issue42 first"),
+            "reducerTitleMatches": String(tab?.metadata.title == "Browser download first"),
             "reducerLoading": String(describing: tab?.metadata.isLoading),
             "nativeCommitted": String(tab.map { adapter.hasCommittedDocument(for: $0.id) } ?? false),
             "nativeURLMatches": String(requestedURL != nil && view?.url == requestedURL),
@@ -380,6 +380,6 @@ private final class RootAdapterObservations {
     ) -> String {
         "\(kind) tab=\(tabID.rawValue.uuidString) correlation=\(correlation) "
             + "expectedURL=\(metadata.committedURL == expectedURL) "
-            + "expectedTitle=\(metadata.title == "Issue42 first") loading=\(metadata.isLoading)"
+            + "expectedTitle=\(metadata.title == "Browser download first") loading=\(metadata.isLoading)"
     }
 }

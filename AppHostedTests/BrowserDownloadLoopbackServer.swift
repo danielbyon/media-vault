@@ -1,5 +1,5 @@
 //
-//  Issue42LoopbackServer.swift
+//  BrowserDownloadLoopbackServer.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -18,7 +18,7 @@ import UniformTypeIdentifiers
 /// ephemeral port. Every listener/connection callback is delivered on DispatchQueue.main; checked
 /// MainActor bridges keep request buffers, route state and teardown in that same execution domain.
 @MainActor
-final class Issue42LoopbackServer {
+final class BrowserDownloadLoopbackServer {
     struct Request {
         let method: String
         let path: String
@@ -63,7 +63,7 @@ final class Issue42LoopbackServer {
     private var connections: [UUID: Connection] = [:]
 
     var cookieName: String {
-        "issue42_" + namespace.replacing("-", with: "")
+        "downloadfixture_" + namespace.replacing("-", with: "")
     }
 
     var cookieValue: String {
@@ -221,7 +221,7 @@ final class Issue42LoopbackServer {
     /// Builds the shared fixture PDF without writing a file to disk.
     private static func makePDFPayload() -> Data {
         let padding = Data(repeating: 0x41, count: 16 * 1_024 * 1_024)
-        var stream = Data("BT /F1 14 Tf 20 100 Td (Issue 42 transfer probe) Tj\n%".utf8)
+        var stream = Data("BT /F1 14 Tf 20 100 Td (Browser download transfer probe) Tj\n%".utf8)
         stream.append(padding)
         stream.append(Data("\nET\n".utf8))
 
@@ -358,8 +358,8 @@ final class Issue42LoopbackServer {
 
     private func page(_ route: String) -> Data {
         Data("""
-        <!doctype html><html><head><title>Issue42 \(route)</title></head><body>
-        <h1 id="ready">Issue42 \(route)</h1>
+        <!doctype html><html><head><title>Browser download \(route)</title></head><body>
+        <h1 id="ready">Browser download \(route)</h1>
         <a id="attribute" download="fixture.pdf" href="\(cookiePath)attribute">Download</a>
         <form id="post" method="POST" action="\(cookiePath)post">
         <input name="fixture" value="\(namespace)"></form>
@@ -382,7 +382,7 @@ final class Issue42LoopbackServer {
     final class Connection {
         let id = UUID()
         private let native: NWConnection
-        private weak var server: Issue42LoopbackServer?
+        private weak var server: BrowserDownloadLoopbackServer?
         private var buffer = Data()
         private var deadline: Task<Void, Never>?
         private var responded = false
@@ -411,7 +411,7 @@ final class Issue42LoopbackServer {
             ])
         }
 
-        init(native: NWConnection, server: Issue42LoopbackServer) {
+        init(native: NWConnection, server: BrowserDownloadLoopbackServer) {
             self.native = native
             self.server = server
         }

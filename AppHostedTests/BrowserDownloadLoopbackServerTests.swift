@@ -1,5 +1,5 @@
 //
-//  Issue42LoopbackServerTests.swift
+//  BrowserDownloadLoopbackServerTests.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -12,10 +12,10 @@ import Testing
 extension AppHostedUITests {
     @Suite("Loopback fixture teardown")
     @MainActor
-    struct Issue42LoopbackServerTests {
+    struct BrowserDownloadLoopbackServerTests {
         @Test("Stopped server rejects queued acceptance and receive without recreating work")
         func stopRejectsLateCallbacks() throws {
-            let server = try Issue42LoopbackServer()
+            let server = try BrowserDownloadLoopbackServer()
             // Hold the same connection delivery used by the listener. No WebKit delegate or
             // request is reconstructed: only the server's queued callback boundary is replayed.
             let native = NWConnection(host: "127.0.0.1", port: .https, using: .tcp)

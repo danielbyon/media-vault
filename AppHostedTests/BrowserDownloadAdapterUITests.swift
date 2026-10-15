@@ -1,5 +1,5 @@
 //
-//  Issue42BrowserAdapterUITests.swift
+//  BrowserDownloadAdapterUITests.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -12,19 +12,19 @@ import XCUIAutomation
 
 /// Exercises the real Root-to-WebKit bridge rather than a separately mounted test browser.
 @MainActor
-final class Issue42BrowserAdapterUITests: XCTestCase {
+final class BrowserDownloadAdapterUITests: XCTestCase {
     private enum Failure: Error { case deadline, observations }
 
     func testMountedBrowserUsesCommandAdapterAndReturnsFromOverview() throws {
-        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.issue42qualificationhost")
+        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
         app.launchArguments = [
-            "--issue42-production-download-qualification",
-            "--issue42-simulated-protection-readback",
+            "--browser-download-production-qualification",
+            "--browser-download-simulated-protection-readback",
         ]
         app.launch()
         defer { app.terminate() }
-        try wait(app, "fixture controls") { app.buttons["issue42OpenFixturePage"].isHittable }
-        app.buttons["issue42OpenFixturePage"].tap()
+        try wait(app, "fixture controls") { app.buttons["downloadQualificationOpenFixturePage"].isHittable }
+        app.buttons["downloadQualificationOpenFixturePage"].tap()
         var registeredBridge: [String: String]?
         try wait(app, "mounted WebKit command bridge registration") {
             registeredBridge = (try? self.observations(app))?.last { $0["event"] == "mountedWebKitBridge" }
@@ -40,7 +40,7 @@ final class Issue42BrowserAdapterUITests: XCTestCase {
             return committed?["documentMatches"] == "true" && committed?["webViewAttached"] == "true"
         }
         let webViewIdentity = try XCTUnwrap(committed?["webViewIdentity"])
-        let page = app.webViews.staticTexts["Issue42 first"]
+        let page = app.webViews.staticTexts["Browser download first"]
         try wait(app, "visible fixture HTML") { page.exists && !page.frame.isEmpty }
         app.buttons["Show Tabs, 1 tabs"].tap()
         let overview = app.scrollViews["browser.tab-overview.scroll-view"]
@@ -48,7 +48,7 @@ final class Issue42BrowserAdapterUITests: XCTestCase {
         let card = overview.buttons
             .matching(NSPredicate(
                 format: "label CONTAINS %@ AND NOT label BEGINSWITH %@",
-                "Issue42 first",
+                "Browser download first",
                 "Close ",
             ))
             .firstMatch
@@ -65,13 +65,13 @@ final class Issue42BrowserAdapterUITests: XCTestCase {
     }
 
     private func observations(_ app: XCUIApplication) throws -> [[String: String]] {
-        let refresh = app.buttons["issue42RefreshObservations"]
+        let refresh = app.buttons["downloadQualificationRefreshObservations"]
         guard refresh.isHittable else {
             throw Failure.observations
         }
 
         refresh.tap()
-        guard let value = app.staticTexts["issue42QualificationObservations"].value as? String else {
+        guard let value = app.staticTexts["downloadQualificationObservations"].value as? String else {
             throw Failure.observations
         }
 

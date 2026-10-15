@@ -17,7 +17,7 @@ import SwiftUI
 /// `Color.clear` scene.
 ///
 /// The standalone Issue #42 qualification application is a separate target
-/// with its own entry point in `Issue42QualificationApp.swift`, so neither
+/// with its own entry point in `BrowserDownloadQualificationApp.swift`, so neither
 /// application target compiles the other's entry point.
 @main
 struct AppHostedTestHost: App {

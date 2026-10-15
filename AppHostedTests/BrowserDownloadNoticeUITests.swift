@@ -15,8 +15,8 @@ import XCUIAutomation
 @MainActor
 final class BrowserDownloadNoticeUITests: XCTestCase {
     func testNoticeReplacement() {
-        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.issue42qualificationhost")
-        app.launchArguments = ["--issue42-browser-notice-qualification"]
+        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
+        app.launchArguments = ["--browser-download-notice-qualification"]
         app.launch()
         defer { app.terminate() }
 
@@ -32,7 +32,7 @@ final class BrowserDownloadNoticeUITests: XCTestCase {
         assertOnscreen(notice, in: app)
 
         let retainedLimit = "Download limit reached. Eight downloads are kept in the list. Discard a download and try again."
-        let showRetainedLimit = app.buttons["issue42ShowRetainedLimitNotice"]
+        let showRetainedLimit = app.buttons["downloadQualificationShowRetainedLimitNotice"]
         XCTAssertTrue(showRetainedLimit.exists)
         XCTAssertTrue(showRetainedLimit.isHittable)
         showRetainedLimit.tap()
@@ -47,7 +47,7 @@ final class BrowserDownloadNoticeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts[capacity].exists)
         assertOnscreen(notice, in: app)
 
-        let replace = app.buttons["issue42ReplaceDownloadNotice"]
+        let replace = app.buttons["downloadQualificationReplaceDownloadNotice"]
         XCTAssertTrue(replace.exists)
         XCTAssertTrue(replace.isHittable)
         replace.tap()

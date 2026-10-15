@@ -1,5 +1,5 @@
 //
-//  Issue42DownloadSeparationFixture+RootHosting.swift
+//  BrowserDownloadPersistenceFixture+RootHosting.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -18,7 +18,7 @@ import UIKit
 @testable import VaultFeature
 
 @MainActor
-extension Issue42DownloadSeparationFixture {
+extension BrowserDownloadPersistenceFixture {
     func mountRoot() {
         let store = makeRootStore()
         rootStore = store

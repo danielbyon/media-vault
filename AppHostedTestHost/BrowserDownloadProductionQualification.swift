@@ -1,5 +1,5 @@
 //
-//  Issue42ProductionQualification.swift
+//  BrowserDownloadProductionQualification.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -7,7 +7,7 @@
 
 import Foundation
 import SwiftUI
-#if DEBUG && ISSUE42_STANDALONE_QUALIFICATION
+#if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
 import CalculatorFeature
 import ComposableArchitecture
 import CryptoKit
@@ -24,36 +24,36 @@ import WebKit
 
 /// Opt-in production-path fixture, compiled only into the separate Debug qualification app.
 @MainActor
-enum Issue42ProductionQualification {
-    static let argument = "--issue42-production-download-qualification"
-    #if DEBUG && ISSUE42_STANDALONE_QUALIFICATION && targetEnvironment(simulator)
+enum BrowserDownloadProductionQualification {
+    static let argument = "--browser-download-production-qualification"
+    #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION && targetEnvironment(simulator)
     /// Explicit simulator fixture opt-in. Physical builds never compile the injected verifier.
-    static let simulatedProtectionArgument = "--issue42-simulated-protection-readback"
+    static let simulatedProtectionArgument = "--browser-download-simulated-protection-readback"
     #endif
 
     @ViewBuilder
     static var root: some View {
-        #if DEBUG && ISSUE42_STANDALONE_QUALIFICATION
-        Issue42ProductionQualificationRoot(process: .shared)
+        #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
+        BrowserDownloadProductionQualificationRoot(process: .shared)
         #else
         Color.clear
         #endif
     }
 }
 
-#if DEBUG && ISSUE42_STANDALONE_QUALIFICATION
+#if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
 /// Every WindowGroup surface shares this process-owned real Root store and download lifetime.
 /// Only unrelated persistence and credentials are deterministic; WebKit and protection remain live.
 @Observable
 @MainActor
-private final class Issue42ProductionQualificationProcess {
-    static let shared = Issue42ProductionQualificationProcess()
+private final class BrowserDownloadProductionQualificationProcess {
+    static let shared = BrowserDownloadProductionQualificationProcess()
     let store: StoreOf<RootFeature>
     let owner: BrowserDownloadOwner
     let adapter: BrowserWebKitAdapter
     let coordinator: BrowserDownloadNativeCoordinator
-    let evidence: Issue42ProductionEvidence
-    let fault: Issue42RemovalFault
+    let evidence: BrowserDownloadProductionEvidence
+    let fault: BrowserDownloadQualificationRemovalFault
     let simulatedProtectionReadback: Bool
     var status = "Fixture-seeded authentication; qualification controls below."
     var observationsJSON = "[]"
@@ -157,19 +157,19 @@ private final class Issue42ProductionQualificationProcess {
 
     private var pendingFixtureNavigation: (id: String, url: URL)?
     private var navigationInspectionIsPending = false
-    private var server: Issue42LoopbackServer?
+    private var server: BrowserDownloadLoopbackServer?
     private var started = false
     private var observation: Task<Void, Never>?
     private var inspected: Set<BrowserDownloadID> = []
 
     private init() {
-        let recorder = Issue42ProductionEvidence()
+        let recorder = BrowserDownloadProductionEvidence()
         evidence = recorder
-        let removalFault = Issue42RemovalFault()
+        let removalFault = BrowserDownloadQualificationRemovalFault()
         fault = removalFault
         #if targetEnvironment(simulator)
         let simulateReadback = ProcessInfo.processInfo.arguments.contains(
-            Issue42ProductionQualification.simulatedProtectionArgument,
+            BrowserDownloadProductionQualification.simulatedProtectionArgument,
         )
         #else
         let simulateReadback = false
@@ -243,7 +243,7 @@ private final class Issue42ProductionQualificationProcess {
         coordinator = nativeCoordinator
         var vault = VaultFeature.State(phase: .authenticated, configuredKind: .pin)
         vault.shell.selectedTab = .browser
-        let defaults = UserDefaults(suiteName: "Issue42Qualification-\(UUID().uuidString)") ?? UserDefaults()
+        let defaults = UserDefaults(suiteName: "BrowserDownloadQualification-\(UUID().uuidString)") ?? UserDefaults()
         store = withDependencies {
             $0.defaultAppStorage = defaults
             $0.calculatorPersistence.load = { nil }
@@ -320,7 +320,7 @@ private final class Issue42ProductionQualificationProcess {
             }
         }
         do {
-            let loopback = try Issue42LoopbackServer()
+            let loopback = try BrowserDownloadLoopbackServer()
             server = loopback
             try await loopback.start()
             status = "Loopback ready. Open fixture page, then download attachment PDF."
@@ -465,7 +465,7 @@ private final class Issue42ProductionQualificationProcess {
                     ? "UNVERIFIED"
                     : (actualProtection == .complete ? "verified" : "notConfirmed"),
                 "backupExcluded": String(values.isExcludedFromBackup == true),
-                "fixtureBytesMatch": String(bytes == Issue42LoopbackServer.fixturePDF),
+                "fixtureBytesMatch": String(bytes == BrowserDownloadLoopbackServer.fixturePDF),
             ])
         } catch {
             evidence.record("completedFileInspectionFailed", ["operation": id.rawValue.uuidString])
@@ -474,12 +474,12 @@ private final class Issue42ProductionQualificationProcess {
 }
 
 @MainActor
-private struct Issue42ProductionQualificationRoot: View {
-    let process: Issue42ProductionQualificationProcess
+private struct BrowserDownloadProductionQualificationRoot: View {
+    let process: BrowserDownloadProductionQualificationProcess
     @State
     private var browserHostingContext: BrowserQualificationWebKitHostingContext
 
-    init(process: Issue42ProductionQualificationProcess) {
+    init(process: BrowserDownloadProductionQualificationProcess) {
         self.process = process
         _browserHostingContext = State(initialValue: BrowserQualificationWebKitHostingContext(
             adapter: process.adapter,
@@ -503,43 +503,43 @@ private struct Issue42ProductionQualificationRoot: View {
                 Text(process.status).font(.caption)
                 Text(process.protectionLabel)
                     .font(.caption)
-                    .accessibilityIdentifier("issue42ProtectionQualificationMode")
+                    .accessibilityIdentifier("downloadQualificationProtectionQualificationMode")
                 ScrollView(.horizontal) {
                     HStack {
                         Button("Open fixture page") { process.navigate("first") }
-                            .accessibilityIdentifier("issue42OpenFixturePage")
+                            .accessibilityIdentifier("downloadQualificationOpenFixturePage")
                         Button("Download attachment PDF") { process.navigate("attachment") }
-                            .accessibilityIdentifier("issue42DownloadAttachment")
+                            .accessibilityIdentifier("downloadQualificationDownloadAttachment")
                         Button("Remove authentication") { process.loseAuthentication() }
-                            .accessibilityIdentifier("issue42RemoveAuthentication")
+                            .accessibilityIdentifier("downloadQualificationRemoveAuthentication")
                         Button("Arm one removal failure") {
                             process.fault.arm()
                             process.evidence.record("removalFaultArmed", ["remaining": "1"])
                         }
-                        .accessibilityIdentifier("issue42ArmRemovalFailure")
+                        .accessibilityIdentifier("downloadQualificationArmRemovalFailure")
                     }
                 }
-                .accessibilityIdentifier("issue42QualificationControls")
+                .accessibilityIdentifier("downloadQualificationControls")
                 // Scene and observation controls remain reachable in narrow system-managed windows.
                 VStack(alignment: .leading) {
                     Button("Request second scene") { process.requestSecondScene() }
-                        .accessibilityIdentifier("issue42RequestSecondScene")
+                        .accessibilityIdentifier("downloadQualificationRequestSecondScene")
                     Button("Reactivate background qualification scene") { process.reactivateBackgroundScene() }
-                        .accessibilityIdentifier("issue42ReactivateBackgroundScene")
+                        .accessibilityIdentifier("downloadQualificationReactivateBackgroundScene")
                     Button("Mark system resize gesture") { process.markResizeGesture() }
-                        .accessibilityIdentifier("issue42MarkResizeGesture")
+                        .accessibilityIdentifier("downloadQualificationMarkResizeGesture")
                     Button("Refresh scene census") { process.refreshSceneCensus() }
-                        .accessibilityIdentifier("issue42RefreshSceneCensus")
+                        .accessibilityIdentifier("downloadQualificationRefreshSceneCensus")
                     Button("Refresh observations") { process.refreshObservations() }
-                        .accessibilityIdentifier("issue42RefreshObservations")
+                        .accessibilityIdentifier("downloadQualificationRefreshObservations")
                 }
                 Text("Qualification observations")
                     .font(.caption2)
-                    .accessibilityIdentifier("issue42QualificationObservations")
+                    .accessibilityIdentifier("downloadQualificationObservations")
                     .accessibilityValue(process.observationsJSON)
                 Text("Connected window-scene census")
                     .font(.caption2)
-                    .accessibilityIdentifier("issue42QualificationSceneCensus")
+                    .accessibilityIdentifier("downloadQualificationSceneCensus")
                     .accessibilityValue(process.sceneCensusJSON)
             }
             .padding(8)
@@ -553,7 +553,7 @@ private struct Issue42ProductionQualificationRoot: View {
 /// Removal-only injection; preparation and completed-file protection always remain native.
 @Observable
 @MainActor
-private final class Issue42RemovalFault {
+private final class BrowserDownloadQualificationRemovalFault {
     private(set) var remainingFailures = 0
 
     func arm() {
@@ -572,9 +572,9 @@ private final class Issue42RemovalFault {
 }
 
 /// Redacted append-only evidence; no request URLs, credentials, filenames or downloaded content.
-/// Export Documents/issue42-production-events.jsonl from the standalone app's data container.
+/// Export Documents/browser-download-production-events.jsonl from the standalone app's data container.
 @MainActor
-private final class Issue42ProductionEvidence {
+private final class BrowserDownloadProductionEvidence {
     private let origin = ProcessInfo.processInfo.systemUptime
 
     /// Current timestamp on the same monotonic clock used by qualification events.
@@ -606,7 +606,7 @@ private final class Issue42ProductionEvidence {
     }
 
     private let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("issue42-production-events.jsonl")
+        .appendingPathComponent("browser-download-production-events.jsonl")
 
     func record(_ event: String, _ fields: [String: String]) {
         var object = fields

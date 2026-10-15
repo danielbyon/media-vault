@@ -1,5 +1,5 @@
 //
-//  Issue42ProductionQualificationUITests.swift
+//  BrowserDownloadQualificationUITests.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -14,7 +14,7 @@ import XCUIAutomation
 /// simulated; these tests do not qualify native file protection, an AirDrop receiver, task-switcher
 /// pixels, simultaneous application scenes, or system window resizing.
 @MainActor
-final class Issue42ProductionQualificationUITests: XCTestCase {
+final class BrowserDownloadQualificationUITests: XCTestCase {
     private typealias Observation = [String: String]
     private enum FixtureError: Error { case missingObservation, waitFailed }
 
@@ -30,7 +30,7 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
         let app = try launchFixture()
         defer { app.terminate() }
         let first = try download(app)
-        try tapControl("issue42ArmRemovalFailure", in: app)
+        try tapControl("downloadQualificationArmRemovalFailure", in: app)
         try openDownloads(app)
         try tap(app.buttons["Discard"], in: app)
         // The production reducer closes Downloads on retryable cleanup failure. Qualify that
@@ -55,13 +55,13 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
         assertRemoved(first, in: recovered)
         XCTAssertTrue(recovered.contains { $0["event"] == "ownerSnapshot" && $0["cleanupRetry"] == "false" })
         XCTAssertTrue(app.buttons["Browser Menu"].isHittable)
-        try tapControl("issue42OpenFixturePage", in: app)
+        try tapControl("downloadQualificationOpenFixturePage", in: app)
         let second = try download(app)
         XCTAssertNotEqual(first["operation"], second["operation"])
         let beforeAuthenticationLoss = Date()
-        try tapControl("issue42RemoveAuthentication", in: app)
+        try tapControl("downloadQualificationRemoveAuthentication", in: app)
         try wait(app, milestone: "safe unauthenticated Root usable") {
-            app.buttons["issue42RefreshObservations"].isHittable
+            app.buttons["downloadQualificationRefreshObservations"].isHittable
                 && !app.buttons["Browser Menu"].exists
         }
         let lost = try observations(app)
@@ -82,7 +82,7 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
         if action == "Preview" {
             let preview = app.descendants(matching: .any)["QLPreviewControllerView"]
             let document = preview.descendants(matching: .any)["QLPDFViewControllerViewAccessibilityIdentifier"]
-            let probe = document.staticTexts["Issue 42 transfer probe"]
+            let probe = document.staticTexts["Browser download transfer probe"]
             // A presented Quick Look shell can precede PDF rendering. Require the document's
             // actual semantic text and visible geometry within the native container before Home.
             try wait(app, milestone: "rendered native PDF probe text") {
@@ -92,7 +92,7 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
                     return false
                 }
 
-                return probe.label == "Issue 42 transfer probe" && !probe.frame.isEmpty
+                return probe.label == "Browser download transfer probe" && !probe.frame.isEmpty
                     && !document.frame.isEmpty && !preview.frame.isEmpty
                     && probe.frame.intersects(document.frame) && probe.frame.intersects(preview.frame)
                     && probe.frame.intersects(app.frame)
@@ -159,14 +159,14 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
     }
 
     private func launchFixture() throws -> XCUIApplication {
-        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.issue42qualificationhost")
-        app.launchArguments = ["--issue42-production-download-qualification"]
+        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
+        app.launchArguments = ["--browser-download-production-qualification"]
         #if targetEnvironment(simulator)
-        app.launchArguments.append("--issue42-simulated-protection-readback")
+        app.launchArguments.append("--browser-download-simulated-protection-readback")
         #endif
         app.launch()
-        XCTAssertTrue(app.staticTexts["issue42ProtectionQualificationMode"].waitForExistence(timeout: 10))
-        let modeLabel = app.staticTexts["issue42ProtectionQualificationMode"].label
+        XCTAssertTrue(app.staticTexts["downloadQualificationProtectionQualificationMode"].waitForExistence(timeout: 10))
+        let modeLabel = app.staticTexts["downloadQualificationProtectionQualificationMode"].label
         #if targetEnvironment(simulator)
         XCTAssertTrue(modeLabel.contains("UNVERIFIED"))
         #else
@@ -175,15 +175,15 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
         try wait(app, milestone: "fixture server ready") {
             app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
         }
-        try tapControl("issue42OpenFixturePage", in: app)
+        try tapControl("downloadQualificationOpenFixturePage", in: app)
         try wait(app, milestone: "root browser bridge registration") {
-            let refresh = app.buttons["issue42RefreshObservations"]
+            let refresh = app.buttons["downloadQualificationRefreshObservations"]
             guard refresh.exists, refresh.isHittable else {
                 return false
             }
 
             refresh.tap()
-            guard let value = app.staticTexts["issue42QualificationObservations"].value as? String,
+            guard let value = app.staticTexts["downloadQualificationObservations"].value as? String,
                   let events = try? JSONDecoder().decode([Observation].self, from: Data(value.utf8))
             else {
                 return false
@@ -203,7 +203,7 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
             app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
         }
         let earlier = try observations(app).filter { $0["event"] == "completedFileProof" }
-        try tapControl("issue42DownloadAttachment", in: app)
+        try tapControl("downloadQualificationDownloadAttachment", in: app)
         var proof: Observation?
         try wait(app, milestone: "actual WebKit completed-file proof") {
             guard let events = try? self.observations(app) else {
@@ -294,8 +294,8 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
     }
 
     private func observations(_ app: XCUIApplication) throws -> [Observation] {
-        try tapControl("issue42RefreshObservations", in: app)
-        let node = app.staticTexts["issue42QualificationObservations"]
+        try tapControl("downloadQualificationRefreshObservations", in: app)
+        let node = app.staticTexts["downloadQualificationObservations"]
         guard let value = node.value as? String else {
             throw FixtureError.missingObservation
         }
@@ -309,7 +309,7 @@ final class Issue42ProductionQualificationUITests: XCTestCase {
 
     private func tapControl(_ identifier: String, in app: XCUIApplication) throws {
         let button = app.buttons[identifier]
-        let strip = app.scrollViews["issue42QualificationControls"]
+        let strip = app.scrollViews["downloadQualificationControls"]
         // Scroll real controls into reach; this is not a synthesized lifecycle notification.
         if !button.isHittable {
             for _ in 0 ..< 3 where !button.isHittable {

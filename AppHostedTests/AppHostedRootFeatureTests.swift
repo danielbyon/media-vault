@@ -578,7 +578,7 @@ private final class MountedDownloadRoot {
 
     init() throws {
         scratchRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "issue42-root-ui-\(UUID().uuidString)",
+            "download-root-ui-\(UUID().uuidString)",
             isDirectory: true,
         )
         let removalFaults = Faults()
@@ -663,7 +663,7 @@ private final class MountedDownloadRoot {
     func completedPDF() throws -> (id: BrowserDownloadID, url: URL) {
         let id = try #require(owner.admit(RootDownloadWriter(), tabID: .init()))
         let url = try #require(owner.destination(for: id, suggestedName: "root-fixture.pdf"))
-        try Issue42LoopbackServer.fixturePDF.write(to: url)
+        try BrowserDownloadLoopbackServer.fixturePDF.write(to: url)
         owner.finished(id)
         #expect(owner.snapshot.records.first?.isReady == true)
         return (id, url)

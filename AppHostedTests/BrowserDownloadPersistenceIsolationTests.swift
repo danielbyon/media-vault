@@ -1,5 +1,5 @@
 //
-//  Issue42DownloadSeparationTests.swift
+//  BrowserDownloadPersistenceIsolationTests.swift
 //  MediaVault
 //
 //  SPDX-License-Identifier: GPL-3.0-or-later
@@ -15,28 +15,28 @@ import VaultFeature
 // File-protection attributes are only observable on a physical device. The simulator run
 // still checks file identity, size, and backup exclusion through the injected verifier.
 #if targetEnvironment(simulator)
-private let issue42ProtectionReadbackSupported = false
+private let protectionReadbackSupported = false
 #else
-private let issue42ProtectionReadbackSupported = true
+private let protectionReadbackSupported = true
 #endif
 
 extension AppHostedUITests {
     /// Keeps downloads, Browser preferences, tabs, and Library imports in separate persistence domains.
     @Suite(
-        "Issue 42 download persistence separation",
+        "Browser download persistence isolation",
         .serialized,
     )
     @MainActor
-    struct Issue42DownloadSeparationTests {
+    struct BrowserDownloadPersistenceIsolationTests {
         @Test(
             "Completed WebKit files retain protection and backup exclusion",
             .enabled(
-                if: issue42ProtectionReadbackSupported,
+                if: protectionReadbackSupported,
                 "Skip on simulator: file-protection attributes only persist on a physical iPhone.",
             ),
         )
         func completedFilesRetainProtectionAndBackupExclusion() async throws {
-            try await withIssue42DownloadSeparationFixture { fixture in
+            try await withBrowserDownloadPersistenceFixture { fixture in
                 let id = try await fixture.completeDownload(
                     url: fixture.pdfServer.url("attachment"),
                     bytes: fixture.pdfServer.payload,
@@ -52,7 +52,7 @@ extension AppHostedUITests {
 
         @Test("PDF and image completion, discard, and cancellation leave app persistence unchanged")
         func downloadTransitionsLeaveAppPersistenceUnchanged() async throws {
-            try await withIssue42DownloadSeparationFixture { fixture in
+            try await withBrowserDownloadPersistenceFixture { fixture in
                 let baseline = try await fixture.checkpoint()
                 #expect(fixture.rootStore?.vault.shell.library.assets.isEmpty == true)
                 #expect(fixture.owner.snapshot.records.isEmpty)
@@ -96,7 +96,7 @@ extension AppHostedUITests {
         /// work happens on the fixture's behalf.
         @Test("Import dependency recorder observes a direct importFile call")
         func importDependencyRecorderObservesDirectOperations() async throws {
-            try await withIssue42DownloadSeparationFixture { fixture in
+            try await withBrowserDownloadPersistenceFixture { fixture in
                 #expect(fixture.importRecorder.importFileCalls.isEmpty)
 
                 await #expect(throws: MediaImportError.persistenceFailed) {
