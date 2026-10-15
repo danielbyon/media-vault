@@ -1,0 +1,67 @@
+App.xcodeproj/project.pbxproj
+  s_5d62df6b616a0e::t_8b8dbdaa9c8a90 10-12,43,45-47,49-51,53-57,61-63,89,91,93-96,98-103,191,267-269,271,279-284,286,295-297,432,438,443,496,587,589-590,609-613,615-616,631-635,927,935,954,1118
+AppHostedTestHost/AppHostedTestHost.swift
+  s_5d62df6b616a0e::t_7dbc7c025cab20 20
+AppHostedTestHost/AppHostedTestHostRootView.swift
+  s_5d62df6b616a0e::t_82ede4a0a8ade2 15
+AppHostedTestHost/BrowserDownloadNoticeQualification.swift
+  s_5d62df6b616a0e::t_e9d08bbdb67504 2,9,18-19,23-24,31,33,60,68
+AppHostedTestHost/BrowserDownloadProductionQualification.swift
+  s_5d62df6b616a0e::t_79f5d367990834 2,10,27-29,31,36-37,44,49-50,55-56,160,166,168,172,246,323,468,477-478,482,506,510,512,514,519,522,526,528,530,532,534,538,542,556,575,577,609
+AppHostedTestHost/BrowserDownloadQualificationApp.swift
+  s_5d62df6b616a0e::t_04ecf1f120062f 2,13,19,22
+AppHostedTestHost/BrowserDownloadQualificationRootView.swift
+  s_5d62df6b616a0e::t_2a86e8b8eaf0b1 2,10,18,25,27-30,41
+AppHostedTests/AppHostedRootFeatureTests.swift
+  s_5d62df6b616a0e::t_b13435580df082 581,666
+AppHostedTests/BrowserDownloadAdapterUITests.swift
+  s_5d62df6b616a0e::t_336d97080af817 2,15,19,21-22,26-27,43,51,68,74
+AppHostedTests/BrowserDownloadHTTPTests.swift
+  s_5d62df6b616a0e::t_d4d1d19e444eb7 31,35,160,287,301,303,384,434,459
+AppHostedTests/BrowserDownloadLoopbackServer.swift
+  s_5d62df6b616a0e::t_9747730e9e824b 2,21,66,224,361-362,385,414
+AppHostedTests/BrowserDownloadLoopbackServerTests.swift
+  s_5d62df6b616a0e::t_4890058e4e675f 2,15,18
+AppHostedTests/BrowserDownloadMultiSceneUITests.swift
+  s_b43feea609488d::t_27b22ad24ea1d5 2,17,138,140,170-171,193,259,294,321,323,354,359,452,454-455,458,460,465,477,482-483,493,495,497,522-524
+AppHostedTests/BrowserDownloadNoticeUITests.swift
+  s_5d62df6b616a0e::t_2f9f72358a8ede 18-19,35,50
+AppHostedTests/BrowserDownloadPersistenceFixture+RootHosting.swift
+  s_5d62df6b616a0e::t_47e1be810d084e 2,21
+AppHostedTests/BrowserDownloadPersistenceFixture.swift
+  s_5d62df6b616a0e::t_ef75960542288f 2,24,45-46,48,67,77,84,106,109,132,138,140,145,151,155,404
+AppHostedTests/BrowserDownloadPersistenceIsolationTests.swift
+  s_5d62df6b616a0e::t_c53f228bede1da 2,18,20,26,30,34,39,55,99
+AppHostedTests/BrowserDownloadQualificationUITests.swift
+  s_5d62df6b616a0e::t_02a67c33c423dc 2,17,33,58,62,64,85,95,162-163,165,168-169,178,180,186,206,297-298,312
+AppHostedTests/BrowserDownloadRootAdapterTests.swift
+  s_5d62df6b616a0e::t_7d6038f7584a8a 2,27,93,107,109,126,235,383
+AppHostedTests/DownloadSeparationTestSupport.swift
+  s_5d62df6b616a0e::t_07446c7836f9be 2,21,28,35,62,86,89-90,102,156,213,358
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserDownloadCoreTests.swift
+  s_5d62df6b616a0e::t_1525dc3ffa957f 958
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d16f26a106d1f8a57834ce33b11e25bdcae1d9a6",
+  "prompts": {},
+  "sessions": {
+    "s_5d62df6b616a0e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a131c2-ae01-7141-874c-cf889bf8eb74",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_b43feea609488d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14166-6366-70b0-a27c-83f41019cf48",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
