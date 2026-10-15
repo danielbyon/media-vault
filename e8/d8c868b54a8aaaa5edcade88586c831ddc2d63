@@ -1,0 +1,31 @@
+AppHostedTests/BrowserDownloadMultiSceneUITests.swift
+  s_b43feea609488d::t_a3da045ea6ad0a 458-460
+AppHostedTests/BrowserDownloadPersistenceFixture.swift
+  s_5d62df6b616a0e::t_8b3781f752424f 101-103,253,315-320,322-333,335,355-374
+AppHostedTests/BrowserDownloadPersistenceIsolationTests.swift
+  s_5d62df6b616a0e::t_07117d76a0936a 152-153,157,161-168,172-173,177-178,186,191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e8d8c868b54a8aaaa5edcade88586c831ddc2d63",
+  "prompts": {},
+  "sessions": {
+    "s_5d62df6b616a0e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a131c2-ae01-7141-874c-cf889bf8eb74",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_b43feea609488d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14166-6366-70b0-a27c-83f41019cf48",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
