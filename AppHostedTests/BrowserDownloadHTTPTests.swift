@@ -373,6 +373,12 @@ private final class HTTPDownloadFixture {
         let firstURL = try server.url("first")
         requestedPage = firstURL
         store.send(.navigate(firstURL))
+        // The first navigation pays the system's NetworkProcess launch. CI measured a ~6.5 s
+        // pre-relaunch stall plus a 12.28 s replacement launch (~18.8 s to ready); the 30 s
+        // bound keeps the ten-second committed-page window below measuring transport progress.
+        try await waitForSinglePageControl("native navigation dispatched: first", timeout: 30) {
+            server.requests.contains { issue42RouteName($0.path) == "first" && $0.method == "GET" }
+        }
         try await waitForSinglePageControl("native page committed: first") {
             store.selectedTab?.metadata.committedURL == firstURL
                 && store.selectedTab?.metadata.title == "Issue42 first"
@@ -382,14 +388,19 @@ private final class HTTPDownloadFixture {
         return firstURL
     }
 
+    /// Bounded wait for observable native progress. The default ten-second window covers the
+    /// committed-page assertion; environment preconditions (the first network-process dispatch)
+    /// pass an explicit timeout. Waiting sleeps so WebKit and loopback main-queue callbacks keep
+    /// running during cross-process startup.
     private func waitForSinglePageControl(
         _ milestone: String,
+        timeout: TimeInterval = 10,
         until predicate: @MainActor () -> Bool,
     ) async throws {
-        let deadline = Date().addingTimeInterval(10)
+        let deadline = Date().addingTimeInterval(timeout)
         while !predicate(), Date() < deadline {
             window.rootViewController?.view.layoutIfNeeded()
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(10))
         }
         try #require(
             predicate(),
