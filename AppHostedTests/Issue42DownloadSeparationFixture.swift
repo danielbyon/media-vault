@@ -7,6 +7,7 @@
 
 import ComposableArchitecture
 import ConcurrencyExtras
+import CoreFoundation
 import Foundation
 import SwiftUI
 import Testing
@@ -95,6 +96,9 @@ final class Issue42DownloadSeparationFixture {
     var tabID = BrowserTabID()
     var committedURL: URL?
     var fixtureTabIDs: Set<BrowserTabID> = []
+
+    /// Name of the isolated UserDefaults domain owned by this fixture.
+    var ownedDefaultsDomainName: String { defaultsSuite }
 
     init() throws {
         rootDirectory = FileManager.default
@@ -209,12 +213,185 @@ final class Issue42DownloadSeparationFixture {
 /// Values captured after startup so setup writes cannot be misattributed to a download.
 struct PersistenceCheckpoint: Equatable {
     let settings: BrowserSettings
-    let defaults: Data
+    let defaultsDomain: DefaultsDomainSnapshot
     let settingsWrites: [String]
     let sessionWrites: [String]
     let sessionData: Data?
     let sessionOutcome: BrowserOpenTabsSessionLoadOutcome
     let importFileCalls: [String]
+}
+
+/// Order-independent semantic snapshot of one UserDefaults domain.
+///
+/// The snapshot stores decoded property-list values so two captures of the same domain can be
+/// compared key by key. Comparing snapshots avoids depending on the byte layout of a serialized
+/// aggregate, which is not a persistence property.
+struct DefaultsDomainSnapshot: Equatable {
+    /// Decoded value for every key currently present in the domain.
+    let entries: [String: DefaultsDomainValue]
+
+    /// Captures the semantic content of a domain dictionary returned by `persistentDomain(forName:)`.
+    init(domain: [String: Any]) {
+        entries = domain.mapValues { DefaultsDomainValue(plistValue: $0) }
+    }
+
+    /// Computes how this snapshot differs from an earlier one.
+    func difference(from baseline: DefaultsDomainSnapshot) -> DefaultsDomainDifference {
+        var added: [String] = []
+        var removed: [String] = []
+        var changed: [String] = []
+        for (key, value) in entries where baseline.entries[key] == nil {
+            added.append(key + ":" + value.typeName)
+        }
+        for (key, value) in baseline.entries {
+            guard let current = entries[key] else {
+                removed.append(key + ":" + value.typeName)
+                continue
+            }
+            if current != value {
+                changed.append(key + ":" + value.typeName + "->" + current.typeName)
+            }
+        }
+        return DefaultsDomainDifference(
+            added: added.sorted(),
+            removed: removed.sorted(),
+            changed: changed.sorted(),
+        )
+    }
+}
+
+/// Difference between two defaults domain snapshots.
+///
+/// Every entry names only a key and its value type, so diagnostics never expose stored values.
+struct DefaultsDomainDifference: Equatable {
+    /// Keys the current snapshot added, formatted as `key:ValueType`.
+    var added: [String]
+    /// Keys the current snapshot dropped, formatted as `key:ValueType`.
+    var removed: [String]
+    /// Keys whose value changed, formatted as `key:OldValueType->NewValueType`.
+    var changed: [String]
+
+    /// True when the two snapshots describe the same keys with semantically equal values.
+    var isEmpty: Bool {
+        added.isEmpty && removed.isEmpty && changed.isEmpty
+    }
+
+    /// Sorted, human-readable summary for assertion diagnostics.
+    var summary: String {
+        var parts: [String] = []
+        if !added.isEmpty {
+            parts.append("added [" + added.joined(separator: ", ") + "]")
+        }
+        if !removed.isEmpty {
+            parts.append("removed [" + removed.joined(separator: ", ") + "]")
+        }
+        if !changed.isEmpty {
+            parts.append("changed [" + changed.joined(separator: ", ") + "]")
+        }
+        return parts.joined(separator: "; ")
+    }
+}
+
+/// Semantic representation of one decoded defaults value.
+///
+/// Equality compares stored content, while `typeName` provides the only rendering that
+/// diagnostics may use.
+enum DefaultsDomainValue: Equatable {
+    case bool(Bool)
+    case int(Int64)
+    case uint(UInt64)
+    case double(Double)
+    case string(String)
+    case data(Data)
+    case date(Date)
+    case array([DefaultsDomainValue])
+    case dictionary([String: DefaultsDomainValue])
+    case other(String)
+
+    /// Decodes a property-list value returned by `UserDefaults`.
+    init(plistValue: Any) {
+        if let number = plistValue as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                self = .bool(number.boolValue)
+            } else {
+                switch String(cString: number.objCType) {
+                case "f", "d":
+                    self = .double(number.doubleValue)
+                case "c", "s", "i", "l", "q":
+                    self = .int(number.int64Value)
+                case "C", "S", "I", "L", "Q":
+                    self = .uint(number.uint64Value)
+                default:
+                    // Unknown numeric encodings compare as doubles so a fractional
+                    // value can never be silently conflated with its truncation.
+                    self = .double(number.doubleValue)
+                }
+            }
+        } else if let string = plistValue as? String {
+            self = .string(string)
+        } else if let data = plistValue as? Data {
+            self = .data(data)
+        } else if let date = plistValue as? Date {
+            self = .date(date)
+        } else if let array = plistValue as? [Any] {
+            self = .array(array.map { DefaultsDomainValue(plistValue: $0) })
+        } else if let dictionary = plistValue as? [String: Any] {
+            self = .dictionary(dictionary.mapValues { DefaultsDomainValue(plistValue: $0) })
+        } else {
+            self = .other(String(describing: type(of: plistValue)))
+        }
+    }
+
+    /// Name of the represented value type, safe to include in diagnostics.
+    var typeName: String {
+        switch self {
+        case .bool: "Bool"
+        case .int: "Int"
+        case .uint: "UInt"
+        case .double: "Double"
+        case .string: "String"
+        case .data: "Data"
+        case .date: "Date"
+        case .array: "Array"
+        case .dictionary: "Dictionary"
+        case .other(let name): name
+        }
+    }
+
+    /// Compares values by semantics rather than by encoding.
+    ///
+    /// Signed and unsigned integers holding the same non-negative number are equal, while a
+    /// negative signed value never equals an unsigned value such as `UInt64.max`.
+    static func == (lhs: DefaultsDomainValue, rhs: DefaultsDomainValue) -> Bool {
+        switch (lhs, rhs) {
+        case let (.bool(lhsValue), .bool(rhsValue)):
+            lhsValue == rhsValue
+        case let (.int(lhsValue), .int(rhsValue)):
+            lhsValue == rhsValue
+        case let (.uint(lhsValue), .uint(rhsValue)):
+            lhsValue == rhsValue
+        case let (.int(lhsValue), .uint(rhsValue)) where lhsValue >= 0:
+            UInt64(lhsValue) == rhsValue
+        case let (.uint(lhsValue), .int(rhsValue)) where rhsValue >= 0:
+            UInt64(rhsValue) == lhsValue
+        case let (.double(lhsValue), .double(rhsValue)):
+            lhsValue == rhsValue
+        case let (.string(lhsValue), .string(rhsValue)):
+            lhsValue == rhsValue
+        case let (.data(lhsValue), .data(rhsValue)):
+            lhsValue == rhsValue
+        case let (.date(lhsValue), .date(rhsValue)):
+            lhsValue == rhsValue
+        case let (.array(lhsValue), .array(rhsValue)):
+            lhsValue == rhsValue
+        case let (.dictionary(lhsValue), .dictionary(rhsValue)):
+            lhsValue == rhsValue
+        case let (.other(lhsValue), .other(rhsValue)):
+            lhsValue == rhsValue
+        default:
+            false
+        }
+    }
 }
 
 /// Replaces the app's import dependency with a recorder that performs no library work.

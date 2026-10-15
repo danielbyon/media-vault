@@ -231,10 +231,8 @@ extension Issue42DownloadSeparationFixture {
     func checkpoint() async throws -> PersistenceCheckpoint {
         try await PersistenceCheckpoint(
             settings: settingsStorage.load(),
-            defaults: PropertyListSerialization.data(
-                fromPropertyList: defaults.dictionaryRepresentation(),
-                format: .binary,
-                options: 0,
+            defaultsDomain: DefaultsDomainSnapshot(
+                domain: defaults.persistentDomain(forName: ownedDefaultsDomainName) ?? [:],
             ),
             settingsWrites: settingsWrites.withValue { $0 },
             sessionWrites: sessionWrites.withValue { $0 },
@@ -331,11 +329,14 @@ extension Issue42DownloadSeparationFixture {
     /// Checks all owned stores and both ordinary and revisioned clients after each download transition.
     func assertUnchanged(_ baseline: PersistenceCheckpoint) async throws {
         #expect(await settingsStorage.load() == baseline.settings)
-        #expect(try PropertyListSerialization.data(
-            fromPropertyList: defaults.dictionaryRepresentation(),
-            format: .binary,
-            options: 0,
-        ) == baseline.defaults)
+        let defaultsDomain = DefaultsDomainSnapshot(
+            domain: defaults.persistentDomain(forName: ownedDefaultsDomainName) ?? [:],
+        )
+        let defaultsDifference = defaultsDomain.difference(from: baseline.defaultsDomain)
+        #expect(
+            defaultsDifference.isEmpty,
+            "Owned defaults domain changed during download transitions: \(defaultsDifference.summary)",
+        )
         #expect(settingsWrites.withValue { $0 } == baseline.settingsWrites)
         #expect(sessionWrites.withValue { $0 } == baseline.sessionWrites)
         #expect((try? Data(contentsOf: sessionStorage.fileURL)) == baseline.sessionData)

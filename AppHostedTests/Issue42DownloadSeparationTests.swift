@@ -108,3 +108,101 @@ extension AppHostedUITests {
         }
     }
 }
+
+
+/// Regression tests for the semantic defaults-domain comparator used by persistence assertions.
+///
+/// The comparator backs download-separation assertions, so these tests pin dictionary-order
+/// independence, nested value equality, boolean versus numeric distinction, and the
+/// added/removed/changed diagnostics that may expose key names and value type names only.
+@Suite("Defaults domain snapshot comparison")
+struct DefaultsDomainSnapshotTests {
+    @Test("Comparison ignores dictionary ordering")
+    func comparisonIgnoresDictionaryOrdering() {
+        let first = DefaultsDomainSnapshot(domain: [
+            "alpha": "one",
+            "beta": 1,
+        ])
+        let second = DefaultsDomainSnapshot(domain: [
+            "beta": 1,
+            "alpha": "one",
+        ])
+        #expect(first == second)
+        #expect(first.difference(from: second).isEmpty)
+    }
+
+    @Test("Nested arrays and dictionaries compare by value")
+    func nestedCollectionsCompareByValue() {
+        let list: [Any] = [["id": 1], ["id": 2]]
+        let mapping: [String: Any] = ["enabled": true, "count": 3]
+        let baseline = DefaultsDomainSnapshot(domain: ["list": list, "map": mapping])
+
+        let reorderedList: [Any] = [["id": 1], ["id": 2]]
+        let reorderedMapping: [String: Any] = ["count": 3, "enabled": true]
+        let identical = DefaultsDomainSnapshot(domain: ["map": reorderedMapping, "list": reorderedList])
+        #expect(baseline == identical)
+        #expect(baseline.difference(from: identical).isEmpty)
+
+        let mutatedList: [Any] = [["id": 1], ["id": 2], ["id": 3]]
+        let changed = DefaultsDomainSnapshot(domain: ["list": mutatedList, "map": mapping])
+        #expect(changed.difference(from: baseline).changed == ["list:Array->Array"])
+    }
+
+    @Test("Boolean and numeric values stay distinguishable")
+    func booleanAndNumericValuesStayDistinguishable() {
+        let boolean = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: true)])
+        let integer = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: 1)])
+        #expect(boolean != integer)
+        #expect(integer.difference(from: boolean).changed == ["flag:Bool->Int"])
+
+        let float = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: Float(1.5))])
+        #expect(float.entries["flag"]?.typeName == "Double")
+        #expect(float.difference(from: integer).changed == ["flag:Int->Double"])
+
+        let smaller = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: Float(1.25))])
+        let larger = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: Float(1.75))])
+        #expect(smaller != larger)
+        #expect(smaller.difference(from: larger).changed == ["flag:Double->Double"])
+
+        let signedNegative = DefaultsDomainSnapshot(domain: ["count": NSNumber(value: Int64(-1))])
+        let unsignedMaximum = DefaultsDomainSnapshot(domain: ["count": NSNumber(value: UInt64.max)])
+        #expect(signedNegative != unsignedMaximum)
+        #expect(signedNegative.difference(from: unsignedMaximum).changed == ["count:UInt->Int"])
+
+        let signedFive = DefaultsDomainSnapshot(domain: ["count": NSNumber(value: Int64(5))])
+        let unsignedFive = DefaultsDomainSnapshot(domain: ["count": NSNumber(value: UInt64(5))])
+        #expect(signedFive == unsignedFive)
+    }
+
+    @Test("Difference reports added, removed, and changed keys with type names only")
+    func differenceReportsKeyNamesAndTypeNamesOnly() {
+        let baseline = DefaultsDomainSnapshot(domain: [
+            "kept": "same",
+            "removed": NSNumber(value: 1),
+            "changed": "before",
+        ])
+        let current = DefaultsDomainSnapshot(domain: [
+            "kept": "same",
+            "changed": NSNumber(value: 2),
+            "added": true,
+        ])
+        let difference = current.difference(from: baseline)
+        #expect(!difference.isEmpty)
+        #expect(difference.added == ["added:Bool"])
+        #expect(difference.removed == ["removed:Int"])
+        #expect(difference.changed == ["changed:String->Int"])
+        #expect(difference.summary == "added [added:Bool]; removed [removed:Int]; changed [changed:String->Int]")
+    }
+
+    @Test("Data values compare by content and never render content")
+    func dataValuesCompareByContentOnly() {
+        let first = DefaultsDomainSnapshot(domain: ["blob": Data([0x01, 0x02])])
+        let second = DefaultsDomainSnapshot(domain: ["blob": Data([0x01, 0x02])])
+        let third = DefaultsDomainSnapshot(domain: ["blob": Data([0x01, 0x03])])
+        #expect(first == second)
+        #expect(first.difference(from: second).isEmpty)
+        let difference = third.difference(from: first)
+        #expect(difference == DefaultsDomainDifference(added: [], removed: [], changed: ["blob:Data->Data"]))
+        #expect(difference.summary == "changed [blob:Data->Data]")
+    }
+}
