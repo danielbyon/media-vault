@@ -1,0 +1,30 @@
+AppHostedTests/Issue42DownloadSeparationFixture.swift
+  s_5d62df6b616a0e::t_980f985942f549 317-319,324-328
+  s_5d62df6b616a0e::t_adf2cd5f01bfc9 224-300,303-316,329-349,351-357,393-396
+  s_5d62df6b616a0e::t_73c9cd0d9e24fe 301-302,320-323,350,358-392
+  s_5d62df6b616a0e::t_a820e31a864ecc 100-102
+  s_5d62df6b616a0e::t_dd8ee007b47feb 10,216
+AppHostedTests/Issue42SeparationTestSupport.swift
+  s_5d62df6b616a0e::t_99d3ba702f8a2a 234-235,332-339
+AppHostedTests/Issue42DownloadSeparationTests.swift
+  s_5d62df6b616a0e::t_5029a8d4d31e96 160-165
+  s_5d62df6b616a0e::t_3d7edee9fb4b2e 166-174
+  s_5d62df6b616a0e::t_81aba1539f1047 111-159,175-207
+  s_5d62df6b616a0e::t_911a7b809c7b1a 208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ab0ce1b0f1367111f15ed72033a4f542a0d45091",
+  "prompts": {},
+  "sessions": {
+    "s_5d62df6b616a0e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a131c2-ae01-7141-874c-cf889bf8eb74",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
