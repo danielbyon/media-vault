@@ -372,13 +372,13 @@ private final class HTTPDownloadFixture {
         }
         let firstURL = try server.url("first")
         requestedPage = firstURL
+        let requestBaseline = server.requests.count
         store.send(.navigate(firstURL))
         // The first navigation pays the system's NetworkProcess launch. CI measured a ~6.5 s
-        // pre-relaunch stall plus a 12.28 s replacement launch (~18.8 s to ready); the 30 s
-        // bound keeps the ten-second committed-page window below measuring transport progress.
-        try await waitForSinglePageControl("native navigation dispatched: first", timeout: 30) {
-            server.requests.contains { issue42RouteName($0.path) == "first" && $0.method == "GET" }
-        }
+        // pre-relaunch stall plus a 12.28 s replacement launch (~18.8 s to ready). Dispatch
+        // receipt and native finish are separate milestones: the wider receipt window below
+        // does not extend the unchanged ten-second committed-page checks.
+        try await waitForDispatchedRequest("first", baseline: requestBaseline)
         try await waitForSinglePageControl("native page committed: first") {
             store.selectedTab?.metadata.committedURL == firstURL
                 && store.selectedTab?.metadata.title == "Issue42 first"
@@ -412,9 +412,28 @@ private final class HTTPDownloadFixture {
                     + "committed=\(adapter.hasCommittedDocument(for: tabID)) "
                     + "reducerLoading=\(String(describing: store.selectedTab?.metadata.isLoading)) "
                     + "nativeLoading=\(webView.isLoading) attached=\(webView.window === window) "
-                    + "bounds=\(webView.bounds.size) errors=\(observations.nativeErrors.count)",
+                    + "bounds=\(webView.bounds.size) errors=\(observations.nativeErrors.count) "
+                    + failureTransportEvidence(),
             ),
         )
+    }
+
+    /// Waits until the loopback server parses a GET for `route` dispatched after
+    /// `baseline`, so a stale or unrelated request cannot satisfy navigation
+    /// readiness. Later navigations in a fixture can also pay network-process
+    /// startup, so receipt uses the same bounded window as the first-page path;
+    /// committed-page checks stay on the unchanged ten-second bound.
+    private func waitForDispatchedRequest(
+        _ route: String,
+        baseline: Int,
+        timeout: TimeInterval = 30,
+    ) async throws {
+        try await waitForSinglePageControl("native navigation dispatched: \(route)", timeout: timeout) {
+            server.requests.count > baseline
+                && server.requests.suffix(from: baseline).contains {
+                    issue42RouteName($0.path) == route && $0.method == "GET"
+                }
+        }
     }
 
     func prepare() async throws {
@@ -433,7 +452,9 @@ private final class HTTPDownloadFixture {
     private func loadPage(_ route: String) async throws {
         let url = try server.url(route)
         requestedPage = url
+        let requestBaseline = server.requests.count
         store.send(.navigate(url))
+        try await waitForDispatchedRequest(route, baseline: requestBaseline)
         try await wait("native page committed: \(route)") {
             store.selectedTab?.metadata.committedURL == url && store.selectedTab?.metadata.title == "Issue42 \(route)"
                 && store.selectedTab?.metadata.isLoading == false && !webView.isLoading
@@ -536,9 +557,30 @@ private final class HTTPDownloadFixture {
                     + " content=\(String(describing: store.selectedTab?.content)) expectedURL=\(String(describing: requestedPage))"
                     + " attached=\(webView.window === window) bounds=\(webView.bounds) loading=\(webView.isLoading)"
                     + " nativeURL=\(String(describing: webView.url)) events=\(observations.events.count)"
-                    + " nativeErrors=\(observations.nativeErrors)",
+                    + " nativeErrors=\(observations.nativeErrors)"
+                    + " \(failureTransportEvidence())",
             ),
         )
+    }
+
+    /// Bounded failure-only transport and adapter diagnostics. Serializes the
+    /// loopback server's per-connection records and the observed WebKit events
+    /// while the fixture is still alive, so a stalled wait can be classified
+    /// from test output alone without changing what the wait asserts.
+    private func failureTransportEvidence() -> String {
+        let connections =
+            if let data = try? JSONSerialization.data(
+                withJSONObject: server.connectionEvidence,
+                options: [.sortedKeys],
+            ), let text = String(data: data, encoding: .utf8) {
+                String(text.prefix(6_000))
+            } else {
+                "transport evidence serialization failed"
+            }
+        let events = String(describing: observations.events)
+        return "connectionEvidence=\(connections)"
+            + " adapterCommitted=\(adapter.hasCommittedDocument(for: tabID))"
+            + " adapterEvents=\(events.prefix(2_000))"
     }
 
     func remove() async {
