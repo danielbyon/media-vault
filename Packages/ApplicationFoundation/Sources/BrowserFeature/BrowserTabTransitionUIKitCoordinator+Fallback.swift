@@ -317,6 +317,9 @@ extension BrowserTabTransitionUIKitCoordinator {
             return
         }
 
+        #if DEBUG
+        recordQualificationState("transitionAbortedUnprovable")
+        #endif
         let callback = session.presentationUnavailable
         finish()
         callback?()
@@ -324,6 +327,9 @@ extension BrowserTabTransitionUIKitCoordinator {
 
     func record(_ execution: BrowserTabTransitionExecution) {
         diagnostics.onExecution?(execution)
+        #if DEBUG
+        recordQualificationState("transitionExecution", details: ["execution": String(describing: execution)])
+        #endif
     }
 
     func finish() {
@@ -331,6 +337,9 @@ extension BrowserTabTransitionUIKitCoordinator {
             return
         }
 
+        #if DEBUG
+        recordQualificationState("transitionFinish")
+        #endif
         let currentDirection = session.direction
         if currentDirection != .toOverview {
             clearParkedSurfaceAssociation()

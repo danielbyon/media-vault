@@ -663,7 +663,14 @@ extension AppHostedUITests {
             #expect(coordinator.surfaceRegistry.representation(for: .content(tab.id)) == .live)
             #expect(
                 coordinator.surfaceRegistry.isReady(for: .content(tab.id)),
-                "readiness events: \(readinessEvents)",
+                Comment(rawValue: "readiness events: \(readinessEvents)"
+                    + " ownsView=\(BrowserWebKitAdapter.shared.webView(for: tab.id) === webView)"
+                    + " ownWindow=\(webView.window === window) bounds=\(webView.bounds)"
+                    + " attached=\(webView.superview != nil) loading=\(webView.isLoading)"
+                    + " committed=\(BrowserWebKitAdapter.shared.hasCommittedDocument(for: tab.id))"
+                    + " opaqueCover=\(BrowserWebKitPresentationGuard.hasOpaqueCover(in: webView))"
+                    + " pendingAction=\(store.pendingWebAction != nil)"
+                    + " pendingOperation=\(String(describing: store.previewState.operation(for: tab.id)))"),
             )
             #expect(
                 try await webKitValue(
@@ -1176,6 +1183,153 @@ extension AppHostedUITests {
                 var destinationCardMountedAtAbort = false
                 var destinationCardReadyAtAbort = false
                 var destinationGeometryAtAbort = "Unavailable"
+                var readinessDisplayTurns = 0
+
+                func boundedDiagnosticDescription(_ value: Any, depth: Int = 2) -> String {
+                    let mirror = Mirror(reflecting: value)
+                    let description: String
+                    if depth > 0, !mirror.children.isEmpty {
+                        let children = mirror.children.prefix(8).map { child in
+                            "\(child.label ?? "<unlabeled>")=\(boundedDiagnosticDescription(child.value, depth: depth - 1))"
+                        }
+                        description = "\(mirror.subjectType)(\(children.joined(separator: ", ")))"
+                    } else {
+                        description = String(reflecting: value)
+                    }
+
+                    return description.count <= 900 ? description : "\(description.prefix(897))..."
+                }
+
+                func findVisibilityTracker(
+                    in value: Any,
+                    depth: Int,
+                    remainingNodes: inout Int,
+                ) -> BrowserTabOverviewScrollVisibility? {
+                    guard remainingNodes > 0 else {
+                        return nil
+                    }
+
+                    remainingNodes -= 1
+
+                    if let tracker = value as? BrowserTabOverviewScrollVisibility {
+                        return tracker
+                    }
+
+                    let mirror = Mirror(reflecting: value)
+                    guard depth > 0 else {
+                        return nil
+                    }
+
+                    for child in mirror.children.prefix(12) {
+                        if let tracker = findVisibilityTracker(
+                            in: child.value,
+                            depth: depth - 1,
+                            remainingNodes: &remainingNodes,
+                        ) {
+                            return tracker
+                        }
+                    }
+                    return nil
+                }
+
+                func readinessCheckpoint() -> String {
+                    let role = BrowserTabTransitionSurfaceRole.card(selectedTabID)
+                    let selectedCard = coordinator.surfaceRegistry.view(for: role)
+                    let selectedCardFrame = selectedCard.map { $0.convert($0.bounds, to: rootView) }
+                    let scrollViews = allViews(in: rootView).compactMap { $0 as? UIScrollView }
+                    let scrollDescriptions = scrollViews.enumerated().map { index, scrollView in
+                        let viewportFrame = scrollView.convert(scrollView.bounds, to: rootView)
+                        let containsCard = selectedCardFrame.map { viewportFrame.contains($0) }
+                        return [
+                            "index=\(index)",
+                            "id=\(scrollView.accessibilityIdentifier ?? "<none>")",
+                            "viewportInRoot=\(viewportFrame)",
+                            "offset=\(scrollView.contentOffset)",
+                            "contentSize=\(scrollView.contentSize)",
+                            "selectedCardContained=\(String(describing: containsCard))",
+                        ].joined(separator: ",")
+                    }
+                    let scrollPositionLabels: Set = [
+                        "livePosition",
+                        "_persistedPosition",
+                        "_transitionOwnership",
+                        "scrollObservation",
+                        "pendingPosition",
+                        "programmaticTargetEcho",
+                        "scrollBindingRevision",
+                        "fullyVisibleTargetIDs",
+                        "hasObservedFullyVisibleTargetIDs",
+                    ]
+                    let scrollPositionDetails = Mirror(reflecting: scrollPosition)
+                        .children
+                        .compactMap { child -> String? in
+                            guard let label = child.label, scrollPositionLabels.contains(label) else {
+                                return nil
+                            }
+
+                            return "\(label)=\(boundedDiagnosticDescription(child.value))"
+                        }
+                        .joined(separator: ",")
+                    var remainingMirrorNodes = 96
+                    let visibilityTracker = findVisibilityTracker(
+                        in: hostingController.rootView,
+                        depth: 6,
+                        remainingNodes: &remainingMirrorNodes,
+                    )
+                    let visibilityTrackerDetails = visibilityTracker.map { tracker in
+                        let privateGeometryCache = Mirror(reflecting: tracker)
+                            .children
+                            .compactMap { child -> String? in
+                                guard let label = child.label,
+                                      ["viewportFrame", "cardFrames"]
+                                      .contains(label)
+                                else {
+                                    return nil
+                                }
+
+                                return "\(label)=\(boundedDiagnosticDescription(child.value))"
+                            }
+                        let trackerState = [
+                            "revision=\(tracker.revision)",
+                            "fullyVisibleTargetIDs=\(boundedDiagnosticDescription(tracker.fullyVisibleTargetIDs))",
+                        ] + privateGeometryCache
+                        return trackerState.joined(separator: ",")
+                    } ?? "unavailable through mounted-root reflection"
+                    let scene = window.windowScene
+                    let requestedSize = CGSize(width: layout.width, height: layout.height)
+
+                    return [
+                        "checkpoint=before-readiness-assertions",
+                        "displayTurns=\(readinessDisplayTurns)/" +
+                            "\(BrowserTabTransitionPresentationCoordinator.overviewDestinationWaitDisplayTurnBudget)",
+                        "sizeClass=\(layout.sizeClass)",
+                        "requestedSize=\(requestedSize)",
+                        "selectedTabID=\(selectedTabID)",
+                        "persistedAnchor=\(anchor)",
+                        "sceneActivation=\(String(describing: scene?.activationState))",
+                        "sceneBounds=\(String(describing: scene?.effectiveGeometry.coordinateSpace.bounds))",
+                        "sceneSession=\(scene?.session.persistentIdentifier ?? "<none>")",
+                        "windowFrame=\(window.frame)",
+                        "windowBounds=\(window.bounds)",
+                        "windowSafeArea=\(window.safeAreaInsets)",
+                        "rootFrame=\(rootView.frame)",
+                        "rootBounds=\(rootView.bounds)",
+                        "rootSafeArea=\(rootView.safeAreaInsets)",
+                        "scrollPositionPhase=\(scrollPosition.scrollPhase)",
+                        "scrollObservation=\(scrollPosition.scrollObservation.state)",
+                        "scrollPositionState=\(scrollPositionDetails)",
+                        "visibilityTrackerCache=\(visibilityTrackerDetails)",
+                        "registryMounted=\(selectedCard != nil)",
+                        "registryReady=\(coordinator.surfaceRegistry.isReady(for: role))",
+                        "selectedCardFrameInRoot=\(String(describing: selectedCardFrame))",
+                        "scrollViews=\(scrollDescriptions)",
+                        "destinationRequests=\(destinationRequests.map { String(describing: $0) })",
+                        "geometryCallbackCount=\(executions.count(where: { $0 == .geometry }))",
+                        "transitionExecutionCallbacks=\(executions.map { String(describing: $0) })",
+                        "aborted=\(aborted)",
+                    ].joined(separator: " | ")
+                }
+
                 BrowserTabTransitionPresentationCoordinator.begin(
                     coordinator: coordinator,
                     selectedTabID: selectedTabID,
@@ -1238,21 +1392,24 @@ extension AppHostedUITests {
 
                 for _ in 0 ..< BrowserTabTransitionPresentationCoordinator.overviewDestinationWaitDisplayTurnBudget
                     where coordinator.isActive && !executions.contains(.geometry) {
+                    readinessDisplayTurns += 1
                     rootView.layoutIfNeeded()
                     await waitForDisplayTurn()
                 }
+                let readinessDiagnostic = readinessCheckpoint()
+                let readinessDiagnosticComment = Comment(rawValue: readinessDiagnostic)
                 #expect(presentationAfterRequest == .tabOverview)
                 #expect(destinationRequests.contains(.awaitingReadiness))
-                #expect(destinationRequests.contains(.alreadyUsable))
+                #expect(destinationRequests.contains(.alreadyUsable), readinessDiagnosticComment)
                 if aborted {
                     #expect(presentationAtAbort == .tabOverview)
                     #expect(destinationCardMountedAtAbort)
                     #expect(destinationCardReadyAtAbort, "\(destinationGeometryAtAbort)")
                 }
-                #expect(!aborted)
-                #expect(executions.contains(.geometry))
+                #expect(!aborted, readinessDiagnosticComment)
+                #expect(executions.contains(.geometry), readinessDiagnosticComment)
                 #expect(scrollPosition.transitionDrivenPosition == selectedTabID)
-                #expect(scrollPosition.isDestinationUsable(selectedTabID))
+                #expect(scrollPosition.isDestinationUsable(selectedTabID), readinessDiagnosticComment)
                 #expect(store.state.tabOverviewScrollPosition == anchor)
                 guard !aborted else {
                     window.isHidden = true
@@ -1641,6 +1798,42 @@ extension AppHostedUITests {
 
             window.isHidden = true
             window.rootViewController = nil
+        }
+
+        @Test("Closed Downloads notice revisions preserve mounted browser navigation")
+        func closedDownloadsSheetShowsNotice() {
+            let initial = BrowserFeature.State.readyForTesting()
+            let store = makeBrowserViewStore(initialState: initial)
+            let tabs = store.tabs
+            let selected = store.selectedTabID
+            let controller = UIHostingController(rootView: BrowserView(store: store))
+            let window = mount(controller, size: CGSize(width: 390, height: 700))
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+            var snapshot = BrowserDownloadSnapshot()
+            snapshot.revision = 1
+            snapshot.notice = .activeTransferLimitReached
+            store.send(.downloadsChanged(snapshot))
+            // Rendered text and accessibility replacement are qualified by the external
+            // BrowserDownloadNoticeUITests process, which can observe SwiftUI's semantic tree.
+            #expect(store.downloads.revision == snapshot.revision)
+            #expect(store.downloads.notice == snapshot.notice)
+            #expect(!store.downloadsArePresented)
+            #expect(controller.view.window === window)
+            #expect(controller.presentedViewController == nil)
+            #expect(store.tabs == tabs)
+            #expect(store.selectedTabID == selected)
+            snapshot.revision = 2
+            snapshot.notice = .transferFailed
+            store.send(.downloadsChanged(snapshot))
+            #expect(store.downloads.revision == snapshot.revision)
+            #expect(store.downloads.notice == snapshot.notice)
+            #expect(!store.downloadsArePresented)
+            #expect(controller.view.window === window)
+            #expect(store.tabs == tabs)
+            #expect(store.selectedTabID == selected)
         }
 
         private func makeBrowserViewStore(initialState: BrowserFeature.State) -> StoreOf<BrowserFeature> {

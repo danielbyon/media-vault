@@ -102,6 +102,14 @@ public enum BrowserWebKitEvent: Equatable, Sendable {
     /// Reports a WebKit navigation that was not issued by the reducer and therefore supersedes any
     /// pending reducer operation for the same tab.
     case navigationStarted(tabID: BrowserTabID)
+    /// Reports an accepted didCommit snapshot without settling the operation's loading lifecycle.
+    case navigationCommitted(
+        tabID: BrowserTabID,
+        metadata: BrowserTab.Metadata,
+        correlation: BrowserWebKitEventCorrelation,
+    )
+    /// Settles a navigation converted to a download without replacing the previously committed page.
+    case navigationConvertedToDownload(tabID: BrowserTabID, correlation: BrowserWebKitEventCorrelation)
     /// Reports app-visible page metadata and its explicit correlation status.
     case metadata(
         tabID: BrowserTabID,
