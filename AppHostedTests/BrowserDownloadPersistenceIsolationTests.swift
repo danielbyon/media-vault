@@ -109,7 +109,6 @@ extension AppHostedUITests {
     }
 }
 
-
 /// Regression tests for the semantic defaults-domain comparator used by persistence assertions.
 ///
 /// The comparator backs download-separation assertions, so these tests pin dictionary-order
@@ -150,27 +149,33 @@ struct DefaultsDomainSnapshotTests {
 
     @Test("Boolean and numeric values stay distinguishable")
     func booleanAndNumericValuesStayDistinguishable() {
-        let boolean = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: true)])
-        let integer = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: 1)])
+        let boolean = DefaultsDomainSnapshot(domain: ["flag": true])
+        let integer = DefaultsDomainSnapshot(domain: ["flag": Int64(1)])
         #expect(boolean != integer)
         #expect(integer.difference(from: boolean).changed == ["flag:Bool->Int"])
 
-        let float = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: Float(1.5))])
+        let float = DefaultsDomainSnapshot(domain: ["flag": Double(1.5)])
         #expect(float.entries["flag"]?.typeName == "Double")
         #expect(float.difference(from: integer).changed == ["flag:Int->Double"])
 
-        let smaller = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: Float(1.25))])
-        let larger = DefaultsDomainSnapshot(domain: ["flag": NSNumber(value: Float(1.75))])
+        let integralDouble = DefaultsDomainSnapshot(domain: ["flag": Double(2.0)])
+        let integralInteger = DefaultsDomainSnapshot(domain: ["flag": Int64(2)])
+        #expect(integralDouble.entries["flag"]?.typeName == "Double")
+        #expect(integralDouble != integralInteger)
+        #expect(integralDouble.difference(from: integralInteger).changed == ["flag:Int->Double"])
+
+        let smaller = DefaultsDomainSnapshot(domain: ["flag": Float(1.25)])
+        let larger = DefaultsDomainSnapshot(domain: ["flag": Float(1.75)])
         #expect(smaller != larger)
         #expect(smaller.difference(from: larger).changed == ["flag:Double->Double"])
 
-        let signedNegative = DefaultsDomainSnapshot(domain: ["count": NSNumber(value: Int64(-1))])
-        let unsignedMaximum = DefaultsDomainSnapshot(domain: ["count": NSNumber(value: UInt64.max)])
+        let signedNegative = DefaultsDomainSnapshot(domain: ["count": Int64(-1)])
+        let unsignedMaximum = DefaultsDomainSnapshot(domain: ["count": UInt64.max])
         #expect(signedNegative != unsignedMaximum)
         #expect(signedNegative.difference(from: unsignedMaximum).changed == ["count:UInt->Int"])
 
-        let signedFive = DefaultsDomainSnapshot(domain: ["count": NSNumber(value: Int64(5))])
-        let unsignedFive = DefaultsDomainSnapshot(domain: ["count": NSNumber(value: UInt64(5))])
+        let signedFive = DefaultsDomainSnapshot(domain: ["count": Int64(5)])
+        let unsignedFive = DefaultsDomainSnapshot(domain: ["count": UInt64(5)])
         #expect(signedFive == unsignedFive)
     }
 
@@ -178,12 +183,12 @@ struct DefaultsDomainSnapshotTests {
     func differenceReportsKeyNamesAndTypeNamesOnly() {
         let baseline = DefaultsDomainSnapshot(domain: [
             "kept": "same",
-            "removed": NSNumber(value: 1),
+            "removed": Int64(1),
             "changed": "before",
         ])
         let current = DefaultsDomainSnapshot(domain: [
             "kept": "same",
-            "changed": NSNumber(value: 2),
+            "changed": Int64(2),
             "added": true,
         ])
         let difference = current.difference(from: baseline)

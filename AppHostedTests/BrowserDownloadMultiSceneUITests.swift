@@ -455,7 +455,9 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             "--browser-download-simulated-protection-readback",
         ]
         app.launch()
-        XCTAssertTrue(app.staticTexts["downloadQualificationProtectionQualificationMode"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["downloadQualificationProtectionQualificationMode"]
+            .firstMatch
+            .waitForExistence(timeout: 10))
         try wait(app, milestone: "initial scene browser bridge registration") {
             guard let scope = self.hittableScope("downloadQualificationRefreshSceneCensus", in: app) else {
                 return false

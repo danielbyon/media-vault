@@ -98,7 +98,9 @@ final class BrowserDownloadPersistenceFixture {
     var fixtureTabIDs: Set<BrowserTabID> = []
 
     /// Name of the isolated UserDefaults domain owned by this fixture.
-    var ownedDefaultsDomainName: String { defaultsSuite }
+    var ownedDefaultsDomainName: String {
+        defaultsSuite
+    }
 
     init() throws {
         rootDirectory = FileManager.default
@@ -248,6 +250,7 @@ struct DefaultsDomainSnapshot: Equatable {
                 removed.append(key + ":" + value.typeName)
                 continue
             }
+
             if current != value {
                 changed.append(key + ":" + value.typeName + "->" + current.typeName)
             }
@@ -309,23 +312,27 @@ enum DefaultsDomainValue: Equatable {
     case other(String)
 
     /// Decodes a property-list value returned by `UserDefaults`.
+    ///
+    /// Boolean values are recognized through their CoreFoundation type so a
+    /// stored `true` never compares equal to a stored `1`. Numbers with a
+    /// floating-point representation decode as doubles before the integer
+    /// branches run, so integral `Double` and `Float` storage cannot collapse
+    /// into `Int64` values.
     init(plistValue: Any) {
-        if let number = plistValue as? NSNumber {
-            if CFGetTypeID(number) == CFBooleanGetTypeID() {
-                self = .bool(number.boolValue)
+        let object = plistValue as AnyObject
+        if CFGetTypeID(object) == CFBooleanGetTypeID() {
+            self = .bool((plistValue as? Bool) ?? false)
+        } else if CFGetTypeID(object) == CFNumberGetTypeID() {
+            // The type-ID gate above establishes that the object really is a CFNumber.
+            let number = unsafeBitCast(object, to: CFNumber.self)
+            if CFNumberIsFloatType(number), let value = object as? Double {
+                self = .double(value)
+            } else if let value = object as? Int64 {
+                self = .int(value)
+            } else if let value = object as? UInt64 {
+                self = .uint(value)
             } else {
-                switch String(cString: number.objCType) {
-                case "f", "d":
-                    self = .double(number.doubleValue)
-                case "c", "s", "i", "l", "q":
-                    self = .int(number.int64Value)
-                case "C", "S", "I", "L", "Q":
-                    self = .uint(number.uint64Value)
-                default:
-                    // Unknown numeric encodings compare as doubles so a fractional
-                    // value can never be silently conflated with its truncation.
-                    self = .double(number.doubleValue)
-                }
+                self = .other(String(describing: type(of: plistValue)))
             }
         } else if let string = plistValue as? String {
             self = .string(string)
@@ -345,16 +352,26 @@ enum DefaultsDomainValue: Equatable {
     /// Name of the represented value type, safe to include in diagnostics.
     var typeName: String {
         switch self {
-        case .bool: "Bool"
-        case .int: "Int"
-        case .uint: "UInt"
-        case .double: "Double"
-        case .string: "String"
-        case .data: "Data"
-        case .date: "Date"
-        case .array: "Array"
-        case .dictionary: "Dictionary"
-        case .other(let name): name
+        case .bool:
+            "Bool"
+        case .int:
+            "Int"
+        case .uint:
+            "UInt"
+        case .double:
+            "Double"
+        case .string:
+            "String"
+        case .data:
+            "Data"
+        case .date:
+            "Date"
+        case .array:
+            "Array"
+        case .dictionary:
+            "Dictionary"
+        case let .other(name):
+            name
         }
     }
 
