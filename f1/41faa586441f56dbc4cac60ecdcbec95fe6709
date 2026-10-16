@@ -1,0 +1,25 @@
+AppHostedTests/BrowserDownloadLoopbackServer.swift
+  s_5d62df6b616a0e::t_56d3cf5ef2cb12 199
+  s_5d62df6b616a0e::t_a2606cb79bc3ba 35-36,39-41,226-227,402-405,419-420,622-627,632-640,656-658,673-674,676,678
+AppHostedTests/BrowserDownloadHTTPTests.swift
+  s_5d62df6b616a0e::t_21b63254b164ee 133-140,143-144,153-155
+  s_5d62df6b616a0e::t_a2606cb79bc3ba 118-132,145-152,158-166,503-508,616-617
+  s_5d62df6b616a0e::t_e5c1d9b4f46b6e 184,186
+  s_5d62df6b616a0e::t_b619b59e50ab9a 61,63-69,141-142,156-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f141faa586441f56dbc4cac60ecdcbec95fe6709",
+  "prompts": {},
+  "sessions": {
+    "s_5d62df6b616a0e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a131c2-ae01-7141-874c-cf889bf8eb74",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
