@@ -124,45 +124,87 @@ struct BrowserOpenTabsSessionTests {
         let operationStarted = DispatchSemaphore(value: 0)
         let releaseOperation = DispatchSemaphore(value: 0)
         let operationFinished = LockIsolated(false)
-        let mutation = Task.detached {
-            gate.perform(revision: 1) {
+        let mutationAccepted = LockIsolated<Bool?>(nil)
+        let mutationFinished = DispatchSemaphore(value: 0)
+
+        // The mutation intentionally stays blocked while it is in flight, so it
+        // runs on a dedicated dispatch queue. Cooperative-pool tasks must not be
+        // blocked this way: that starves the pool and can delay this very
+        // mutation from starting, which is unrelated to the revision gate.
+        let mutationQueue = DispatchQueue(label: "BrowserPersistenceRevisionGateTests.mutation")
+        mutationQueue.async {
+            let accepted = gate.perform(revision: 1) {
                 operationStarted.signal()
-                // The mutation stays in flight until this test releases it, so a
-                // reservation made below runs against a mutation that has not
-                // finished. The bounded wait only keeps a failing run from
-                // blocking forever; it never gates a passing run.
+                // This test releases the wait after reserving against the
+                // in-flight mutation. The bound only keeps a failing run from
+                // hanging forever; a passing run signals well before it elapses.
                 _ = releaseOperation.wait(timeout: .now() + 30)
                 operationFinished.setValue(true)
             }
+            mutationAccepted.setValue(accepted)
+            mutationFinished.signal()
         }
 
-        // Starting the detached fixture is test setup rather than product
-        // behavior, so it gets a wide budget: scheduler latency on a loaded
-        // machine must not be mistaken for latency inside the revision gate.
-        let didStartOperation = waitForSignal(operationStarted, timeout: 30)
-        #expect(didStartOperation)
-        guard didStartOperation else {
-            releaseOperation.signal()
-            _ = await mutation.value
-            return
+        // The start, reservation, in-flight check, and release run on their own
+        // dispatch queue, so the sequence does not depend on when the cooperative
+        // pool resumes this test task. Only the assertions below run back on the
+        // test task.
+        let observationQueue = DispatchQueue(label: "BrowserPersistenceRevisionGateTests.observation")
+        let observation: RevisionReservationObservation = await withCheckedContinuation { continuation in
+            observationQueue.async {
+                let didStart = Self.waitForSignal(operationStarted, timeout: 30)
+                guard didStart else {
+                    releaseOperation.signal()
+                    _ = Self.waitForSignal(mutationFinished, timeout: 30)
+                    continuation.resume(returning: RevisionReservationObservation(
+                        didStart: false,
+                        revision: nil,
+                        reservedDuringMutation: nil,
+                        mutationAccepted: nil,
+                        didFinish: false,
+                    ))
+                    return
+                }
+
+                // The mutation cannot finish before this sequence signals the
+                // release semaphore, so a reservation that returns while the
+                // mutation is still blocked provably did not wait for it.
+                let revision = gate.reserve(after: 1)
+                let reservedDuringMutation = operationFinished.value == false
+                releaseOperation.signal()
+                let didFinish = Self.waitForSignal(mutationFinished, timeout: 30)
+                continuation.resume(returning: RevisionReservationObservation(
+                    didStart: true,
+                    revision: revision,
+                    reservedDuringMutation: reservedDuringMutation,
+                    mutationAccepted: mutationAccepted.value,
+                    didFinish: didFinish,
+                ))
+            }
         }
 
-        // The mutation cannot finish before this test signals
-        // `releaseOperation`, so a reservation that returns while the mutation
-        // is still blocked provably did not wait for it. Asserting that order
-        // replaces an elapsed-time budget, which previously counted scheduler
-        // latency as if it were gate latency and failed on loaded machines.
-        let revision = gate.reserve(after: 1)
-        let reservedDuringMutation = operationFinished.value == false
-        releaseOperation.signal()
-
-        let mutationWasAccepted = await mutation.value
-        #expect(reservedDuringMutation)
-        #expect(mutationWasAccepted)
-        #expect(revision == 2)
+        #expect(observation.didStart)
+        #expect(observation.didFinish)
+        #expect(observation.reservedDuringMutation == true)
+        #expect(observation.mutationAccepted == true)
+        #expect(observation.revision == 2)
     }
 
-    private func waitForSignal(
+    /// Values observed while the mutation was in flight, evaluated by the test
+    /// task after the dispatch-queue sequence completes.
+    private struct RevisionReservationObservation: Sendable {
+        let didStart: Bool
+        let revision: UInt64?
+        let reservedDuringMutation: Bool?
+        let mutationAccepted: Bool?
+        let didFinish: Bool
+    }
+
+    /// Waits for a signal without occupying a cooperative-pool thread.
+    ///
+    /// Callers run on a dispatch queue, where blocking does not starve the
+    /// cooperative executor that runs Swift tasks.
+    private static func waitForSignal(
         _ semaphore: DispatchSemaphore,
         timeout: TimeInterval = 1,
     ) -> Bool {
