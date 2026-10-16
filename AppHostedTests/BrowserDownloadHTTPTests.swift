@@ -58,8 +58,15 @@ extension AppHostedUITests {
         @Test("Fresh native initial page commits with command and transport witnesses")
         func initialPageCommits() async throws {
             try await withHTTPDownloadFixture(.ephemeral) { fixture in
+                let firstURL = try fixture.server.url("first")
                 #expect(fixture.adapter.hasCommittedDocument(for: fixture.tabID))
-                #expect(fixture.server.requests.count >= 2)
+                #expect(fixture.server.requests.contains {
+                    $0.method == "GET" && $0.path == fixture.server.cookiePath + "first"
+                })
+                #expect(fixture.store.selectedTab?.metadata.committedURL == firstURL)
+                #expect(fixture.webView.url == firstURL)
+                #expect(fixture.webView.backForwardList.currentItem?.url == firstURL)
+                #expect(!fixture.webView.isLoading)
             }
         }
 
@@ -108,6 +115,55 @@ extension AppHostedUITests {
             }
         }
 
+        /// The one-page setup above covers every classification row. This dedicated regression
+        /// keeps a second committed page so the prior-page and back/forward history contract is
+        /// still exercised against a real native download conversion for both browsing profiles.
+        /// The row is fixed because every row kind shares the same conversion contract in the
+        /// classification matrix; only the history dimension is unique here.
+        @Test(
+            "Prior page and back-forward history survive a native download conversion",
+            arguments: [BrowserBrowsingProfile.persistentPrivate, .ephemeral],
+        )
+        func priorPageHistorySurvivesNativeDownloadConversion(
+            profile: BrowserBrowsingProfile,
+        ) async throws {
+            try await withHTTPDownloadFixture(profile) { fixture in
+                try await fixture.loadCommittedHistory()
+                let before = try #require(fixture.store.selectedTab?.metadata)
+                // Reducer metadata cannot prove the native list survived conversion, so pin
+                // the real WKWebView entries: current document is the second committed page
+                // and its back destination is the first page.
+                let firstURL = try fixture.server.url("first")
+                let committedURL = try fixture.server.url("committed")
+                let listBefore = fixture.webView.backForwardList
+                let currentBefore = try #require(listBefore.currentItem)
+                let backBefore = try #require(listBefore.backItem)
+                let backURLsBefore = listBefore.backList.map(\.url)
+                let forwardURLsBefore = listBefore.forwardList.map(\.url)
+                #expect(currentBefore.url == committedURL)
+                #expect(backBefore.url == firstURL)
+                try await fixture.trigger(.attribute)
+                try await fixture.wait("completed attribute download keeps prior page history") {
+                    fixture.owner.snapshot.records.first?.isReady == true
+                        && fixture.observations.conversions == 1
+                        && fixture.store.selectedTab?.metadata.isLoading == false
+                        && fixture.store.previewState.operation(for: fixture.tabID) == nil
+                }
+                #expect(fixture.store.selectedTab?.metadata.canGoBack == true)
+                let listAfter = fixture.webView.backForwardList
+                #expect(listAfter.currentItem?.url == currentBefore.url)
+                #expect(listAfter.backItem?.url == backBefore.url)
+                #expect(listAfter.backList.map(\.url) == backURLsBefore)
+                #expect(listAfter.forwardList.map(\.url) == forwardURLsBefore)
+                fixture.assertPreservedDocument(before)
+                #expect(fixture.observations.handoffs.count == 1)
+                #expect(fixture.owner.retainedCount == 1)
+                try fixture.verifyCompletedFile()
+                fixture.assertNativeRequest(.attribute)
+                #expect(fixture.observations.failures == 0)
+            }
+        }
+
         @Test(
             "Slow native progress excludes partial files and cancellation waits for writer acknowledgement",
             arguments:
@@ -125,9 +181,9 @@ extension AppHostedUITests {
                 let partial = try #require(fixture.owner.snapshot.records.first)
                 #expect(!partial.isReady)
                 #expect(partial.filename == nil)
-                #expect(partial.receivedBytes < Int64(fixture.server.payload.count))
+                #expect(partial.receivedBytes < Int64(BrowserDownloadLoopbackServer.slowPayload.count))
                 if knownLength {
-                    #expect(partial.expectedBytes == Int64(fixture.server.payload.count))
+                    #expect(partial.expectedBytes == Int64(BrowserDownloadLoopbackServer.slowPayload.count))
                 } else {
                     #expect(partial.expectedBytes == nil)
                 }
@@ -444,6 +500,12 @@ private final class HTTPDownloadFixture {
                 && store.downloads.revision == owner.snapshot.revision
         }
         try await loadPage("first")
+        #expect(adapter.hasCommittedDocument(for: tabID))
+    }
+
+    /// Loads a second committed page so prior-page and back/forward history exists before a
+    /// download row runs. Dedicated history regressions call this after the one-page `prepare()`.
+    func loadCommittedHistory() async throws {
         try await loadPage("committed")
         #expect(store.selectedTab?.metadata.canGoBack == true)
         #expect(adapter.hasCommittedDocument(for: tabID))
@@ -551,7 +613,8 @@ private final class HTTPDownloadFixture {
                 rawValue:
                 "\(milestone): requests=\(server.requests.count) handoffs=\(observations.handoffs.count) "
                     + "conversions=\(observations.conversions) failures=\(observations.failures) active=\(owner.activeCount) "
-                    + "records=\(owner.snapshot.records.count) notice=\(String(describing: owner.snapshot.notice))"
+                    + "records=\(owner.snapshot.records.count) bytes=\(owner.snapshot.records.first?.receivedBytes ?? 0) "
+                    + "ready=\(owner.snapshot.records.first?.isReady == true) notice=\(String(describing: owner.snapshot.notice))"
                     + " accepted=\(server.acceptedCount) ready=\(server.ready) profileReady=\(adapter.profileIsConfigured)"
                     + " commands=\(String(describing: observations.commands)) pending=\(String(describing: store.pendingWebAction))"
                     + " content=\(String(describing: store.selectedTab?.content)) expectedURL=\(String(describing: requestedPage))"

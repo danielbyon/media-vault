@@ -32,9 +32,13 @@ final class BrowserDownloadLoopbackServer {
     }
 
     let namespace = UUID().uuidString.lowercased()
-    /// Shared fixture bytes so qualification hosts and the test bundle agree on one PDF.
+    /// Shared small fixture PDF so classification, preview, share, and persistence cases transfer
+    /// a minimal valid document; ordinary routes never serve the large transfer payload.
     static let fixturePDF = makePDFPayload()
     let payload = fixturePDF
+    /// Explicitly large transfer bytes for slow, progress, cancellation, and writer-acknowledgement
+    /// routes only.
+    static let slowPayload = makePDFPayload(paddingBytes: 16 * 1_024 * 1_024)
     private(set) var requests: [Request] = []
     private(set) var slowPrefixSent = false
     private(set) var acceptedCount = 0
@@ -192,7 +196,7 @@ final class BrowserDownloadLoopbackServer {
             connection.send(payload, type: "application/octet-stream")
         case "slow-known",
              "slow-unknown":
-            connection.sendSlow(payload, knownLength: route == "slow-known")
+            connection.sendSlow(Self.slowPayload, knownLength: route == "slow-known")
         default:
             connection.send(Data(), type: "text/plain", status: "404 Not Found")
         }
@@ -219,8 +223,8 @@ final class BrowserDownloadLoopbackServer {
     }
 
     /// Builds the shared fixture PDF without writing a file to disk.
-    private static func makePDFPayload() -> Data {
-        let padding = Data(repeating: 0x41, count: 16 * 1_024 * 1_024)
+    private static func makePDFPayload(paddingBytes: Int = 0) -> Data {
+        let padding = Data(repeating: 0x41, count: paddingBytes)
         var stream = Data("BT /F1 14 Tf 20 100 Td (Browser download transfer probe) Tj\n%".utf8)
         stream.append(padding)
         stream.append(Data("\nET\n".utf8))
@@ -395,6 +399,10 @@ final class BrowserDownloadLoopbackServer {
         private var networkError = "none"
         private var transportState = "created"
         private var closeReason = "none"
+        /// Local Network.framework stack milestone only: the stack accepted or rejected bytes for
+        /// sending. It is not peer delivery acknowledgement and not a WebKit commit signal.
+        private var sendStackState = "none"
+        private var sendStackBytes = 0
 
         private func recordEvidence() {
             server?.recordConnection(id, fields: [
@@ -408,6 +416,8 @@ final class BrowserDownloadLoopbackServer {
                 "transportState": transportState,
                 "closed": String(closed),
                 "closeReason": closeReason,
+                "sendStackState": sendStackState,
+                "sendStackBytes": String(sendStackBytes),
             ])
         }
 
@@ -609,12 +619,25 @@ final class BrowserDownloadLoopbackServer {
             if !headOnly {
                 data.append(body)
             }
+            // contentProcessed reports the local stack finishing this content, not peer delivery
+            // and not a WebKit commit. The milestone is recorded before and after so transport
+            // evidence separates stack processing from request receipt and from peer close/EOF.
+            sendStackBytes = data.count
+            sendStackState = "pending"
+            recordEvidence()
             native.send(
                 content: data,
                 contentContext: .finalMessage,
                 isComplete: true,
-                completion: .contentProcessed { [weak self] _ in
-                    MainActor.assumeIsolated { self?.close() }
+                completion: .contentProcessed { [weak self] error in
+                    MainActor.assumeIsolated {
+                        guard let self else {
+                            return
+                        }
+
+                        self.sendStackState = error == nil ? "stackProcessed" : "stackFailed"
+                        self.close(reason: error == nil ? "sendStackProcessed" : "sendStackFailed")
+                    }
                 },
             )
         }
@@ -630,6 +653,9 @@ final class BrowserDownloadLoopbackServer {
             if !knownLength {
                 data.append(Data("\r\n".utf8))
             }
+            sendStackBytes = data.count
+            sendStackState = "pending"
+            recordEvidence()
             native.send(content: data, completion: .contentProcessed { [weak self] error in
                 MainActor.assumeIsolated {
                     self?.didSendSlowPrefix(failed: error != nil)
@@ -644,9 +670,12 @@ final class BrowserDownloadLoopbackServer {
             }
 
             if failed {
-                close()
+                sendStackState = "stackFailed"
+                close(reason: "slowPrefixStackFailed")
             } else {
+                sendStackState = "stackPrefixProcessed"
                 server?.slowPrefixSent = true
+                recordEvidence()
             }
         }
 
