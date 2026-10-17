@@ -54,6 +54,8 @@ private final class BrowserDownloadProductionQualificationProcess {
     let coordinator: BrowserDownloadNativeCoordinator
     let evidence: BrowserDownloadProductionEvidence
     let fault: BrowserDownloadQualificationRemovalFault
+    let pendingAllocation: BrowserDownloadQualificationPendingAllocation
+    let securitySentinel: BrowserDownloadSecuritySentinel
     let simulatedProtectionReadback: Bool
     var status = "Fixture-seeded authentication; qualification controls below."
     var observationsJSON = "[]"
@@ -167,6 +169,10 @@ private final class BrowserDownloadProductionQualificationProcess {
         evidence = recorder
         let removalFault = BrowserDownloadQualificationRemovalFault()
         fault = removalFault
+        let pendingAllocationState = BrowserDownloadQualificationPendingAllocation()
+        pendingAllocation = pendingAllocationState
+        let securitySentinelState = BrowserDownloadSecuritySentinel(record: recorder.record)
+        securitySentinel = securitySentinelState
         #if targetEnvironment(simulator)
         let simulateReadback = ProcessInfo.processInfo.arguments.contains(
             BrowserDownloadProductionQualification.simulatedProtectionArgument,
@@ -225,10 +231,18 @@ private final class BrowserDownloadProductionQualificationProcess {
         scratch = BrowserDownloadScratchStore(remove: remove)
         #endif
         scratch.qualificationDiagnostic = { fields in
+            if let recordKind = fields["recordKind"] {
+                var inspection = fields
+                inspection["recordKind"] = nil
+                recorder.record(recordKind, inspection)
+                return
+            }
+
             var diagnostic = fields
             diagnostic["remainingFaultCount"] = String(removalFault.remainingFailures)
             recorder.record("scratchFailure", diagnostic)
         }
+        scratch.qualificationExpectedPriorOperation = pendingAllocationState.priorOperationID
         let downloadOwner = BrowserDownloadOwner(store: scratch)
         owner = downloadOwner
         let webKitAdapter = BrowserWebKitAdapter(requiresProfileConfiguration: true, downloadOwner: downloadOwner)
@@ -467,8 +481,52 @@ private final class BrowserDownloadProductionQualificationProcess {
                 "backupExcluded": String(values.isExcludedFromBackup == true),
                 "fixtureBytesMatch": String(bytes == BrowserDownloadLoopbackServer.fixturePDF),
             ])
+            pendingAllocation.record(operation: id, directory: url.deletingLastPathComponent())
         } catch {
             evidence.record("completedFileInspectionFailed", ["operation": id.rawValue.uuidString])
+        }
+    }
+
+    /// Pre-termination proof that this process's own completed allocation still exists. Reports
+    /// the opaque identifier plus existence booleans only; a missing identifier or a failed
+    /// verification records a negative check instead of fabricating evidence.
+    func checkPendingAllocation() {
+        let id = pendingAllocation.latestOperationID
+        let directory = pendingAllocation.latestDirectory
+        guard let id, let directory else {
+            evidence.record("pendingAllocationPreTerminationCheck", [
+                "operation": "unavailable",
+                "present": "false",
+                "verified": "false",
+            ])
+            return
+        }
+
+        let verified = (try? owner.qualificationCompletedFile(id)) != nil
+        let present = (try? FileManager.default.attributesOfItem(atPath: directory.path)) != nil
+        evidence.record("pendingAllocationPreTerminationCheck", [
+            "operation": id.rawValue.uuidString,
+            "present": String(present),
+            "verified": String(verified),
+        ])
+    }
+
+    /// Prepares the protected-data sentinel, arms the lock observers and the bounded background
+    /// assertion, then leaves the device lock itself to the operator.
+    ///
+    /// The sentinel accepts one qualification cycle per process. A preparation request that
+    /// arrives after that cycle has begun is refused, and the refusal is surfaced here as a status
+    /// message that names the required action, relaunching the host, instead of silently arming
+    /// nothing.
+    func prepareSecuritySentinel() {
+        switch securitySentinel.prepare() {
+        case .accepted:
+            status = "Sentinel armed: lock the device, wait about 20 seconds, then unlock and return to this app."
+        case .preparationFailed:
+            status = "Sentinel preparation failed: no qualification cycle is armed; relaunch the host before retrying."
+        case .refusedCycleAlreadyUsed:
+            status = "Sentinel preparation refused: this process already used its one qualification "
+                + "cycle; relaunch the host before preparing again."
         }
     }
 }
@@ -517,6 +575,10 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                             process.evidence.record("removalFaultArmed", ["remaining": "1"])
                         }
                         .accessibilityIdentifier("downloadQualificationArmRemovalFailure")
+                        Button("Check pending allocation") { process.checkPendingAllocation() }
+                            .accessibilityIdentifier("downloadQualificationCheckPendingAllocation")
+                        Button("Prepare security sentinel") { process.prepareSecuritySentinel() }
+                            .accessibilityIdentifier("downloadQualificationPrepareSecuritySentinel")
                     }
                 }
                 .accessibilityIdentifier("downloadQualificationControls")
@@ -532,6 +594,10 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                         .accessibilityIdentifier("downloadQualificationRefreshSceneCensus")
                     Button("Refresh observations") { process.refreshObservations() }
                         .accessibilityIdentifier("downloadQualificationRefreshObservations")
+                    Text("Sentinel: " + process.securitySentinel.stage)
+                        .font(.caption2)
+                        .accessibilityIdentifier("downloadQualificationSecuritySentinelStatus")
+                        .accessibilityValue(process.securitySentinel.stageSummary)
                 }
                 Text("Qualification observations")
                     .font(.caption2)
@@ -568,6 +634,38 @@ private final class BrowserDownloadQualificationRemovalFault {
 
         remainingFailures -= 1
         return true
+    }
+}
+
+/// Opaque completed-allocation correlation for the physical cold-relaunch qualification. Only a
+/// UUID is persisted, in this host's own defaults suite, so a relaunched process can recognize the
+/// previous process's allocation without ever storing a URL, filename, or content.
+@Observable
+@MainActor
+private final class BrowserDownloadQualificationPendingAllocation {
+    private static let suiteName = "BrowserDownloadQualificationPendingAllocation"
+    private static let key = "pendingOperation"
+
+    /// Opaque operation persisted by a previous process; read before any new admission.
+    let priorOperationID: UUID?
+    /// Identifier completed by this process; the matching directory stays in memory only.
+    private(set) var latestOperationID: BrowserDownloadID?
+    private(set) var latestDirectory: URL?
+
+    private let defaults = UserDefaults(suiteName: BrowserDownloadQualificationPendingAllocation.suiteName)
+
+    init() {
+        priorOperationID = defaults?
+            .string(forKey: BrowserDownloadQualificationPendingAllocation.key)
+            .flatMap(UUID.init(uuidString:))
+    }
+
+    /// Persists the opaque identifier only, so abrupt termination cannot lose the correlation.
+    func record(operation id: BrowserDownloadID, directory: URL) {
+        latestOperationID = id
+        latestDirectory = directory
+        defaults?.set(id.rawValue.uuidString, forKey: BrowserDownloadQualificationPendingAllocation.key)
+        defaults?.synchronize()
     }
 }
 

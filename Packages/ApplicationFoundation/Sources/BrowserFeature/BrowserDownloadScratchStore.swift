@@ -32,6 +32,11 @@ final class BrowserDownloadScratchStore {
     /// Optional, path-free diagnostics for the standalone qualification app. No observer is
     /// installed by production; failures still follow the same revocation and cleanup policy.
     var qualificationDiagnostic: (@MainActor ([String: String]) -> Void)?
+    /// Opaque operation identifier that a qualification launch expects to survive from its
+    /// previous process. The startup purge reports whether this exact allocation directory
+    /// existed immediately before removal; the value carries no URL, filename, or content.
+    /// Production never sets it.
+    var qualificationExpectedPriorOperation: UUID?
     private var qualificationStage = "none"
     private var qualificationResource = "root"
 
@@ -117,10 +122,45 @@ final class BrowserDownloadScratchStore {
     /// Purges only this dedicated root before the first admission of a process.
     func purgePreviousProcess() throws {
         try prepareDirectory(root)
+        #if DEBUG
+        if let qualificationDiagnostic {
+            let entryNames = try files.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+                .map(\.lastPathComponent)
+            qualificationDiagnostic(Self.purgeInspectionFields(
+                entryNames: entryNames,
+                expectedOperation: qualificationExpectedPriorOperation,
+            ))
+        }
+        #endif
         for item in try files.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) {
             try removeConfirmed(item)
         }
     }
+
+    #if DEBUG
+    /// Pure projection for the pre-removal startup purge inspection.
+    ///
+    /// Carries only the inspection stage, the number of entries found, whether every entry
+    /// name parses as a UUID directory, and — when the qualification host persisted one — the
+    /// opaque operation identifier that must be matched. No path, filename leaf, or content
+    /// value is emitted. An empty enumeration vacuously parses as UUID names; the count
+    /// disambiguates that case for readers.
+    static func purgeInspectionFields(entryNames: [String], expectedOperation: UUID?) -> [String: String] {
+        var fields = [
+            "recordKind": "scratchStartupPurgeInspection",
+            "phase": "startupPurge",
+            "stage": "startupPurgeInspection",
+            "resource": "root",
+            "preExistingCount": String(entryNames.count),
+            "entryNamesParseUUID": String(entryNames.allSatisfy { UUID(uuidString: $0) != nil }),
+        ]
+        fields["expectedOperation"] = expectedOperation?.uuidString ?? "unavailable"
+        if let expectedOperation {
+            fields["expectedPresent"] = String(entryNames.contains { UUID(uuidString: $0) == expectedOperation })
+        }
+        return fields
+    }
+    #endif
 
     /// Allocates ownership before filesystem work, so a partially created directory stays recoverable.
     func allocation(id: BrowserDownloadID, suggestedName: String) -> BrowserDownloadAllocation {

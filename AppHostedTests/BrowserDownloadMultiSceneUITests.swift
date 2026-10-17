@@ -27,17 +27,29 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
     private struct SceneCensus: Codable {
         let capturedMonotonicSeconds: String
         let distinctSessionIDs: Int
-        let ownerGeneration: String
         let rootLayoutObservations: [Observation]
         let connectedWindowScenes: [WindowScene]
         let latestCoordinatorObservations: [Observation]
     }
 
+    /// One connected UIKit window scene as recorded by the qualification host census.
     private struct WindowScene: Codable {
         let sessionID: String
         let activation: String
         let activationRawValue: String
         let bounds: String
+        let windows: [SceneWindow]
+    }
+
+    /// Geometry of one UIWindow attached to a connected scene, exactly as the host recorded it.
+    /// `hidden` and `alpha` describe on-screen visibility, and `rootViewBounds` is the loaded
+    /// root view's bounds, or the host's `"unloaded"` placeholder before the view is loaded.
+    private struct SceneWindow: Codable {
+        let frame: String
+        let bounds: String
+        let hidden: String
+        let alpha: String
+        let rootViewBounds: String
     }
 
     private struct ControlScope {
@@ -164,8 +176,18 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             baselineSessionIDs: Set(baseline.connectedWindowScenes.map(\.sessionID)),
             runID: runID,
             requestedAt: requestedAt,
+            requiringActiveSceneSafeRoot: true,
         )
-        let active = try XCTUnwrap(before.connectedWindowScenes.first { $0.activation == "foregroundActive" })
+        // Historical pre-gesture evidence: the census wait above requires the host's safe Root
+        // layout confirmation for the active scene, so the gesture cannot begin before it exists.
+        // A real system resize does not change the SwiftUI render token that governs those
+        // confirmations, so the host emits no second confirmation for the new bounds; the
+        // post-gesture witness below verifies the resize from scene and window geometry instead.
+        let (active, preResizeRoot) = try XCTUnwrap(
+            activeSceneSafeRoot(in: before, runID: runID),
+            "The active scene must have a confirmed safe Root layout before the resize gesture.",
+        )
+        attach(preResizeRoot, named: "historical pre-resize Root layout confirmation")
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let cardID = "card:com.danielbyon.mediavault.browserdownloadqualificationhost:sceneID:"
             + "com.danielbyon.mediavault.browserdownloadqualificationhost-" + active.sessionID
@@ -211,30 +233,152 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         ))
         let destination = start.withOffset(CGVector(dx: -applicationFrame.width / 4, dy: -applicationFrame.height / 4))
         start.press(forDuration: 0.2, thenDragTo: destination)
-        let after = try refreshCensus(
-            in: app,
-            newerThan: gestureStart,
-            milestone: "real resized scene and safe Root layout",
-        ) {
-            guard let scene = $0.connectedWindowScenes.first(where: { $0.sessionID == active.sessionID }),
-                  scene.activation == "foregroundActive", scene.bounds != active.bounds
-            else {
-                return false
+        var witnessFailure: String?
+        let after: SceneCensus
+        do {
+            after = try refreshCensus(
+                in: app,
+                newerThan: gestureStart,
+                milestone: "real resized scene geometry and usable qualification controls",
+            ) {
+                witnessFailure = self.resizedSceneWitnessFailure(
+                    $0,
+                    activeSceneID: active.sessionID,
+                    baselineBounds: active.bounds,
+                    runID: runID,
+                )
+                return witnessFailure == nil
             }
-
-            let generation = $0.ownerGeneration
-            return $0.rootLayoutObservations.contains {
-                $0["event"] == "rootLayoutConfirmed" && $0["runID"] == runID && $0["sceneSession"] == scene.sessionID
-                    && $0["generation"] == generation && $0["sceneBounds"] == scene.bounds
-                    && ($0["monotonicSeconds"].flatMap { Double($0) } ?? -1) > gestureStart
-                    && $0["rootProof"] == "true" && $0["nativeBarrier"] == "false" && $0["coverVisible"] == "false"
-            }
+        } catch {
+            attach(
+                witnessFailure ?? "no census evaluated the resize witness",
+                named: "last failure from the post-resize geometry witness",
+            )
+            throw error
         }
-        attach(after, named: "actual resized scene geometry and production Root layout")
+        attach(after, named: "actual resized scene geometry and window witness")
+        try wait(app, milestone: "post-resize qualification controls remain usable") {
+            self.hittableButton("downloadQualificationRefreshObservations", in: app) != nil
+                && self.hittableButton("downloadQualificationMarkResizeGesture", in: app) != nil
+        }
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "actual system-resized qualification window"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+
+    /// Parses the host's `String(describing:)` rectangle format, for example
+    /// `"(0.0, 0.0, 523.0, 813.0)"`. Returns `nil` for any other input, including the host's
+    /// `"unloaded"` placeholder for a window root view that has never been loaded.
+    private func parsedRect(_ description: String) -> CGRect? {
+        let stripped = description.trimmingCharacters(in: CharacterSet(charactersIn: "() "))
+        let parts = stripped.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 4,
+              let x = Double(parts[0]), let y = Double(parts[1]),
+              let width = Double(parts[2]), let height = Double(parts[3]),
+              [x, y, width, height].allSatisfy(\.isFinite)
+        else {
+            return nil
+        }
+
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Compares rectangles parsed from host descriptions. Both sides round-trip through the same
+    /// decimal string format, so a difference beyond a sub-point epsilon is a real change.
+    private func rectsMatch(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.origin.x - rhs.origin.x) < 0.001
+            && abs(lhs.origin.y - rhs.origin.y) < 0.001
+            && abs(lhs.size.width - rhs.size.width) < 0.001
+            && abs(lhs.size.height - rhs.size.height) < 0.001
+    }
+
+    /// The scene's single visible window, or `nil` when that is not exactly one window. The
+    /// fixture presents the privacy cover as its own scene-attached window, so a visible cover
+    /// appears as a second non-hidden window and this check then fails.
+    private func singleVisibleSceneWindow(in scene: WindowScene) -> SceneWindow? {
+        let visibleWindows = scene.windows.filter { window in
+            window.hidden == "false" && (Double(window.alpha) ?? 0) > 0
+        }
+        return visibleWindows.count == 1 ? visibleWindows.first : nil
+    }
+
+    /// The most recent qualification observation the host recorded for one scene in this run.
+    private func latestSceneObservation(sceneID: String, runID: String, in census: SceneCensus) -> Observation? {
+        census.latestCoordinatorObservations.last {
+            $0["sceneSession"] == sceneID && $0["runID"] == runID
+        }
+    }
+
+    /// The foreground-active scene from the census together with its most recent safe Root layout
+    /// confirmation in this run, or `nil` while either is missing. A confirmation counts as safe
+    /// baseline evidence only when the host recorded `rootProof` as `"true"` with no visible
+    /// privacy cover and no native barrier for the same scene and run.
+    private func activeSceneSafeRoot(
+        in census: SceneCensus,
+        runID: String,
+    ) -> (scene: WindowScene, confirmation: Observation)? {
+        guard let scene = census.connectedWindowScenes.first(where: { $0.activation == "foregroundActive" }),
+              let confirmation = census.rootLayoutObservations.last(where: {
+                  $0["event"] == "rootLayoutConfirmed" && $0["runID"] == runID
+                      && $0["sceneSession"] == scene.sessionID && $0["rootProof"] == "true"
+                      && $0["coverVisible"] == "false" && $0["nativeBarrier"] == "false"
+              })
+        else {
+            return nil
+        }
+
+        return (scene, confirmation)
+    }
+
+    /// `nil` when a census captured after the resize gesture shows the active scene session still
+    /// foreground-active with new bounds, exactly one visible attached window whose frame,
+    /// bounds and loaded root view bounds all match the new scene bounds, and no privacy cover
+    /// reported for the scene; otherwise the first condition that does not hold. This is the
+    /// retry predicate for `refreshCensus`, so the caller keeps the last returned reason as its
+    /// timeout diagnosis. A real system resize does not change the SwiftUI render token that
+    /// governs `rootLayoutConfirmed`, so this witness verifies the resize from scene and window
+    /// geometry plus the latest cover-visibility record instead of a new confirmation.
+    private func resizedSceneWitnessFailure(
+        _ census: SceneCensus,
+        activeSceneID: String,
+        baselineBounds: String,
+        runID: String,
+    ) -> String? {
+        guard let baseline = parsedRect(baselineBounds) else {
+            return "the pre-gesture baseline bounds are not parseable"
+        }
+        guard let scene = census.connectedWindowScenes.first(where: { $0.sessionID == activeSceneID }) else {
+            return "the active scene session \(activeSceneID) is no longer connected"
+        }
+        guard scene.activation == "foregroundActive" else {
+            return "the active scene session is no longer foreground-active"
+        }
+        guard let resizedBounds = parsedRect(scene.bounds) else {
+            return "the resized scene bounds are not parseable"
+        }
+        guard !rectsMatch(resizedBounds, baseline) else {
+            return "the scene bounds still match the pre-gesture baseline"
+        }
+        guard let window = singleVisibleSceneWindow(in: scene) else {
+            return "the scene does not have exactly one visible attached window"
+        }
+        guard let windowFrame = parsedRect(window.frame), rectsMatch(windowFrame, resizedBounds) else {
+            return "the attached window frame does not match the resized scene bounds"
+        }
+        guard let windowBounds = parsedRect(window.bounds), rectsMatch(windowBounds, resizedBounds) else {
+            return "the attached window bounds do not match the resized scene bounds"
+        }
+        guard let rootViewBounds = parsedRect(window.rootViewBounds), rectsMatch(rootViewBounds, resizedBounds) else {
+            return "the loaded root view bounds do not match the resized scene bounds"
+        }
+        guard let observation = latestSceneObservation(sceneID: activeSceneID, runID: runID, in: census),
+              observation["coverVisible"] == "false"
+        else {
+            return "the latest observation for the resized scene does not report an uncovered scene"
+        }
+
+        return nil
     }
 
     private func assertFreshNavigation(in app: XCUIApplication, runID: String) throws {
@@ -298,8 +442,13 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             return proof != nil
         }
         let completed = try XCTUnwrap(proof)
-        XCTAssertEqual(completed["bytes"], "16777827")
-        XCTAssertEqual(completed["sha256"], "8816500369189a8354a2fa88a75f9550efeae8a45b447525d862eb45ddbe02df")
+        // The attachment route serves BrowserDownloadLoopbackServer.fixturePDF (608 bytes).
+        // The UI-test bundle cannot import that AppHostedTests unit-test target symbol, so the
+        // current fixture identity is pinned here; fixtureBytesMatch proves the host compared
+        // the served bytes byte-for-byte against the fixture.
+        XCTAssertEqual(completed["bytes"], "608")
+        XCTAssertEqual(completed["sha256"], "852ba89aa0d708405217efd9cc3d014f4a1cc48ed1895748a1e1d9540f97bd79")
+        XCTAssertEqual(completed["fixtureBytesMatch"], "true")
         XCTAssertEqual(completed["backupExcluded"], "true")
         XCTAssertEqual(completed["nativeProtection"], "UNVERIFIED")
         XCTAssertEqual(completed["protectionMode"], "simulatedReadback")
@@ -330,14 +479,19 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         return try XCTUnwrap(events.last { $0["event"] == "sceneRequested" })
     }
 
+    /// Waits for a census captured after the scene request that shows the new mounted session
+    /// and, when `requiringActiveSceneSafeRoot` is set, also that the census already carries the
+    /// safe Root layout confirmation for its foreground-active scene.
     private func freshCensusWithNewMountedScene(
         in app: XCUIApplication,
         baselineSessionIDs: Set<String>,
         runID: String,
         requestedAt: Double,
+        requiringActiveSceneSafeRoot: Bool = false,
     ) throws -> SceneCensus {
         try refreshCensus(in: app, newerThan: requestedAt, milestone: "new mounted session after scene request") {
             self.hasNewMountedScene($0, baselineSessionIDs: baselineSessionIDs, runID: runID)
+                && (!requiringActiveSceneSafeRoot || self.activeSceneSafeRoot(in: $0, runID: runID) != nil)
         }
     }
 

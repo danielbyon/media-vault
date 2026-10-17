@@ -905,6 +905,62 @@ struct BrowserDownloadCoreTests {
         #expect(store.state.downloads == revoked)
         #expect(store.state.tabs == tabs)
     }
+
+    #if DEBUG
+    /// The startup-purge projection reports the persisted expectation, the enumerated count, and
+    /// whether every entry name parses as a UUID without ever carrying a path, filename leaf, or
+    /// content value.
+    @Test
+    func purgeInspectionFieldsCarryExpectationAndParsabilityOnly() {
+        let expected = UUID()
+        let fields = BrowserDownloadScratchStore.purgeInspectionFields(
+            entryNames: [expected.uuidString],
+            expectedOperation: expected,
+        )
+        #expect(fields["recordKind"] == "scratchStartupPurgeInspection")
+        #expect(fields["expectedOperation"] == expected.uuidString)
+        #expect(fields["expectedPresent"] == "true")
+        #expect(fields["preExistingCount"] == "1")
+        #expect(fields["entryNamesParseUUID"] == "true")
+        #expect(
+            Set(fields.keys) == [
+                "recordKind",
+                "phase",
+                "stage",
+                "resource",
+                "preExistingCount",
+                "entryNamesParseUUID",
+                "expectedOperation",
+                "expectedPresent",
+            ],
+        )
+    }
+
+    /// An expectation that is absent from the enumeration still reports a parsable directory whose
+    /// names identify no matching operation, and unparsable names surface as a negative parse.
+    @Test
+    func purgeInspectionFieldsReportAbsentExpectationAndUnparsableEntries() {
+        let expected = UUID()
+        let fields = BrowserDownloadScratchStore.purgeInspectionFields(
+            entryNames: [UUID().uuidString, "not-a-uuid"],
+            expectedOperation: expected,
+        )
+        #expect(fields["expectedPresent"] == "false")
+        #expect(fields["preExistingCount"] == "2")
+        #expect(fields["entryNamesParseUUID"] == "false")
+    }
+
+    /// Without a persisted operation the projection omits the presence key entirely and an empty
+    /// enumeration vacuously parses as UUID names.
+    @Test
+    func purgeInspectionFieldsOmitExpectedPresenceWithoutPersistedOperation() {
+        let fields = BrowserDownloadScratchStore.purgeInspectionFields(entryNames: [], expectedOperation: nil)
+        #expect(fields["expectedOperation"] == "unavailable")
+        #expect(fields["expectedPresent"] == nil)
+        #expect(fields["preExistingCount"] == "0")
+        #expect(fields["entryNamesParseUUID"] == "true")
+    }
+    #endif
 }
 
 /// Test writer with an explicit terminal barrier; cancellation does not stop it automatically.

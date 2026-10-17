@@ -217,8 +217,12 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
             return proof != nil
         }
         let result = try XCTUnwrap(proof)
-        XCTAssertEqual(result["bytes"], "16777827")
-        XCTAssertEqual(result["sha256"], "8816500369189a8354a2fa88a75f9550efeae8a45b447525d862eb45ddbe02df")
+        // The attachment route serves BrowserDownloadLoopbackServer.fixturePDF (608 bytes).
+        // The UI-test bundle cannot import that AppHostedTests unit-test target symbol, so the
+        // current fixture identity is pinned here; fixtureBytesMatch below verifies the served
+        // bytes byte-for-byte against the fixture.
+        XCTAssertEqual(result["bytes"], "608")
+        XCTAssertEqual(result["sha256"], "852ba89aa0d708405217efd9cc3d014f4a1cc48ed1895748a1e1d9540f97bd79")
         XCTAssertEqual(result["backupExcluded"], "true")
         XCTAssertEqual(result["fixtureBytesMatch"], "true")
         #if targetEnvironment(simulator)
