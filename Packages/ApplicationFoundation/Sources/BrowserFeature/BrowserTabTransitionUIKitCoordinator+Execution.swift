@@ -100,10 +100,16 @@ extension BrowserTabTransitionUIKitCoordinator {
         guard let destinationView = registry.view(for: role),
               let destinationRect = registry.frame(for: role, in: overlay)
         else {
+            #if DEBUG
+            recordQualificationState("transitionDestinationGuard", details: ["guard": "registrationOrGeometry"])
+            #endif
             handleUnreadyDestination(retryMissingDestination: true)
             return
         }
         guard prepareDestinationIfNeeded() else {
+            #if DEBUG
+            recordQualificationState("transitionDestinationGuard", details: ["guard": "preparation"])
+            #endif
             handleUnreadyDestination(
                 retryMissingDestination: false,
                 prepareDestination: false,
@@ -111,6 +117,9 @@ extension BrowserTabTransitionUIKitCoordinator {
             return
         }
         guard !session.destinationReadiness.requiresReadySurface || registry.isReady(for: role) else {
+            #if DEBUG
+            recordQualificationState("transitionDestinationGuard", details: ["guard": "readiness"])
+            #endif
             handleUnreadyDestination(
                 retryMissingDestination: false,
                 prepareDestination: false,

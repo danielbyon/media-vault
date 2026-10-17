@@ -7,7 +7,7 @@
 
 import Testing
 
-/// Shared serialized parent suite for every app-hosted test suite in this target.
+/// Shared serialized parent suite for the app-hosted test target.
 ///
 /// App-hosted tests mount real UIWindow scenes and drive WebKit contexts owned by
 /// BrowserWebKitAdapter.shared. Swift Testing executes tests and suites concurrently by
@@ -15,8 +15,8 @@ import Testing
 /// can interleave and observe each other's partially torn-down process-level state.
 ///
 /// Nesting every suite that touches the app-hosted environment beneath this parent and
-/// marking the parent `.serialized` makes Swift Testing run the entire subtree one test at
-/// a time: sibling child suites cannot execute concurrently with one another. The trait is
+/// marking the parent .serialized makes Swift Testing run the entire subtree one test at a
+/// time: sibling child suites cannot execute concurrently with one another. The trait is
 /// inherited by nested suites, so a child does not need to repeat it.
 ///
 /// Add new app-hosted suites as nested types in an extension of this type rather than as

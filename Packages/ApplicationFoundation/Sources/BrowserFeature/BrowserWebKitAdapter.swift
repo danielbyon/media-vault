@@ -31,8 +31,16 @@ final class BrowserWebKitAdapter: NSObject {
     private var browsingProfile: BrowserBrowsingProfile = .persistentPrivate
     private var ephemeralWebsiteDataStore: WKWebsiteDataStore?
     private var hasConfiguredProfile: Bool
+    /// Internal fixture witnesses expose configuration and native error codes without URLs.
+    var profileIsConfigured: Bool {
+        hasConfiguredProfile
+    }
+
+    var nativeNavigationFailureObserver: (@MainActor (String, Int) -> Void)?
     private var continuations: [UUID: AsyncStream<BrowserWebKitEvent>.Continuation] = [:]
     private var popupOpenersThisTurn: Set<BrowserTabID> = []
+    /// Shared-browser ownership survives view remounts and tab surface detachment.
+    fileprivate let downloadOwner: BrowserDownloadOwner
     private let makeTabID: () -> BrowserTabID
     private let makeWebView: @MainActor (CGRect, WKWebViewConfiguration) -> WKWebView
     private let snapshotter: @MainActor (
@@ -44,8 +52,13 @@ final class BrowserWebKitAdapter: NSObject {
     /// Test-only observation seam for actual adapter attachment operations.
     var attachmentObserver: ((BrowserWebKitAttachmentEvent) -> Void)?
 
+    /// Observes an actual native handoff after policy/origin validation. Tests retain only identity
+    /// and origin observations; the callback does not admit, cancel or extend writer ownership.
+    var downloadHandoffObserver: (@MainActor (WKDownload, BrowserTabID) -> Void)?
+
     init(
         requiresProfileConfiguration: Bool = false,
+        downloadOwner: BrowserDownloadOwner? = nil,
         makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init,
         makeWebView: @escaping @MainActor (CGRect, WKWebViewConfiguration) -> WKWebView = {
             frame,
@@ -60,6 +73,7 @@ final class BrowserWebKitAdapter: NSObject {
         },
     ) {
         hasConfiguredProfile = !requiresProfileConfiguration
+        self.downloadOwner = downloadOwner ?? .shared
         self.makeTabID = makeTabID
         self.makeWebView = makeWebView
         self.snapshotter = snapshotter
@@ -67,6 +81,30 @@ final class BrowserWebKitAdapter: NSObject {
 
     var contextCount: Int {
         contexts.count
+    }
+
+    /// Converts framework ownership only when the download still originates from the exact live tab.
+    fileprivate func receiveDownload(
+        _ download: WKDownload,
+        tabID: BrowserTabID,
+        association: BrowserWebKitDownloadAssociation.Handoff?,
+    ) {
+        guard !downloadOwner.owns(download) else {
+            downloadOwner.releaseAdmissionReservation(association?.admissionToken)
+            return
+        }
+
+        let transfer = BrowserWKDownloadTransfer(download: download, owner: downloadOwner)
+        guard let association, let context = contexts[tabID], download.webView === context.webView else {
+            downloadOwner.releaseAdmissionReservation(association?.admissionToken)
+            downloadOwner.reject(transfer, notice: .invalidOrigin)
+            return
+        }
+
+        downloadHandoffObserver?(download, tabID)
+        if let id = downloadOwner.admit(transfer, tabID: tabID, using: association.admissionToken) {
+            transfer.registered(id)
+        }
     }
 
     func hasContext(for tabID: BrowserTabID) -> Bool {
@@ -112,11 +150,13 @@ final class BrowserWebKitAdapter: NSObject {
 
     /// Resolves tab-owned modal UI and releases the tab's platform context.
     func destroyContext(for tabID: BrowserTabID) {
+        downloadOwner.revokeTab(tabID)
         guard let context = contexts.removeValue(forKey: tabID) else {
             return
         }
 
         context.resolvePendingDialog()
+        context.releasePendingDownloadReservations()
         context.adapter = nil
         context.webView.stopLoading()
         context.webView.navigationDelegate = nil
@@ -312,6 +352,7 @@ final class BrowserWebKitAdapter: NSObject {
             return
         }
 
+        downloadOwner.revokeAll()
         let ownedTabIDs = Array(contexts.keys)
         retiredTabIDs.formUnion(retiringTabIDs)
         retiredTabIDs.formUnion(ownedTabIDs)
@@ -393,10 +434,11 @@ struct BrowserWebKitCommittedURLProjection: Equatable, Sendable {
     }
 }
 
+/// Retains only a weak identity handle, so retiring a navigation does not extend its lifetime.
 private final class BrowserWebKitNavigationReference {
-    weak var value: WKNavigation?
+    weak var value: AnyObject?
 
-    init(_ value: WKNavigation) {
+    init(_ value: AnyObject) {
         self.value = value
     }
 }
@@ -406,7 +448,7 @@ private final class BrowserWebKitNavigationReference {
 /// WebKit KVO change handlers are not main-actor-isolated, so they cannot read the correlation
 /// tracker directly. They capture this snapshot instead and re-validate it on the main actor before
 /// emitting metadata, which keeps a delayed observation from being attributed to a later navigation.
-private struct BrowserWebKitMetadataEpoch: Sendable {
+struct BrowserWebKitMetadataEpoch: Sendable {
     /// Correlation generation that was current when the observation was delivered.
     let generation: Int
 
@@ -419,7 +461,7 @@ private struct BrowserWebKitMetadataEpoch: Sendable {
 /// The correlation tracker changes only on the main actor and republishes the resulting epoch after
 /// every change. Nonisolated WebKit observations read the latest published epoch without touching
 /// main-actor state.
-private final class BrowserWebKitMetadataEpochStore: Sendable {
+final class BrowserWebKitMetadataEpochStore: Sendable {
     private let epoch = Mutex(BrowserWebKitMetadataEpoch(generation: 0, operationID: nil))
 
     /// Records the epoch that matches the tracker state after a correlation change.
@@ -435,15 +477,133 @@ private final class BrowserWebKitMetadataEpochStore: Sendable {
     }
 }
 
+/// A download policy decision is consumed once even when its top-level navigation was superseded.
+/// Each decision has its own reservation identity; subframes do not borrow main-navigation state.
+@MainActor
+struct BrowserWebKitDownloadAssociation {
+    struct Handoff {
+        let admissionToken: BrowserDownloadOwner.AdmissionToken?
+        let completion: BrowserWebKitNavigationCorrelation.Completion?
+    }
+
+    let reservationID: UUID
+    let conversion: BrowserWebKitNavigationCorrelation.DownloadConversion?
+    let admissionToken: BrowserDownloadOwner.AdmissionToken?
+    private var consumed = false
+
+    init(
+        conversion: BrowserWebKitNavigationCorrelation.DownloadConversion?,
+        admissionToken: BrowserDownloadOwner.AdmissionToken? = nil,
+    ) {
+        reservationID = UUID()
+        self.conversion = conversion
+        self.admissionToken = admissionToken
+    }
+
+    mutating func consume(correlation: inout BrowserWebKitNavigationCorrelation) -> Handoff? {
+        guard !consumed else {
+            return nil
+        }
+
+        consumed = true
+        return Handoff(
+            admissionToken: admissionToken,
+            completion: conversion.flatMap { correlation.settleDownloadConversion($0) },
+        )
+    }
+}
+
+/// Tracks policy objects without retaining them past WebKit's conversion or cancellation callback.
+/// A dead policy object identifies only its own abandoned reservation; main-navigation completion
+/// is matched separately through the conversion generation.
+@MainActor
+struct BrowserWebKitDownloadAssociationRegistry {
+    @MainActor
+    private final class Entry {
+        weak var policyObject: AnyObject?
+        let association: BrowserWebKitDownloadAssociation
+
+        init(policyObject: AnyObject, association: BrowserWebKitDownloadAssociation) {
+            self.policyObject = policyObject
+            self.association = association
+        }
+    }
+
+    private var entries: [UUID: Entry] = [:]
+
+    mutating func insert(_ association: BrowserWebKitDownloadAssociation, forPolicyObject policyObject: AnyObject) {
+        entries[association.reservationID] = Entry(policyObject: policyObject, association: association)
+    }
+
+    mutating func take(forPolicyObject policyObject: AnyObject) -> BrowserWebKitDownloadAssociation? {
+        guard let reservationID = entries.first(where: { $0.value.policyObject === policyObject })?.key else {
+            return nil
+        }
+
+        return entries.removeValue(forKey: reservationID)?.association
+    }
+
+    @discardableResult
+    mutating func releaseAbandonedAssociations(owner: BrowserDownloadOwner?) -> [UUID] {
+        let reservationIDs = entries.compactMap { $0.value.policyObject == nil ? $0.key : nil }
+        release(reservationIDs, owner: owner)
+        return reservationIDs
+    }
+
+    mutating func releaseReservations(
+        forFinishedNavigation completion: BrowserWebKitNavigationCorrelation.Completion,
+        owner: BrowserDownloadOwner?,
+    ) {
+        releaseReservations(forNavigationGeneration: completion.navigationGeneration, owner: owner)
+    }
+
+    mutating func releaseReservations(forNavigationGeneration generation: Int, owner: BrowserDownloadOwner?) {
+        let reservationIDs = entries.compactMap { entry in
+            entry.value.association.conversion?.navigationGeneration == generation ? entry.key : nil
+        }
+        release(reservationIDs, owner: owner)
+    }
+
+    mutating func releaseAll(owner: BrowserDownloadOwner?) {
+        release(Array(entries.keys), owner: owner)
+    }
+
+    func contains(reservationID: UUID) -> Bool {
+        entries[reservationID] != nil
+    }
+
+    private mutating func release(_ reservationIDs: [UUID], owner: BrowserDownloadOwner?) {
+        for reservationID in reservationIDs {
+            guard let entry = entries.removeValue(forKey: reservationID) else {
+                continue
+            }
+
+            owner?.releaseAdmissionReservation(entry.association.admissionToken)
+        }
+    }
+}
+
 /// Keeps one WebKit context's reducer-operation identity and delegate-navigation lifecycle together.
 ///
 /// WebKit may deliver callbacks for an older navigation after a newer command has been issued, and
 /// some history commands complete without returning a `WKNavigation` at all. Keeping those cases
 /// in one tracker makes the accepted-current-navigation rule explicit at every delegate boundary.
+///
+/// The internal tracker accepts opaque reference objects because it compares identity only and
+/// never calls navigation APIs. Production delegates supply WebKit-created `WKNavigation` objects;
+/// deterministic tests can supply ordinary reference tokens without constructing native navigations.
+/// Weak retirement handles preserve the same lifetime and `ObjectIdentifier` rules for both.
 @MainActor
-private struct BrowserWebKitNavigationCorrelation {
+struct BrowserWebKitNavigationCorrelation {
+    /// Captured at the policy boundary, independent of later KVO and registration epochs.
+    struct DownloadConversion: Equatable {
+        fileprivate let navigationGeneration: Int
+        let operationID: BrowserNavigationOperationID?
+    }
+
     struct Completion {
         let operationID: BrowserNavigationOperationID?
+        let navigationGeneration: Int
     }
 
     private(set) var hasCommittedDocument = false
@@ -456,11 +616,35 @@ private struct BrowserWebKitNavigationCorrelation {
     private var activeNavigationReference: BrowserWebKitNavigationReference?
     private var supersededNavigations: [BrowserWebKitNavigationReference] = []
     private(set) var generation = 0
+    private var navigationGeneration = 0
+    private var pendingOperationID: BrowserNavigationOperationID?
+    private var downloadConversionIsPending = false
+    private var downloadConversionIsSettled = false
+    private var convertedNavigations: [BrowserWebKitNavigationReference] = []
+
+    /// Returns the generation used to match pending download conversions to navigation callbacks.
+    fileprivate func currentNavigationGeneration() -> Int {
+        navigationGeneration
+    }
+
+    var hasActiveNavigation: Bool {
+        isAwaitingNavigationRegistration || activeNavigationIdentifier != nil || hasActiveUnidentifiedNavigation
+    }
+
+    /// Conversion never publishes provisional metadata as a newly committed page.
+    var acceptsMetadataObservations: Bool {
+        !downloadConversionIsPending
+    }
+
+    /// Accepts fresh observations after settlement while rejecting work queued under an older epoch.
+    func acceptsMetadataObservation(_ epoch: BrowserWebKitMetadataEpoch) -> Bool {
+        acceptsMetadataObservations && epoch.generation == generation
+    }
 
     /// Lock-protected mirror of this tracker's epoch, read by nonisolated WebKit observations.
     private let metadataEpoch: BrowserWebKitMetadataEpochStore
 
-    init(metadataEpoch: BrowserWebKitMetadataEpochStore) {
+    init(metadataEpoch: BrowserWebKitMetadataEpochStore = .init()) {
         self.metadataEpoch = metadataEpoch
         publishMetadataEpoch()
     }
@@ -469,7 +653,7 @@ private struct BrowserWebKitNavigationCorrelation {
         supersededNavigations.removeAll { $0.value == nil }
     }
 
-    private mutating func rememberSupersededNavigation(_ navigation: WKNavigation?) {
+    private mutating func rememberSupersededNavigation(_ navigation: AnyObject?) {
         pruneSupersededNavigations()
         guard let navigation else {
             return
@@ -478,27 +662,51 @@ private struct BrowserWebKitNavigationCorrelation {
         supersededNavigations.append(.init(navigation))
     }
 
-    mutating func beginNavigation() {
+    mutating func beginNavigation(operationID: BrowserNavigationOperationID) {
         rememberSupersededNavigation(activeNavigationReference?.value)
-        wasCommittedBeforeNavigation = hasCommittedDocument
+        wasCommittedBeforeNavigation = hasCommittedDocument || wasCommittedBeforeNavigation
         hasCommittedDocument = false
         activeNavigationIdentifier = nil
         activeNavigationReference = nil
         isAwaitingNavigationRegistration = true
         hasActiveUnidentifiedNavigation = false
         operationIDs.removeAll(keepingCapacity: true)
+        pendingOperationID = operationID
+        navigationGeneration &+= 1
+        downloadConversionIsPending = false
+        downloadConversionIsSettled = false
         generation &+= 1
         publishMetadataEpoch()
     }
 
     /// Registers the navigation returned by a command. Returns `false` for a synchronous no-op.
     mutating func register(
-        _ navigation: WKNavigation?,
+        _ navigation: AnyObject?,
         operationID: BrowserNavigationOperationID,
     ) -> Bool {
+        // A synchronous conversion can settle before the command returns its WKNavigation.
+        // That return must not revive the consumed operation or emit page-completion metadata.
+        guard pendingOperationID == operationID else {
+            rememberSupersededNavigation(navigation)
+            return true
+        }
+
         isAwaitingNavigationRegistration = false
+        pendingOperationID = nil
         generation &+= 1
+        if downloadConversionIsSettled {
+            if let navigation {
+                convertedNavigations.append(.init(navigation))
+            }
+            publishMetadataEpoch()
+            return true
+        }
         guard let navigation else {
+            // A policy handoff is still outstanding; nil is not an ordinary history no-op.
+            if downloadConversionIsPending {
+                publishMetadataEpoch()
+                return true
+            }
             hasCommittedDocument = wasCommittedBeforeNavigation
             publishMetadataEpoch()
             return false
@@ -515,7 +723,7 @@ private struct BrowserWebKitNavigationCorrelation {
     }
 
     /// Accepts an unregistered navigation created outside the reducer command path.
-    mutating func acceptExternalNavigation(_ navigation: WKNavigation?) -> Bool {
+    mutating func acceptExternalNavigation(_ navigation: AnyObject?) -> Bool {
         if navigation == nil {
             guard !isAwaitingNavigationRegistration else {
                 return false
@@ -527,11 +735,15 @@ private struct BrowserWebKitNavigationCorrelation {
             }
 
             rememberSupersededNavigation(activeNavigationReference?.value)
+            wasCommittedBeforeNavigation = hasCommittedDocument || wasCommittedBeforeNavigation
             hasCommittedDocument = false
             operationIDs.removeAll(keepingCapacity: true)
             activeNavigationIdentifier = nil
             activeNavigationReference = nil
             hasActiveUnidentifiedNavigation = true
+            navigationGeneration &+= 1
+            downloadConversionIsPending = false
+            downloadConversionIsSettled = false
             generation &+= 1
             publishMetadataEpoch()
             return true
@@ -542,7 +754,9 @@ private struct BrowserWebKitNavigationCorrelation {
 
         let navigationIdentifier = ObjectIdentifier(navigation)
         pruneSupersededNavigations()
+        convertedNavigations.removeAll { $0.value == nil }
         guard !isAwaitingNavigationRegistration,
+              !convertedNavigations.contains(where: { $0.value === navigation }),
               !supersededNavigations.contains(where: { $0.value === navigation }),
               operationIDs[navigationIdentifier] == nil,
               activeNavigationIdentifier != navigationIdentifier
@@ -550,17 +764,32 @@ private struct BrowserWebKitNavigationCorrelation {
             return false
         }
 
+        // Retire the previous identity, including a conversion awaiting its didBecome callback.
+        // A distinct provisional start owns a new generation; the old policy capture cannot settle it.
+        if downloadConversionIsPending, let converted = activeNavigationReference?.value {
+            convertedNavigations.append(.init(converted))
+        } else {
+            rememberSupersededNavigation(activeNavigationReference?.value)
+        }
+        wasCommittedBeforeNavigation = hasCommittedDocument || wasCommittedBeforeNavigation
         hasCommittedDocument = false
         operationIDs.removeAll(keepingCapacity: true)
         activeNavigationIdentifier = navigationIdentifier
         activeNavigationReference = .init(navigation)
         hasActiveUnidentifiedNavigation = false
+        navigationGeneration &+= 1
+        downloadConversionIsPending = false
+        downloadConversionIsSettled = false
         generation &+= 1
         publishMetadataEpoch()
         return true
     }
 
-    func isCurrent(_ navigation: WKNavigation?) -> Bool {
+    func isCurrent(_ navigation: AnyObject?) -> Bool {
+        guard !downloadConversionIsPending, !downloadConversionIsSettled else {
+            return false
+        }
+
         if let navigation {
             guard let activeNavigationIdentifier else {
                 return false
@@ -572,7 +801,7 @@ private struct BrowserWebKitNavigationCorrelation {
         return hasActiveUnidentifiedNavigation
     }
 
-    mutating func commit(_ navigation: WKNavigation?) -> Bool {
+    mutating func commit(_ navigation: AnyObject?) -> Bool {
         guard isCurrent(navigation) else {
             return false
         }
@@ -581,22 +810,26 @@ private struct BrowserWebKitNavigationCorrelation {
         return true
     }
 
-    mutating func finish(_ navigation: WKNavigation?) -> Completion? {
+    mutating func finish(_ navigation: AnyObject?) -> Completion? {
         guard isCurrent(navigation) else {
             return nil
         }
 
+        let completedNavigationGeneration = navigationGeneration
         hasCommittedDocument = true
         if navigation == nil {
             hasActiveUnidentifiedNavigation = false
-            return Completion(operationID: nil)
+            return Completion(operationID: nil, navigationGeneration: completedNavigationGeneration)
         }
 
         clearActiveNavigation()
-        return Completion(operationID: consumeOperationID(for: navigation))
+        return Completion(
+            operationID: consumeOperationID(for: navigation),
+            navigationGeneration: completedNavigationGeneration,
+        )
     }
 
-    func operationID(for navigation: WKNavigation?) -> BrowserNavigationOperationID? {
+    func operationID(for navigation: AnyObject?) -> BrowserNavigationOperationID? {
         guard let navigation else {
             return nil
         }
@@ -609,11 +842,48 @@ private struct BrowserWebKitNavigationCorrelation {
     /// KVO does not carry a `WKNavigation`, but metadata emitted after a correlated commit still
     /// belongs to that operation until its delegate finish callback consumes the identity.
     func currentOperationID() -> BrowserNavigationOperationID? {
-        guard let activeNavigationIdentifier else {
+        guard !downloadConversionIsSettled else {
             return nil
+        }
+        guard let activeNavigationIdentifier else {
+            return pendingOperationID
         }
 
         return operationIDs[activeNavigationIdentifier]
+    }
+
+    /// Freezes the initiating operation before calling a WebKit download policy decision handler.
+    mutating func captureDownloadConversion() -> DownloadConversion {
+        downloadConversionIsPending = true
+        generation &+= 1
+        publishMetadataEpoch()
+        return .init(navigationGeneration: navigationGeneration, operationID: currentOperationID())
+    }
+
+    /// Settles only the captured navigation; duplicates and older handoffs cannot finish newer work.
+    mutating func settleDownloadConversion(_ capture: DownloadConversion) -> Completion? {
+        guard capture.navigationGeneration == navigationGeneration,
+              downloadConversionIsPending, !downloadConversionIsSettled
+        else {
+            return nil
+        }
+
+        if let navigation = activeNavigationReference?.value {
+            convertedNavigations.append(.init(navigation))
+        }
+        activeNavigationIdentifier = nil
+        activeNavigationReference = nil
+        hasActiveUnidentifiedNavigation = false
+        operationIDs.removeAll(keepingCapacity: true)
+        hasCommittedDocument = wasCommittedBeforeNavigation
+        downloadConversionIsPending = false
+        downloadConversionIsSettled = true
+        generation &+= 1
+        publishMetadataEpoch()
+        return .init(
+            operationID: capture.operationID,
+            navigationGeneration: capture.navigationGeneration,
+        )
     }
 
     /// Republishes the epoch that nonisolated WebKit observations capture before hopping onto the
@@ -623,8 +893,12 @@ private struct BrowserWebKitNavigationCorrelation {
         metadataEpoch.publish(generation: generation, operationID: currentOperationID())
     }
 
-    mutating func consumeOperationID(for navigation: WKNavigation?) -> BrowserNavigationOperationID? {
+    mutating func consumeOperationID(for navigation: AnyObject?) -> BrowserNavigationOperationID? {
         guard let navigation else {
+            return nil
+        }
+
+        if downloadConversionIsPending, ObjectIdentifier(navigation) == activeNavigationIdentifier {
             return nil
         }
         guard let operationID = operationIDs.removeValue(forKey: ObjectIdentifier(navigation)) else {
@@ -636,7 +910,7 @@ private struct BrowserWebKitNavigationCorrelation {
         return operationID
     }
 
-    mutating func markFinished(_ navigation: WKNavigation?) {
+    mutating func markFinished(_ navigation: AnyObject?) {
         guard isCurrent(navigation) else {
             return
         }
@@ -658,7 +932,7 @@ private struct BrowserWebKitNavigationCorrelation {
         publishMetadataEpoch()
     }
 
-    mutating func discardSupersededNavigation(_ navigation: WKNavigation?) {
+    mutating func discardSupersededNavigation(_ navigation: AnyObject?) {
         guard let navigation else {
             return
         }
@@ -668,6 +942,12 @@ private struct BrowserWebKitNavigationCorrelation {
 
     mutating func processTerminated() {
         hasCommittedDocument = false
+        wasCommittedBeforeNavigation = false
+        pendingOperationID = nil
+        navigationGeneration &+= 1
+        downloadConversionIsPending = false
+        downloadConversionIsSettled = false
+        convertedNavigations.removeAll(keepingCapacity: true)
         isAwaitingNavigationRegistration = false
         hasActiveUnidentifiedNavigation = false
         activeNavigationIdentifier = nil
@@ -679,11 +959,23 @@ private struct BrowserWebKitNavigationCorrelation {
     }
 }
 
+/// Classifies responses without substituting a request or changing inline displayable content.
+enum BrowserWebKitDownloadPolicy {
+    static func responseRequiresDownload(canShowMIMEType: Bool, contentDisposition: String?) -> Bool {
+        let disposition = contentDisposition?.split(separator: ";", maxSplits: 1)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return !canShowMIMEType || disposition == "attachment"
+    }
+}
+
 @MainActor
 private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     let tabID: BrowserTabID
     let webView: WKWebView
     weak var adapter: BrowserWebKitAdapter?
+    private weak var downloadOwner: BrowserDownloadOwner?
     var hasCommittedDocument: Bool {
         navigationCorrelation.hasCommittedDocument
     }
@@ -694,6 +986,7 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var navigationCorrelation: BrowserWebKitNavigationCorrelation
     private var committedURLProjection = BrowserWebKitCommittedURLProjection()
     private let backForwardTokens = BrowserBackForwardTokenRegistry<WKBackForwardListItem>()
+    private var downloadAssociations = BrowserWebKitDownloadAssociationRegistry()
 
     init(tabID: BrowserTabID, webView: WKWebView, adapter: BrowserWebKitAdapter) {
         let metadataEpochStore = BrowserWebKitMetadataEpochStore()
@@ -701,6 +994,7 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         self.tabID = tabID
         self.webView = webView
         self.adapter = adapter
+        downloadOwner = adapter.downloadOwner
         navigationCorrelation = BrowserWebKitNavigationCorrelation(metadataEpoch: metadataEpochStore)
         super.init()
         observations = [
@@ -734,7 +1028,7 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func load(_ url: URL, operationID: BrowserNavigationOperationID) {
-        navigationCorrelation.beginNavigation()
+        navigationCorrelation.beginNavigation(operationID: operationID)
         invalidateBackForwardTokens()
         let navigation = webView.load(URLRequest(url: url))
         register(navigation, operationID: operationID)
@@ -745,13 +1039,13 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         operationID: BrowserNavigationOperationID,
     ) {
         guard let item = backForwardTokens.resolve(token) else {
-            navigationCorrelation.beginNavigation()
+            navigationCorrelation.beginNavigation(operationID: operationID)
             register(nil, operationID: operationID)
             return
         }
 
         backForwardTokens.invalidate()
-        navigationCorrelation.beginNavigation()
+        navigationCorrelation.beginNavigation(operationID: operationID)
         register(webView.go(to: item), operationID: operationID)
     }
 
@@ -760,21 +1054,168 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func goBack(operationID: BrowserNavigationOperationID) {
-        navigationCorrelation.beginNavigation()
+        navigationCorrelation.beginNavigation(operationID: operationID)
         invalidateBackForwardTokens()
         register(webView.goBack(), operationID: operationID)
     }
 
     func goForward(operationID: BrowserNavigationOperationID) {
-        navigationCorrelation.beginNavigation()
+        navigationCorrelation.beginNavigation(operationID: operationID)
         invalidateBackForwardTokens()
         register(webView.goForward(), operationID: operationID)
     }
 
     func reload(operationID: BrowserNavigationOperationID) {
-        navigationCorrelation.beginNavigation()
+        navigationCorrelation.beginNavigation(operationID: operationID)
         invalidateBackForwardTokens()
         register(webView.reload(), operationID: operationID)
+    }
+
+    func webView(
+        _: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @MainActor (WKNavigationActionPolicy) -> Void,
+    ) {
+        guard navigationAction.shouldPerformDownload else {
+            decisionHandler(.allow)
+            return
+        }
+        guard let association = captureDownloadAssociation(
+            isMainFrame: navigationAction.targetFrame?.isMainFrame == true,
+        ) else {
+            decisionHandler(.cancel)
+            return
+        }
+
+        downloadAssociations.insert(association, forPolicyObject: navigationAction)
+        decisionHandler(.download)
+    }
+
+    func webView(
+        _: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @MainActor (WKNavigationResponsePolicy) -> Void,
+    ) {
+        let disposition = (navigationResponse.response as? HTTPURLResponse)?
+            .value(forHTTPHeaderField: "Content-Disposition")
+        guard BrowserWebKitDownloadPolicy.responseRequiresDownload(
+            canShowMIMEType: navigationResponse.canShowMIMEType,
+            contentDisposition: disposition,
+        ) else {
+            decisionHandler(.allow)
+            return
+        }
+        guard let association = captureDownloadAssociation(isMainFrame: navigationResponse.isForMainFrame) else {
+            decisionHandler(.cancel)
+            return
+        }
+
+        downloadAssociations.insert(association, forPolicyObject: navigationResponse)
+        decisionHandler(.download)
+    }
+
+    func webView(_: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        releaseAbandonedDownloadAssociations()
+        let associated = consumeDownloadAssociation(downloadAssociations.take(forPolicyObject: navigationAction))
+        handoff(download, association: associated)
+    }
+
+    func webView(_: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        releaseAbandonedDownloadAssociations()
+        let associated = consumeDownloadAssociation(downloadAssociations.take(forPolicyObject: navigationResponse))
+        handoff(download, association: associated)
+    }
+
+    private func captureDownloadConversion() -> BrowserWebKitNavigationCorrelation.DownloadConversion {
+        if !navigationCorrelation.hasActiveNavigation,
+           navigationCorrelation.acceptExternalNavigation(nil) {
+            adapter?.emit(.navigationStarted(tabID: tabID))
+        }
+        return navigationCorrelation.captureDownloadConversion()
+    }
+
+    /// Reserves capacity before asking WebKit to create a native writer. A denied main-frame
+    /// conversion is settled immediately so cancellation cannot leave navigation state loading.
+    private func captureDownloadAssociation(isMainFrame: Bool) -> BrowserWebKitDownloadAssociation? {
+        releaseAbandonedDownloadAssociations()
+        let admissionToken: BrowserDownloadOwner.AdmissionToken?
+        if let downloadOwner {
+            guard let token = downloadOwner.captureAdmissionToken(for: tabID) else {
+                if isMainFrame {
+                    _ = consumeDownloadAssociation(
+                        BrowserWebKitDownloadAssociation(conversion: captureDownloadConversion()),
+                    )
+                }
+                return nil
+            }
+
+            admissionToken = token
+        } else {
+            admissionToken = nil
+        }
+
+        let conversion = isMainFrame ? captureDownloadConversion() : nil
+        return BrowserWebKitDownloadAssociation(
+            conversion: conversion,
+            admissionToken: admissionToken,
+        )
+    }
+
+    /// Releases policy-time slots that WebKit cannot hand off after a tab or process ends.
+    func releasePendingDownloadReservations() {
+        downloadAssociations.releaseAll(owner: downloadOwner)
+    }
+
+    /// Releases main-frame conversions for a navigation that finished or failed without handoff.
+    /// Subframe reservations are released by their exact policy-object terminal callback instead.
+    private func releasePendingDownloadReservations(forNavigationGeneration generation: Int) {
+        downloadAssociations.releaseReservations(forNavigationGeneration: generation, owner: downloadOwner)
+    }
+
+    private func releasePendingDownloadReservations(
+        forFinishedNavigation completion: BrowserWebKitNavigationCorrelation.Completion,
+    ) {
+        downloadAssociations.releaseReservations(forFinishedNavigation: completion, owner: downloadOwner)
+    }
+
+    private func releaseAbandonedDownloadAssociations() {
+        _ = downloadAssociations.releaseAbandonedAssociations(owner: downloadOwner)
+    }
+
+    private func consumeDownloadAssociation(
+        _ association: BrowserWebKitDownloadAssociation?,
+    ) -> BrowserWebKitDownloadAssociation.Handoff? {
+        guard var association,
+              let handoff = association.consume(correlation: &navigationCorrelation)
+        else {
+            return nil
+        }
+
+        if let completion = handoff.completion {
+            adapter?.emit(.navigationConvertedToDownload(
+                tabID: tabID,
+                correlation: completion.operationID.map { .operation($0) } ?? .untracked,
+            ))
+        }
+        return handoff
+    }
+
+    private func handoff(_ download: WKDownload, association: BrowserWebKitDownloadAssociation.Handoff?) {
+        if let adapter {
+            adapter.receiveDownload(download, tabID: tabID, association: association)
+        } else {
+            guard let owner = downloadOwner else {
+                download.cancel { _ in }
+                return
+            }
+            guard !owner.owns(download) else {
+                owner.releaseAdmissionReservation(association?.admissionToken)
+                return
+            }
+
+            owner.releaseAdmissionReservation(association?.admissionToken)
+            owner.reject(BrowserWKDownloadTransfer(download: download, owner: owner), notice: .invalidOrigin)
+        }
     }
 
     func webView(_: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
@@ -798,29 +1239,40 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
 
         backForwardTokens.invalidate()
         committedURLProjection.update(authoritativeCurrentItemURL: webView.backForwardList.currentItem?.url)
-        // The committed projection is updated here for adapter-owned history and readiness state.
-        // Reducer metadata is emitted once, from didFinish, so one navigation has one logical
-        // invalidation/completion path instead of a commit observation plus a second completion.
+        // didCommit proves document ownership even for same-URL reloads. This event updates
+        // the conversion recovery snapshot without finishing loading or invalidating previews.
+        let operationID = navigationCorrelation.operationID(for: navigation)
+        adapter?.emit(.navigationCommitted(
+            tabID: tabID,
+            metadata: currentMetadata(),
+            correlation: operationID.map { .operation($0) } ?? .untracked,
+        ))
     }
 
     func webView(_: WKWebView, didFinish navigation: WKNavigation?) {
+        releaseAbandonedDownloadAssociations()
         guard let completion = navigationCorrelation.finish(navigation) else {
             navigationCorrelation.discardSupersededNavigation(navigation)
             _ = navigationCorrelation.consumeOperationID(for: navigation)
             return
         }
 
+        releasePendingDownloadReservations(forFinishedNavigation: completion)
         backForwardTokens.invalidate()
         emitMetadata(operationID: completion.operationID)
     }
 
     func webView(_: WKWebView, didFail navigation: WKNavigation?, withError error: Error) {
+        releaseAbandonedDownloadAssociations()
+        let nativeError = error as NSError
+        adapter?.nativeNavigationFailureObserver?(nativeError.domain, nativeError.code)
         guard navigationCorrelation.isCurrent(navigation) else {
             navigationCorrelation.discardSupersededNavigation(navigation)
             _ = navigationCorrelation.consumeOperationID(for: navigation)
             return
         }
 
+        releasePendingDownloadReservations(forNavigationGeneration: navigationCorrelation.currentNavigationGeneration())
         emit(error, navigation: navigation)
     }
 
@@ -829,16 +1281,21 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         didFailProvisionalNavigation navigation: WKNavigation?,
         withError error: Error,
     ) {
+        releaseAbandonedDownloadAssociations()
+        let nativeError = error as NSError
+        adapter?.nativeNavigationFailureObserver?(nativeError.domain, nativeError.code)
         guard navigationCorrelation.isCurrent(navigation) else {
             navigationCorrelation.discardSupersededNavigation(navigation)
             _ = navigationCorrelation.consumeOperationID(for: navigation)
             return
         }
 
+        releasePendingDownloadReservations(forNavigationGeneration: navigationCorrelation.currentNavigationGeneration())
         emit(error, navigation: navigation)
     }
 
     func webViewWebContentProcessDidTerminate(_: WKWebView) {
+        releasePendingDownloadReservations()
         navigationCorrelation.processTerminated()
         adapter?.emit(.processTerminated(tabID: tabID))
     }
@@ -1017,7 +1474,7 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// Emits metadata for an observation epoch unless its generation is no longer current.
     private func performMetadataEmission(for epoch: BrowserWebKitMetadataEpoch) -> Bool {
-        guard navigationCorrelation.generation == epoch.generation else {
+        guard navigationCorrelation.acceptsMetadataObservation(epoch) else {
             return false
         }
 
@@ -1025,9 +1482,10 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         return true
     }
 
-    private func emitMetadata(operationID: BrowserNavigationOperationID? = nil) {
+    /// Reads the current document projection; only delegate didCommit proves commit ownership.
+    private func currentMetadata() -> BrowserTab.Metadata {
         synchronizeCommittedURL()
-        let metadata = BrowserTab.Metadata(
+        return BrowserTab.Metadata(
             committedURL: committedURLProjection.committedURL,
             title: webView.title,
             isLoading: webView.isLoading,
@@ -1035,11 +1493,14 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
             canGoBack: webView.canGoBack,
             canGoForward: webView.canGoForward,
         )
+    }
+
+    private func emitMetadata(operationID: BrowserNavigationOperationID? = nil) {
         let correlation: BrowserWebKitEventCorrelation = operationID.map { .operation($0) }
             ?? .untracked
         adapter?.emit(.metadata(
             tabID: tabID,
-            metadata: metadata,
+            metadata: currentMetadata(),
             correlation: correlation,
         ))
     }

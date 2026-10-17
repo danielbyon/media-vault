@@ -279,6 +279,120 @@ struct BrowserViewSnapshotTests {
         )
     }
 
+    @Test("Downloads show determinate progress and completed actions on phone and regular iPad")
+    func downloadProgressAndCompletedRows() {
+        let projection = downloadProjection(records: [
+            downloadRecord(filename: nil, received: 4_194_304, expected: 16_777_827, ready: false),
+            downloadRecord(filename: "fixture.pdf", received: 16_777_827, expected: 16_777_827, ready: true),
+        ])
+        let store = downloadSnapshotStore(projection)
+        downloadSnapshot(
+            BrowserDownloadsView(store: store),
+            named: "downloads-progress-completed-compact-phone",
+            config: DeterministicTestSupport.compactPhone,
+        )
+        downloadSnapshot(
+            BrowserDownloadsView(store: store),
+            named: "downloads-progress-completed-regular-ipad",
+            config: DeterministicTestSupport.regularWidthIPad,
+        )
+    }
+
+    @Test("Completed download actions fit a narrow iPad column at accessibility size")
+    func downloadCompletedActionsLargeType() {
+        let store = downloadSnapshotStore(downloadProjection(records: [
+            downloadRecord(filename: "fixture.pdf", received: 16_777_827, expected: 16_777_827, ready: true),
+        ]))
+        downloadSnapshot(
+            BrowserDownloadsView(store: store).environment(\.dynamicTypeSize, .accessibility3),
+            named: "downloads-completed-actions-accessibility3-narrow-ipad",
+            config: DeterministicTestSupport.narrowWidthIPad,
+        )
+    }
+
+    @Test("Transfer failure and download-only cleanup recovery remain readable at accessibility size")
+    func downloadFailureAndCleanupRetryLargeType() {
+        for retry in [false, true] {
+            var projection = downloadProjection(records: [])
+            projection.isAvailable = false
+            projection.cleanupNeedsRetry = retry
+            projection.notice = retry ? .cleanupRequired : .transferFailed
+            let store = downloadSnapshotStore(projection)
+            downloadSnapshot(
+                BrowserDownloadsView(store: store).environment(\.dynamicTypeSize, .accessibility3),
+                named: retry
+                    ? "downloads-cleanup-retry-accessibility3-phone"
+                    : "downloads-failure-accessibility3-phone",
+                config: DeterministicTestSupport.compactPhone,
+            )
+        }
+    }
+
+    @Test("Closed Downloads keeps the redacted browser notice visible with Reduce Motion")
+    func closedDownloadNoticeReducedMotion() {
+        var projection = downloadProjection(records: [])
+        projection.notice = .activeTransferLimitReached
+        let store = downloadSnapshotStore(projection)
+        #expect(!store.downloadsArePresented)
+        downloadSnapshot(
+            BrowserView(store: store, reduceMotionOverride: true),
+            named: "downloads-closed-notice-reduced-motion-phone",
+            config: DeterministicTestSupport.compactPhone,
+        )
+    }
+
+    /// Recording is restricted to these new download references. Missing PNGs are written and
+    /// reported as failures by SnapshotTesting; existing images are compared, never overwritten.
+    private func downloadSnapshot(_ content: some View, named name: String, config: ViewImageConfig) {
+        withSnapshotTesting(record: .missing) {
+            presentationSnapshot(content, named: name, config: config)
+        }
+    }
+
+    /// Projection fixtures freeze all visible values. Opaque download identities are created once
+    /// per record and never rendered; the production type intentionally exposes no fixed-ID initializer.
+    /// Indeterminate spinner animation is excluded from PNGs; its semantics need the separate UI gate.
+    private func downloadRecord(
+        filename: String?,
+        received: Int64,
+        expected: Int64?,
+        ready: Bool,
+    ) -> BrowserDownloadRecord {
+        .init(
+            id: BrowserDownloadID(),
+            tabID: BrowserTabID(UUID(1)),
+            filename: filename,
+            receivedBytes: received,
+            expectedBytes: expected,
+            isReady: ready,
+        )
+    }
+
+    private func downloadProjection(records: [BrowserDownloadRecord]) -> BrowserDownloadSnapshot {
+        var projection = BrowserDownloadSnapshot()
+        projection.revision = 42
+        projection.generation = 7
+        projection.isAvailable = true
+        projection.records = records
+        return projection
+    }
+
+    /// The real Browser reducer receives an immutable projection with no live download subscription.
+    /// This keeps image rendering independent of process-wide scene authorization and task scheduling.
+    private func downloadSnapshotStore(_ projection: BrowserDownloadSnapshot) -> StoreOf<BrowserFeature> {
+        var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID(UUID(1)))
+        state.downloads = projection
+        state.downloadsArePresented = false
+        return withDependencies {
+            $0.browserDownloads = BrowserDownloadClient(
+                execute: { _ in },
+                events: { AsyncStream { $0.finish() } },
+            )
+        } operation: {
+            makeBrowserViewStore(initialState: state)
+        }
+    }
+
     private func snapshot(_ state: BrowserFeature.State, named name: String, config: ViewImageConfig) {
         let store = makeBrowserViewStore(initialState: state)
         assertSnapshot(

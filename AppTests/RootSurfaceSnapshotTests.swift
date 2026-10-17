@@ -13,6 +13,7 @@ import FoundationTestSupport
 import SnapshotTesting
 import SwiftUI
 import Testing
+import UIKit
 import VaultFeature
 
 @MainActor
@@ -28,7 +29,10 @@ struct RootSurfaceSnapshotTests {
     func compactPhoneSnapshot() {
         assertSnapshot(
             of: rootView(horizontalSizeClass: .compact),
-            as: .image(layout: .device(config: DeterministicTestSupport.compactPhone)),
+            as: .image(
+                layout: .device(config: DeterministicTestSupport.compactPhone),
+                traits: .init(displayScale: 3),
+            ),
         )
     }
 
@@ -36,7 +40,10 @@ struct RootSurfaceSnapshotTests {
     func largePhoneSnapshot() {
         assertSnapshot(
             of: rootView(horizontalSizeClass: .compact),
-            as: .image(layout: .device(config: DeterministicTestSupport.largePhone)),
+            as: .image(
+                layout: .device(config: DeterministicTestSupport.largePhone),
+                traits: .init(displayScale: 3),
+            ),
         )
     }
 
@@ -44,7 +51,10 @@ struct RootSurfaceSnapshotTests {
     func regularWidthIPadSnapshot() {
         assertSnapshot(
             of: rootView(horizontalSizeClass: .regular),
-            as: .image(layout: .device(config: DeterministicTestSupport.regularWidthIPad)),
+            as: .image(
+                layout: .device(config: DeterministicTestSupport.regularWidthIPad),
+                traits: .init(displayScale: 3),
+            ),
         )
     }
 
