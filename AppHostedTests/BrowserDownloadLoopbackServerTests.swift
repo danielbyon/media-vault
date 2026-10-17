@@ -13,6 +13,31 @@ extension AppHostedUITests {
     @Suite("Loopback fixture teardown")
     @MainActor
     struct BrowserDownloadLoopbackServerTests {
+        @Test("Incomplete and malformed requests never become parsed readiness evidence")
+        func incompleteAndMalformedRequestsDoNotBecomeReadinessEvidence() throws {
+            let server = try BrowserDownloadLoopbackServer()
+
+            let incomplete = NWConnection(host: "127.0.0.1", port: .https, using: .tcp)
+            let incompleteConnection = try #require(server.accept(incomplete))
+            incompleteConnection.didReceive(
+                Data("GET \(server.cookiePath)first HTTP/1.1\r\nHost: 127.0.0.1\r\n".utf8),
+                complete: true,
+                failed: false,
+            )
+            #expect(server.requests.isEmpty)
+
+            let malformed = NWConnection(host: "127.0.0.1", port: .https, using: .tcp)
+            let malformedConnection = try #require(server.accept(malformed))
+            malformedConnection.didReceive(
+                Data("malformed request\r\n\r\n".utf8),
+                complete: true,
+                failed: false,
+            )
+            #expect(server.requests.isEmpty)
+
+            server.stop()
+        }
+
         @Test("Stopped server rejects queued acceptance and receive without recreating work")
         func stopRejectsLateCallbacks() throws {
             let server = try BrowserDownloadLoopbackServer()

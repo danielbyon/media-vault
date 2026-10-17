@@ -23,6 +23,73 @@ extension AppHostedUITests {
     @Suite("Originating WebKit HTTP downloads")
     @MainActor
     struct BrowserDownloadHTTPTests {
+        @Test("Dispatch readiness requires an exact new GET for the cookie-prefixed fixture path")
+        func dispatchReadinessRequiresExactNewGET() {
+            let cookiePath = "/fixture-cookie/"
+
+            func request(_ method: String, _ route: String) -> BrowserDownloadLoopbackServer.Request {
+                .init(
+                    method: method,
+                    path: cookiePath + route,
+                    headers: [:],
+                    body: Data(),
+                )
+            }
+
+            let stale = [request("GET", "first")]
+            #expect(
+                !hasParsedGET(
+                    "first",
+                    cookiePath: cookiePath,
+                    afterBaseline: stale.count,
+                    requests: stale,
+                ),
+            )
+
+            let wrongRoute = [request("GET", "first"), request("GET", "committed")]
+            #expect(
+                !hasParsedGET(
+                    "first",
+                    cookiePath: cookiePath,
+                    afterBaseline: 1,
+                    requests: wrongRoute,
+                ),
+            )
+
+            let sameTerminalWrongRoute = [
+                request("GET", "first"),
+                request("GET", "other/first"),
+            ]
+            #expect(
+                !hasParsedGET(
+                    "first",
+                    cookiePath: cookiePath,
+                    afterBaseline: 1,
+                    requests: sameTerminalWrongRoute,
+                ),
+            )
+
+            let wrongMethod = [request("GET", "first"), request("POST", "first")]
+            #expect(
+                !hasParsedGET(
+                    "first",
+                    cookiePath: cookiePath,
+                    afterBaseline: 1,
+                    requests: wrongMethod,
+                ),
+            )
+
+            let exactNewGET = [request("GET", "first"), request("GET", "first?commit=fixture")]
+            #expect(
+                hasParsedGET(
+                    "first",
+                    cookiePath: cookiePath,
+                    afterBaseline: 1,
+                    requests: exactNewGET,
+                ),
+            )
+        }
+
         @Test("Non-Root adapter commits one first page at Root WebKit geometry")
         func nonRootAdapterCommitsFirstPageAtRootGeometry() async throws {
             try await withSinglePageHTTPDownloadFixture { fixture, firstURL in
@@ -216,6 +283,23 @@ extension AppHostedUITests {
 private func fixtureRouteName(_ requestPath: String) -> String {
     let lastComponent = requestPath.split(separator: "/").last ?? ""
     return String(lastComponent.split(separator: "?", maxSplits: 1).first ?? "")
+}
+
+private func hasParsedGET(
+    _ route: String,
+    cookiePath: String,
+    afterBaseline baseline: Int,
+    requests: [BrowserDownloadLoopbackServer.Request],
+) -> Bool {
+    guard requests.count > baseline else {
+        return false
+    }
+
+    let expectedPath = cookiePath + route
+    return requests.suffix(from: baseline).contains {
+        let requestPath = $0.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
+        return requestPath == expectedPath && $0.method == "GET"
+    }
 }
 
 enum HTTPDownloadCase: String, CaseIterable, Sendable {
@@ -430,10 +514,10 @@ private final class HTTPDownloadFixture {
         requestedPage = firstURL
         let requestBaseline = server.requests.count
         store.send(.navigate(firstURL))
-        // The first navigation pays the system's NetworkProcess launch. CI measured a ~6.5 s
-        // pre-relaunch stall plus a 12.28 s replacement launch (~18.8 s to ready). Dispatch
-        // receipt and native finish are separate milestones: the wider receipt window below
-        // does not extend the unchanged ten-second committed-page checks.
+        // The first navigation pays the system's NetworkProcess launch. Local cold-start
+        // evidence included a 45.4 s WebContent launch plus NetworkProcess suspension/resume.
+        // The shared 60 s receipt budget covers startup without extending committed-page or
+        // download-completion deadlines.
         try await waitForDispatchedRequest("first", baseline: requestBaseline)
         try await waitForSinglePageControl("native page committed: first") {
             store.selectedTab?.metadata.committedURL == firstURL
@@ -474,21 +558,25 @@ private final class HTTPDownloadFixture {
         )
     }
 
-    /// Waits until the loopback server parses a GET for `route` dispatched after
-    /// `baseline`, so a stale or unrelated request cannot satisfy navigation
-    /// readiness. Later navigations in a fixture can also pay network-process
-    /// startup, so receipt uses the same bounded window as the first-page path;
-    /// committed-page checks stay on the unchanged ten-second bound.
+    /// Waits until the loopback server parses GET `route` dispatched after
+    /// `baseline`, so a stale, wrong-route, wrong-method, or incomplete request
+    /// cannot satisfy navigation readiness. Later navigations in the fixture also
+    /// pay network-process startup, so receipt uses the same bounded window as the
+    /// first-page path; committed-page checks stay on the unchanged ten-second bound.
+    /// The 60 s receipt budget covers measured WebKit cold-start and process-suspension
+    /// intervals; request parsing, route, method, and baseline must all still match.
     private func waitForDispatchedRequest(
         _ route: String,
         baseline: Int,
-        timeout: TimeInterval = 30,
+        timeout: TimeInterval = 60,
     ) async throws {
         try await waitForSinglePageControl("native navigation dispatched: \(route)", timeout: timeout) {
-            server.requests.count > baseline
-                && server.requests.suffix(from: baseline).contains {
-                    fixtureRouteName($0.path) == route && $0.method == "GET"
-                }
+            hasParsedGET(
+                route,
+                cookiePath: server.cookiePath,
+                afterBaseline: baseline,
+                requests: server.requests,
+            )
         }
     }
 
