@@ -450,8 +450,13 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         XCTAssertEqual(completed["sha256"], "852ba89aa0d708405217efd9cc3d014f4a1cc48ed1895748a1e1d9540f97bd79")
         XCTAssertEqual(completed["fixtureBytesMatch"], "true")
         XCTAssertEqual(completed["backupExcluded"], "true")
+        #if targetEnvironment(simulator)
         XCTAssertEqual(completed["nativeProtection"], "UNVERIFIED")
         XCTAssertEqual(completed["protectionMode"], "simulatedReadback")
+        #else
+        XCTAssertEqual(completed["nativeProtection"], "verified")
+        XCTAssertEqual(completed["protectionMode"], "nativeCompleteRequired")
+        #endif
         attach(completed, named: "completed file before actual system scene request")
         return completed
     }
@@ -606,8 +611,10 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
         app.launchArguments = [
             "--browser-download-production-qualification",
-            "--browser-download-simulated-protection-readback",
         ]
+        #if targetEnvironment(simulator)
+        app.launchArguments.append("--browser-download-simulated-protection-readback")
+        #endif
         app.launch()
         XCTAssertTrue(app.staticTexts["downloadQualificationProtectionQualificationMode"]
             .firstMatch
