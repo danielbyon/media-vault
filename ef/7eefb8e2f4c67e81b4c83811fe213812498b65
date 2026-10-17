@@ -1,0 +1,27 @@
+AppHostedTests/BrowserDownloadHTTPTests.swift
+  s_5d62df6b616a0e::t_cb81f42b37938a 297
+  s_5d62df6b616a0e::t_4d4d22be607cbc 517-520,561-567,571
+  s_5d62df6b616a0e::t_63e363efe17a3e 574-579
+  s_5d62df6b616a0e::t_e56231ceb8605b 290,298,300-301
+  s_5d62df6b616a0e::t_5bd8cc752dd0dd 27,30-32,34-39,48-49,71-72,81,91-92
+  s_5d62df6b616a0e::t_1724df13b97f59 288-289,291-296,299,302-304
+  s_5d62df6b616a0e::t_e2a76c1d1b9b03 26,28-29,33,40-47,50-70,73-80,82-90
+AppHostedTests/BrowserDownloadLoopbackServerTests.swift
+  s_5d62df6b616a0e::t_7f0e3d70c4af54 16-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ef7eefb8e2f4c67e81b4c83811fe213812498b65",
+  "prompts": {},
+  "sessions": {
+    "s_5d62df6b616a0e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a131c2-ae01-7141-874c-cf889bf8eb74",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
