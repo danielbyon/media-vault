@@ -28,6 +28,15 @@ func makeBrowserDownloadInitialSettings() -> BrowserSettings {
 struct DownloadSeparationTestSupport {
     let webKit: BrowserWebKitClient
     let downloads: BrowserDownloadClient
+
+    /// Owner readiness and reducer projection settlement arrive through separate
+    /// asynchronous streams. Completion is observable only after both milestones.
+    static func downloadCompletionIsSettled(
+        hasReadyRecord: Bool,
+        previewOperation: BrowserNavigationOperationID?,
+    ) -> Bool {
+        hasReadyRecord && previewOperation == nil
+    }
 }
 
 /// Wraps the real isolated settings storage with a revision-aware observation client.
@@ -246,8 +255,41 @@ extension BrowserDownloadPersistenceFixture {
     func completeDownload(url: URL, bytes: Data, filename: String) async throws -> BrowserDownloadID {
         let oldIDs = owner.snapshot.records.map(\.id)
         navigate(to: url)
-        try await wait("completed \(filename) attachment") {
-            self.owner.snapshot.records.contains { !oldIDs.contains($0.id) && $0.isReady }
+        let clock = ContinuousClock()
+        var observedReady = false
+        var operationAtReady: BrowserNavigationOperationID?
+        var operationObservedAt: ContinuousClock.Instant?
+        do {
+            try await wait("completed \(filename) attachment and preview projection settlement") {
+                let hasReadyRecord = self.owner.snapshot.records.contains {
+                    !oldIDs.contains($0.id) && $0.isReady
+                }
+                if hasReadyRecord, !observedReady {
+                    observedReady = true
+                    operationAtReady = self.previewOperation
+                    operationObservedAt = clock.now
+                    print(
+                        "SEPARATION_PREVIEW_OPERATION_BOUNDARY state="
+                            + (operationAtReady.map { "pending:\(String(describing: $0))" } ?? "clear"),
+                    )
+                }
+                return DownloadSeparationTestSupport.downloadCompletionIsSettled(
+                    hasReadyRecord: hasReadyRecord,
+                    previewOperation: self.previewOperation,
+                )
+            }
+        } catch {
+            print(
+                "SEPARATION_PREVIEW_OPERATION_TIMEOUT state="
+                    + (previewOperation.map { "pending:\(String(describing: $0))" } ?? "clear"),
+            )
+            throw error
+        }
+        if let operationAtReady, let operationObservedAt {
+            print(
+                "SEPARATION_PREVIEW_OPERATION_CLEARED initial=\(String(describing: operationAtReady)) "
+                    + "elapsed=\(operationObservedAt.duration(to: clock.now))",
+            )
         }
 
         let record = try #require(owner.snapshot.records.first { !oldIDs.contains($0.id) && $0.isReady })
@@ -257,6 +299,10 @@ extension BrowserDownloadPersistenceFixture {
         #expect(try Data(contentsOf: file) == bytes)
         assertCommittedPagePreserved()
         return record.id
+    }
+
+    private var previewOperation: BrowserNavigationOperationID? {
+        rootStore?.vault.shell.browser.previewState.operation(for: tabID)
     }
 
     /// Discards a completed native download and waits for source and reducer cleanup.

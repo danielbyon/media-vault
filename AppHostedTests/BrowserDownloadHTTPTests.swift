@@ -23,6 +23,347 @@ extension AppHostedUITests {
     @Suite("Originating WebKit HTTP downloads")
     @MainActor
     struct BrowserDownloadHTTPTests {
+        @Test("Active polling budget charges work and discounts only sleep overrun")
+        func activePollingBudgetChargesWorkAndDiscountsSleepOverrun() {
+            var budget = AppHostedActivePollBudget(timeout: .seconds(10))
+            budget.chargeActiveWork(after: .seconds(3))
+            #expect(budget.remaining == .seconds(7))
+
+            budget.chargePollSleep(after: .seconds(369))
+            #expect(budget.remaining == .milliseconds(6_980))
+
+            for _ in 0 ..< 349 {
+                budget.chargePollSleep(after: .milliseconds(20))
+            }
+            #expect(!budget.canPoll)
+            #expect(budget.remaining == .zero)
+        }
+
+        @Test("A slow predicate cannot satisfy the active budget")
+        func slowPredicateCannotSatisfyActiveBudget() async throws {
+            let satisfied = try await waitForAppHostedPolling(timeout: .milliseconds(1)) {
+                Thread.sleep(forTimeInterval: 0.02)
+                return true
+            }
+            #expect(!satisfied)
+        }
+
+        @Test("Active polling propagates cancellation")
+        func activePollingPropagatesCancellation() async {
+            let preCanceled = Task { @MainActor in
+                withUnsafeCurrentTask { $0?.cancel() }
+                do {
+                    _ = try await waitForAppHostedPolling(timeout: .seconds(10)) { true }
+                    return false
+                } catch is CancellationError {
+                    return true
+                } catch {
+                    return false
+                }
+            }
+            let preCanceledResult = await preCanceled.value
+            #expect(preCanceledResult)
+
+            let waiting = Task { @MainActor in
+                var enteredBeforeSleep = false
+                var sleepInvoked = false
+                do {
+                    _ = try await waitForAppHostedPolling(
+                        timeout: .seconds(10),
+                        onBeforeSleep: {
+                            enteredBeforeSleep = true
+                            withUnsafeCurrentTask { $0?.cancel() }
+                        },
+                        pollSleep: { _ in
+                            sleepInvoked = true
+                            throw CancellationError()
+                        },
+                    ) { false }
+                    return (
+                        enteredBeforeSleep: enteredBeforeSleep,
+                        sleepInvoked: sleepInvoked,
+                        cancellationCaught: false,
+                    )
+                } catch is CancellationError {
+                    return (
+                        enteredBeforeSleep: enteredBeforeSleep,
+                        sleepInvoked: sleepInvoked,
+                        cancellationCaught: true,
+                    )
+                } catch {
+                    return (
+                        enteredBeforeSleep: enteredBeforeSleep,
+                        sleepInvoked: sleepInvoked,
+                        cancellationCaught: false,
+                    )
+                }
+            }
+            let outcome = await waiting.value
+            #expect(outcome.enteredBeforeSleep)
+            #expect(!outcome.sleepInvoked)
+            #expect(outcome.cancellationCaught)
+        }
+
+        @Test("HTTP failure evidence is sanitized and lossless")
+        func failureEvidenceIsSanitizedAndLossless() throws {
+            let firstOperationID = BrowserNavigationOperationID()
+            let inlineOperationID = BrowserNavigationOperationID()
+            let tabID = BrowserTabID()
+            let privateNamespace = "private-namespace"
+            let firstURL = try #require(
+                URL(string: "http://127.0.0.1:8080/\(privateNamespace)/first"),
+            )
+            let inlineURL = try #require(
+                URL(string: "http://127.0.0.1:8080/\(privateNamespace)/inline"),
+            )
+            let commands: [BrowserWebKitCommand] = [
+                .load(tabID: tabID, url: firstURL, operationID: firstOperationID),
+                .load(tabID: tabID, url: inlineURL, operationID: inlineOperationID),
+            ]
+            let events: [BrowserWebKitEvent] = [
+                .navigationCommitted(
+                    tabID: tabID,
+                    metadata: BrowserTab.Metadata(
+                        committedURL: firstURL,
+                        title: "private title",
+                        isLoading: true,
+                    ),
+                    correlation: .operation(firstOperationID),
+                ),
+                .metadata(
+                    tabID: tabID,
+                    metadata: BrowserTab.Metadata(
+                        committedURL: inlineURL,
+                        title: "private title",
+                        isLoading: false,
+                        estimatedProgress: 1,
+                    ),
+                    correlation: .untracked,
+                ),
+                .navigationFailed(
+                    tabID: tabID,
+                    error: .noInternet(inlineURL),
+                    correlation: .operation(inlineOperationID),
+                ),
+                .navigationStarted(tabID: tabID),
+                .navigationConvertedToDownload(
+                    tabID: tabID,
+                    correlation: .operation(inlineOperationID),
+                ),
+                .processTerminated(tabID: tabID),
+                .siteCreatedTab(
+                    openerID: BrowserTabID(),
+                    tabID: BrowserTabID(),
+                    url: inlineURL,
+                    foreground: true,
+                ),
+                .scriptCloseRequested(tabID: tabID),
+                .javaScriptDialogChanged(tabID: tabID, isPresented: true),
+                .backForwardEntries(tabID: tabID, direction: .back, entries: []),
+                .preview(tabID: tabID, revision: .init(), pngData: nil),
+                .linkContextAction(tabID: tabID, action: .copyLink, url: inlineURL),
+            ]
+
+            let evidence = HTTPDownloadDiagnosticEvidence.eventLines(events, commands: commands)
+            let expectedLines = [
+                "event[0]=navigationCommitted op=op1:load:first route=first loading=1 progress=0.00",
+                "event[1]=metadata op=untracked route=inline loading=0 progress=1.00",
+                "event[2]=navigationFailed op=op2:load:inline category=noInternet route=inline",
+                "event[3]=navigationStarted",
+                "event[4]=navigationConvertedToDownload op=op2:load:inline",
+                "event[5]=processTerminated",
+                "event[6]=siteCreatedTab route=inline foreground=true",
+                "event[7]=scriptCloseRequested",
+                "event[8]=javaScriptDialogChanged presented=true",
+                "event[9]=backForwardEntries direction=back count=0",
+                "event[10]=preview hasPNG=false",
+                "event[11]=linkContextAction action=copyLink route=inline",
+            ]
+            #expect(evidence.split(separator: "\n").map(String.init) == expectedLines)
+            #expect(!evidence.contains("127.0.0.1"))
+            #expect(!evidence.contains(privateNamespace))
+            #expect(!evidence.contains("private title"))
+        }
+
+        @Test("HTTP failure evidence is deterministically capped")
+        func failureEvidenceIsDeterministicallyCapped() throws {
+            let tabID = BrowserTabID()
+            let route = try #require(
+                URL(string: "http://127.0.0.1:8080/private-namespace/inline"),
+            )
+            let events = Array(repeating: BrowserWebKitEvent.navigationStarted(tabID: tabID), count: 30)
+                + [
+                    .navigationFailed(
+                        tabID: tabID,
+                        error: .connectionFailed(route),
+                        correlation: .untracked,
+                    ),
+                    .processTerminated(tabID: tabID),
+                ]
+
+            let lines = HTTPDownloadDiagnosticEvidence
+                .eventLines(events, commands: [])
+                .split(separator: "\n")
+                .map(String.init)
+
+            #expect(lines.count == HTTPDownloadDiagnosticEvidence.maximumEventLineCount)
+            #expect(lines.first == "event[0]=navigationStarted")
+            #expect(lines[4] == "adapterEventsTruncated total=32 omitted=17")
+            #expect(
+                Array(lines.suffix(2)) == [
+                    "event[30]=navigationFailed op=untracked category=connectionFailed route=inline",
+                    "event[31]=processTerminated",
+                ],
+            )
+        }
+
+        @Test("HTTP command and native-error evidence is deterministically capped")
+        func commandAndNativeErrorEvidenceIsDeterministicallyCapped() throws {
+            let tabID = BrowserTabID()
+            let route = try #require(
+                URL(string: "http://127.0.0.1:8080/private-namespace/inline"),
+            )
+            var commands = (0 ..< 20).map { _ in
+                BrowserWebKitCommand.load(
+                    tabID: tabID,
+                    url: route,
+                    operationID: BrowserNavigationOperationID(),
+                )
+            }
+            commands.append(.dismissJavaScriptDialog(tabID: tabID))
+
+            let commandEvidence = HTTPDownloadDiagnosticEvidence.commandList(commands)
+            #expect(
+                commandEvidence.contains("commandsTruncated total=21 omitted=10"),
+            )
+            #expect(commandEvidence.hasSuffix(",dismissJavaScriptDialog"))
+            #expect(!commandEvidence.contains("127.0.0.1"))
+            #expect(!commandEvidence.contains("private-namespace"))
+
+            let nativeErrors = (0 ..< 12).map { "WebKitErrorDomain:\($0)" }
+            let nativeErrorEvidence = HTTPDownloadDiagnosticEvidence.nativeErrorList(nativeErrors)
+            #expect(
+                nativeErrorEvidence.contains("nativeErrorsTruncated total=12 omitted=5"),
+            )
+            #expect(nativeErrorEvidence.hasSuffix("WebKitErrorDomain:11"))
+        }
+
+        @Test("Adapter commit evidence must follow the request baseline")
+        func adapterCommitEvidenceRequiresPostBaselineEvent() throws {
+            let tabID = BrowserTabID()
+            let otherTabID = BrowserTabID()
+            let firstOperationID = BrowserNavigationOperationID()
+            let inlineOperationID = BrowserNavigationOperationID()
+            let firstURL = try #require(
+                URL(string: "http://127.0.0.1:8080/private-namespace/first"),
+            )
+            let inlineURL = try #require(
+                URL(string: "http://127.0.0.1:8080/private-namespace/inline"),
+            )
+            let stale = BrowserWebKitEvent.navigationCommitted(
+                tabID: tabID,
+                metadata: .init(committedURL: firstURL),
+                correlation: .operation(firstOperationID),
+            )
+            let inline = BrowserWebKitEvent.navigationCommitted(
+                tabID: tabID,
+                metadata: .init(committedURL: inlineURL),
+                correlation: .operation(inlineOperationID),
+            )
+
+            #expect(
+                !HTTPDownloadDiagnosticEvidence.hasNavigationCommit(
+                    in: [stale],
+                    tabID: tabID,
+                    url: inlineURL,
+                    operationID: inlineOperationID,
+                    afterEventIndex: 0,
+                ),
+            )
+            #expect(
+                !HTTPDownloadDiagnosticEvidence.hasNavigationCommit(
+                    in: [stale, inline],
+                    tabID: tabID,
+                    url: inlineURL,
+                    operationID: inlineOperationID,
+                    afterEventIndex: 2,
+                ),
+            )
+            #expect(
+                HTTPDownloadDiagnosticEvidence.hasNavigationCommit(
+                    in: [stale, inline],
+                    tabID: tabID,
+                    url: inlineURL,
+                    operationID: inlineOperationID,
+                    afterEventIndex: 1,
+                ),
+            )
+            #expect(
+                !HTTPDownloadDiagnosticEvidence.hasNavigationCommit(
+                    in: [inline],
+                    tabID: otherTabID,
+                    url: inlineURL,
+                    operationID: inlineOperationID,
+                    afterEventIndex: 0,
+                ),
+            )
+        }
+
+        @Test("Navigation commit evidence requires the submitted operation identity")
+        func navigationCommitEvidenceRequiresOperationIdentity() throws {
+            let tabID = BrowserTabID()
+            let inlineURL = try #require(
+                URL(string: "http://127.0.0.1:8080/private-namespace/inline"),
+            )
+            let submittedOperationID = BrowserNavigationOperationID()
+            let unrelatedOperationID = BrowserNavigationOperationID()
+            let commands: [BrowserWebKitCommand] = [
+                .load(
+                    tabID: tabID,
+                    url: inlineURL,
+                    operationID: submittedOperationID,
+                ),
+            ]
+            #expect(
+                HTTPDownloadDiagnosticEvidence.navigationOperationID(
+                    in: commands,
+                    tabID: tabID,
+                    url: inlineURL,
+                    afterCommandIndex: 0,
+                ) == submittedOperationID,
+            )
+
+            let unrelatedCommit = BrowserWebKitEvent.navigationCommitted(
+                tabID: tabID,
+                metadata: .init(committedURL: inlineURL),
+                correlation: .operation(unrelatedOperationID),
+            )
+            #expect(
+                !HTTPDownloadDiagnosticEvidence.hasNavigationCommit(
+                    in: [unrelatedCommit],
+                    tabID: tabID,
+                    url: inlineURL,
+                    operationID: submittedOperationID,
+                    afterEventIndex: 0,
+                ),
+            )
+
+            let submittedCommit = BrowserWebKitEvent.navigationCommitted(
+                tabID: tabID,
+                metadata: .init(committedURL: inlineURL),
+                correlation: .operation(submittedOperationID),
+            )
+            #expect(
+                HTTPDownloadDiagnosticEvidence.hasNavigationCommit(
+                    in: [unrelatedCommit, submittedCommit],
+                    tabID: tabID,
+                    url: inlineURL,
+                    operationID: submittedOperationID,
+                    afterEventIndex: 1,
+                ),
+            )
+        }
+
         @Test("Dispatch readiness requires an exact new GET for the cookie-prefixed fixture path")
         func dispatchReadinessRequiresExactNewGET() {
             let cookiePath = "/fixture-cookie/"
@@ -148,12 +489,48 @@ extension AppHostedUITests {
                 let before = try #require(fixture.store.selectedTab?.metadata)
                 let selected = fixture.store.selectedTabID
                 let tabIDs = fixture.store.tabs.map(\.id)
+                let requestBaseline = fixture.server.requests.count
+                let adapterEventBaseline = fixture.observations.events.count
+                let adapterCommandBaseline = fixture.observations.commands.count
                 try await fixture.trigger(row)
                 if row == .inline {
+                    let inlineURL = try #require(fixture.inlineURL)
+                    // Request receipt and reducer projection are separate asynchronous
+                    // milestones. Establish the exact GET first so its 60-second budget
+                    // cannot hide commit delay inside the unchanged settle deadline.
+                    try await fixture.waitForDispatchedRequest("inline", baseline: requestBaseline)
+                    let inlineOperationID = try #require(
+                        HTTPDownloadDiagnosticEvidence.navigationOperationID(
+                            in: fixture.observations.commands,
+                            tabID: fixture.tabID,
+                            url: inlineURL,
+                            afterCommandIndex: adapterCommandBaseline,
+                        ),
+                    )
                     try await fixture.wait("inline PDF commits without download") {
-                        fixture.store.selectedTab?.metadata.committedURL == fixture.inlineURL
+                        fixture.store.selectedTab?.metadata.committedURL == inlineURL
                             && fixture.store.selectedTab?.metadata.isLoading == false
+                            && fixture.adapter.hasCommittedDocument(for: fixture.tabID)
+                            && fixture.store.previewState.operation(for: fixture.tabID) == nil
+                            && HTTPDownloadDiagnosticEvidence.hasNavigationCommit(
+                                in: fixture.observations.events,
+                                tabID: fixture.tabID,
+                                url: inlineURL,
+                                operationID: inlineOperationID,
+                                afterEventIndex: adapterEventBaseline,
+                            )
                     }
+                    #expect(fixture.adapter.hasCommittedDocument(for: fixture.tabID))
+                    #expect(fixture.store.previewState.operation(for: fixture.tabID) == nil)
+                    #expect(
+                        HTTPDownloadDiagnosticEvidence.hasNavigationCommit(
+                            in: fixture.observations.events,
+                            tabID: fixture.tabID,
+                            url: inlineURL,
+                            operationID: inlineOperationID,
+                            afterEventIndex: adapterEventBaseline,
+                        ),
+                    )
                     #expect(fixture.owner.snapshot.records.isEmpty)
                     #expect(fixture.observations.handoffs.isEmpty)
                     #expect(fixture.observations.conversions == 0)
@@ -299,6 +676,299 @@ private func hasParsedGET(
     return requests.suffix(from: baseline).contains {
         let requestPath = $0.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
         return requestPath == expectedPath && $0.method == "GET"
+    }
+}
+
+private enum HTTPDownloadDiagnosticEvidence {
+    /// Keeps failure output below host truncation limits while retaining the initial
+    /// correlation window and the latest WebKit callbacks.
+    static let maximumEventLineCount = 16
+    private static let leadingEventLineCount = 4
+    static let maximumCommandCount = 12
+    private static let leadingCommandCount = 4
+    static let maximumNativeErrorCount = 8
+    private static let leadingNativeErrorCount = 2
+
+    /// Maps fixture and external locations to stable labels without recording origins,
+    /// namespaces, titles, or other values that make CI failures noisy.
+    static func routeLabel(_ url: URL?) -> String {
+        guard let url else {
+            return "nil"
+        }
+
+        switch url.lastPathComponent {
+        case "first",
+             "committed",
+             "attachment",
+             "inline",
+             "octet",
+             "redirect",
+             "protected",
+             "post",
+             "blob",
+             "attribute",
+             "blob-bytes",
+             "slow-known",
+             "slow-unknown":
+            return url.lastPathComponent
+        default:
+            return url.host == "127.0.0.1" ? "loopback-other" : "external"
+        }
+    }
+
+    static func operationLabels(
+        _ commands: [BrowserWebKitCommand],
+    ) -> [BrowserNavigationOperationID: String] {
+        var labels: [BrowserNavigationOperationID: String] = [:]
+        var ordinal = 0
+        for command in commands {
+            guard case let .load(_, url, operationID) = command else {
+                continue
+            }
+
+            ordinal += 1
+            labels[operationID] = "op\(ordinal):load:\(routeLabel(url))"
+        }
+        return labels
+    }
+
+    static func operationLabel(
+        _ operationID: BrowserNavigationOperationID?,
+        labels: [BrowserNavigationOperationID: String],
+    ) -> String {
+        guard let operationID else {
+            return "none"
+        }
+
+        return labels[operationID] ?? "unregistered"
+    }
+
+    /// Finds the unique reducer-issued load identity for one route after the fixture baseline.
+    static func navigationOperationID(
+        in commands: [BrowserWebKitCommand],
+        tabID: BrowserTabID,
+        url: URL,
+        afterCommandIndex commandIndex: Int,
+    ) -> BrowserNavigationOperationID? {
+        var matchingOperationID: BrowserNavigationOperationID?
+        for command in commands.dropFirst(commandIndex) {
+            guard case let .load(commandTabID, commandURL, operationID) = command,
+                  commandTabID == tabID,
+                  commandURL == url
+            else {
+                continue
+            }
+            guard matchingOperationID == nil else {
+                return nil
+            }
+
+            matchingOperationID = operationID
+        }
+        return matchingOperationID
+    }
+
+    /// Requires a post-baseline adapter callback for this tab, route and operation.
+    /// A prior page or unrelated navigation cannot satisfy the assertion.
+    static func hasNavigationCommit(
+        in events: [BrowserWebKitEvent],
+        tabID: BrowserTabID,
+        url: URL,
+        operationID: BrowserNavigationOperationID,
+        afterEventIndex eventIndex: Int,
+    ) -> Bool {
+        events.dropFirst(eventIndex).contains { event in
+            guard case let .navigationCommitted(eventTabID, metadata, correlation) = event else {
+                return false
+            }
+
+            return eventTabID == tabID && metadata.committedURL == url
+                && correlation.operationID == operationID
+        }
+    }
+
+    static func commandList(_ commands: [BrowserWebKitCommand]) -> String {
+        let labels = commands.map { command in
+            switch command {
+            case .configureProfile:
+                "configureProfile"
+            case .ensureContext:
+                "ensureContext"
+            case let .load(_, url, _):
+                "load:\(routeLabel(url))"
+            case .destroyContext:
+                "destroyContext"
+            case .goBack:
+                "goBack"
+            case .goForward:
+                "goForward"
+            case .reload:
+                "reload"
+            case .stop:
+                "stop"
+            case let .showBackForwardList(_, direction):
+                "showBackForwardList:\(directionLabel(direction))"
+            case .find:
+                "find"
+            case .goToBackForwardEntry:
+                "goToBackForwardEntry"
+            case .capturePreview:
+                "capturePreview"
+            case .dismissJavaScriptDialog:
+                "dismissJavaScriptDialog"
+            }
+        }
+        return boundedLabels(
+            labels,
+            maximum: maximumCommandCount,
+            leading: leadingCommandCount,
+            emptyLabel: "commands=none",
+            separator: ",",
+            marker: { total, omitted in
+                "commandsTruncated total=\(total) omitted=\(omitted)"
+            },
+        )
+    }
+
+    static func nativeErrorList(_ errors: [String]) -> String {
+        boundedLabels(
+            errors,
+            maximum: maximumNativeErrorCount,
+            leading: leadingNativeErrorCount,
+            emptyLabel: "nativeErrors=none",
+            separator: ",",
+            marker: { total, omitted in
+                "nativeErrorsTruncated total=\(total) omitted=\(omitted)"
+            },
+        )
+    }
+
+    static func eventLines(
+        _ events: [BrowserWebKitEvent],
+        commands: [BrowserWebKitCommand],
+    ) -> String {
+        let labels = operationLabels(commands)
+        var lines: [String] = []
+        for (index, event) in events.enumerated() {
+            let summary =
+                switch event {
+                case .navigationStarted:
+                    "navigationStarted"
+                case let .navigationCommitted(_, metadata, correlation):
+                    "navigationCommitted op=\(correlationLabel(correlation, labels: labels)) "
+                        + metadataEvidence(metadata)
+                case let .navigationConvertedToDownload(_, correlation):
+                    "navigationConvertedToDownload op=\(correlationLabel(correlation, labels: labels))"
+                case let .metadata(_, metadata, correlation):
+                    "metadata op=\(correlationLabel(correlation, labels: labels)) "
+                        + metadataEvidence(metadata)
+                case let .navigationFailed(_, error, correlation):
+                    "navigationFailed op=\(correlationLabel(correlation, labels: labels)) "
+                        + "category=\(errorCategory(error)) route=\(routeLabel(error.url))"
+                case .processTerminated:
+                    "processTerminated"
+                case let .siteCreatedTab(_, _, url, foreground):
+                    "siteCreatedTab route=\(routeLabel(url)) foreground=\(foreground)"
+                case .scriptCloseRequested:
+                    "scriptCloseRequested"
+                case let .javaScriptDialogChanged(_, isPresented):
+                    "javaScriptDialogChanged presented=\(isPresented)"
+                case let .backForwardEntries(_, direction, entries):
+                    "backForwardEntries direction=\(directionLabel(direction)) count=\(entries.count)"
+                case let .preview(_, _, pngData):
+                    "preview hasPNG=\(pngData != nil)"
+                case let .linkContextAction(_, action, url):
+                    "linkContextAction action=\(linkActionLabel(action)) route=\(routeLabel(url))"
+                }
+            lines.append("event[\(index)]=\(summary)")
+        }
+        return boundedEventLines(lines)
+    }
+
+    private static func boundedEventLines(_ lines: [String]) -> String {
+        boundedLabels(
+            lines,
+            maximum: maximumEventLineCount,
+            leading: leadingEventLineCount,
+            emptyLabel: "adapterEvents=none",
+            separator: "\n",
+            marker: { total, omitted in
+                "adapterEventsTruncated total=\(total) omitted=\(omitted)"
+            },
+        )
+    }
+
+    private static func boundedLabels(
+        _ labels: [String],
+        maximum: Int,
+        leading: Int,
+        emptyLabel: String,
+        separator: String,
+        marker: (_ total: Int, _ omitted: Int) -> String,
+    ) -> String {
+        guard !labels.isEmpty else {
+            return emptyLabel
+        }
+        guard labels.count > maximum else {
+            return labels.joined(separator: separator)
+        }
+
+        let trailingCount = maximum - leading - 1
+        let omittedCount = labels.count - leading - trailingCount
+        var boundedLabels = Array(labels.prefix(leading))
+        boundedLabels.append(marker(labels.count, omittedCount))
+        boundedLabels.append(contentsOf: labels.suffix(trailingCount))
+        return boundedLabels.joined(separator: separator)
+    }
+
+    private static func correlationLabel(
+        _ correlation: BrowserWebKitEventCorrelation,
+        labels: [BrowserNavigationOperationID: String],
+    ) -> String {
+        guard let operationID = correlation.operationID else {
+            return "untracked"
+        }
+
+        return labels[operationID] ?? "unregistered"
+    }
+
+    private static func metadataEvidence(_ metadata: BrowserTab.Metadata) -> String {
+        "route=\(routeLabel(metadata.committedURL)) loading=\(metadata.isLoading ? 1 : 0) "
+            + "progress=\(String(format: "%.2f", metadata.estimatedProgress))"
+    }
+
+    private static func errorCategory(_ error: BrowserNavigationError) -> String {
+        switch error {
+        case .noInternet:
+            "noInternet"
+        case .serverNotFound:
+            "serverNotFound"
+        case .connectionFailed:
+            "connectionFailed"
+        case .pageCouldNotLoad:
+            "pageCouldNotLoad"
+        }
+    }
+
+    private static func directionLabel(_ direction: BrowserNavigationDirection) -> String {
+        switch direction {
+        case .back:
+            "back"
+        case .forward:
+            "forward"
+        }
+    }
+
+    private static func linkActionLabel(_ action: BrowserLinkContextAction) -> String {
+        switch action {
+        case .open:
+            "open"
+        case .openInNewTab:
+            "openInNewTab"
+        case .copyLink:
+            "copyLink"
+        case .shareLink:
+            "shareLink"
+        }
     }
 }
 
@@ -534,16 +1204,18 @@ private final class HTTPDownloadFixture {
     /// running during cross-process startup.
     private func waitForSinglePageControl(
         _ milestone: String,
-        timeout: TimeInterval = 10,
+        timeout: Duration = .seconds(10),
         until predicate: @MainActor () -> Bool,
     ) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !predicate(), Date() < deadline {
+        let satisfied = try await waitForAppHostedPolling(
+            timeout: timeout,
+            pollInterval: .milliseconds(10),
+        ) {
             window.rootViewController?.view.layoutIfNeeded()
-            try? await Task.sleep(for: .milliseconds(10))
+            return predicate()
         }
         try #require(
-            predicate(),
+            satisfied,
             Comment(
                 rawValue:
                 "Timed out: \(milestone) requests=\(server.requests.count) "
@@ -565,10 +1237,10 @@ private final class HTTPDownloadFixture {
     /// first-page path; committed-page checks stay on the unchanged ten-second bound.
     /// The 60 s receipt budget covers measured WebKit cold-start and process-suspension
     /// intervals; request parsing, route, method, and baseline must all still match.
-    private func waitForDispatchedRequest(
+    fileprivate func waitForDispatchedRequest(
         _ route: String,
         baseline: Int,
-        timeout: TimeInterval = 60,
+        timeout: Duration = .seconds(60),
     ) async throws {
         try await waitForSinglePageControl("native navigation dispatched: \(route)", timeout: timeout) {
             hasParsedGET(
@@ -690,26 +1362,46 @@ private final class HTTPDownloadFixture {
     }
 
     func wait(_ milestone: String, _ predicate: @MainActor () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(10)
-        while !predicate(), Date() < deadline {
+        let satisfied = try await waitForAppHostedPolling(timeout: .seconds(10)) {
             window.rootViewController?.view.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(20))
+            return predicate()
         }
+
+        let operationLabels = HTTPDownloadDiagnosticEvidence.operationLabels(observations.commands)
+        let pendingOperation = HTTPDownloadDiagnosticEvidence.operationLabel(
+            store.previewState.operation(for: tabID),
+            labels: operationLabels,
+        )
+        let navigationOrigin = HTTPDownloadDiagnosticEvidence.routeLabel(
+            store.previewState.navigationOrigin(for: tabID)?.metadata.committedURL,
+        )
+        let reducerCommitted = HTTPDownloadDiagnosticEvidence.routeLabel(
+            store.selectedTab?.metadata.committedURL,
+        )
         try #require(
-            predicate(),
+            satisfied,
             Comment(
                 rawValue:
                 "\(milestone): requests=\(server.requests.count) handoffs=\(observations.handoffs.count) "
-                    + "conversions=\(observations.conversions) failures=\(observations.failures) active=\(owner.activeCount) "
-                    + "records=\(owner.snapshot.records.count) bytes=\(owner.snapshot.records.first?.receivedBytes ?? 0) "
-                    + "ready=\(owner.snapshot.records.first?.isReady == true) notice=\(String(describing: owner.snapshot.notice))"
-                    + " accepted=\(server.acceptedCount) ready=\(server.ready) profileReady=\(adapter.profileIsConfigured)"
-                    + " commands=\(String(describing: observations.commands)) pending=\(String(describing: store.pendingWebAction))"
-                    + " content=\(String(describing: store.selectedTab?.content)) expectedURL=\(String(describing: requestedPage))"
-                    + " attached=\(webView.window === window) bounds=\(webView.bounds) loading=\(webView.isLoading)"
-                    + " nativeURL=\(String(describing: webView.url)) events=\(observations.events.count)"
-                    + " nativeErrors=\(observations.nativeErrors)"
-                    + " \(failureTransportEvidence())",
+                    + "conversions=\(observations.conversions) failures=\(observations.failures) "
+                    + "active=\(owner.activeCount) records=\(owner.snapshot.records.count) "
+                    + "bytes=\(owner.snapshot.records.first?.receivedBytes ?? 0) "
+                    + "ready=\(owner.snapshot.records.first?.isReady == true) "
+                    + "notice=\(String(describing: owner.snapshot.notice)) "
+                    + "accepted=\(server.acceptedCount) serverReady=\(server.ready) "
+                    + "profileReady=\(adapter.profileIsConfigured) "
+                    + "commands=\(HTTPDownloadDiagnosticEvidence.commandList(observations.commands)) "
+                    + "pendingOperation=\(pendingOperation) "
+                    + "navigationOrigin=\(navigationOrigin) "
+                    + "reducerCommitted=\(reducerCommitted) "
+                    + "reducerLoading=\(store.selectedTab?.metadata.isLoading == true) "
+                    + "generation=\(store.downloads.revision)/\(owner.snapshot.revision) "
+                    + "expectedRoute=\(HTTPDownloadDiagnosticEvidence.routeLabel(requestedPage)) "
+                    + "attached=\(webView.window === window) bounds=\(webView.bounds) "
+                    + "loading=\(webView.isLoading) nativeRoute=\(HTTPDownloadDiagnosticEvidence.routeLabel(webView.url)) "
+                    + "events=\(observations.events.count) "
+                    + "nativeErrors=\(HTTPDownloadDiagnosticEvidence.nativeErrorList(observations.nativeErrors)) "
+                    + "\(failureTransportEvidence())",
             ),
         )
     }
@@ -728,10 +1420,13 @@ private final class HTTPDownloadFixture {
             } else {
                 "transport evidence serialization failed"
             }
-        let events = String(describing: observations.events)
+        let events = HTTPDownloadDiagnosticEvidence.eventLines(
+            observations.events,
+            commands: observations.commands,
+        )
         return "connectionEvidence=\(connections)"
             + " adapterCommitted=\(adapter.hasCommittedDocument(for: tabID))"
-            + " adapterEvents=\(events.prefix(2_000))"
+            + "\n\(events)"
     }
 
     func remove() async {

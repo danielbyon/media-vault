@@ -28,6 +28,29 @@ extension AppHostedUITests {
     )
     @MainActor
     struct BrowserDownloadPersistenceIsolationTests {
+        @Test("Download completion requires preview projection settlement")
+        func downloadCompletionRequiresPreviewProjectionSettlement() {
+            let operation = BrowserNavigationOperationID()
+            #expect(
+                !DownloadSeparationTestSupport.downloadCompletionIsSettled(
+                    hasReadyRecord: false,
+                    previewOperation: nil,
+                ),
+            )
+            #expect(
+                !DownloadSeparationTestSupport.downloadCompletionIsSettled(
+                    hasReadyRecord: true,
+                    previewOperation: operation,
+                ),
+            )
+            #expect(
+                DownloadSeparationTestSupport.downloadCompletionIsSettled(
+                    hasReadyRecord: true,
+                    previewOperation: nil,
+                ),
+            )
+        }
+
         @Test(
             "Completed WebKit files retain protection and backup exclusion",
             .enabled(

@@ -28,6 +28,37 @@ extension AppHostedUITests {
     @Suite("Root feature window mount (app hosted)")
     @MainActor
     struct AppHostedRootFeatureTests {
+        @Test("Only an explicitly scoped first native share receives the cold-start allowance")
+        func shareStartupAllowanceRequiresExplicitScope() {
+            #expect(
+                MountedDownloadRoot.presentationStartupBudget(
+                    kind: .preview,
+                    shareStartupCompleted: false,
+                    firstShareStartupAllowance: .seconds(15),
+                ) == .seconds(5),
+            )
+            #expect(
+                MountedDownloadRoot.presentationStartupBudget(
+                    kind: .share,
+                    shareStartupCompleted: false,
+                ) == .seconds(5),
+            )
+            #expect(
+                MountedDownloadRoot.presentationStartupBudget(
+                    kind: .share,
+                    shareStartupCompleted: false,
+                    firstShareStartupAllowance: .seconds(15),
+                ) == .seconds(15),
+            )
+            #expect(
+                MountedDownloadRoot.presentationStartupBudget(
+                    kind: .share,
+                    shareStartupCompleted: true,
+                    firstShareStartupAllowance: .seconds(15),
+                ) == .seconds(5),
+            )
+        }
+
         @Test("The Browser surface is mounted only after authentication and Browser entry")
         @MainActor
         func browserSurfaceRespectsTheVaultCompositionBoundary() async throws {
@@ -203,7 +234,9 @@ extension AppHostedUITests {
     struct RootDownloadPrivacyTests {
         @Test("Mounted Root authentication loss synchronously conceals and revokes a native share")
         func liveAuthenticationRevokesBeforeLayout() async throws {
-            try await withDownloadRoot { fixture in
+            try await withDownloadRoot(
+                firstShareStartupAllowance: .seconds(15),
+            ) { fixture in
                 let file = try fixture.completedPDF()
                 try await fixture.present(file.id, .share)
                 fixture.store.send(.vault(.retryConfiguration))
@@ -539,8 +572,13 @@ extension AppHostedUITests {
 }
 
 @MainActor
-private func withDownloadRoot(_ body: (MountedDownloadRoot) async throws -> Void) async throws {
-    let fixture = try MountedDownloadRoot()
+private func withDownloadRoot(
+    firstShareStartupAllowance: Duration? = nil,
+    _ body: (MountedDownloadRoot) async throws -> Void,
+) async throws {
+    let fixture = try MountedDownloadRoot(
+        firstShareStartupAllowance: firstShareStartupAllowance,
+    )
     do {
         try await fixture.waitReady()
         try await body(fixture)
@@ -569,6 +607,8 @@ private final class MountedDownloadRoot {
     let window: UIWindow
     private(set) var host: BrowserDownloadHostController?
     private var nativeCallbacks: [String] = []
+    private var nativeShareStartupCompleted = false
+    private let firstShareStartupAllowance: Duration?
 
     let scene: UIWindowScene
 
@@ -576,7 +616,8 @@ private final class MountedDownloadRoot {
         coordinator.coverWindow(in: scene) == nil
     }
 
-    init() throws {
+    init(firstShareStartupAllowance: Duration? = nil) throws {
+        self.firstShareStartupAllowance = firstShareStartupAllowance
         scratchRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
             "download-root-ui-\(UUID().uuidString)",
             isDirectory: true,
@@ -671,12 +712,44 @@ private final class MountedDownloadRoot {
 
     func present(_ id: BrowserDownloadID, _ kind: BrowserDownloadPresentation.Kind) async throws {
         owner.execute(.init(snapshot: owner.snapshot, action: .present(id, kind)))
-        try await wait("\(kind) real UIKit presentation completion") {
+
+        // The first native ShareSheet presentation includes remote extension
+        // startup. Only that share receives a bounded cold-start allowance;
+        // Quick Look and later shares retain the steady-state wait. Every case
+        // still requires the real UIKit completion callback plus attached,
+        // settled controller state.
+        let isFirstShare = kind == .share && !nativeShareStartupCompleted
+        let isShareColdStart = isFirstShare && firstShareStartupAllowance != nil
+        let startupBudget = Self.presentationStartupBudget(
+            kind: kind,
+            shareStartupCompleted: nativeShareStartupCompleted,
+            firstShareStartupAllowance: firstShareStartupAllowance,
+        )
+        try await wait(
+            "\(kind) real UIKit presentation completion "
+                + "(share-cold-start=\(isShareColdStart))",
+            timeout: startupBudget,
+        ) {
             self.coordinator.nativePresentationCompleted
                 && self.coordinator.nativeController?.presentingViewController != nil
                 && self.coordinator.nativeController?.viewIfLoaded?.window != nil
                 && self.coordinator.nativeController?.isBeingPresented == false
         }
+        if isFirstShare {
+            nativeShareStartupCompleted = true
+        }
+    }
+
+    static func presentationStartupBudget(
+        kind: BrowserDownloadPresentation.Kind,
+        shareStartupCompleted: Bool,
+        firstShareStartupAllowance: Duration? = nil,
+    ) -> Duration {
+        guard kind == .share, !shareStartupCompleted else {
+            return .seconds(5)
+        }
+
+        return firstShareStartupAllowance ?? .seconds(5)
     }
 
     func deactivate() {
@@ -689,13 +762,16 @@ private final class MountedDownloadRoot {
 
     /// A deadline failure preserves all privacy assertions; it is never treated as successful UIKit
     /// completion. Scene attachment and modal absence are observed rather than assumed after a yield.
-    func wait(_ milestone: String, _ predicate: @MainActor () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(5.0)
-        while !predicate(), Date() < deadline {
+    func wait(
+        _ milestone: String,
+        timeout: Duration = .seconds(5),
+        _ predicate: @MainActor () -> Bool,
+    ) async throws {
+        let satisfied = try await waitForAppHostedPolling(timeout: timeout) {
             root.view.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(20))
+            return predicate()
         }
-        try #require(predicate(), "\(milestone): \(diagnostics)")
+        try #require(satisfied, "\(milestone): \(diagnostics)")
     }
 
     private var diagnostics: String {
