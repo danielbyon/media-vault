@@ -94,7 +94,8 @@ private final class BrowserDownloadProductionQualificationProcess {
 
     /// Samples actual native geometry without loading views, assigning frames or granting admission.
     private func sceneGeometry(_ scene: UIWindowScene) -> [String: Any] {
-        [
+        let coverWindow = coordinator.coverWindow(in: scene)
+        return [
             "sessionID": scene.session.persistentIdentifier,
             "activation": activationLabel(scene.activationState),
             "activationRawValue": String(scene.activationState.rawValue),
@@ -110,6 +111,7 @@ private final class BrowserDownloadProductionQualificationProcess {
                     "hidden": String(window.isHidden),
                     "alpha": String(describing: window.alpha),
                     "key": String(window.isKeyWindow),
+                    "isCover": String(window === coverWindow),
                     "rootViewBounds": window.rootViewController?
                         .viewIfLoaded
                         .map { String(describing: $0.bounds) } ?? "unloaded",
@@ -124,15 +126,22 @@ private final class BrowserDownloadProductionQualificationProcess {
             .connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .filter { $0.activationState == .foregroundActive }
-        guard scenes.count == 1, let active = scenes.first else {
+        guard !scenes.isEmpty else {
             evidence.record("resizeGestureUnavailable", [:])
             return
         }
 
-        evidence.record("resizeGestureWillBegin", [
-            "sceneSession": active.session.persistentIdentifier,
-            "generation": String(owner.snapshot.generation),
-        ])
+        for scene in scenes {
+            let sceneSession = scene.session.persistentIdentifier
+            let mounted = evidence.latestCoordinatorObservations.last {
+                $0["sceneSession"] == sceneSession && $0["mounted"] == "true"
+            }
+            evidence.record("resizeGestureWillBegin", [
+                "sceneSession": sceneSession,
+                "registration": mounted?["registration"] ?? "unavailable",
+                "generation": mounted?["generation"] ?? "unavailable",
+            ])
+        }
     }
 
     /// Stable evidence labels come from actual UIKit enum cases, not its debug description.
