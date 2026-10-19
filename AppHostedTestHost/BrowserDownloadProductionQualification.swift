@@ -26,6 +26,11 @@ import WebKit
 @MainActor
 enum BrowserDownloadProductionQualification {
     static let argument = "--browser-download-production-qualification"
+    static let passiveSceneCensusArgument = "--browser-download-passive-scene-census"
+    static var passiveSceneCensusEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(passiveSceneCensusArgument)
+    }
+
     #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION && targetEnvironment(simulator)
     /// Explicit simulator fixture opt-in. Physical builds never compile the injected verifier.
     static let simulatedProtectionArgument = "--browser-download-simulated-protection-readback"
@@ -60,6 +65,7 @@ private final class BrowserDownloadProductionQualificationProcess {
     var status = "Fixture-seeded authentication; qualification controls below."
     var observationsJSON = "[]"
     var sceneCensusJSON = "{}"
+    var sceneRequestJSON = "{}"
 
     /// Copy redacted observations only on explicit fixture input, avoiding a Root-layout feedback loop.
     func refreshObservations() {
@@ -421,17 +427,28 @@ private final class BrowserDownloadProductionQualificationProcess {
         guard UIApplication.shared.supportsMultipleScenes else {
             status = "Multiple application scenes are unsupported here."
             evidence.record("sceneRequestUnsupported", [:])
+            refreshSceneRequestEvidence()
             return
         }
 
-        // A request is not proof: log only scenes actually registered by the production bridge.
+        // Record the issued request before UIKit can deliver its asynchronous completion error.
+        // A request is not proof: only the census shows which scenes UIKit actually registered.
         let request = UISceneSessionActivationRequest(role: .windowApplication)
+        evidence.record("sceneRequested", [:])
+        refreshSceneRequestEvidence()
         UIApplication.shared.activateSceneSession(for: request) { [weak self] error in
             MainActor.assumeIsolated {
                 self?.evidence.record("sceneRequestFailed", ["code": String((error as NSError).code)])
+                self?.refreshSceneRequestEvidence()
             }
         }
-        evidence.record("sceneRequested", [:])
+        if BrowserDownloadProductionQualification.passiveSceneCensusEnabled {
+            status = "Scene requested. Arrange the original window fully in the background; keep this new window active."
+        }
+    }
+
+    private func refreshSceneRequestEvidence() {
+        sceneRequestJSON = evidence.latestSceneRequestJSON() ?? "{}"
     }
 
     /// Requests the one known background qualification session; UIKit callbacks prove the result.
@@ -543,6 +560,8 @@ private final class BrowserDownloadProductionQualificationProcess {
 @MainActor
 private struct BrowserDownloadProductionQualificationRoot: View {
     let process: BrowserDownloadProductionQualificationProcess
+    @Environment(\.scenePhase)
+    private var scenePhase
     @State
     private var browserHostingContext: BrowserQualificationWebKitHostingContext
 
@@ -568,6 +587,14 @@ private struct BrowserDownloadProductionQualificationRoot: View {
             VStack(alignment: .leading) {
                 Text("Production qualification — fixture-seeded auth").font(.caption)
                 Text(process.status).font(.caption)
+                if BrowserDownloadProductionQualification.passiveSceneCensusEnabled {
+                    Text(
+                        "Operator: minimize the original window to the Stage Manager shelf without closing it. "
+                            + "Keep this new window active; the test continues automatically within 120 seconds.",
+                    )
+                    .font(.caption)
+                    .accessibilityIdentifier("downloadQualificationOperatorArrangementInstruction")
+                }
                 Text(process.protectionLabel)
                     .font(.caption)
                     .accessibilityIdentifier("downloadQualificationProtectionQualificationMode")
@@ -616,12 +643,26 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                     .font(.caption2)
                     .accessibilityIdentifier("downloadQualificationSceneCensus")
                     .accessibilityValue(process.sceneCensusJSON)
+                Text("Latest scene-request event")
+                    .font(.caption2)
+                    .accessibilityIdentifier("downloadQualificationSceneRequest")
+                    .accessibilityValue(process.sceneRequestJSON)
             }
             .padding(8)
             .background(.regularMaterial)
         }
         .task { await process.start() }
         .onAppear { process.refreshSceneCensus() }
+        .onChange(of: scenePhase) { _, _ in
+            guard BrowserDownloadProductionQualification.passiveSceneCensusEnabled else {
+                return
+            }
+
+            Task { @MainActor in
+                await Task.yield()
+                process.refreshSceneCensus()
+            }
+        }
     }
 }
 
@@ -707,6 +748,19 @@ private final class BrowserDownloadProductionEvidence {
     var observationsJSON: String {
         guard let data = try? JSONSerialization.data(withJSONObject: observations, options: [.sortedKeys]) else {
             return "[]"
+        }
+
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Returns the latest request outcome, allowing physical qualification to read it without
+    /// tapping a control that could change which app window is foreground.
+    func latestSceneRequestJSON() -> String? {
+        let requestEvents: Set = ["sceneRequested", "sceneRequestFailed", "sceneRequestUnsupported"]
+        guard let observation = observations.last(where: { requestEvents.contains($0["event"] ?? "") }),
+              let data = try? JSONSerialization.data(withJSONObject: observation, options: [.sortedKeys])
+        else {
+            return nil
         }
 
         return String(decoding: data, as: UTF8.self)
