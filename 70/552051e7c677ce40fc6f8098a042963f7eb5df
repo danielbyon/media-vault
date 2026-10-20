@@ -1,0 +1,29 @@
+AppTests/RootSurfaceSnapshotTests.swift
+  s_5d62df6b616a0e::t_33701c0dcb56ac 11
+  s_5d62df6b616a0e::t_9bb76087913d5d 31-34,40-43,49-64,66,68-69,71
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserViewSnapshotTests.swift
+  s_5d62df6b616a0e::t_fc7486983e0ea1 425-426,441,445-447
+  s_5d62df6b616a0e::t_550654c8889034 431
+  s_5d62df6b616a0e::t_33701c0dcb56ac 9
+  s_5d62df6b616a0e::t_39f46549f1b8a2 436-437,439
+  s_5d62df6b616a0e::t_fd53ab8c12d12e 349,351-356
+  s_5d62df6b616a0e::t_ad8f941ae580ae 433,438
+  s_5d62df6b616a0e::t_d936282b6360dd 16
+  s_5d62df6b616a0e::t_b4fef2197f7973 448-449
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "70552051e7c677ce40fc6f8098a042963f7eb5df",
+  "prompts": {},
+  "sessions": {
+    "s_5d62df6b616a0e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a131c2-ae01-7141-874c-cf889bf8eb74",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
