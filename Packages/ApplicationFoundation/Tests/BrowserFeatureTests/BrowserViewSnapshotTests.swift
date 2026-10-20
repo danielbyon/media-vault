@@ -6,12 +6,14 @@
 //
 
 import ComposableArchitecture
+import CoreFoundation
 import Dependencies
 import Foundation
 import FoundationTestSupport
 import SnapshotTesting
 import SwiftUI
 import Testing
+import UIKit
 @testable import BrowserFeature
 
 @Suite("Browser view snapshots", .serialized)
@@ -344,8 +346,14 @@ struct BrowserViewSnapshotTests {
     /// Recording is restricted to these new download references. Missing PNGs are written and
     /// reported as failures by SnapshotTesting; existing images are compared, never overwritten.
     private func downloadSnapshot(_ content: some View, named name: String, config: ViewImageConfig) {
+        let displayScale = UITraitCollection.current.displayScale
         withSnapshotTesting(record: .missing) {
-            presentationSnapshot(content, named: name, config: config)
+            presentationSnapshot(
+                content,
+                named: name,
+                config: config,
+                displayScale: displayScale,
+            )
         }
     }
 
@@ -414,16 +422,29 @@ struct BrowserViewSnapshotTests {
         )
     }
 
+    /// Renders a presentation at the host display scale. The reference test name is derived
+    /// from that scale so callers cannot pair an image and reference name from different hosts.
     private func presentationSnapshot(
         _ content: some View,
         named name: String,
         config: ViewImageConfig,
+        displayScale: CGFloat? = nil,
     ) {
+        let resolvedDisplayScale = displayScale ?? UITraitCollection.current.displayScale
         assertSnapshot(
             of: content.environment(\.colorScheme, .light),
-            as: .image(layout: .device(config: config)),
+            as: .image(
+                layout: .device(config: config),
+                traits: .init(displayScale: resolvedDisplayScale),
+            ),
             named: name,
+            testName: Self.presentationSnapshotTestName(for: resolvedDisplayScale),
         )
+    }
+
+    private static func presentationSnapshotTestName(for displayScale: CGFloat) -> String {
+        let scaleSuffix = displayScale == 3 ? "" : "\(Int(displayScale))x"
+        return "presentationSnapshot\(scaleSuffix)(_:named:config:)"
     }
 
     private func makeBrowserViewStore(initialState: BrowserFeature.State) -> StoreOf<BrowserFeature> {

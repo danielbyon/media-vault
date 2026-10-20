@@ -8,6 +8,7 @@
 import AppFeature
 import CalculatorFeature
 import ComposableArchitecture
+import CoreFoundation
 import Dependencies
 import FoundationTestSupport
 import SnapshotTesting
@@ -27,34 +28,47 @@ struct RootSurfaceSnapshotTests {
 
     @Test("The root surface is stable on a compact iPhone")
     func compactPhoneSnapshot() {
-        assertSnapshot(
-            of: rootView(horizontalSizeClass: .compact),
-            as: .image(
-                layout: .device(config: DeterministicTestSupport.compactPhone),
-                traits: .init(displayScale: 3),
-            ),
+        rootSurfaceSnapshot(
+            horizontalSizeClass: .compact,
+            config: DeterministicTestSupport.compactPhone,
+            testName: #function,
         )
     }
 
     @Test("The root surface is stable on a large iPhone")
     func largePhoneSnapshot() {
-        assertSnapshot(
-            of: rootView(horizontalSizeClass: .compact),
-            as: .image(
-                layout: .device(config: DeterministicTestSupport.largePhone),
-                traits: .init(displayScale: 3),
-            ),
+        rootSurfaceSnapshot(
+            horizontalSizeClass: .compact,
+            config: DeterministicTestSupport.largePhone,
+            testName: #function,
         )
     }
 
     @Test("The root surface is stable at regular iPad width")
     func regularWidthIPadSnapshot() {
+        rootSurfaceSnapshot(
+            horizontalSizeClass: .regular,
+            config: DeterministicTestSupport.regularWidthIPad,
+            testName: #function,
+        )
+    }
+
+    private func rootSurfaceSnapshot(
+        horizontalSizeClass: UserInterfaceSizeClass,
+        config: ViewImageConfig,
+        testName: String,
+    ) {
+        let displayScale = UITraitCollection.current.displayScale
+        let referenceTestName = displayScale == 3
+            ? testName
+            : String(testName.dropLast(2)) + "\(Int(displayScale))x()"
         assertSnapshot(
-            of: rootView(horizontalSizeClass: .regular),
+            of: rootView(horizontalSizeClass: horizontalSizeClass),
             as: .image(
-                layout: .device(config: DeterministicTestSupport.regularWidthIPad),
-                traits: .init(displayScale: 3),
+                layout: .device(config: config),
+                traits: .init(displayScale: displayScale),
             ),
+            testName: referenceTestName,
         )
     }
 
