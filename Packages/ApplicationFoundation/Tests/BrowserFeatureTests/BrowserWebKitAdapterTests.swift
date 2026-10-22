@@ -111,6 +111,12 @@ struct BrowserWebKitAdapterTests {
         #expect(await events.next() == .navigationStarted(tabID: tabID))
 
         delegate.webView?(webView, didCommit: nil)
+        guard case let .navigationCommitted(committedTabID, _, .untracked) = await events.next() else {
+            Issue.record("An unidentified nil navigation did not emit an untracked document commit")
+            return
+        }
+
+        #expect(committedTabID == tabID)
         try #require(adapter.hasCommittedDocument(for: tabID))
 
         delegate.webView?(webView, didFinish: nil)

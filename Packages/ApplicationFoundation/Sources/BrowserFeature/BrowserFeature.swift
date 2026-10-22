@@ -15,6 +15,8 @@ struct BrowserPreviewState: Equatable, Sendable {
         var data: BrowserTabPreviewCacheEntry?
         var revision: BrowserTabPreviewRevision
         var operation: BrowserNavigationOperationID?
+        /// Prior presentation retained only until this navigation settles or is superseded.
+        var navigationOrigin: BrowserTab?
 
         init(
             data: BrowserTabPreviewCacheEntry? = nil,
@@ -24,6 +26,7 @@ struct BrowserPreviewState: Equatable, Sendable {
             self.data = data
             self.revision = revision
             self.operation = operation
+            navigationOrigin = nil
         }
     }
 
@@ -69,11 +72,13 @@ struct BrowserPreviewState: Equatable, Sendable {
     mutating func invalidate(
         tabID: BrowserTabID,
         operation: BrowserNavigationOperationID?,
+        navigationOrigin: BrowserTab? = nil,
     ) {
         var entry = entries[tabID] ?? .init()
         entry.revision = .init()
         entry.data = nil
         entry.operation = operation
+        entry.navigationOrigin = navigationOrigin
         entries[tabID] = entry
     }
 
@@ -86,6 +91,21 @@ struct BrowserPreviewState: Equatable, Sendable {
         entries[tabID]?.operation
     }
 
+    /// Returns the presentation to restore when navigation becomes a download instead of a page.
+    func navigationOrigin(for tabID: BrowserTabID) -> BrowserTab? {
+        entries[tabID]?.navigationOrigin
+    }
+
+    /// Advances the recoverable presentation after a document commits while still loading.
+    mutating func updateNavigationOrigin(_ tab: BrowserTab, for tabID: BrowserTabID) {
+        entries[tabID]?.navigationOrigin = tab
+    }
+
+    /// Releases the transient origin without changing the monotonically invalidated preview revision.
+    mutating func clearNavigationOrigin(for tabID: BrowserTabID) {
+        entries[tabID]?.navigationOrigin = nil
+    }
+
     @discardableResult
     mutating func consume(operationID: BrowserNavigationOperationID, for tabID: BrowserTabID) -> Bool {
         guard entries[tabID]?.operation == operationID
@@ -94,6 +114,7 @@ struct BrowserPreviewState: Equatable, Sendable {
         }
 
         entries[tabID]?.operation = nil
+        entries[tabID]?.navigationOrigin = nil
         return true
     }
 
@@ -104,6 +125,7 @@ struct BrowserPreviewState: Equatable, Sendable {
         }
 
         entries[tabID]?.operation = nil
+        entries[tabID]?.navigationOrigin = nil
         return true
     }
 
@@ -193,6 +215,9 @@ public struct BrowserFeature {
         var javaScriptDialogTabID: BrowserTabID?
         /// Revision-scoped preview bytes and WebKit operation identities owned by each tab.
         var previewState: BrowserPreviewState
+        /// Revisioned transient download projection; native objects and scratch paths remain owner-only.
+        var downloads = BrowserDownloadSnapshot()
+        var downloadsArePresented = false
         var shareURL: URL?
         var shareTitle: String?
         var destructiveConfirmation: BrowserDestructiveConfirmation?
@@ -490,10 +515,18 @@ public struct BrowserFeature {
         case shareDismissed
         /// Delivers a Sendable event projected by the WebKit adapter.
         case webKitEvent(BrowserWebKitEvent)
+        /// Opens or closes the transient Downloads sheet.
+        case downloadsPresented(Bool)
+        /// Reconciles a newer atomic snapshot from the shared download owner.
+        case downloadsChanged(BrowserDownloadSnapshot)
+        /// Routes an opaque download command without passing files through reducer state.
+        case downloadCommand(BrowserDownloadCommand)
     }
 
     @Dependency(\.browserWebKit)
     var webKit
+    @Dependency(\.browserDownloads)
+    var browserDownloads
     @Dependency(\.uuid)
     var uuid
     @Dependency(\.continuousClock)
@@ -516,6 +549,7 @@ public struct BrowserFeature {
     enum CancelID {
         case providerSuggestions
         case webKitEvents
+        case downloadEvents
     }
 
     /// Creates the browser reducer.

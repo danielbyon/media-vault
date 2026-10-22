@@ -14,12 +14,21 @@ extension BrowserFeature {
         switch action {
         case .task:
             let events = webKit.events
-            return Effect<Action>.run { send in
-                for await event in await events() {
-                    await send(.webKitEvent(event))
+            let downloads = browserDownloads.events
+            return .merge(
+                Effect<Action>.run { send in
+                    for await event in await events() {
+                        await send(.webKitEvent(event))
+                    }
                 }
-            }
-            .cancellable(id: CancelID.webKitEvents, cancelInFlight: true)
+                .cancellable(id: CancelID.webKitEvents, cancelInFlight: true),
+                Effect<Action>.run { send in
+                    for await snapshot in await downloads() {
+                        await send(.downloadsChanged(snapshot))
+                    }
+                }
+                .cancellable(id: CancelID.downloadEvents, cancelInFlight: true),
+            )
         case .browserEntered:
             guard state.openTabsEntryLifecycle == .notEntered else {
                 return .none
@@ -801,6 +810,23 @@ extension BrowserFeature {
             return retry(tab: tab, state: &state)
         case let .webKitEvent(event):
             return handle(event: event, state: &state)
+        case let .downloadsPresented(presented):
+            state.downloadsArePresented = presented
+            return .none
+
+        case let .downloadsChanged(snapshot):
+            guard snapshot.revision > state.downloads.revision else {
+                return .none
+            }
+
+            if snapshot.generation != state.downloads.generation
+                || (snapshot.cleanupNeedsRetry && !state.downloads.cleanupNeedsRetry) {
+                state.downloadsArePresented = false
+            }
+            state.downloads = snapshot
+        case let .downloadCommand(command):
+            let execute = browserDownloads.execute
+            return .run { _ in await execute(command) }
         }
         return .none
     }
