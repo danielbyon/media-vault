@@ -400,7 +400,8 @@ extension AppHostedUITests {
             await lateHarness.waitForAnimation()
 
             #expect(lateCompletion)
-            #expect(lateExecutions.contains(.missingDestination))
+            #expect(!lateExecutions.contains(.missingDestination))
+            #expect(lateExecutions.contains(.geometry))
             #expect(lateHarness.card.subviews.count == 1)
             lateHarness.window.isHidden = true
 
