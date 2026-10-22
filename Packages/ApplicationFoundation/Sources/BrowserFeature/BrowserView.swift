@@ -39,7 +39,7 @@ public struct BrowserView: View {
     @StateObject
     private var tabTransitionUIKitCoordinator = BrowserTabTransitionUIKitCoordinator()
     @StateObject
-    private var tabOverviewScrollVisibility = BrowserTabOverviewScrollVisibility()
+    private var tabOverviewScrollVisibility: BrowserTabOverviewScrollVisibility
     @StateObject
     private var defaultTabOverviewScrollPosition = BrowserTabOverviewScrollPosition()
     private let injectedTabOverviewScrollPosition: BrowserTabOverviewScrollPosition?
@@ -78,6 +78,7 @@ public struct BrowserView: View {
         transitionCoordinator: BrowserTabTransitionUIKitCoordinator,
         readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
         scrollPosition: BrowserTabOverviewScrollPosition? = nil,
+        scrollVisibility: BrowserTabOverviewScrollVisibility? = nil,
     ) {
         self.init(
             store: store,
@@ -85,6 +86,7 @@ public struct BrowserView: View {
             transitionCoordinator: transitionCoordinator,
             readinessCoordinator: readinessCoordinator,
             scrollPosition: scrollPosition,
+            scrollVisibility: scrollVisibility,
         )
     }
 
@@ -94,12 +96,16 @@ public struct BrowserView: View {
         transitionCoordinator: BrowserTabTransitionUIKitCoordinator?,
         readinessCoordinator: BrowserWebKitReadinessCoordinator? = nil,
         scrollPosition: BrowserTabOverviewScrollPosition? = nil,
+        scrollVisibility: BrowserTabOverviewScrollVisibility? = nil,
     ) {
         self.store = store
         self.reduceMotionOverride = reduceMotionOverride
         injectedTabOverviewScrollPosition = scrollPosition
         _tabTransitionUIKitCoordinator = StateObject(wrappedValue: transitionCoordinator ?? .init())
         _webKitReadinessCoordinator = State(initialValue: readinessCoordinator ?? .init())
+        _tabOverviewScrollVisibility = StateObject(
+            wrappedValue: scrollVisibility ?? BrowserTabOverviewScrollVisibility(),
+        )
         _chromeOpacity = State(initialValue: store.presentation == .browsing ? 1 : 0)
         _tabTransitionState = State(initialValue: .init(overviewVisualMounted: store.presentation == .tabOverview))
     }
