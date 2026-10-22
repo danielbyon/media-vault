@@ -1,0 +1,68 @@
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserTabTests.swift
+  s_537f13372bbf30::t_b564979021f571 632,638-652
+  s_6ef47ae5a7db2d::t_190b843429766f 653-654
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabOverviewView.swift
+  s_537f13372bbf30::t_9071aca929685e 126-135
+  s_537f13372bbf30::t_b006fd42b63b40 597-600
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserTabTransitionUIKitCoordinator+Fallback.swift
+  s_537f13372bbf30::t_2136fbbe060c37 218-221
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserView.swift
+  s_537f13372bbf30::t_a501ef3ed63693 42,81,89,99,106-108
+BrowserTabOverviewUITestHost/BrowserTabOverviewUITestHost.swift
+  s_537f13372bbf30::t_d9e6cbdd95bdd1 246
+  s_537f13372bbf30::t_9632d645e2a117 191-196,202-207,224,233,300,438-449,471,515,524,551,558-572,582-592,602
+  s_537f13372bbf30::t_8e80a1992aa7d3 24-25
+  s_537f13372bbf30::t_61bc3e6c5a40fd 258-260,263-264,269,271-272,274-275,279,282-283,285-286,288-289,292-294
+  s_537f13372bbf30::t_ebf99cea21d65c 14
+  s_537f13372bbf30::t_1adcac9ec7144f 323,330-331,356,385,518-523,525,646-650
+  s_537f13372bbf30::t_f4eb26d0c639d3 429-433,437,459,464,472,476-478
+  s_537f13372bbf30::t_a72fba96929290 485-498
+  s_537f13372bbf30::t_5e75b8fb89f3d0 311-313,324-329
+  s_537f13372bbf30::t_5b269fa8d5fb2e 173-174,184-190,197-201,208-212,214-223,225-227,235-245,247-254,256-257,261-262,265-268,270,273,276-278,280-281,284,287,290-291,295-297,301-302,308-310,314-322,338-351,354-355,357-360,365-369,376-380,383-384,386-389,394-398,405-428,450-458,460-463,465-470,473-475,479-484,499-508,513,555-557,573-581,593-601,603-631,635-637,651-684
+  s_537f13372bbf30::t_a74e3ea2fe452d 175-183,213,228,230-232
+  s_537f13372bbf30::t_321f7446b7b7e1 509-512,514,516-517,526-544,553
+  s_537f13372bbf30::t_2cfb4d37a974f3 298-299,303-307
+  s_537f13372bbf30::t_1d471a471127bd 352
+  s_537f13372bbf30::t_76237200ffb597 353,361-364,370-375,381-382,390-393,399-404
+  s_537f13372bbf30::t_c3e8754215c981 9
+  s_537f13372bbf30::t_447e2a554a7dc5 255,332-337,545-550,552,554,632-634,638-645
+  s_537f13372bbf30::t_44e75aa87a6552 26,434-436
+  s_537f13372bbf30::t_de5fc40a789f3b 229,234
+BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests.swift
+  s_537f13372bbf30::t_1513ac989636b2 99-120,122-124,153-156,159-164,166-175,181-184,190-210,212-215,228-236,244-246,248,275,277-282,295-308,310-319
+  s_537f13372bbf30::t_fb202c9ff4ca71 121,158,238-242
+  s_537f13372bbf30::t_25e91904d0f2f0 176-180,185-189,291-294,309
+  s_537f13372bbf30::t_de5fc40a789f3b 217,221
+  s_537f13372bbf30::t_47cbbec326f274 237,243,247,249,259-263,274
+  s_537f13372bbf30::t_294cf381403f73 250-258,264-273,276
+  s_537f13372bbf30::t_d366e166e02e17 283-290
+  s_537f13372bbf30::t_e136d7278fa3be 125-152,157
+  s_537f13372bbf30::t_4569bd9c334acc 165,211
+  s_537f13372bbf30::t_31755f8f469973 216,218-220,222-227
+AppHostedTests/BrowserTabTransitionTests.swift
+  s_537f13372bbf30::t_cf672a1c3481ce 403-404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d170b2d83df8517cf3d8e245392962394a6db414",
+  "prompts": {},
+  "sessions": {
+    "s_537f13372bbf30": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15836-9c35-71e2-891b-d288adcbda2a",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    },
+    "s_6ef47ae5a7db2d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16191-4636-7ac2-864d-0aa45b3e2d08",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <daniel@danielbyon.com>"
+    }
+  }
+}
