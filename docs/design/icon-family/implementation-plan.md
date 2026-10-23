@@ -53,6 +53,76 @@ Each stage records exact input/output hashes, reproducibility instructions, and 
 4. **Review.** Confirm owner approval Gate 1 preceded all family artwork and Gate 2 preceded production integration. Compare device screenshots against the approved board, run targeted/full tests, strict lint and build gates, and obtain independent Standards and Spec reviews. Resolve in-scope defects without modifying unrelated targets or privacy/decoy behavior.
 5. **Closeout evidence.** Report source master and generated SHA-256s, resolved Xcode settings, original reference identity, retained product/archive locations and hashes, Debug/Release primary/alternate metadata, exclusion proofs, physical device/OS/screenshots, test results, review findings and anything inconclusive. Keep the **single** PR draft/unmerged until accepted. Never describe disposable primary-icon inspection as runtime alternate switching validation.
 
+## Retained qualification commands
+
+The following is a required **inspection-only device build/archive procedure** for the implementation worktree; do not run in the dirty primary checkout. The Xcode 27 disposable packaging probe in Stage 1 must use the same retention principles for its Primary prototype and temporary alternate. These commands intentionally preserve every exact device build and archive output in a run-specific directory. Record the current Git SHA, selected Xcode, all target settings and raw logs before making product-level claims. Signing-disabled device products cannot be installed; use **separate properly signed disposable inspection builds** for physical iPhone/iPad visual qualification.
+
+~~~bash
+set -euo pipefail
+QA_ROOT="$PWD/.build/icon-family-qualification/$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$QA_ROOT/logs" "$QA_ROOT/products" "$QA_ROOT/archives" "$QA_ROOT/reports"
+git rev-parse HEAD > "$QA_ROOT/reports/HEAD.txt"
+xcodebuild -version > "$QA_ROOT/reports/xcode-version.txt"
+xcodebuild -list -json -project App.xcodeproj > "$QA_ROOT/reports/targets.json"
+
+for CONFIG in Debug Release; do
+  DERIVED="$QA_ROOT/derived/$CONFIG"
+  ARCHIVE="$QA_ROOT/archives/$CONFIG.xcarchive"
+
+  # Enumerate every target from targets.json and retain its resolved settings;
+  # App must own the icon settings, not project-level xcconfigs or test hosts.
+  xcodebuild -project App.xcodeproj -target App \
+    -configuration "$CONFIG" -showBuildSettings -json \
+    > "$QA_ROOT/reports/$CONFIG-App-build-settings.json"
+
+  xcodebuild -workspace App.xcworkspace -scheme App \
+    -configuration "$CONFIG" -destination 'generic/platform=iOS' \
+    -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO build \
+    > "$QA_ROOT/logs/$CONFIG-device-build.log" 2>&1
+
+  DEVICE_APP="$DERIVED/Build/Products/$CONFIG-iphoneos/App.app"
+  test -d "$DEVICE_APP"
+  mkdir -p "$QA_ROOT/products/$CONFIG"
+  ditto "$DEVICE_APP" "$QA_ROOT/products/$CONFIG/App.app"
+
+  xcodebuild -workspace App.xcworkspace -scheme App \
+    -configuration "$CONFIG" -destination 'generic/platform=iOS' \
+    -derivedDataPath "$DERIVED" -archivePath "$ARCHIVE" \
+    CODE_SIGNING_ALLOWED=NO archive \
+    > "$QA_ROOT/logs/$CONFIG-archive.log" 2>&1
+
+  ARCHIVE_APP="$ARCHIVE/Products/Applications/App.app"
+  test -d "$ARCHIVE_APP"
+
+  for PRODUCT in device archive; do
+    if [ "$PRODUCT" = device ]; then
+      APP="$QA_ROOT/products/$CONFIG/App.app"
+    else
+      APP="$ARCHIVE_APP"
+    fi
+    LABEL="$CONFIG-$PRODUCT"
+    plutil -p "$APP/Info.plist" > "$QA_ROOT/reports/$LABEL-Info.plist.txt"
+    if [ -f "$APP/Assets.car" ]; then
+      xcrun --sdk iphoneos assetutil --info "$APP/Assets.car" \
+        > "$QA_ROOT/reports/$LABEL-asset-renditions.json"
+    else
+      printf 'Assets.car absent: inspect actual alternate compiled packaging\n' \
+        > "$QA_ROOT/reports/$LABEL-asset-renditions.txt"
+    fi
+    find "$APP" -type f -print | LC_ALL=C sort \
+      > "$QA_ROOT/reports/$LABEL-resource-files.txt"
+    while IFS= read -r FILE; do
+      shasum -a 256 "$FILE"
+    done < "$QA_ROOT/reports/$LABEL-resource-files.txt" \
+      > "$QA_ROOT/reports/$LABEL-resource-hashes.txt"
+  done
+done
+~~~
+
+**Mandatory follow-through before cleanup:** For **each Xcode project target**, obtain resolved settings using the target list in targets.json and the same xcodebuild -project/-target/-configuration/-showBuildSettings -json command shape; save every report and assess icon-key and resource ownership, not merely the App output. Preserve a copy of App.xcodeproj/project.pbxproj or a byte-identical project-file hash for resource-phase audit. Cross-reference the compiled Info.plist keys CFBundleIcons and (if generated) CFBundleIcons~ipad, the CFBundleAlternateIcons name set, compiled assets/renditions, the exact seven Pro alternates, and complete file-hash manifests. Prove the Release product has **neither Development registration nor its compiled artwork** using the verified Stage 1/3 packaging method. Do not infer source-family asset counts from compiled files. Preserve the exact .app copies, .xcarchive bundles, logs, target-settings JSON and reports until inspection and review are complete.
+
+If an unsigned device archive is blocked by the current signing/toolchain setup, keep the failure log and rerun with legitimate signing settings that yield an inspectable archive. Do **not** waive the required archive inspection, replace evidence with a simulator build, infer success from CI, or delete the failed/successful product before recording its identity.
+
 ## Acceptance invariants
 
 - Release primary = Core Tight—Circle; Debug primary = recognizable ring plus distinct DEV treatment. No Dev icon in Release.
