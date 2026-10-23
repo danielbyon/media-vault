@@ -8,7 +8,7 @@ Source decisions: [ADR-0001](../../adr/0001-preserve-icon-family-design.md). Ter
 
 ## Goal and constraints
 
-Implement nine faithful editable icon identities (Primary, Development, Mineral, Indigo, Instrument, Grid, Compass, Calculator, Calculator Glass) and three explicitly authored system appearances (Default, Dark, Tinted) for each. The unaltered supplied 1536×1024 RGBA PNG is the reference authority; preserve its SHA-256 **92dc5f23741c424d5eceb3c308a041b73ad17a2140fc7b3631cd93f866073975** in the repository alongside it. The source image must be copied from the user's uploaded file—not substituted with previously reconstructed or newly generated imagery. **Before reconstruction, verify the exact original PNG, its dimensions/color format and this SHA-256, then copy it unchanged to docs/design/icon-family/approved-showcase.png and verify the copied hash. Missing/mismatched source is a blocker.**
+Implement nine faithful editable icon identities (Primary, Development, Mineral, Indigo, Instrument, Grid, Compass, Calculator, Calculator Glass) and three explicitly authored system appearances (Default, Dark, Tinted) for each. The unaltered supplied 1536×1024 RGBA PNG (2,177,931 bytes) is the reference authority; preserve its SHA-256 **92dc5f23741c424d5eceb3c308a041b73ad17a2140fc7b3631cd93f866073975** in the repository alongside it. The source image must be copied from the user's uploaded file—not substituted with previously reconstructed or newly generated imagery. **Before reconstruction, verify the exact original PNG, its dimensions/color format and this SHA-256, then copy it unchanged to docs/design/icon-family/approved-showcase.png and verify the copied hash. Missing/mismatched source is a blocker.**
 
 **Inventory semantics:** Nine source identities times three authored appearances equals **27 authored source appearances**. Each shipping configuration registers **eight identities**: Release Primary plus seven Pro alternates, or Debug Development plus the same seven Pro alternates. Xcode may compile several appearances into one Assets.car or other rendition files; compiled resource-file counts do not equal, and must not be inferred from, either number. Prove these three facts independently.
 
@@ -69,11 +69,18 @@ for CONFIG in Debug Release; do
   DERIVED="$QA_ROOT/derived/$CONFIG"
   ARCHIVE="$QA_ROOT/archives/$CONFIG.xcarchive"
 
-  # Enumerate every target from targets.json and retain its resolved settings;
-  # App must own the icon settings, not project-level xcconfigs or test hosts.
-  xcodebuild -project App.xcodeproj -target App \
-    -configuration "$CONFIG" -showBuildSettings -json \
-    > "$QA_ROOT/reports/$CONFIG-App-build-settings.json"
+  # Inspect EVERY target, not only App. jq is a qualification-only tool.
+  command -v jq >/dev/null
+  TARGET_INDEX=0
+  while IFS= read -r TARGET; do
+    printf '%s: %s\n' "$TARGET_INDEX" "$TARGET" \
+      >> "$QA_ROOT/reports/$CONFIG-target-index.txt"
+    xcodebuild -project App.xcodeproj -target "$TARGET" \
+      -configuration "$CONFIG" -showBuildSettings -json \
+      > "$QA_ROOT/reports/$CONFIG-target-$TARGET_INDEX-build-settings.json"
+    TARGET_INDEX=$((TARGET_INDEX + 1))
+  done < <(jq -r '.project.targets[]' "$QA_ROOT/reports/targets.json")
+  test "$TARGET_INDEX" -gt 0
 
   xcodebuild -workspace App.xcworkspace -scheme App \
     -configuration "$CONFIG" -destination 'generic/platform=iOS' \
