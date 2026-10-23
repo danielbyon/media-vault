@@ -22,6 +22,40 @@ Create an **isolated local worktree for the single branch codex/icon-family-prod
 
 Each stage records exact input/output hashes, reproducibility instructions, and review evidence. Owner approval is explicit at Stage 1 and Stage 2; absence of an answer means STOP. After technical verification, request acceptance before merge. No autonomous background work and no automatic merge.
 
+## Local implementation worktree bootstrap
+
+The connected GitHub branch is available remotely, but the local implementation worktree must be materialized **on the developer's Mac**. The command below is a controlled handoff for a local agent/terminal with filesystem access, not a claim that ChatGPT's remote branch creation created that worktree. It preserves dirty primary-checkout files and fails closed if origin/main advanced beyond the branch baseline; reconcile any advancement in an isolated worktree **without** overwriting newer main files or using a blind force push.
+
+~~~bash
+set -euo pipefail
+cd /Users/daniel/Projects/media-vault
+git fetch origin --prune
+git status --short
+CURRENT_MAIN="$(git rev-parse origin/main)"
+FEATURE_HEAD="$(git rev-parse origin/codex/icon-family-production-assets)"
+printf 'origin/main=%s\nfeature=%s\n' "$CURRENT_MAIN" "$FEATURE_HEAD"
+if ! git merge-base --is-ancestor origin/main origin/codex/icon-family-production-assets; then
+  printf 'BLOCKED: origin/main advanced; reconcile the feature branch first.\n' >&2
+  exit 1
+fi
+WORKTREE="$HOME/.codex/worktrees/icon-family-production-assets/media-vault"
+if [ -e "$WORKTREE" ]; then
+  printf 'BLOCKED: desired worktree already exists: %s\n' "$WORKTREE" >&2
+  exit 1
+fi
+mkdir -p "$(dirname "$WORKTREE")"
+if git show-ref --verify --quiet refs/heads/codex/icon-family-production-assets; then
+  git worktree add "$WORKTREE" codex/icon-family-production-assets
+else
+  git worktree add --track -b codex/icon-family-production-assets \
+    "$WORKTREE" origin/codex/icon-family-production-assets
+fi
+test "$(git -C "$WORKTREE" rev-parse HEAD)" = "$FEATURE_HEAD"
+git -C "$WORKTREE" status --short
+~~~
+
+Before Stage 1, verify the worktree's complete Git status, baseline/merge-base relationship, carried-forward documentation hashes, and no modifications to the primary checkout; the local agent is responsible for this evidence.
+
 ### Stage 1 — Primary artwork and disposable Xcode 27 packaging probe (Owner visual approval gate 1)
 
 1. **Verify reference before reconstruction.** Obtain the exact original uploaded PNG (1536 × 1024 RGBA); calculate its SHA-256, require an exact match to **92dc5f23741c424d5eceb3c308a041b73ad17a2140fc7b3631cd93f866073975**, and check in the unchanged file at docs/design/icon-family/approved-showcase.png. Rehash the repository copy and record provenance. If missing or mismatched, STOP; do not substitute crops, older generated packs or synthesized imagery.
