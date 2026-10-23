@@ -35,9 +35,25 @@ The approved concept showcase is a small raster design reference rather than a p
 
 Invariants: no changes to calculator decoy branding or behavior; icon selection independent of decoy; no Pro selection bypass; no consumer marketing name in internal module/type/domain identifiers; original reference board remains the design authority.
 
-## Remaining decisions for future rounds
+## Additional decisions settled October 22, 2026 (Q8–Q11)
 
-- Exact layered/vector/3D master and deterministic export strategy, including how to prove fidelity without claiming pixel-for-pixel recovery.
-- Release/Debug inclusion matrix: whether to package the premium alternates in the development build and ensure the Development Icon is absent from release payloads.
-- Development badge placement and small-icon legibility thresholds.
-- Objective QA/review evidence, output formats, and fallback behavior for simulator/device system appearances.
+8. **Hybrid layered masters (Q8=A).** Use editable vector geometry for the icon forms plus controlled gradient, lighting, and raster material passes where useful. Keep the assets and deterministic export tooling in source control; compare their rendered appearance against the original board. Choose the particular authoring tool based on a successful Primary Icon prototype, not convenience alone. Builds must consume pre-exported artifacts without requiring that tool in CI.
+9. **Configuration-specific icon inclusion (Q9=A).** Release primary = the approved Primary Icon; Debug primary = the Development Icon. Both include the same seven premium Alternate Icons. Never place the Development Icon in the release product, and do not expose the release primary as an additional Debug alternate. Other target bundles are not part of this icon task.
+10. **Canonical reference board in repository (Q10=A).** Check in the *unaltered* uploaded showcase under an icon-design reference directory, not merely a crop, regenerated visual approximation, or transient conversation link. Preserve its provenance and byte identity:
+    - Source upload name: `Folaro Glossy Icon Family Showcase.png` (creative artifact, not a domain identifier).
+    - Image dimensions: 1536 × 1024; PNG RGBA.
+    - Verified SHA-256: `92dc5f23741c424d5eceb3c308a041b73ad17a2140fc7b3631cd93f866073975`.
+    - Suggested check-in path: `docs/design/icon-family/approved-showcase.png`, separate from domain-spec terminology. Verify byte-for-byte hash after copying; do not substitute prior reconstructed assets.
+11. **Full visual qualification (Q11=A).** Check all authored identity×appearance combinations at 1024px and representative actual Home Screen sizes, with light/dark/tinted/clear modes and contrasting backgrounds. Require real-device evidence on iPhone and iPad before final acceptance. Run deterministic size/format/assets/build checks as technical acceptance, but do not confuse those with human approval of visual fidelity. The DEV badge must remain identifiable at small sizes without changing the approved primary geometry.
+
+## Implementation boundaries established by Apple documentation
+
+- Xcode builds the primary icon from `ASSETCATALOG_COMPILER_APPICON_NAME` and includes declared alternates from `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`. It writes `CFBundleIcons`/alternate entries; do not edit those keys manually. https://developer.apple.com/documentation/xcode/configuring-your-app-to-use-alternate-app-icons
+- Asset catalogs support iOS/iPadOS Any/Default, Dark and grayscale Tinted artwork; clear/tinted final presentation requires on-device review. https://developer.apple.com/documentation/xcode/configuring-your-app-icon
+- Icon Composer can preview default/dark/mono appearances and native effects, but it is an authoring choice, not an excuse to alter the approved design. https://developer.apple.com/documentation/xcode/creating-your-app-icon-using-icon-composer
+
+## Final engineering gates to resolve
+
+- Sequence of source/artwork reviews versus commits/PRs, without bypassing either owner visual approval.
+- Implementer to prove Xcode 27 compatibility for the selected asset packaging, especially any differences between `.appiconset` and `.icon` when registering alternate icons.
+- Clear distinctions between reference concept imagery, master artwork, exported asset catalog images, and installed runtime icons.
