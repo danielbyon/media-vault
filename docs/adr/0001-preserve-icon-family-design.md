@@ -1,6 +1,6 @@
 # Preserve the approved icon family through faithful, editable artwork
 
-Status: proposed (remaining art-production, Debug packaging, and acceptance details still require decisions).
+Status: accepted design decisions (Q1–Q12); detailed implementation plan awaits final owner confirmation.
 
 ## Context
 
@@ -40,7 +40,7 @@ Invariants: no changes to calculator decoy branding or behavior; icon selection 
 8. **Hybrid layered masters (Q8=A).** Use editable vector geometry for the icon forms plus controlled gradient, lighting, and raster material passes where useful. Keep the assets and deterministic export tooling in source control; compare their rendered appearance against the original board. Choose the particular authoring tool based on a successful Primary Icon prototype, not convenience alone. Builds must consume pre-exported artifacts without requiring that tool in CI.
 9. **Configuration-specific icon inclusion (Q9=A).** Release primary = the approved Primary Icon; Debug primary = the Development Icon. Both include the same seven premium Alternate Icons. Never place the Development Icon in the release product, and do not expose the release primary as an additional Debug alternate. Other target bundles are not part of this icon task.
 10. **Canonical reference board in repository (Q10=A).** Check in the *unaltered* uploaded showcase under an icon-design reference directory, not merely a crop, regenerated visual approximation, or transient conversation link. Preserve its provenance and byte identity:
-    - Source upload name: `Folaro Glossy Icon Family Showcase.png` (creative artifact, not a domain identifier).
+    - Original image title is visible in the reference artwork. Use the neutral repository path below; do not propagate the consumer brand into domain documentation or source identifiers.
     - Image dimensions: 1536 × 1024; PNG RGBA.
     - Verified SHA-256: `92dc5f23741c424d5eceb3c308a041b73ad17a2140fc7b3631cd93f866073975`.
     - Suggested check-in path: `docs/design/icon-family/approved-showcase.png`, separate from domain-spec terminology. Verify byte-for-byte hash after copying; do not substitute prior reconstructed assets.
@@ -52,8 +52,13 @@ Invariants: no changes to calculator decoy branding or behavior; icon selection 
 - Asset catalogs support iOS/iPadOS Any/Default, Dark and grayscale Tinted artwork; clear/tinted final presentation requires on-device review. https://developer.apple.com/documentation/xcode/configuring-your-app-icon
 - Icon Composer can preview default/dark/mono appearances and native effects, but it is an authoring choice, not an excuse to alter the approved design. https://developer.apple.com/documentation/xcode/creating-your-app-icon-using-icon-composer
 
-## Final engineering gates to resolve
+12. **Single implementation branch and draft PR with mandatory stops (Q12=A).** Create one isolated implementation branch and one draft PR, using the latest verified `origin/main` while preserving the primary checkout. Stage 1 (reconstructed Primary Icon) must stop for owner visual approval before Stage 2; Stage 2 (all nine icon identities, three authored appearances each) must stop for owner visual approval before Stage 3 (Xcode integration). Only Stage 4 may close engineering validation. Keep review evidence on the same PR; commits at gates are allowed, but absence of approval is a blocker, not permission to continue. Do not merge until all approvals, tests, and iPhone/iPad physical visual qualification pass.
 
-- Sequence of source/artwork reviews versus commits/PRs, without bypassing either owner visual approval.
-- Implementer to prove Xcode 27 compatibility for the selected asset packaging, especially any differences between `.appiconset` and `.icon` when registering alternate icons.
-- Clear distinctions between reference concept imagery, master artwork, exported asset catalog images, and installed runtime icons.
+## Implementation plan and verification constraints
+
+See [the staged icon-family implementation plan](../design/icon-family/implementation-plan.md), maintained on the design documentation branch until incorporated into the implementation branch. The existing documentation branch is **not** a second implementation PR.
+
+- Use `ASSETCATALOG_COMPILER_APPICON_NAME` per build configuration and an explicit seven-name list in `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`; prohibit `ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS=YES` because the Development Icon must be excluded from Release.
+- Confirm Xcode 27 compatibility of selected packaging for each alternate, including any `.icon`/Icon Composer requirement, before finalizing the export pipeline. Do not hand-edit generated `CFBundleIcons` keys.
+- Validate three separate concerns: source-reference provenance, faithful editable production renders, and actual installed Home Screen appearance. Asset-hash validation cannot substitute for human visual review.
+- Retain all existing decoy, entitlement, privacy, and runtime navigation behavior without changes. Issue #54 will make the bundled Pro icon identities selectable in a later task.
