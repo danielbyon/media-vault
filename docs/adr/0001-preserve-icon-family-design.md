@@ -1,6 +1,6 @@
 # Preserve the approved icon family through faithful, editable artwork
 
-Status: accepted design decisions (Q1–Q12); detailed implementation plan awaits final owner confirmation.
+Status: Q1–Q12 product decisions accepted; amended execution plan awaits final owner review, with both owner visual gates mandatory.
 
 ## Context
 
@@ -54,11 +54,23 @@ Invariants: no changes to calculator decoy branding or behavior; icon selection 
 
 12. **Single implementation branch and draft PR with mandatory stops (Q12=A).** Create one isolated implementation branch and one draft PR, using the latest verified `origin/main` while preserving the primary checkout. Stage 1 (reconstructed Primary Icon) must stop for owner visual approval before Stage 2; Stage 2 (all nine icon identities, three authored appearances each) must stop for owner visual approval before Stage 3 (Xcode integration). Only Stage 4 may close engineering validation. Keep review evidence on the same PR; commits at gates are allowed, but absence of approval is a blocker, not permission to continue. Do not merge until all approvals, tests, and iPhone/iPad physical visual qualification pass.
 
+## Execution amendments incorporated October 23, 2026
+
+These are **engineering feasibility and evidence clarifications**, not changes to the approved Q1–Q12 product decisions. The reviewed starting point is commit 231d431c29acee1da74cbde53700491866657a02; the new single implementation branch was created from verified remote main 6e01909b2c7c1ef23df4a06f531114db0c1803c2. Preserve newer main changes during local worktree setup, keep the existing checkout untouched, and reuse the reviewed design documentation without silently losing rationale.
+
+1. **Move feasibility left (Stage 1).** Before locking in the hybrid source/export format, build a disposable Xcode 27 prototype project with one primary icon and one temporary alternate, both using provisional Default/Dark/Tinted appearances. Reuse the Primary artwork rather than beginning the seven alternates or Development artwork before Gate 1. Keep the compiled device product and inspect generated primary/alternate metadata, appearance mappings and resources. Rationale: discovering an incompatible asset package after nine icons are authored causes avoidable rework and can undermine the visual gates. A failed probe is a Stage 1 blocker.
+2. **Production App target isolation (Stage 3).** Scope icon build settings and resource membership solely to the App target. Existing Debug and Release xcconfigs are project-level and must not receive app-icon settings that transitively alter test targets and hosts. Verify resolved per-target settings, PBX resource membership and actual target payloads. Rationale: preventing test host/icon collisions is part of correctness, not cosmetic cleanup.
+3. **Physical validation without switching API (Stage 4).** Qualify **every one of the nine icon identities** as a *primary* icon using disposable separately signed apps installed on physical iPhone and iPad, in all relevant Home Screen appearance modes. Independently inspect the **seven registered shipping alternate identities** in exact production Debug/Release products. Do not invoke runtime icon-selection APIs or describe disposable primary inspection as proof of runtime alternate switching; issue #54 owns that test and behavior.
+4. **Retain and inspect actual products (Stage 4).** Keep the exact Debug and Release generic-device App.app builds and .xcarchives until generated Info.plist keys (including CFBundleIcons~ipad where emitted), seven alternate-name sets, development-resource exclusion, compiled appearance resources, build settings and full resource manifests have been inspected and saved with hashes. A green CI check alone cannot establish those release-specific properties. Rationale: build success does not imply correct icon registration or packaging isolation.
+5. **Verify original source and count distinct concepts.** The unaltered user-provided reference PNG was independently verified as **1536×1024 RGBA PNG**, SHA-256 **92dc5f23741c424d5eceb3c308a041b73ad17a2140fc7b3631cd93f866073975**. Before any reconstruction, verify the exact available original again and verify its unchanged repository copy; fail closed if missing or mismatched. There are **27 authored appearances across nine source identities**, **eight configured identities in each build** (Primary/Development + seven alternates), and toolchain-dependent **compiled resource/rendition-file counts**. Never treat these numbers as interchangeable.
+
+**Gate invariants preserved:** Owner Gate 1 must approve Primary artwork before any family artwork; Gate 2 must approve the entire family before production App integration. No automatic promotion through either gate, no runtime icon selection, and no merge before physical qualification.
+
 ## Implementation plan and verification constraints
 
 See [the staged icon-family implementation plan](../design/icon-family/implementation-plan.md), maintained on the design documentation branch until incorporated into the implementation branch. The existing documentation branch is **not** a second implementation PR.
 
-- Use `ASSETCATALOG_COMPILER_APPICON_NAME` per build configuration and an explicit seven-name list in `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`; prohibit `ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS=YES` because the Development Icon must be excluded from Release.
-- Confirm Xcode 27 compatibility of selected packaging for each alternate, including any `.icon`/Icon Composer requirement, before finalizing the export pipeline. Do not hand-edit generated `CFBundleIcons` keys.
+- Use `ASSETCATALOG_COMPILER_APPICON_NAME` and an explicit seven-name list in `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES` **only at the App target's build configuration**, not in project-level Debug/Release xcconfigs. Prohibit `ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS=YES`; prove by retained product inspection that the Development Icon is absent from Release.
+- Confirm Xcode 27 packaging feasibility during Stage 1 with the disposable Primary-plus-temporary-alternate probe before finalizing the export pipeline; then reuse the proven method for all icons. Do not hand-edit generated `CFBundleIcons` keys. Retain test and production artifacts for inspection.
 - Validate three separate concerns: source-reference provenance, faithful editable production renders, and actual installed Home Screen appearance. Asset-hash validation cannot substitute for human visual review.
 - Retain all existing decoy, entitlement, privacy, and runtime navigation behavior without changes. Issue #54 will make the bundled Pro icon identities selectable in a later task.
