@@ -1,0 +1,25 @@
+docs/design/icon-family/artwork/README.md
+  s_1999fbef51cbbd::t_3aafaf6198bb13 3-29
+docs/design/icon-family/artwork/compose_board.py
+  s_1999fbef51cbbd::t_3382361b950010 1,3,8-48
+docs/design/icon-family/artwork/render_family.py
+  s_1999fbef51cbbd::t_2e3840f2bfbe88 85-86
+docs/design/icon-family/artwork/verify_and_package.py
+  s_1999fbef51cbbd::t_dee2f994b14deb 28-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5f65c4d3a2ca78c47e8a95dcf0d71a47e6623908",
+  "prompts": {},
+  "sessions": {
+    "s_1999fbef51cbbd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a171f9-9c74-7103-b8eb-a91433c75f65",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
