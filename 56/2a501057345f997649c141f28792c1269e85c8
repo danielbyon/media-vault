@@ -1,0 +1,116 @@
+App/Resources/Assets.xcassets/AppIcon-Mineral.appiconset/Contents.json
+  s_1999fbef51cbbd::t_aecb8b2c58efa4 1-38
+docs/design/icon-family/artwork/svg/Mineral-Tinted.svg
+  s_1999fbef51cbbd::t_354c8fa303ab05 1-273
+docs/design/icon-family/artwork/svg/Folaro-Dev-Tinted.svg
+  s_1999fbef51cbbd::t_623c974300df58 1-286
+docs/design/icon-family/artwork/svg/Instrument-Tinted.svg
+  s_1999fbef51cbbd::t_a9c8b848540a9e 1-134
+App/Resources/Assets.xcassets/AppIcon-Indigo.appiconset/Contents.json
+  s_1999fbef51cbbd::t_df0d5df0c639f5 1-38
+App/Resources/Assets.xcassets/AppIcon-Instrument.appiconset/Contents.json
+  s_1999fbef51cbbd::t_b09b7d30b6a08f 1-38
+docs/design/icon-family/artwork/svg/Calculator-Dark.svg
+  s_1999fbef51cbbd::t_cad2552ef99603 1-129
+docs/design/icon-family/artwork/svg/Default-Tinted.svg
+  s_1999fbef51cbbd::t_f103b106b2a22c 1-273
+docs/design/icon-family/artwork/svg/Folaro-Dev-Dark.svg
+  s_1999fbef51cbbd::t_18ab89f87c2005 1-286
+docs/design/icon-family/artwork/svg/Indigo-Tinted.svg
+  s_1999fbef51cbbd::t_b818369348609d 1-273
+docs/design/icon-family/artwork/svg/Default-Dark.svg
+  s_1999fbef51cbbd::t_f9d7077275c834 1-273
+docs/design/icon-family/artwork/svg/Compass-Default.svg
+  s_1999fbef51cbbd::t_56089754e8f8ed 1-136
+docs/design/icon-family/artwork/svg/Grid-Tinted.svg
+  s_1999fbef51cbbd::t_a418bacf24e8a2 1-120
+App/Configuration/Release.xcconfig
+  s_1999fbef51cbbd::t_3f8e802483a3e8 6-10
+docs/design/icon-family/artwork/svg/Calculator-Glass-Tinted.svg
+  s_1999fbef51cbbd::t_f55ca7c24d81dc 1-133
+docs/design/icon-family/artwork/svg/Mineral-Dark.svg
+  s_1999fbef51cbbd::t_ae87cc9ea6bc5f 1-273
+docs/design/icon-family/artwork/svg/Instrument-Default.svg
+  s_1999fbef51cbbd::t_1c4ca8bd6932c8 1-134
+docs/design/icon-family/artwork/svg/Compass-Dark.svg
+  s_1999fbef51cbbd::t_708d34c91da916 1-136
+docs/design/icon-family/artwork/source/Core-Tight-Tentatively-Approved-v12.svg
+  s_1999fbef51cbbd::t_c68594d6520454 1-273
+docs/design/icon-family/artwork/svg/Grid-Dark.svg
+  s_1999fbef51cbbd::t_ebbfb0388283a5 1-120
+docs/design/icon-family/artwork/compose_board.py
+  s_1999fbef51cbbd::t_52617a8711eb9a 3-52
+  s_1999fbef51cbbd::t_e7417f66bf5a9a 1-2
+docs/design/icon-family/artwork/svg/Folaro-Dev-Default.svg
+  s_1999fbef51cbbd::t_22f62f36f3684c 1-286
+App/Resources/Assets.xcassets/AppIcon-Grid.appiconset/Contents.json
+  s_1999fbef51cbbd::t_3334287717a911 1-38
+App/Resources/Assets.xcassets/AppIcon-Default.appiconset/Contents.json
+  s_1999fbef51cbbd::t_024aeb5d30bc7a 1-38
+docs/design/icon-family/artwork/svg/Calculator-Glass-Dark.svg
+  s_1999fbef51cbbd::t_9cc8bdd20d4cfd 1-133
+docs/design/icon-family/artwork/svg/Calculator-Tinted.svg
+  s_1999fbef51cbbd::t_babada9bf5ceae 1-129
+docs/design/icon-family/artwork/verify_and_package.py
+  s_1999fbef51cbbd::t_e4b940e6b597db 3-44
+  s_1999fbef51cbbd::t_3c55d20980d51b 1-2
+docs/design/icon-family/artwork/svg/Default-Default.svg
+  s_1999fbef51cbbd::t_b642c0524cbf1e 1-273
+App/Resources/Assets.xcassets/AppIcon-CalculatorGlass.appiconset/Contents.json
+  s_1999fbef51cbbd::t_5ccfa253782259 1-38
+docs/design/icon-family/artwork/README.md
+  s_1999fbef51cbbd::t_626877b9f08f48 1-11
+docs/design/icon-family/artwork/DEV-Centering-Verification.json
+  s_1999fbef51cbbd::t_504809b2d7b72d 1-19
+docs/design/icon-family/artwork/render_family.py
+  s_1999fbef51cbbd::t_65c72cbaa3205f 3-105
+  s_1999fbef51cbbd::t_ce67ad906d9dd0 1-2
+App.xcodeproj/project.pbxproj
+  s_1999fbef51cbbd::t_25da66714eddc1 10,41,186,432
+docs/design/icon-family/artwork/svg/Compass-Tinted.svg
+  s_1999fbef51cbbd::t_022afbf0f92803 1-136
+App/Configuration/Debug.xcconfig
+  s_1999fbef51cbbd::t_cc1a410833dde5 6-10
+App/Resources/Assets.xcassets/AppIcon-Compass.appiconset/Contents.json
+  s_1999fbef51cbbd::t_8f7c59b15b0400 1-38
+docs/design/icon-family/artwork/INTEGRATION-RECORD.md
+  s_1999fbef51cbbd::t_713a99193dbd04 1-19
+App/Resources/Assets.xcassets/AppIcon-FolaroDev.appiconset/Contents.json
+  s_1999fbef51cbbd::t_503a04e4656ca5 1-38
+docs/design/icon-family/artwork/svg/Calculator-Default.svg
+  s_1999fbef51cbbd::t_a43c446f7ecbe5 1-129
+App/Resources/Assets.xcassets/Contents.json
+  s_1999fbef51cbbd::t_304d818051c8ae 1-6
+docs/design/icon-family/artwork/svg/Indigo-Dark.svg
+  s_1999fbef51cbbd::t_48665aad40bc65 1-273
+docs/design/icon-family/artwork/svg/Calculator-Glass-Default.svg
+  s_1999fbef51cbbd::t_f5f2ae548776ac 1-133
+docs/design/icon-family/artwork/svg/Grid-Default.svg
+  s_1999fbef51cbbd::t_c7995ef31569cc 1-120
+App/Resources/Assets.xcassets/AppIcon-Calculator.appiconset/Contents.json
+  s_1999fbef51cbbd::t_96a6f637991d30 1-38
+docs/design/icon-family/artwork/manifest.json
+  s_1999fbef51cbbd::t_47c3c2f1cba6a6 1-230
+docs/design/icon-family/artwork/svg/Mineral-Default.svg
+  s_1999fbef51cbbd::t_bed94f30af0440 1-273
+docs/design/icon-family/artwork/svg/Indigo-Default.svg
+  s_1999fbef51cbbd::t_d304900cc38f3e 1-273
+docs/design/icon-family/artwork/svg/Instrument-Dark.svg
+  s_1999fbef51cbbd::t_9f20b7cf9a826f 1-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "562a501057345f997649c141f28792c1269e85c8",
+  "prompts": {},
+  "sessions": {
+    "s_1999fbef51cbbd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a171f9-9c74-7103-b8eb-a91433c75f65",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
