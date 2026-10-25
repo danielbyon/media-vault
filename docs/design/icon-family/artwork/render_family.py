@@ -92,7 +92,7 @@ def build():
    bg=root.find('.//*[@id="bg"]');saved=copy.deepcopy(bg)
    recolor(root,lambda rgb:profile(rgb,ident));bg[:]=saved[:]
   if ident=='Folaro-Dev':
-   root.append(ET.fromstring('<g xmlns="'+N+'" id="development-badge"><defs><linearGradient id="badge" x1="0" y1="0" x2=".6" y2="1"><stop stop-color="#fbffff"/><stop offset=".5" stop-color="#bddbff"/><stop offset="1" stop-color="#709ac6"/></linearGradient></defs><rect x="685" y="781" width="255" height="122" rx="60" fill="url(#badge)" stroke="#e5f8ff" stroke-width="3"/><g id="development-lettering" transform="translate(751.8415 820.4) scale(1.35)" fill="none" stroke="#102338" stroke-width="5" stroke-linejoin="round"><path d="M0 0 V32 H10 C30 32 30 0 10 0 Z M38 0 V32 M38 0 H59 M38 15 H56 M38 32 H59 M68 0 L79 32 L90 0"/></g></g>'))
+   root.append(ET.fromstring('<g xmlns="'+N+'" id="development-badge"><defs><linearGradient id="badge" x1="0" y1="0" x2=".6" y2="1"><stop stop-color="#fbffff"/><stop offset=".5" stop-color="#bddbff"/><stop offset="1" stop-color="#709ac6"/></linearGradient></defs><rect x="685" y="781" width="255" height="122" rx="60" fill="url(#badge)" stroke="#e5f8ff" stroke-width="3"/><g transform="translate(751.8415 820.4) scale(1.35)" fill="none" stroke="#102338" stroke-width="5" stroke-linejoin="round" id="development-lettering"><path d="M0 0 V32 H10 C30 32 30 0 10 0 Z M38 0 V32 M38 0 H59 M38 15 H56 M38 32 H59 M68 0 L79 32 L90 0"/></g></g>'))
   for app in APPEARANCES:
    r=copy.deepcopy(root)
    if app!='Default':recolor(r,lambda rgb:appearance(rgb,app))

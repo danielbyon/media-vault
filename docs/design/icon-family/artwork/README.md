@@ -8,6 +8,10 @@ The checked-in artwork sources are the 27 editable appearance SVGs in `svg/`, th
 
 Each `manifest.json` appearance entry names its expected generated SVG and PNG paths and records their SHA-256 hashes. The `png` path is relative to this artwork directory. Its basename maps to the same-named PNG in the corresponding shipping asset set: `Folaro-Dev` maps to `AppIcon-FolaroDev.appiconset`, `Calculator-Glass` to `AppIcon-CalculatorGlass.appiconset`, and every other identity to `AppIcon-<identity>.appiconset`. For example, `png/Default-Default.png` corresponds to `App/Resources/Assets.xcassets/AppIcon-Default.appiconset/Default-Default.png`, and its `png_sha256` is expected to match that file. The regeneration validator hashes generated PNGs but does not read the asset catalog; compare the recorded hash with the catalog file separately when checking byte identity. The manifest describes generated output and does not require a second checked-in PNG copy.
 
+## Versioned qualification profile
+
+The isolated qualification profile uses Python 3.14.4, Inkscape 1.4 (`e7c3feb1`, 2024-10-09) for macOS arm64, Pillow 12.3.0, NumPy 2.3.5, and the official DejaVu Sans 2.37 regular and bold fonts. The original source package specified these tools by name but did not record an operating system or exact tool versions, so this is a reproducible comparison profile, not verified historical provenance. Keep the original PNG SHA-256 values authoritative: a regenerated hash mismatch remains a mismatch even when decoded pixels are visually close.
+
 ## Regeneration
 
 Use Python 3, Pillow, NumPy, and Inkscape. Run commands sequentially from this directory:
