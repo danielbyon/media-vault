@@ -82,6 +82,8 @@ def appearance(rgb,name):
  return rgb
 def build():
  """Generate each identity and appearance SVG, then render the corresponding 1024-pixel PNG files."""
+ (P / "svg").mkdir(parents=True, exist_ok=True)
+ (P / "png").mkdir(parents=True, exist_ok=True)
  outputs=[]
  for ident in IDENTITIES:
   root=ET.parse(BASE).getroot() if ident in IDENTITIES[:4] else utility(ident)

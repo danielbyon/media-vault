@@ -1,10 +1,51 @@
-"""Render the labeled Folaro icon-family contact sheet. Read the generated 1024-pixel renders from the sibling `png` directory, then write the composite and smaller preview PNGs beside this script. Running this file regenerates those two presentation images; it does not modify the source SVGs or app asset catalog."""
+"""Render the labeled icon contact sheet using the generated PNGs and configured DejaVu fonts."""
 
+import os
 from pathlib import Path
 from PIL import Image,ImageDraw,ImageFont
 import numpy as np
 P=Path(__file__).parent;W,H=2600,1840
-font='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';bold='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+FONT_SEARCH_DIRECTORIES = (
+    Path("/usr/share/fonts/truetype/dejavu"),
+    Path("/usr/local/share/fonts"),
+    Path("/usr/local/share/fonts/dejavu"),
+    Path("/opt/homebrew/share/fonts"),
+    Path("/opt/homebrew/share/fonts/dejavu"),
+    Path("/opt/homebrew/share/fonts/dejavu-sans"),
+    Path("/usr/local/share/fonts/dejavu-sans"),
+    Path("/Library/Fonts"),
+    Path.home() / "Library" / "Fonts",
+)
+
+
+def resolve_font_path(environment_variable, filename):
+    """Find the required DejaVu face or report how to configure its exact path."""
+    configured_path = os.environ.get(environment_variable)
+    if configured_path:
+        candidate = Path(configured_path).expanduser()
+        if candidate.is_file():
+            return candidate
+        raise FileNotFoundError(
+            f"{environment_variable} points to a missing font file: {candidate}"
+        )
+
+    for directory in FONT_SEARCH_DIRECTORIES:
+        candidate = directory / filename
+        if candidate.is_file():
+            return candidate
+
+    searched = ", ".join(
+        str(directory / filename) for directory in FONT_SEARCH_DIRECTORIES
+    )
+    raise FileNotFoundError(
+        f"Required DejaVu Sans font {filename} was not found. Set "
+        f"{environment_variable} to its full path. Searched: {searched}. "
+        "Install DejaVu Sans or provide the matching face to preserve contact-sheet text geometry."
+    )
+
+
+font = resolve_font_path("FOLARO_FONT_REGULAR", "DejaVuSans.ttf")
+bold = resolve_font_path("FOLARO_FONT_BOLD", "DejaVuSans-Bold.ttf")
 def F(size,b=False):
  """Load the regular or bold font face at the requested point size."""
  return ImageFont.truetype(bold if b else font,size)
