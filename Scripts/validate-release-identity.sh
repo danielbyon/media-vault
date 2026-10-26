@@ -74,6 +74,7 @@ assert_identity_isolated() {
     --glob '!.serena/**' \
     --glob '!App/Configuration/**' \
     --glob '!App/Resources/**' \
+    --glob '!docs/design/icon-family/artwork/**' \
     --glob '!.build/**' \
     --glob '!.swiftpm/**'); then
     printf '%s\n' "$matches"

@@ -1,0 +1,120 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Folaro Grid — Default appearance; review candidate</title>
+  <defs>
+    <radialGradient id="bg" cx=".15" cy=".04" r="1.1">
+      <stop stop-color="#2a425d" />
+      <stop offset=".5" stop-color="#111f2d" />
+      <stop offset="1" stop-color="#050c13" />
+    </radialGradient>
+    <linearGradient id="metal" x1=".12" y1="0" x2=".85" y2="1">
+      <stop stop-color="#f3f8ff" />
+      <stop offset=".16" stop-color="#b4c8e7" />
+      <stop offset=".36" stop-color="#45658a" />
+      <stop offset=".54" stop-color="#233951" />
+      <stop offset=".75" stop-color="#bac9e3" />
+      <stop offset=".91" stop-color="#edf5ff" />
+      <stop offset="1" stop-color="#5d789a" />
+    </linearGradient>
+    <linearGradient id="blue" x1=".05" y1=".15" x2=".8" y2=".9">
+      <stop stop-color="#9cffff" />
+      <stop offset=".15" stop-color="#00d8ff" />
+      <stop offset=".38" stop-color="#007eff" />
+      <stop offset=".64" stop-color="#0036c3" />
+      <stop offset=".85" stop-color="#03a7f6" />
+      <stop offset="1" stop-color="#96ffff" />
+    </linearGradient>
+    <radialGradient id="face" cx=".25" cy=".15" r=".95">
+      <stop stop-color="#526a86" />
+      <stop offset=".35" stop-color="#293e58" />
+      <stop offset=".8" stop-color="#0b1726" />
+      <stop offset="1" stop-color="#030a13" />
+    </radialGradient>
+    <linearGradient id="knob" x1=".05" y1="0" x2=".85" y2="1">
+      <stop stop-color="#c9dbeb" />
+      <stop offset=".18" stop-color="#61758b" />
+      <stop offset=".42" stop-color="#293847" />
+      <stop offset=".62" stop-color="#0d1822" />
+      <stop offset=".9" stop-color="#24384c" />
+      <stop offset="1" stop-color="#617b98" />
+    </linearGradient>
+    <radialGradient id="tile-blue" cx=".25" cy=".15" r="1">
+      <stop stop-color="#b8e5ff" />
+      <stop offset=".15" stop-color="#5086b0" />
+      <stop offset=".5" stop-color="#1d5079" />
+      <stop offset=".8" stop-color="#113456" />
+      <stop offset="1" stop-color="#7faad4" />
+    </radialGradient>
+    <linearGradient id="tile-silver" x1=".1" y1="0" x2=".8" y2="1">
+      <stop stop-color="#f4faff" />
+      <stop offset=".24" stop-color="#b4cce7" />
+      <stop offset=".52" stop-color="#849dbe" />
+      <stop offset=".8" stop-color="#e0edff" />
+      <stop offset="1" stop-color="#ffffff" />
+    </linearGradient>
+    <radialGradient id="tile-electric" cx=".2" cy=".12" r="1.1">
+      <stop stop-color="#bcffff" />
+      <stop offset=".18" stop-color="#1797ff" />
+      <stop offset=".46" stop-color="#0041ff" />
+      <stop offset=".7" stop-color="#006dea" />
+      <stop offset=".9" stop-color="#00d3ff" />
+      <stop offset="1" stop-color="#aaffff" />
+    </radialGradient>
+    <radialGradient id="tile-dark" cx=".2" cy=".1" r="1">
+      <stop stop-color="#b5c7db" />
+      <stop offset=".2" stop-color="#536d89" />
+      <stop offset=".5" stop-color="#202e42" />
+      <stop offset=".8" stop-color="#121d2d" />
+      <stop offset="1" stop-color="#7a91af" />
+    </radialGradient>
+    <radialGradient id="button" cx=".3" cy="0" r="1.1">
+      <stop stop-color="#657484" />
+      <stop offset=".5" stop-color="#394450" />
+      <stop offset="1" stop-color="#151e29" />
+    </radialGradient>
+    <radialGradient id="orange" cx=".3" cy=".1" r="1">
+      <stop stop-color="#ffe1a9" />
+      <stop offset=".2" stop-color="#ffad3d" />
+      <stop offset=".6" stop-color="#ff7900" />
+      <stop offset="1" stop-color="#bc4300" />
+    </radialGradient>
+    <radialGradient id="glass-blue" cx=".28" cy=".17" r=".85">
+      <stop stop-color="#b2e8ff" stop-opacity=".8" />
+      <stop offset=".23" stop-color="#608fbc" stop-opacity=".72" />
+      <stop offset=".6" stop-color="#1c4f89" stop-opacity=".6" />
+      <stop offset="1" stop-color="#81bbf4" stop-opacity=".83" />
+    </radialGradient>
+    <radialGradient id="specular">
+      <stop stop-color="#ffffff" stop-opacity=".65" />
+      <stop offset=".4" stop-color="#c5e7ff" stop-opacity=".2" />
+      <stop offset="1" stop-color="#a1dbff" stop-opacity="0" />
+    </radialGradient>
+    <filter id="shadow" x="-.4" y="-.4" width="1.8" height="1.8">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14" result="blur" />
+      <feOffset in="blur" dx="0" dy="15" result="offset" />
+      <feComponentTransfer in="offset" result="shadow-alpha">
+        <feFuncA type="linear" slope=".6" />
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode in="shadow-alpha" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="soft">
+      <feGaussianBlur stdDeviation="5" />
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)" />
+  <rect x="180" y="180" width="312" height="312" rx="88" fill="url(#tile-blue)" stroke="#ccedff" stroke-width="3" filter="url(#shadow)" />
+  <rect x="189" y="189" width="294" height="294" rx="80" fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="6" />
+  <ellipse cx="277" cy="229" rx="110" ry="35" fill="url(#specular)" />
+  <rect x="532" y="180" width="312" height="312" rx="88" fill="url(#tile-silver)" stroke="#ccedff" stroke-width="3" filter="url(#shadow)" />
+  <rect x="541" y="189" width="294" height="294" rx="80" fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="6" />
+  <ellipse cx="629" cy="229" rx="110" ry="35" fill="url(#specular)" />
+  <rect x="180" y="532" width="312" height="312" rx="88" fill="url(#tile-electric)" stroke="#ccedff" stroke-width="3" filter="url(#shadow)" />
+  <rect x="189" y="541" width="294" height="294" rx="80" fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="6" />
+  <ellipse cx="277" cy="581" rx="110" ry="35" fill="url(#specular)" />
+  <rect x="532" y="532" width="312" height="312" rx="88" fill="url(#tile-dark)" stroke="#ccedff" stroke-width="3" filter="url(#shadow)" />
+  <rect x="541" y="541" width="294" height="294" rx="80" fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="6" />
+  <ellipse cx="629" cy="581" rx="110" ry="35" fill="url(#specular)" />
+</svg>

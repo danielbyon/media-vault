@@ -1,0 +1,230 @@
+{
+  "status": "family visual review candidate",
+  "shared_geometry": "tentatively approved v12",
+  "identities": 9,
+  "authored_appearances": 27,
+  "image_dimensions": [
+    1024,
+    1024
+  ],
+  "grayscale_tinted_verified": true,
+  "primary_pixel_identical_to_v12": true,
+  "appearance_inventory": [
+    {
+      "identity": "Default",
+      "appearance": "Default",
+      "svg": "svg/Default-Default.svg",
+      "svg_sha256": "4bba9f025e2cb5bf12f16abfdbce661010c4b404f0a2dbd6c060fb39889d3e19",
+      "png": "png/Default-Default.png",
+      "png_sha256": "7b01bed689d7875c6fdfaef3c78acc6f90ed8a85dcc0a1175441855045f779e2"
+    },
+    {
+      "identity": "Default",
+      "appearance": "Dark",
+      "svg": "svg/Default-Dark.svg",
+      "svg_sha256": "15d886ce511af8401e29dc1bceab9172584ac65cc74026808ac136069326194a",
+      "png": "png/Default-Dark.png",
+      "png_sha256": "8d2c86feb51fd1bd4174d14e48a63c84e9a4f102d6599cd03e8d7505dd6118d4"
+    },
+    {
+      "identity": "Default",
+      "appearance": "Tinted",
+      "svg": "svg/Default-Tinted.svg",
+      "svg_sha256": "a72e78c4b4607ba23d5bb8eea30d44b57087fe0337ecab9929a1d0fcee19010a",
+      "png": "png/Default-Tinted.png",
+      "png_sha256": "948b3a657c98f67d065a67fd6f4fd959145a14a6325bc3db0b15fa4f463008b8"
+    },
+    {
+      "identity": "Mineral",
+      "appearance": "Default",
+      "svg": "svg/Mineral-Default.svg",
+      "svg_sha256": "ef626976525c53da6a3c55f21e789f7bbf023c062f0b31daa3e0f1170de80bc4",
+      "png": "png/Mineral-Default.png",
+      "png_sha256": "0d2732b969b66ab589b8719745292a9b0e53944848810f9c40850c69565c8a1d"
+    },
+    {
+      "identity": "Mineral",
+      "appearance": "Dark",
+      "svg": "svg/Mineral-Dark.svg",
+      "svg_sha256": "9ce0f1bfd2f598aabb8dbb26a7928e364b2c1d5b6f4d3e6525a90c623c9370cd",
+      "png": "png/Mineral-Dark.png",
+      "png_sha256": "e50648ee47ca673e7ce792da4f1a4b5fb4e6b4168bd91637e4283e0e029ad305"
+    },
+    {
+      "identity": "Mineral",
+      "appearance": "Tinted",
+      "svg": "svg/Mineral-Tinted.svg",
+      "svg_sha256": "53cd48579e2cf1f0813bb6c6992b56e405e62f3e0be269983c66daa84c0b12ba",
+      "png": "png/Mineral-Tinted.png",
+      "png_sha256": "eb7d7cf1c191c6e4d58d9f398e415a2a148b313aa131fb65082ce9220fcd37e7"
+    },
+    {
+      "identity": "Indigo",
+      "appearance": "Default",
+      "svg": "svg/Indigo-Default.svg",
+      "svg_sha256": "14b1ec2513c4d8b60f8a9b7af38334b2b4916c14a398d8f33c5dd54058a9e599",
+      "png": "png/Indigo-Default.png",
+      "png_sha256": "31b7183fc5436aa4b8ce59a08dfb70755e2482d87d14dff82bd8e58366d84c61"
+    },
+    {
+      "identity": "Indigo",
+      "appearance": "Dark",
+      "svg": "svg/Indigo-Dark.svg",
+      "svg_sha256": "5d771a79767a18bdae46d6e1590b959ad49d9e06a4ce0dd06375146077e4f89c",
+      "png": "png/Indigo-Dark.png",
+      "png_sha256": "ba8a92e03614bd0d5466096d2c4c24bec602e966499bd13a1e36abdcf14f9c45"
+    },
+    {
+      "identity": "Indigo",
+      "appearance": "Tinted",
+      "svg": "svg/Indigo-Tinted.svg",
+      "svg_sha256": "fabde957e43750305ebaf07505ef6928b107208c6b0624f629930405a22a826e",
+      "png": "png/Indigo-Tinted.png",
+      "png_sha256": "f13d726366a3172fd68cb7db956703cb06a1747419611a7ca2b17d8bf5f5efc2"
+    },
+    {
+      "identity": "Folaro-Dev",
+      "appearance": "Default",
+      "svg": "svg/Folaro-Dev-Default.svg",
+      "svg_sha256": "e0a8cb2d826f56a9a9dac31521f9cbf32978a7960fc8be6b05c30df34a1e8c0b",
+      "png": "png/Folaro-Dev-Default.png",
+      "png_sha256": "ca3c2f401bd63e447cd8fbc4bddc5ff9aaeea81a92ad0166be2e2790ddd8959e"
+    },
+    {
+      "identity": "Folaro-Dev",
+      "appearance": "Dark",
+      "svg": "svg/Folaro-Dev-Dark.svg",
+      "svg_sha256": "825fb5997372e62639a4399aaad5fc11ed0ab309dc135312f870c7dd06fa6f57",
+      "png": "png/Folaro-Dev-Dark.png",
+      "png_sha256": "90c786211ef4bce4faa0c1589b209eb68f539000fea72f7d78d3b48fd3bfdc00"
+    },
+    {
+      "identity": "Folaro-Dev",
+      "appearance": "Tinted",
+      "svg": "svg/Folaro-Dev-Tinted.svg",
+      "svg_sha256": "671133506b00de7694fa034d3ea68c247259ac074eb3bb28ae53769de25bb393",
+      "png": "png/Folaro-Dev-Tinted.png",
+      "png_sha256": "72e88ae370b5c56ba3a5cf24e9257fd72c6f963fe4a612f985de7ac355ca4815"
+    },
+    {
+      "identity": "Instrument",
+      "appearance": "Default",
+      "svg": "svg/Instrument-Default.svg",
+      "svg_sha256": "573c43618d354d2b9c8141f26179df27863353db4a78035f2330590d2ae71e0e",
+      "png": "png/Instrument-Default.png",
+      "png_sha256": "9ad21fc579b153d8070413777f8042826370ad525482a4e2b6edddf4c8a9553b"
+    },
+    {
+      "identity": "Instrument",
+      "appearance": "Dark",
+      "svg": "svg/Instrument-Dark.svg",
+      "svg_sha256": "a0690478676b8588bc6c1f094dd4492860a7510069e5a1498bb972d6b54f8eac",
+      "png": "png/Instrument-Dark.png",
+      "png_sha256": "5b81550b573f3377c403a3e1eb45e4bf4e499399c1b5f2cbb7318990abf7b3d8"
+    },
+    {
+      "identity": "Instrument",
+      "appearance": "Tinted",
+      "svg": "svg/Instrument-Tinted.svg",
+      "svg_sha256": "4af4c9099d7437188c7d352d2b5f250d7fccbd88278bea2d3077c4b26ec55473",
+      "png": "png/Instrument-Tinted.png",
+      "png_sha256": "cbc18f15ec9d4c76f8c9d27264466ccc900323e1c34b0976195a156194c48e50"
+    },
+    {
+      "identity": "Grid",
+      "appearance": "Default",
+      "svg": "svg/Grid-Default.svg",
+      "svg_sha256": "53d6d1641a6699d50980d73677914dc5dbe5b20701916a635fb5acc9ddf58817",
+      "png": "png/Grid-Default.png",
+      "png_sha256": "f4ee957693253540525542157d916912336eeb64eab3c933080d69bf3dd8ac39"
+    },
+    {
+      "identity": "Grid",
+      "appearance": "Dark",
+      "svg": "svg/Grid-Dark.svg",
+      "svg_sha256": "a0921be45d2e8fe810c08743f980f08510a1434cfd15391da929cad861fda156",
+      "png": "png/Grid-Dark.png",
+      "png_sha256": "c0e9786a172888c709e4da7df2e3fb0e1dcde4d1a0d8ac9ab98bb4fce95cf807"
+    },
+    {
+      "identity": "Grid",
+      "appearance": "Tinted",
+      "svg": "svg/Grid-Tinted.svg",
+      "svg_sha256": "d0fcc046e41d0bbc2cd48ae1a11ea60542e32f7b2b407f5c8e6ee4ed3d2021fe",
+      "png": "png/Grid-Tinted.png",
+      "png_sha256": "2840df10de1b848e23abd34ed7df0521e94e9cdaf851cb5a9107415ec8e01df0"
+    },
+    {
+      "identity": "Compass",
+      "appearance": "Default",
+      "svg": "svg/Compass-Default.svg",
+      "svg_sha256": "666501e0216d442919ac111fad4d71fafb46b30222a4f148dc83bc627878ea82",
+      "png": "png/Compass-Default.png",
+      "png_sha256": "cd880f7ba9609a9909571c4392023fa73477f70e30964c3db8bf1c8308941278"
+    },
+    {
+      "identity": "Compass",
+      "appearance": "Dark",
+      "svg": "svg/Compass-Dark.svg",
+      "svg_sha256": "8a07102b998ee57e1f5d32817826671e7e08b2b32536df9241782aebc086fc34",
+      "png": "png/Compass-Dark.png",
+      "png_sha256": "b5687a6b8fe61870cabb0348642f4a937281a19d49dc6ee2efaa214aab19e914"
+    },
+    {
+      "identity": "Compass",
+      "appearance": "Tinted",
+      "svg": "svg/Compass-Tinted.svg",
+      "svg_sha256": "f467f367f741bced7fe979c90db722f5a7642e3ca8954ae4ac6a8ccd51c465bd",
+      "png": "png/Compass-Tinted.png",
+      "png_sha256": "fc8785cbb878743e21da3e2e9ab8166eafca1b8d0655a1b361ce99b052f20ded"
+    },
+    {
+      "identity": "Calculator",
+      "appearance": "Default",
+      "svg": "svg/Calculator-Default.svg",
+      "svg_sha256": "63aebc1fa04f3490b7696f3b7667e7a2c9a9e35d29dd4d08d232ac6741c2190d",
+      "png": "png/Calculator-Default.png",
+      "png_sha256": "0431df77ba7b284592e34b00ec76fbb6ee3ca3fa34d64900952eef2adfb9190e"
+    },
+    {
+      "identity": "Calculator",
+      "appearance": "Dark",
+      "svg": "svg/Calculator-Dark.svg",
+      "svg_sha256": "3759e159e0795cc8d9000398dc54cdebff61bac1badbc998f7733b407e58c30f",
+      "png": "png/Calculator-Dark.png",
+      "png_sha256": "5f2a66acc5127cc43acdae158779ded647a37b8e1bb56b947fc9cc9773411236"
+    },
+    {
+      "identity": "Calculator",
+      "appearance": "Tinted",
+      "svg": "svg/Calculator-Tinted.svg",
+      "svg_sha256": "2a4f882ea690f3b708dff17cacb98b62d29a721bd4789a496a024bfa9b640602",
+      "png": "png/Calculator-Tinted.png",
+      "png_sha256": "7214b8b048502fb681873ccdac004ebeaeb7dc5b952051e81923457786a272b4"
+    },
+    {
+      "identity": "Calculator-Glass",
+      "appearance": "Default",
+      "svg": "svg/Calculator-Glass-Default.svg",
+      "svg_sha256": "1f068655ff57892702a17189411dbb3010c43c5287b820671b3695c72cbd5a6d",
+      "png": "png/Calculator-Glass-Default.png",
+      "png_sha256": "f82e33b1a00528c35d2ddaa9306394bf044f71a883afd36c34fbe0047f5c5fb2"
+    },
+    {
+      "identity": "Calculator-Glass",
+      "appearance": "Dark",
+      "svg": "svg/Calculator-Glass-Dark.svg",
+      "svg_sha256": "0609823ca562aa29bd8a90905c7915a5b7a75f10b41227789708c892759934a2",
+      "png": "png/Calculator-Glass-Dark.png",
+      "png_sha256": "63cbd7a52cdb58eede43a82e45bcf55dbcbe7c114b8d8b62b1aa6ebc4ff7859f"
+    },
+    {
+      "identity": "Calculator-Glass",
+      "appearance": "Tinted",
+      "svg": "svg/Calculator-Glass-Tinted.svg",
+      "svg_sha256": "5b71d407d98e7a79592e89011a70a8de9db60f09603f1502f71577eb90f04e10",
+      "png": "png/Calculator-Glass-Tinted.png",
+      "png_sha256": "6e0ae760e3c3f3000db88b3efcb7eed78607a184d956dfc713ce18213676db2b"
+    }
+  ]
+}

@@ -3,3 +3,8 @@
 APP_DISPLAY_NAME = Folaro Dev
 PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.folaro.dev
 PRO_PRODUCT_IDENTIFIER = com.danielbyon.folaro.dev.pro
+
+// Build-time primary icon only; no bundled alternate icons or runtime picker.
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon-FolaroDev
+ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO
+ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES =
