@@ -27,6 +27,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test clean target
+        run: make clean-test
+
       - name: Show toolchain
         id: toolchain
         run: |
