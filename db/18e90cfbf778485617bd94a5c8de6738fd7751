@@ -1,0 +1,33 @@
+Scripts/tests/test-clean-build-artifacts.sh
+  s_5ac5f764dc8232::t_bc4084ca0f5110 391-395
+  s_5ac5f764dc8232::t_18863e1c38d985 1-114,116-117,119-121,123-130,132-390,396-426,433-442,444-452,456-519
+  s_5ac5f764dc8232::t_e1b7af573571f6 115,118,122,131,427-432,443,453-455
+Makefile
+  s_5ac5f764dc8232::t_3f03c0b2798ec3 15-19,21,31-33,63-66,69-83
+docs/development/make-clean.md
+  s_5ac5f764dc8232::t_bc416e076957f7 1-61,65-154
+  s_5ac5f764dc8232::t_2db726b53d1473 62-64
+Scripts/clean-build-artifacts.sh
+  s_5ac5f764dc8232::t_f0377f18ccae7e 259-262
+  s_5ac5f764dc8232::t_f79e262dbbcc31 1-138,140-142,144-201,203-258,263-359
+  s_5ac5f764dc8232::t_e1b7af573571f6 139,143
+  s_5ac5f764dc8232::t_08d7c9e81e1dce 202
+.github/workflows/tests.yml
+  s_5ac5f764dc8232::t_aa91c221165e0b 30-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "db18e90cfbf778485617bd94a5c8de6738fd7751",
+  "prompts": {},
+  "sessions": {
+    "s_5ac5f764dc8232": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1756c-e079-7152-8e34-01d8ada6520c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
