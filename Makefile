@@ -12,8 +12,13 @@ PACKAGE_SCHEME := ApplicationFoundation-Package
 # directories do not clone dependencies again. Only package sources are
 # shared; build products stay in the per-run temporary DerivedData directory.
 SOURCE_PACKAGES_DIRECTORY := $(CURDIR)/.build/SourcePackages
+# Recipes resolve helper paths from the Makefile selected by make. This
+# top-level Makefile has no included files, so MAKEFILE_LIST contains one path;
+# preserving it as quoted text supports checkout paths containing spaces. The
+# cleanup helper rejects invocation outside its owning checkout before
+# inspecting any artifact.
 
-.PHONY: all build clean format lint lint-analyze test tools
+.PHONY: all build clean clean-test format lint lint-analyze test tools
 
 all: lint build test
 
@@ -23,14 +28,12 @@ tools:
 format: tools
 	bash ./Scripts/swift-tools.sh format
 
-# Build and test run against a temporary DerivedData directory that is deleted
-# when the recipe exits, including failure paths, so repeated or concurrent
-# runs cannot collide on shared build state or exhaust disk. Directories left
-# behind by runs that were killed outright are pruned after a day.
+# Build and test run against a temporary DerivedData directory that the recipe
+# removes on exit. A later run receives a fresh path. A directory left behind by
+# a killed run is preserved for inspection and is not inferred to be Make-owned.
 build:
 	@set -euo pipefail; \
 	mkdir -p "$(CURDIR)/.build"; \
-	find "$(CURDIR)/.build" -maxdepth 1 -type d -name 'xcodebuild-*' -mtime +0 -exec rm -rf -- {} +; \
 	derived_data=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-build.XXXXXX"); \
 	trap 'rm -rf -- "$$derived_data"' EXIT; \
 	trap 'exit 143' TERM INT; \
@@ -41,7 +44,6 @@ build:
 test:
 	@set -euo pipefail; \
 	mkdir -p "$(CURDIR)/.build"; \
-	find "$(CURDIR)/.build" -maxdepth 1 -type d -name 'xcodebuild-*' -mtime +0 -exec rm -rf -- {} +; \
 	test_root=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-test.XXXXXX"); \
 	trap 'rm -rf -- "$$test_root"' EXIT; \
 	trap 'exit 143' TERM INT; \
@@ -58,16 +60,24 @@ lint: tools
 lint-analyze: tools
 	bash ./Scripts/run-swiftlint-analysis.sh
 
-# Delete build output and regenerable caches: per-run DerivedData and the
-# shared package checkout cache under .build, SwiftPM/Xcode build directories
-# inside packages, per-user Xcode state, and Finder metadata. None of it is
-# tracked by git, and `make all` recreates whatever it needs. The toolchain
-# bootstrap in .tools, the CodeGraph index in .codegraph, .chatgpt
-# orchestration state, and linked worktrees in .worktrees are left in place.
+# Remove repository-local build products through the guarded cleanup helper.
+# The helper deletes only paths emitted by this Makefile below .build. It keeps
+# the .build parent and unknown contents, and preserves package-local build
+# directories because no supported target establishes their ownership.
 clean:
 	@set -euo pipefail; \
-	rm -rf -- "$(CURDIR)/.build"; \
-	rm -rf -- "$(CURDIR)"/Packages/*/.build "$(CURDIR)"/Packages/*/build; \
-	find "$(CURDIR)" -type d \( -name .git -o -name .worktrees \) -prune \
-		-o -type d -name xcuserdata -prune -exec rm -rf -- {} + \
-		-o -type f -name .DS_Store -exec rm -f -- {} +
+	makefile_path="$(MAKEFILE_LIST)"; \
+	makefile_path="$${makefile_path# }"; \
+	makefile_path="$${makefile_path% }"; \
+	script_directory=$$(dirname -- "$$makefile_path"); \
+	bash "$$script_directory/Scripts/clean-build-artifacts.sh"
+
+# Exercise the cleanup helper in disposable Git checkouts. These tests use no
+# Xcode, SwiftPM, network access, or previously completed build.
+clean-test:
+	@set -euo pipefail; \
+	makefile_path="$(MAKEFILE_LIST)"; \
+	makefile_path="$${makefile_path# }"; \
+	makefile_path="$${makefile_path% }"; \
+	script_directory=$$(dirname -- "$$makefile_path"); \
+	bash "$$script_directory/Scripts/tests/test-clean-build-artifacts.sh"
