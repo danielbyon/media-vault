@@ -1,0 +1,21 @@
+Makefile
+  s_bc8853ce81945a::t_fc0772fbf94e52 109
+  s_bc8853ce81945a::t_6f62301a99606c 106-108
+  s_bc8853ce81945a::t_496bf7f2bfa61a 110-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "02a3715874a98eff785bb3e4c7ff1e3516a16eb7",
+  "prompts": {},
+  "sessions": {
+    "s_bc8853ce81945a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a11aa8-72fe-7453-8841-501bbef0dee7",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
