@@ -61,4 +61,138 @@ jobs:
             swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-
 
       - name: Run tests
-        run: make test
+        run: make test TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
+
+      # Preserve both iPhone result bundles for diagnosis. The upload is
+      # advisory: a missing bundle is a warning and an upload failure must not
+      # change the test step outcome or the blocking gate.
+      - name: Upload iPhone test evidence
+        id: upload_iphone_evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: iphone-test-evidence
+          path: .build/TestResults
+          if-no-files-found: warn
+
+  # Visual snapshot qualification runs in its own job so its duration and result
+  # are independent of the required iPhone test job. The approved snapshot
+  # references are still the 3x set, so a 2x PNG mismatch is one possible
+  # outcome. A build error, an unavailable simulator destination, or a timeout
+  # also fails the same step, so this job reports the observed outcome instead
+  # of assuming every failure is a reference mismatch. It is non-blocking
+  # (continue-on-error), keeps its own timeout, and attempts to preserve
+  # evidence for every outcome.
+  snapshot-qualification:
+    name: Snapshot qualification (2x iPad, non-blocking)
+    runs-on: xcode-27
+    timeout-minutes: 60
+    continue-on-error: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Reuse the Swift package checkout cache so this job does not clone
+      # dependencies from scratch when it runs alongside the iPhone test job.
+      - name: Cache Swift package checkouts
+        uses: actions/cache@v6
+        with:
+          path: .build/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-
+
+      # The step timeout stays below the job timeout so a hung test run is
+      # stopped while the always() upload and summary steps can still execute.
+      - name: Run 2x iPad snapshot tests
+        id: snapshot_tests
+        timeout-minutes: 45
+        run: make test-snapshots TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
+
+      - name: Upload 2x iPad snapshot evidence
+        id: upload_evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2x-ipad-snapshot-evidence
+          path: .build/TestResults
+          if-no-files-found: warn
+
+      # Report the observed step outcomes. A failed snapshot command does not
+      # identify its cause: a reference mismatch, a build error, a simulator
+      # problem, and a timeout all produce the same step outcome. This step does
+      # not inspect result contents, so it does not label a failure as the 3x
+      # reference mismatch. The upload step outcome is reported separately
+      # because if-no-files-found is a warning and a successful upload step does
+      # not prove that an artifact exists.
+      - name: Report snapshot qualification status
+        if: always()
+        env:
+          SNAPSHOT_OUTCOME: ${{ steps.snapshot_tests.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload_evidence.outcome }}
+        run: |
+          snapshot_outcome="${SNAPSHOT_OUTCOME:-unavailable}"
+          upload_outcome="${UPLOAD_OUTCOME:-unavailable}"
+
+          case "$snapshot_outcome" in
+            success)
+              qualification_status="snapshot command passed; qualification pending"
+              status_note="2x iPad snapshot command succeeded, and both schemes recorded a positive test count. A successful command does not qualify the snapshots: visual review of the recorded images is still pending, and owner approval of the 2x reference set is still pending."
+              ;;
+            failure)
+              qualification_status="failed"
+              status_note="2x iPad snapshot command failed. Qualification failed and did not pass. The failure may be a snapshot reference mismatch, or it may be a build, simulator, or timeout error; this summary does not inspect the failure cause. Inspect the artifact if present, or the job log, before concluding that a reference mismatch occurred."
+              ;;
+            cancelled|skipped)
+              qualification_status="did not complete"
+              status_note="2x iPad snapshot command did not complete (outcome: $snapshot_outcome). Qualification did not complete. Inspect the artifact if present, or the job log, for partial evidence."
+              ;;
+            *)
+              qualification_status="did not complete"
+              status_note="2x iPad snapshot command outcome is unavailable or unrecognized (value: $snapshot_outcome). Qualification did not complete. Inspect the artifact if present, or the job log, for evidence."
+              ;;
+          esac
+
+          case "$upload_outcome" in
+            success)
+              evidence_note="Artifact upload step succeeded. Inspect artifact 2x-ipad-snapshot-evidence if it exists; if-no-files-found: warn means the upload step can succeed without producing an artifact."
+              ;;
+            unavailable)
+              evidence_note="Artifact upload outcome is unavailable, so this summary makes no claim that evidence was uploaded. Inspect the job log for preserved results."
+              ;;
+            *)
+              evidence_note="Artifact upload step did not succeed (outcome: $upload_outcome), so evidence may be missing. Inspect the job log for preserved results."
+              ;;
+          esac
+
+          echo "$status_note"
+          case "$snapshot_outcome" in
+            success) echo "::notice::$status_note" ;;
+            *) echo "::warning::$status_note" ;;
+          esac
+
+          {
+            echo "### Snapshot qualification (2x iPad)"
+            echo
+            echo "**Qualification status:** $qualification_status"
+            echo
+            echo "$status_note"
+            echo
+            echo "$evidence_note"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Qualification status | $qualification_status |"
+            echo '| Command | `make test-snapshots` |'
+            echo '| Destination | iPad Pro 11-inch (M5), iOS 27.0 (2x) |'
+            echo "| Snapshot step outcome | $snapshot_outcome |"
+            echo "| Artifact upload step outcome | $upload_outcome |"
+            echo "| Blocking | No. The iPhone test job is the blocking gate. |"
+            echo '| Evidence | Artifact `2x-ipad-snapshot-evidence`, if the upload step succeeded and result files were found; otherwise inspect the job log. |'
+            echo
+            echo "Approved snapshot references remain the 3x set until the owner approves 2x candidates. Owner approval is pending."
+          } >> "$GITHUB_STEP_SUMMARY"
