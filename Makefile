@@ -109,8 +109,8 @@ test:
 
 # Exercise only the five visual snapshot suites on the canonical 2x iPad.
 # Both schemes run even when the first suite fails so the complete failure
-# inventory is available. Snapshot reference mismatches are expected until the
-# owner approves 2x references; test execution and the nonzero result are not.
+# inventory is available. The canonical 2x reference baseline is required, and
+# exact snapshot comparisons must pass.
 test-snapshots:
 	@set -euo pipefail; \
 	mkdir -p "$(CURDIR)/.build"; \

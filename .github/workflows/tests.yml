@@ -77,18 +77,15 @@ jobs:
           if-no-files-found: warn
 
   # Visual snapshot qualification runs in its own job so its duration and result
-  # are independent of the required iPhone test job. The approved snapshot
-  # references are still the 3x set, so a 2x PNG mismatch is one possible
-  # outcome. A build error, an unavailable simulator destination, or a timeout
-  # also fails the same step, so this job reports the observed outcome instead
-  # of assuming every failure is a reference mismatch. It is non-blocking
-  # (continue-on-error), keeps its own timeout, and attempts to preserve
-  # evidence for every outcome.
+  # are independent of the required iPhone test job. The committed 2x references
+  # are the automated baseline for this comparison. A PNG mismatch, build error,
+  # unavailable simulator destination, or timeout fails this job and the Tests
+  # workflow. The job keeps its own timeout and preserves evidence for every
+  # outcome.
   snapshot-qualification:
-    name: Snapshot qualification (2x iPad, non-blocking)
+    name: Snapshot qualification (2x iPad)
     runs-on: xcode-27
     timeout-minutes: 60
-    continue-on-error: true
 
     steps:
       - name: Check out repository
@@ -140,12 +137,12 @@ jobs:
 
           case "$snapshot_outcome" in
             success)
-              qualification_status="snapshot command passed; qualification pending"
-              status_note="2x iPad snapshot command succeeded, and both schemes recorded a positive test count. A successful command does not qualify the snapshots: visual review of the recorded images is still pending, and owner approval of the 2x reference set is still pending."
+              qualification_status="automated snapshot success; final owner visual approval pending"
+              status_note="2x iPad snapshot command succeeded, and both schemes recorded a positive test count. The committed 2x references match the automated baseline; this is not final owner visual approval."
               ;;
             failure)
               qualification_status="failed"
-              status_note="2x iPad snapshot command failed. Qualification failed and did not pass. The failure may be a snapshot reference mismatch, or it may be a build, simulator, or timeout error; this summary does not inspect the failure cause. Inspect the artifact if present, or the job log, before concluding that a reference mismatch occurred."
+              status_note="2x iPad snapshot command failed. Qualification failed and blocks the Tests workflow. The failure may be a snapshot reference mismatch, or it may be a build, simulator, or timeout error; this summary does not inspect the failure cause. Inspect the artifact if present, or the job log, before concluding that a reference mismatch occurred."
               ;;
             cancelled|skipped)
               qualification_status="did not complete"
@@ -191,8 +188,8 @@ jobs:
             echo '| Destination | iPad Pro 11-inch (M5), iOS 27.0 (2x) |'
             echo "| Snapshot step outcome | $snapshot_outcome |"
             echo "| Artifact upload step outcome | $upload_outcome |"
-            echo "| Blocking | No. The iPhone test job is the blocking gate. |"
+            echo "| Blocking | Yes. A failed snapshot command fails this job and the Tests workflow. |"
             echo '| Evidence | Artifact `2x-ipad-snapshot-evidence`, if the upload step succeeded and result files were found; otherwise inspect the job log. |'
             echo
-            echo "Approved snapshot references remain the 3x set until the owner approves 2x candidates. Owner approval is pending."
+            echo "Automated snapshot success confirms the committed 2x reference baseline. Final owner visual approval remains pending."
           } >> "$GITHUB_STEP_SUMMARY"

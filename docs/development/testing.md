@@ -1,9 +1,8 @@
 # Test Gates
 
 This repository has two test commands with different jobs. The iPhone command
-checks functional behavior. The iPad command captures visual snapshot evidence.
-A green iPhone run does not qualify visual snapshots, and a failing snapshot run
-is expected while the approved references still use a different rendering scale.
+checks functional behavior. The iPad command compares visual snapshots against
+the committed 2x baseline. In CI, both commands are required gates.
 
 ## 1. iPhone functional gate
 
@@ -68,36 +67,20 @@ files and 4 text files.
 | `MediaLibrarySnapshotTests` | 6 | 3 | 3 |
 | `BrowserViewSnapshotTests` | 11 | 24 | 0 |
 
-The approved PNG references were captured at 3x, so a 2x run on the canonical
-destination makes a PNG mismatch plausible: the reference images encode a
-different rendering scale. Plausibility is not proof. A build error, an
-unavailable simulator destination, or a timeout fails the same command, so a
-given run's failures must be read from its `xcresult` bundle or log before
-they are attributed to reference mismatch.
+The committed PNG references use the 2x rendering scale for the canonical
+destination. The baseline migration replaced all 44 PNG references by exact
+suite-and-method path while preserving the four text references. Each new image
+was checked against the prior 3x reference for the expected 1.5x pixel-scale
+relationship and for layout-equivalent content. Source qualification records,
+original reference hashes, and comparison manifests remain external evidence;
+they are not test inputs.
 
-A 2x run executed on 2026-10-27 on the canonical destination, an iPad Pro
-11-inch (M5) running iOS 27.0 build `24A434`, ran 35 snapshot methods and
-recorded 44 PNG assertion mismatches while the 4 text snapshots passed. This
-describes that run only: it does not predict the outcome of any later run, does
-not attribute a cause to the mismatches, and is not a qualified visual baseline.
-It identifies the references that need owner approval before candidate 2x
-images can replace them. That run used Makefile `01d3d8…` and workflow
-`de39…`.
-
-The final source freeze (Makefile `5f7fbb…`, workflow `6697cd3…`) was rerun on
-2026-10-28 with
-`XCODEBUILD_OPTIONS='-skipMacroValidation -collect-test-diagnostics never'`.
-That value overrides the Makefile default `-skipMacroValidation`. That rerun
-used the same selector and destination, again executed 35 snapshot
-methods, and recorded 44 PNG assertion mismatches, with the same SnapshotTesting
-image attachments. The override suppresses XCTest sysdiagnostics, not
-SnapshotTesting mismatch attachments. CI runs `make test-snapshots` without
-setting `XCODEBUILD_OPTIONS`, so it uses the default `-skipMacroValidation`; the
-CI default remains unqualified.
-
-Do not record or replace approved reference files from a failing run. Candidate
-actual, reference, and difference images belong in external comparison evidence,
-not in the tracked snapshot directories.
+The baseline does not change selectors, snapshot precision, tolerance, rendering
+configuration, or recording behavior. Snapshot recording remains disabled by
+`TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never`, so a missing reference fails instead
+of being created. Do not record or replace committed references from a failing
+run; candidate actual, reference, and difference images belong in external
+comparison evidence.
 
 ## 3. Result bundles and failure handling
 
@@ -143,9 +126,10 @@ replaces a tracked reference.
 1. `test`, named `iOS tests`, is the blocking gate. It runs `make test` on the
    iPhone destination and has no `continue-on-error` setting.
 2. `snapshot-qualification`, named
-   `Snapshot qualification (2x iPad, non-blocking)`, runs `make test-snapshots`
-   on the 2x iPad destination. It is marked `continue-on-error: true`, so its
-   result cannot fail the workflow run or the blocking iPhone job.
+   `Snapshot qualification (2x iPad)`, runs `make test-snapshots` on the 2x iPad
+   destination. It has no `continue-on-error` setting, so a snapshot mismatch,
+   build failure, simulator failure, or timeout fails the job and the `Tests`
+   workflow.
 
 The blocking job passes `TEST_RESULTS_DIRECTORY` so both iPhone bundles survive
 the run, and an `if: always()` step uploads them as the `iphone-test-evidence`
@@ -155,21 +139,16 @@ not change the test step outcome or the blocking gate.
 The two jobs are separate so their time budgets are independent. The snapshot
 job has a 60-minute job timeout and a 45-minute timeout on the test step, so a
 hung snapshot run cannot consume the iPhone job's time budget, and the snapshot
-outcome is visible on its own job. Because the approved references are still
-the 3x set, a PNG reference mismatch is a plausible outcome of the snapshot job,
-and the 2026-10-27 run described in section 2 recorded 44 PNG assertion
-mismatches. Neither observation predicts a later run: a build error, an
-unavailable simulator destination, or a timeout fails the same step, so each
-snapshot job result requires inspection of its artifact or job log before a
-failure is attributed to reference mismatch.
-The job name states that it is non-blocking, and its final step reports the
-observed step outcomes to the workflow run summary. That summary deliberately
-stays cause-neutral: it does not label a generic failure as a reference
-mismatch or attribute a cause to any failure.
+outcome is visible on its own job. The snapshot job is also a required gate. A
+failed command can mean a reference mismatch, a build error, an unavailable
+simulator destination, or a timeout; inspect its artifact or job log before
+attributing a cause. The job's final step reports the observed step outcomes to
+the workflow run summary and deliberately stays cause-neutral.
 
-A passing snapshot command means only that the command exited zero and recorded
-positive test counts; it does not qualify the snapshots. Visual review of the
-recorded images and owner approval of a 2x reference set remain pending.
+A passing snapshot command confirms that the committed 2x references match in
+the automated run and that both schemes recorded positive test counts. It does
+not constitute final owner visual approval; that approval is a separate
+acceptance decision.
 
 The snapshot job preserves evidence on failure. The test step passes
 `TEST_RESULTS_DIRECTORY` so each `xcresult` bundle is copied out of the
@@ -180,8 +159,8 @@ reported as a warning, and a skipped job or missing artifact must not be read as
 snapshot qualification.
 
 If the `xcode-27` runner does not have the iPad Pro 11-inch (M5) iOS 27.0
-destination, the snapshot job fails without blocking the iPhone gate. Its logs
-and result bundle are preserved for diagnosis.
+destination, the snapshot job fails and therefore the `Tests` workflow fails.
+Its logs and result bundle are preserved for diagnosis.
 
 ## 5. Changing the selection
 
