@@ -7,11 +7,12 @@
 
 import ComposableArchitecture
 import CoreFoundation
+import Entitlement
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// The minimal authenticated Library presentation for the first still-image tracer.
+/// Presents committed Library assets and controls for importing supported still images.
 @MainActor
 public struct MediaLibraryView: View {
     private let store: StoreOf<MediaLibraryFeature>
@@ -93,12 +94,18 @@ public struct MediaLibraryView: View {
         )
     }
 
+    private var canStartImport: Bool {
+        !store.isLoading
+            && !store.isImporting
+            && !store.entitlementStatus.blocksImportSelection
+    }
+
     private var importButton: some View {
         Button("Import", systemImage: "plus") {
             store.send(.importTapped)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(store.isLoading || store.isImporting)
+        .disabled(!canStartImport)
         .accessibilityHint("Choose one still image from Files")
     }
 
@@ -112,6 +119,7 @@ public struct MediaLibraryView: View {
                 store.send(.importTapped)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(!canStartImport)
         }
     }
 
@@ -147,10 +155,14 @@ public struct MediaLibraryView: View {
             Text(title(for: error))
                 .font(.headline)
                 .foregroundStyle(.red)
-            Text(message(for: error))
+            Text(Self.message(for: error))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            if error == .resourceUnavailable {
+            if error == .assetLimitReached {
+                entitlementControls
+            } else if error == .resourceUnavailable
+                || error == .entitlementUnavailable
+                || error == .libraryUnavailable {
                 Button("Retry") {
                     store.send(.retryTapped)
                 }
@@ -162,8 +174,85 @@ public struct MediaLibraryView: View {
         .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
     }
 
+    @ViewBuilder
+    private var entitlementControls: some View {
+        switch store.entitlementStatus {
+        case .available:
+            entitlementActionButtons
+        case .purchasing:
+            ProgressView("Purchasing Pro")
+        case .restoring:
+            ProgressView("Restoring Purchases")
+        case .refreshing:
+            ProgressView("Verifying Pro")
+        case .pending:
+            Text("The purchase is pending. Wait for the App Store to finish, then check the purchase status.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Button("Check Purchase Status") {
+                store.send(.purchaseStatusCheckTapped)
+            }
+            .buttonStyle(.borderedProminent)
+            Button("Restore Purchases") {
+                store.send(.restoreTapped)
+            }
+            .buttonStyle(.bordered)
+        case .cancelled:
+            Text("The purchase or restore was cancelled. Nothing changed. Try again to add more assets.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            entitlementActionButtons
+        case .activated:
+            Text("Pro is active. Choose the image again to retry the import.")
+                .font(.subheadline)
+            Button("Choose Image Again") {
+                store.send(.retryTapped)
+            }
+            .buttonStyle(.borderedProminent)
+        case .notVerified:
+            Text(
+                "StoreKit reported success, but Pro is not verified yet. Restore again or choose the image to retry admission.",
+            )
+            .font(.subheadline)
+            entitlementActionButtons
+            Button("Choose Image Again") {
+                store.send(.retryTapped)
+            }
+            .buttonStyle(.bordered)
+        case let .failed(error):
+            Text(Self.entitlementFailureMessage(for: error))
+                .font(.subheadline)
+                .foregroundStyle(.red)
+            entitlementActionButtons
+            Button("Choose Image Again") {
+                store.send(.retryTapped)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var entitlementActionButtons: some View {
+        HStack {
+            Button("Purchase Pro") {
+                store.send(.purchaseTapped)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button("Restore Purchases") {
+                store.send(.restoreTapped)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
     private func title(for error: MediaLibraryFeatureError) -> String {
         switch error {
+        case .assetLimitReached:
+            "Free limit reached"
+        case .entitlementUnavailable:
+            "Could not verify Pro"
+        case .libraryUnavailable:
+            "Could not check Library"
         case .unsupportedMedia:
             "Image not supported"
         case .importFailed:
@@ -173,14 +262,35 @@ public struct MediaLibraryView: View {
         }
     }
 
-    private func message(for error: MediaLibraryFeatureError) -> String {
+    static func message(for error: MediaLibraryFeatureError) -> String {
         switch error {
+        case .assetLimitReached:
+            "Free includes \(MediaLibraryQuota.freeLogicalAssetLimit) Library items. " +
+                "One image is one logical asset. Saved assets stay available; Pro unlocks new imports."
+        case .entitlementUnavailable:
+            "The importer could not verify Pro, so it did not add anything. Choose the image again to retry."
+        case .libraryUnavailable:
+            "Library could not count saved assets, so the importer stopped before copying. Choose the image again to retry."
         case .unsupportedMedia:
             "Choose one ordinary, renderable still image. Videos, animated images, RAW, and compound media are not supported here."
         case .importFailed:
             "The image was not added to Library. Check that Files can provide the source and try again."
         case .resourceUnavailable:
             "The saved image could not be read from protected storage."
+        }
+    }
+
+    static func entitlementFailureMessage(for error: EntitlementError) -> String {
+        switch error {
+        case .productUnavailable,
+             .incompatibleProduct:
+            "The Pro purchase is not available right now. Restore purchases or try again later."
+        case .noEntitlementFound:
+            "No active Pro purchase was found for this Apple Account."
+        case .verificationFailed:
+            "StoreKit could not verify the purchase, so Pro was not granted."
+        case .storeFailure:
+            "The App Store could not complete the request. Try again."
         }
     }
 }

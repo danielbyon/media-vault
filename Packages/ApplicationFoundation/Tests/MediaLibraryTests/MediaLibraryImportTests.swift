@@ -7,6 +7,7 @@
 
 import CoreFoundation
 import CryptoKit
+import Entitlement
 import Foundation
 import GRDB
 import ImageIO
@@ -175,6 +176,76 @@ struct MediaLibraryImportTests {
         #expect(subsequentAssets == loadedAssets)
         #expect(try await environment.store.loadAssets().count == 1)
         #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+    }
+
+    @Test("Importers sharing a store serialize admission at the Free limit")
+    func sharedStoreSerializesAdmissionAcrossImporters() async throws {
+        let acceptedResourceRead = SuspendedAcceptedResourceRead()
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { .notEntitled },
+            resourcesFactory: { root in
+                try FileMediaResourceRepository(
+                    rootURL: root,
+                    protectionOperation: { _ in },
+                    acceptedResourceReadOperation: { url in
+                        try await acceptedResourceRead.read(url)
+                    },
+                )
+            },
+        )
+        try await seedQuotaAssets(
+            count: MediaLibraryQuota.freeLogicalAssetLimit - 1,
+            into: environment.store,
+        )
+
+        let firstImporter = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+        )
+        let rejectedAssetID = TestFixtures.recoveryAssetIDs[0]
+        let rejectedResourceID = TestFixtures.recoveryResourceIDs[0]
+        let rejectedSourceCopy = SourceCopyCounter()
+        let rejectedImporter = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            entitlement: makeEntitlement { .notEntitled },
+            source: MediaSourceClient(copyOperation: { sourceURL, stagingURL in
+                try rejectedSourceCopy.copy(from: sourceURL, to: stagingURL)
+            }),
+            identifiers: [rejectedAssetID, rejectedResourceID],
+        )
+
+        let sourceURL = environment.sourceURL
+        let firstImport = Task {
+            try await firstImporter.importFile(at: sourceURL)
+        }
+        await acceptedResourceRead.waitForFirstReadSuspension()
+
+        let rejectedImport = Task {
+            try await rejectedImporter.importFile(at: sourceURL)
+        }
+        await rejectedImporter.waitForDurableOperationWaiterForTesting()
+        let gatedState = await rejectedImporter.durableOperationGateStateForTesting()
+        #expect(gatedState.isActive)
+        #expect(gatedState.waiterCount == 1)
+
+        await acceptedResourceRead.releaseFirstRead()
+        let importedAsset = try await firstImport.value
+        await #expect(throws: MediaImportError.assetLimitReached) {
+            try await rejectedImport.value
+        }
+
+        let journalEntries = try await environment.store.ingestionJournal.snapshot().entries
+        #expect(await rejectedSourceCopy.count() == 0)
+        #expect(try await environment.store.logicalAssetCount() == MediaLibraryQuota.freeLogicalAssetLimit)
+        #expect(!journalEntries.contains { $0.id == rejectedAssetID })
+        #expect(journalEntries.isEmpty)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: rejectedResourceID).path,
+            ),
+        )
+        #expect(importedAsset.id == TestFixtures.assetID)
     }
 
     @Test("A failed durable operation releases the importer gate for reconciliation")
@@ -1231,6 +1302,289 @@ struct MediaLibraryImportTests {
             try environment.resources.data(for: resource)
         }
     }
+
+    @Test("An import below the free limit does not read entitlement")
+    func belowFreeLimitSkipsEntitlement() async throws {
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { throw EntitlementError.verificationFailed },
+        )
+        try await seedQuotaAssets(count: MediaLibraryQuota.freeLogicalAssetLimit - 1, into: environment.store)
+
+        _ = try await environment.importer.importFile(at: environment.sourceURL)
+
+        #expect(try await environment.store.logicalAssetCount() == MediaLibraryQuota.freeLogicalAssetLimit)
+    }
+
+    @Test("A verified Pro entitlement admits an import at the free limit")
+    func entitledImportAllowedAtFreeLimit() async throws {
+        let entitlementProbe = EntitlementStateProbe(state: .entitled)
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+        )
+        try await seedQuotaAssets(count: MediaLibraryQuota.freeLogicalAssetLimit, into: environment.store)
+
+        _ = try await environment.importer.importFile(at: environment.sourceURL)
+
+        #expect(try await environment.store.logicalAssetCount() == MediaLibraryQuota.freeLogicalAssetLimit + 1)
+        #expect(await entitlementProbe.readCount() == 1)
+    }
+
+    @Test("A verified non-entitlement denies import at the free limit before staging")
+    func notEntitledImportDeniedAtFreeLimit() async throws {
+        try await expectQuotaDenial(for: .notEntitled)
+    }
+
+    @Test("A revoked entitlement denies import at the free limit before staging")
+    func revokedImportDeniedAtFreeLimit() async throws {
+        try await expectQuotaDenial(for: .revoked)
+    }
+
+    @Test("Entitlement lookup failure remains distinct from store failure")
+    func entitlementFailureBlocksBeforeStaging() async throws {
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { throw EntitlementError.verificationFailed },
+        )
+        try await seedQuotaAssets(count: MediaLibraryQuota.freeLogicalAssetLimit, into: environment.store)
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            entitlement: makeEntitlement { throw EntitlementError.verificationFailed },
+            source: MediaSourceClient(copyOperation: { _, _ in throw InjectedUnexpectedSourceCopy() }),
+        )
+
+        await #expect(throws: MediaImportError.entitlementUnavailable) {
+            try await importer.importFile(at: environment.sourceURL)
+        }
+
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: TestFixtures.resourceID).path,
+            ),
+        )
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+    }
+
+    @Test("Database count failure blocks before staging without becoming an entitlement failure")
+    func databaseFailureBlocksBeforeStaging() async throws {
+        let entitlementProbe = EntitlementStateProbe(state: .notEntitled)
+        let entitlement = makeEntitlement { await entitlementProbe.currentState() }
+        let environment = try makeEnvironment(
+            entitlement: entitlement,
+            logicalAssetCountOperation: {
+                throw MediaLibraryStoreError.unavailable
+            },
+        )
+        #expect(try await environment.store.loadAssets().isEmpty)
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            entitlement: entitlement,
+            source: MediaSourceClient(copyOperation: { _, _ in throw InjectedUnexpectedSourceCopy() }),
+        )
+
+        await #expect(throws: MediaImportError.libraryUnavailable) {
+            try await importer.importFile(at: environment.sourceURL)
+        }
+
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: TestFixtures.resourceID).path,
+            ),
+        )
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(await entitlementProbe.readCount() == 0)
+    }
+
+    @Test("Revocation does not block recovery of an accepted import")
+    func acceptedImportRecoversAfterRevocation() async throws {
+        let readFailure = FirstAcceptedResourceReadFailure()
+        let entitlementProbe = EntitlementStateProbe(state: .entitled)
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+            resourcesFactory: { root in
+                try FileMediaResourceRepository(
+                    rootURL: root,
+                    protectionOperation: { _ in },
+                    acceptedResourceReadOperation: { try readFailure.read($0) },
+                )
+            },
+        )
+        try await seedQuotaAssets(count: MediaLibraryQuota.freeLogicalAssetLimit, into: environment.store)
+
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await environment.importer.importFile(at: environment.sourceURL)
+        }
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.first?.state == .validating)
+
+        await entitlementProbe.setState(.revoked)
+        try await environment.importer.reconcile()
+
+        #expect(try await environment.store.logicalAssetCount() == MediaLibraryQuota.freeLogicalAssetLimit + 1)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(await entitlementProbe.readCount() == 1)
+    }
+
+    @Test("Admission recovers accepted work before checking the Free limit")
+    func admissionRecoversAcceptedWorkBeforeFreeLimitCheck() async throws {
+        let entitlementProbe = EntitlementStateProbe(state: .notEntitled)
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+        )
+        try await seedQuotaAssets(
+            count: MediaLibraryQuota.freeLogicalAssetLimit - 1,
+            into: environment.store,
+        )
+        let acceptedEntry = try await seedAcceptedImport(index: 0, in: environment)
+        let sourceCopyCounter = SourceCopyCounter()
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+            source: MediaSourceClient(copyOperation: { sourceURL, stagingURL in
+                try sourceCopyCounter.copy(from: sourceURL, to: stagingURL)
+            }),
+        )
+
+        await #expect(throws: MediaImportError.assetLimitReached) {
+            try await importer.importFile(at: environment.sourceURL)
+        }
+
+        let assets = try await environment.store.loadAssets()
+        #expect(assets.count == MediaLibraryQuota.freeLogicalAssetLimit)
+        #expect(assets.contains { $0.id == acceptedEntry.id })
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(await entitlementProbe.readCount() == 1)
+        #expect(sourceCopyCounter.count() == 0)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: TestFixtures.resourceID).path,
+            ),
+        )
+    }
+
+    @Test("A failed accepted-work recovery defers Free admission before staging")
+    func failedAcceptedWorkRecoveryDefersFreeAdmission() async throws {
+        let readFailure = FirstAcceptedResourceReadFailure()
+        let entitlementProbe = EntitlementStateProbe(state: .notEntitled)
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+            resourcesFactory: { root in
+                try FileMediaResourceRepository(
+                    rootURL: root,
+                    protectionOperation: { _ in },
+                    acceptedResourceReadOperation: { try readFailure.read($0) },
+                )
+            },
+        )
+        try await seedQuotaAssets(
+            count: MediaLibraryQuota.freeLogicalAssetLimit - 1,
+            into: environment.store,
+        )
+        let acceptedEntry = try await seedAcceptedImport(index: 1, in: environment)
+        let validatingEntry = try await environment.store.ingestionJournal.transition(
+            acceptedEntry,
+            to: .validating,
+        )
+        let sourceCopyCounter = SourceCopyCounter()
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+            source: MediaSourceClient(copyOperation: { sourceURL, stagingURL in
+                try sourceCopyCounter.copy(from: sourceURL, to: stagingURL)
+            }),
+        )
+
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await importer.importFile(at: environment.sourceURL)
+        }
+
+        #expect(try await environment.store.logicalAssetCount() == MediaLibraryQuota.freeLogicalAssetLimit - 1)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.map(\.id) == [validatingEntry.id])
+        #expect(await entitlementProbe.readCount() == 0)
+        #expect(sourceCopyCounter.count() == 0)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: TestFixtures.resourceID).path,
+            ),
+        )
+    }
+
+    @Test("51 committed assets remain visible after Pro is revoked and later imports are denied")
+    func existingAssetsRemainVisibleAfterRevocation() async throws {
+        let entitlementProbe = EntitlementStateProbe(state: .entitled)
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+        )
+        try await seedQuotaAssets(count: 50, into: environment.store)
+
+        let importedAsset = try await environment.importer.importFile(at: environment.sourceURL)
+        #expect(try await environment.store.logicalAssetCount() == 51)
+
+        await entitlementProbe.setState(.revoked)
+        let visibleAssets = try await environment.importer.loadAssets()
+
+        #expect(visibleAssets.count == 51)
+        #expect(visibleAssets.contains { $0.id == importedAsset.id })
+        #expect(try await environment.store.logicalAssetCount() == 51)
+
+        let denyingImporter = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+            source: MediaSourceClient(copyOperation: { _, _ in throw InjectedUnexpectedSourceCopy() }),
+        )
+        await #expect(throws: MediaImportError.assetLimitReached) {
+            try await denyingImporter.importFile(at: environment.sourceURL)
+        }
+        #expect(await entitlementProbe.readCount() == 2)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+    }
+
+    private func expectQuotaDenial(for state: ProEntitlementState) async throws {
+        let entitlementProbe = EntitlementStateProbe(state: state)
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+        )
+        try await seedQuotaAssets(count: MediaLibraryQuota.freeLogicalAssetLimit, into: environment.store)
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            entitlement: makeEntitlement { await entitlementProbe.currentState() },
+            source: MediaSourceClient(copyOperation: { _, _ in throw InjectedUnexpectedSourceCopy() }),
+        )
+
+        await #expect(throws: MediaImportError.assetLimitReached) {
+            try await importer.importFile(at: environment.sourceURL)
+        }
+
+        #expect(await entitlementProbe.readCount() == 1)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: TestFixtures.resourceID).path,
+            ),
+        )
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+    }
+
+    private func seedAcceptedImport(
+        index: Int,
+        in environment: ImportEnvironment,
+    ) async throws -> MediaIngestionJournalEntry {
+        let entry = MediaIngestionJournalEntry(
+            id: TestFixtures.recoveryAssetIDs[index],
+            resourceID: TestFixtures.recoveryResourceIDs[index],
+            state: .received,
+            sourceFilename: "accepted-\(index).png",
+            importedAt: TestFixtures.importedAt,
+        )
+        try TestFixtures.pngData.write(
+            to: environment.resources.stagingURL(for: entry.resourceID),
+        )
+        try environment.resources.protectStaging(for: entry.resourceID)
+        try await environment.store.ingestionJournal.accept(entry)
+        return entry
+    }
 }
 
 private final class ImportEnvironment {
@@ -1403,9 +1757,11 @@ private func seedPersistentRecoveryScenarios(
 private func makeEnvironment(
     sourceName: String = "holiday-photo.png",
     sourceBytes: Data = TestFixtures.pngData,
+    entitlement: EntitlementClient = .testValue,
     resourcesFactory: (URL) throws -> FileMediaResourceRepository = {
         try FileMediaResourceRepository(rootURL: $0)
     },
+    logicalAssetCountOperation: (@Sendable () async throws -> Int)? = nil,
 ) throws -> ImportEnvironment {
     let fileManager = FileManager.default
     let root = fileManager.temporaryDirectory
@@ -1414,7 +1770,15 @@ private func makeEnvironment(
     let sourceURL = root.appendingPathComponent(sourceName)
     try sourceBytes.write(to: sourceURL)
     let database = try PersistenceStore.makeInMemory()
-    let mediaStore = SQLiteMediaLibraryStore(database: database)
+    let mediaStore =
+        if let logicalAssetCountOperation {
+            SQLiteMediaLibraryStore(
+                database: database,
+                logicalAssetCountOverride: logicalAssetCountOperation,
+            )
+        } else {
+            SQLiteMediaLibraryStore(database: database)
+        }
     let resources = try resourcesFactory(root.appendingPathComponent("resources"))
     return ImportEnvironment(
         root: root,
@@ -1423,23 +1787,93 @@ private func makeEnvironment(
         database: database,
         store: mediaStore,
         resources: resources,
-        importer: makeImporter(store: mediaStore, resources: resources),
+        importer: makeImporter(store: mediaStore, resources: resources, entitlement: entitlement),
     )
 }
 
 private func makeImporter(
     store: SQLiteMediaLibraryStore,
     resources: FileMediaResourceRepository,
+    entitlement: EntitlementClient = .testValue,
+    source: MediaSourceClient = .localFile,
+    identifiers: [UUID] = [TestFixtures.assetID, TestFixtures.resourceID],
 ) -> MediaLibraryImporter {
-    let ids = IDSequence(ids: [TestFixtures.assetID, TestFixtures.resourceID])
+    let ids = IDSequence(ids: identifiers)
     return MediaLibraryImporter(
         store: store,
         resources: resources,
-        source: .localFile,
+        source: source,
+        entitlement: entitlement,
         id: { ids.next() },
         now: { TestFixtures.importedAt },
     )
 }
+
+private func makeEntitlement(
+    currentState: @escaping @Sendable () async throws -> ProEntitlementState,
+) -> EntitlementClient {
+    EntitlementClient(
+        currentState: currentState,
+        purchase: { .failed(.storeFailure) },
+        restore: { .failed(.storeFailure) },
+    )
+}
+
+private func seedQuotaAssets(
+    count: Int,
+    into store: SQLiteMediaLibraryStore,
+) async throws {
+    for index in 0 ..< count {
+        let assetID = requiredUUID(
+            String(format: "00000000-0000-0000-0003-%012x", index + 1),
+        )
+        let resourceID = requiredUUID(
+            String(format: "00000000-0000-0000-0004-%012x", index + 1),
+        )
+        try await store.commit(
+            MediaAsset(
+                id: assetID,
+                kind: .stillImage,
+                importedAt: TestFixtures.importedAt.addingTimeInterval(TimeInterval(index)),
+                resources: [
+                    MediaResource(
+                        id: resourceID,
+                        role: .original,
+                        relativePath: resourceID.uuidString.lowercased(),
+                        sourceFilename: "seed-\(index).png",
+                        sourceUTI: "public.png",
+                        byteCount: 0,
+                        sha256: String(repeating: "0", count: 64),
+                    ),
+                ],
+            ),
+        )
+    }
+}
+
+private actor EntitlementStateProbe {
+    private var state: ProEntitlementState
+    private var reads = 0
+
+    init(state: ProEntitlementState) {
+        self.state = state
+    }
+
+    func currentState() -> ProEntitlementState {
+        reads += 1
+        return state
+    }
+
+    func setState(_ newState: ProEntitlementState) {
+        state = newState
+    }
+
+    func readCount() -> Int {
+        reads
+    }
+}
+
+private struct InjectedUnexpectedSourceCopy: Error {}
 
 private func makeAnimatedGIF(at url: URL, using bytes: Data) throws {
     let source = try #require(CGImageSourceCreateWithData(bytes as CFData, nil))
@@ -1488,6 +1922,24 @@ private final class IDSequence: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return ids.removeFirst()
+    }
+}
+
+private final class SourceCopyCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var copyCount = 0
+
+    func copy(from sourceURL: URL, to stagingURL: URL) throws {
+        lock.lock()
+        copyCount += 1
+        lock.unlock()
+        try FileManager.default.copyItem(at: sourceURL, to: stagingURL)
+    }
+
+    func count() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return copyCount
     }
 }
 
