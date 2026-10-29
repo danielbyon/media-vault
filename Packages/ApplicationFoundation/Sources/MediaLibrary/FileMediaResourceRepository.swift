@@ -8,6 +8,7 @@
 import CoreFoundation
 import CoreGraphics
 import CryptoKit
+import Entitlement
 import Foundation
 import ImageIO
 import ObjectiveC
@@ -306,37 +307,38 @@ public actor MediaLibraryImporter {
     private let store: SQLiteMediaLibraryStore
     private let resources: FileMediaResourceRepository
     private let source: MediaSourceClient
+    private let entitlement: EntitlementClient
     private let id: @Sendable () -> UUID
     private let now: @Sendable () -> Date
-    private var hasActiveDurableOperation = false
-    private var durableOperationWaiters: [DurableOperationWaiter] = []
-    private var durableOperationWaiterObservers: [CheckedContinuation<Void, Never>] = []
-
-    private struct DurableOperationWaiter {
-        let id: UUID
-        let continuation: CheckedContinuation<Void, Error>
-    }
-
     /// Creates an importer with explicit storage and source-access seams.
     public init(
         store: SQLiteMediaLibraryStore,
         resources: FileMediaResourceRepository,
         source: MediaSourceClient = .live,
+        entitlement: EntitlementClient = .testValue,
         id: @escaping @Sendable () -> UUID = UUID.init,
         now: @escaping @Sendable () -> Date = Date.init,
     ) {
         self.store = store
         self.resources = resources
         self.source = source
+        self.entitlement = entitlement
         self.id = id
         self.now = now
     }
 
-    /// Copies, validates, and durably commits one ordinary still image.
+    /// Recovers accepted imports before admitting and durably committing a new still image.
     public func importFile(at sourceURL: URL) async throws -> MediaAsset {
-        try await acquireDurableOperation()
-        defer { releaseDurableOperation() }
+        try await store.withDurableOperation {
+            try await importFileWhileGated(at: sourceURL)
+        }
+    }
+
+    private func importFileWhileGated(at sourceURL: URL) async throws -> MediaAsset {
         try Task.checkCancellation()
+
+        try await recoverAcceptedImportsBeforeAdmission()
+        try await requireAdmissionForNewImport()
 
         let assetID = id()
         let resourceID = id()
@@ -381,10 +383,63 @@ public actor MediaLibraryImporter {
         }
     }
 
+    private func requireAdmissionForNewImport() async throws {
+        let committedAssetCount: Int
+        do {
+            committedAssetCount = try await store.logicalAssetCount()
+        } catch {
+            throw MediaImportError.libraryUnavailable
+        }
+        guard MediaLibraryQuota.requiresEntitlementLookup(
+            forCommittedAssetCount: committedAssetCount,
+        ) else {
+            return
+        }
+
+        let entitlementState: ProEntitlementState
+        do {
+            entitlementState = try await entitlement.currentState()
+        } catch {
+            throw MediaImportError.entitlementUnavailable
+        }
+        guard MediaLibraryQuota.admitsNewImport(
+            committedAssetCount: committedAssetCount,
+            entitlementState: entitlementState,
+        ) else {
+            throw MediaImportError.assetLimitReached
+        }
+    }
+
+    /// Reconciles accepted journal work before a fresh import is counted or staged.
+    private func recoverAcceptedImportsBeforeAdmission() async throws {
+        let existingAssets: [MediaAsset]
+        do {
+            existingAssets = try await store.loadAssets()
+        } catch {
+            throw MediaImportError.libraryUnavailable
+        }
+
+        let snapshot: MediaIngestionJournalSnapshot
+        do {
+            snapshot = try await store.ingestionJournal.snapshot()
+        } catch {
+            throw MediaImportError.persistenceFailed
+        }
+
+        let blockedIDs = await reconcile(snapshot: snapshot, using: existingAssets)
+        guard blockedIDs.isEmpty else {
+            throw MediaImportError.persistenceFailed
+        }
+    }
+
     /// Reconciles durable imports before returning canonical Library assets.
     public func loadAssets() async throws -> [MediaAsset] {
-        try await acquireDurableOperation()
-        defer { releaseDurableOperation() }
+        try await store.withDurableOperation {
+            try await loadAssetsWhileGated()
+        }
+    }
+
+    private func loadAssetsWhileGated() async throws -> [MediaAsset] {
         try Task.checkCancellation()
 
         let existingAssets = try await store.loadAssets()
@@ -394,71 +449,21 @@ public actor MediaLibraryImporter {
 
     /// Resumes eligible imports without exposing journal transitions to clients.
     public func reconcile() async throws {
-        try await acquireDurableOperation()
-        defer { releaseDurableOperation() }
-        try Task.checkCancellation()
-
-        let existingAssets = try await store.loadAssets()
-        _ = await reconcile(using: existingAssets)
+        try await store.withDurableOperation {
+            try Task.checkCancellation()
+            let existingAssets = try await store.loadAssets()
+            _ = await reconcile(using: existingAssets)
+        }
     }
 
     /// Waits until another durable operation is queued for importer concurrency tests.
     func waitForDurableOperationWaiterForTesting() async {
-        guard durableOperationWaiters.isEmpty else {
-            return
-        }
-
-        await withCheckedContinuation { continuation in
-            durableOperationWaiterObservers.append(continuation)
-        }
+        await store.waitForDurableOperationWaiterForTesting()
     }
 
     /// Returns gate state for deterministic cancellation and failure tests.
-    func durableOperationGateStateForTesting() -> (isActive: Bool, waiterCount: Int) {
-        (hasActiveDurableOperation, durableOperationWaiters.count)
-    }
-
-    private func acquireDurableOperation() async throws {
-        try Task.checkCancellation()
-        guard hasActiveDurableOperation else {
-            hasActiveDurableOperation = true
-            return
-        }
-
-        let waiterID = UUID()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                durableOperationWaiters.append(
-                    DurableOperationWaiter(id: waiterID, continuation: continuation),
-                )
-                let observers = durableOperationWaiterObservers
-                durableOperationWaiterObservers.removeAll(keepingCapacity: true)
-                observers.forEach { $0.resume() }
-            }
-        } onCancel: {
-            Task {
-                await self.cancelDurableOperationWaiter(waiterID)
-            }
-        }
-    }
-
-    private func cancelDurableOperationWaiter(_ waiterID: UUID) {
-        guard let index = durableOperationWaiters.firstIndex(where: { $0.id == waiterID }) else {
-            return
-        }
-
-        let waiter = durableOperationWaiters.remove(at: index)
-        waiter.continuation.resume(throwing: CancellationError())
-    }
-
-    private func releaseDurableOperation() {
-        guard !durableOperationWaiters.isEmpty else {
-            hasActiveDurableOperation = false
-            return
-        }
-
-        let next = durableOperationWaiters.removeFirst()
-        next.continuation.resume()
+    func durableOperationGateStateForTesting() async -> (isActive: Bool, waiterCount: Int) {
+        await store.durableOperationGateStateForTesting()
     }
 
     private func reconcile(using existingAssets: [MediaAsset]) async -> Set<UUID> {
@@ -470,6 +475,13 @@ public actor MediaLibraryImporter {
             return []
         }
 
+        return await reconcile(snapshot: snapshot, using: existingAssets)
+    }
+
+    private func reconcile(
+        snapshot: MediaIngestionJournalSnapshot,
+        using existingAssets: [MediaAsset],
+    ) async -> Set<UUID> {
         var blockedIDs = snapshot.unreadableAssetIDs
         let existingIDs = Set(existingAssets.map(\.id))
         var occupiedAssetIDs = existingIDs

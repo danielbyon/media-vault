@@ -7,18 +7,67 @@
 
 import ComposableArchitecture
 import Dependencies
+import Entitlement
 import Foundation
 
 /// The user-visible import and loading errors for the minimal Library surface.
 public enum MediaLibraryFeatureError: Equatable, Sendable {
+    /// A new import requires Pro and StoreKit verified that Pro is absent.
+    case assetLimitReached
+
+    /// Pro status could not be verified, so import admission failed closed.
+    case entitlementUnavailable
+
+    /// Saved Library state could not be read, so import admission failed closed.
+    case libraryUnavailable
+
     /// The selected source is not a supported ordinary still image.
     case unsupportedMedia
 
-    /// The selected source could not be rendered or copied.
+    /// The new or recovered import could not be durably completed.
     case importFailed
 
     /// The canonical resource could not be read for presentation.
     case resourceUnavailable
+}
+
+/// Progress of a contextual Pro purchase or restore requested at the asset cap.
+public enum MediaLibraryEntitlementStatus: Equatable, Sendable {
+    /// Purchase and restore actions can be offered.
+    case available
+    /// A purchase request is in flight.
+    case purchasing
+    /// A restore request is in flight.
+    case restoring
+    /// StoreKit reported success and the app is reading authoritative state.
+    case refreshing
+    /// StoreKit has not completed the purchase yet.
+    case pending
+    /// The user cancelled the App Store request.
+    case cancelled
+    /// Authoritative state confirms Pro is active.
+    case activated
+    /// A successful operation was not confirmed by authoritative Pro state.
+    case notVerified
+    /// Purchase or restore failed with an app-owned entitlement error.
+    case failed(EntitlementError)
+
+    /// Whether a pending or active StoreKit operation blocks a new source selection.
+    var blocksImportSelection: Bool {
+        switch self {
+        case .purchasing,
+             .restoring,
+             .refreshing,
+             .pending:
+            true
+        case .available,
+             .cancelled,
+             .activated,
+             .notVerified,
+             .failed:
+            false
+        }
+    }
 }
 
 /// The TCA feature that owns committed Library state and the Files import flow.
@@ -45,6 +94,9 @@ public struct MediaLibraryFeature {
         /// The latest user-visible media error.
         public var error: MediaLibraryFeatureError?
 
+        /// Contextual Pro purchase or restore progress shown at the asset cap.
+        public var entitlementStatus: MediaLibraryEntitlementStatus
+
         fileprivate var hasLoaded: Bool
 
         /// Creates an empty or preloaded Library state.
@@ -55,6 +107,7 @@ public struct MediaLibraryFeature {
             isPickerPresented = false
             isImporting = false
             error = nil
+            entitlementStatus = .available
             hasLoaded = !assets.isEmpty
         }
 
@@ -66,6 +119,7 @@ public struct MediaLibraryFeature {
                 && lhs.isPickerPresented == rhs.isPickerPresented
                 && lhs.isImporting == rhs.isImporting
                 && lhs.error == rhs.error
+                && lhs.entitlementStatus == rhs.entitlementStatus
         }
     }
 
@@ -86,18 +140,42 @@ public struct MediaLibraryFeature {
         /// Delivers a durable Library load result.
         case assetsLoaded(Result<[MediaAsset], MediaLibraryStoreError>)
 
+        /// Delivers a canonical asset refresh after quota denial.
+        case assetsRefreshedAfterQuotaDenial(Result<[MediaAsset], MediaLibraryStoreError>)
+
         /// Delivers an import result after canonical commit.
         case importCompleted(Result<MediaAsset, MediaImportError>)
 
         /// Delivers bytes for one committed resource.
         case resourceLoaded(UUID, Result<Data, MediaLibraryStoreError>)
 
-        /// Clears the visible error and retries durable loading.
+        /// Starts an explicit Pro purchase requested from the Library quota notice.
+        case purchaseTapped
+
+        /// Starts an explicit App Store restore requested from the Library quota notice.
+        case restoreTapped
+
+        /// Checks authoritative Pro state while an App Store operation is pending.
+        case purchaseStatusCheckTapped
+
+        /// Delivers the result of an explicit purchase operation.
+        case purchaseResult(EntitlementOperationResult)
+
+        /// Delivers the result of an explicit restore operation.
+        case restoreResult(EntitlementOperationResult)
+
+        /// Delivers authoritative entitlement state after a successful store operation.
+        case entitlementStateLoaded(Result<ProEntitlementState, EntitlementError>)
+
+        /// Clears the error and reopens Files or reloads Library state as appropriate.
         case retryTapped
     }
 
     @Dependency(\.mediaLibrary)
     private var mediaLibrary
+
+    @Dependency(\.entitlement)
+    private var entitlement
 
     /// Creates the Library reducer.
     public init() {}
@@ -121,10 +199,24 @@ public struct MediaLibraryFeature {
             handlePickerCancelled(state: &state)
         case let .assetsLoaded(result):
             handleAssetsLoaded(result, state: &state)
+        case let .assetsRefreshedAfterQuotaDenial(result):
+            handleAssetsRefreshedAfterQuotaDenial(result, state: &state)
         case let .importCompleted(result):
             handleImportCompleted(result, state: &state)
         case let .resourceLoaded(resourceID, result):
             handleResourceLoaded(resourceID: resourceID, result: result, state: &state)
+        case .purchaseTapped:
+            handlePurchaseTapped(state: &state)
+        case .restoreTapped:
+            handleRestoreTapped(state: &state)
+        case .purchaseStatusCheckTapped:
+            handlePurchaseStatusCheckTapped(state: &state)
+        case let .purchaseResult(result):
+            handleEntitlementOperationResult(result, state: &state)
+        case let .restoreResult(result):
+            handleEntitlementOperationResult(result, state: &state)
+        case let .entitlementStateLoaded(result):
+            handleEntitlementStateLoaded(result, state: &state)
         case .retryTapped:
             handleRetry(state: &state)
         }
@@ -149,19 +241,28 @@ public struct MediaLibraryFeature {
     }
 
     private func handleImportTapped(state: inout State) -> Effect<Action> {
-        guard !state.isImporting else {
+        guard !state.isImporting,
+              !state.entitlementStatus.blocksImportSelection
+        else {
             return .none
         }
 
         state.error = nil
+        state.entitlementStatus = .available
         state.isPickerPresented = true
         return .none
     }
 
     private func handleFileSelected(url: URL, state: inout State) -> Effect<Action> {
+        guard !state.entitlementStatus.blocksImportSelection else {
+            state.isPickerPresented = false
+            return .none
+        }
+
         state.isPickerPresented = false
         state.isImporting = true
         state.error = nil
+        state.entitlementStatus = .available
         let importFile = mediaLibrary.importFile
         return .run { send in
             do {
@@ -206,13 +307,43 @@ public struct MediaLibraryFeature {
             state.isImporting = false
             state.hasLoaded = true
             state.error = nil
+            state.entitlementStatus = .available
             state.assets.append(asset)
             return loadResourceEffects(for: [asset])
         case let .failure(error):
             state.isImporting = false
             state.error = featureError(for: error)
+            state.entitlementStatus = .available
+            guard case .assetLimitReached = error else {
+                return .none
+            }
+
+            let loadAssets = mediaLibrary.loadAssets
+            return .run { send in
+                do {
+                    try await send(.assetsRefreshedAfterQuotaDenial(.success(loadAssets())))
+                } catch let error as MediaLibraryStoreError {
+                    await send(.assetsRefreshedAfterQuotaDenial(.failure(error)))
+                } catch {
+                    await send(.assetsRefreshedAfterQuotaDenial(.failure(.unavailable)))
+                }
+            }
+        }
+    }
+
+    private func handleAssetsRefreshedAfterQuotaDenial(
+        _ result: Result<[MediaAsset], MediaLibraryStoreError>,
+        state: inout State,
+    ) -> Effect<Action> {
+        guard case let .success(canonicalAssets) = result else {
             return .none
         }
+
+        let existingIDs = Set(state.assets.map(\.id))
+        let newlyCommittedAssets = canonicalAssets.filter { !existingIDs.contains($0.id) }
+        state.assets.append(contentsOf: newlyCommittedAssets)
+        state.hasLoaded = true
+        return loadResourceEffects(for: newlyCommittedAssets)
     }
 
     private func handleResourceLoaded(
@@ -224,15 +355,148 @@ public struct MediaLibraryFeature {
         case let .success(data):
             state.resourceData[resourceID] = data
         case .failure:
-            state.error = .resourceUnavailable
+            if state.error != .assetLimitReached {
+                state.error = .resourceUnavailable
+            }
+        }
+        return .none
+    }
+
+    private func handlePurchaseTapped(state: inout State) -> Effect<Action> {
+        guard state.error == .assetLimitReached,
+              canStartEntitlementOperation(from: state.entitlementStatus)
+        else {
+            return .none
+        }
+
+        state.entitlementStatus = .purchasing
+        let purchase = entitlement.purchase
+        return .run { send in
+            await send(.purchaseResult(purchase()))
+        }
+    }
+
+    private func handleRestoreTapped(state: inout State) -> Effect<Action> {
+        guard state.error == .assetLimitReached,
+              state.entitlementStatus == .pending
+              || canStartEntitlementOperation(from: state.entitlementStatus)
+        else {
+            return .none
+        }
+
+        state.entitlementStatus = .restoring
+        let restore = entitlement.restore
+        return .run { send in
+            await send(.restoreResult(restore()))
+        }
+    }
+
+    private func handlePurchaseStatusCheckTapped(state: inout State) -> Effect<Action> {
+        guard state.error == .assetLimitReached,
+              state.entitlementStatus == .pending
+        else {
+            return .none
+        }
+
+        state.entitlementStatus = .refreshing
+        return refreshEntitlementState()
+    }
+
+    private func handleEntitlementOperationResult(
+        _ result: EntitlementOperationResult,
+        state: inout State,
+    ) -> Effect<Action> {
+        switch result {
+        case .purchased,
+             .restored,
+             .alreadyEntitled:
+            state.entitlementStatus = .refreshing
+            return refreshEntitlementState()
+        case .pending:
+            state.entitlementStatus = .pending
+            return .none
+        case .cancelled:
+            state.entitlementStatus = .cancelled
+            return .none
+        case let .failed(error):
+            state.entitlementStatus = .failed(error)
+            return .none
+        }
+    }
+
+    private func refreshEntitlementState() -> Effect<Action> {
+        let currentState = entitlement.currentState
+        return .run { send in
+            do {
+                try await send(.entitlementStateLoaded(.success(currentState())))
+            } catch let error as EntitlementError {
+                await send(.entitlementStateLoaded(.failure(error)))
+            } catch {
+                await send(.entitlementStateLoaded(.failure(.storeFailure)))
+            }
+        }
+    }
+
+    private func handleEntitlementStateLoaded(
+        _ result: Result<ProEntitlementState, EntitlementError>,
+        state: inout State,
+    ) -> Effect<Action> {
+        switch result {
+        case .success(.entitled):
+            state.entitlementStatus = .activated
+        case .success(.notEntitled),
+             .success(.revoked):
+            state.entitlementStatus = .notVerified
+        case let .failure(error):
+            state.entitlementStatus = .failed(error)
         }
         return .none
     }
 
     private func handleRetry(state: inout State) -> Effect<Action> {
-        state.error = nil
-        state.hasLoaded = false
-        return .send(.task)
+        switch state.error {
+        case .entitlementUnavailable,
+             .libraryUnavailable:
+            state.error = nil
+            state.isPickerPresented = true
+            return .none
+        case .assetLimitReached
+            where state.entitlementStatus == .activated
+            || state.entitlementStatus == .notVerified
+            || isFailedEntitlementStatus(state.entitlementStatus):
+            state.error = nil
+            state.isPickerPresented = true
+            return .none
+        default:
+            state.error = nil
+            state.hasLoaded = false
+            return .send(.task)
+        }
+    }
+
+    private func isFailedEntitlementStatus(_ status: MediaLibraryEntitlementStatus) -> Bool {
+        if case .failed = status {
+            return true
+        }
+        return false
+    }
+
+    private func canStartEntitlementOperation(
+        from status: MediaLibraryEntitlementStatus,
+    ) -> Bool {
+        switch status {
+        case .available,
+             .cancelled,
+             .notVerified,
+             .failed:
+            true
+        case .purchasing,
+             .restoring,
+             .refreshing,
+             .pending,
+             .activated:
+            false
+        }
     }
 
     private func loadResourceEffects(for assets: [MediaAsset]) -> Effect<Action> {
@@ -255,6 +519,12 @@ public struct MediaLibraryFeature {
 
     private func featureError(for error: MediaImportError) -> MediaLibraryFeatureError {
         switch error {
+        case .assetLimitReached:
+            .assetLimitReached
+        case .entitlementUnavailable:
+            .entitlementUnavailable
+        case .libraryUnavailable:
+            .libraryUnavailable
         case .unsupportedMedia,
              .unrenderableMedia:
             .unsupportedMedia

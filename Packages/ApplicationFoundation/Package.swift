@@ -122,6 +122,7 @@ let package = Package(
                 .product(name: "DependenciesMacros", package: "swift-dependencies"),
                 .product(name: "SQLiteData", package: "sqlite-data"),
                 .product(name: "GRDB", package: "GRDB.swift"),
+                "Entitlement",
                 "PersistenceSupport",
             ],
         ),
@@ -215,6 +216,7 @@ let package = Package(
             name: "MediaLibraryTests",
             dependencies: [
                 "MediaLibrary",
+                "Entitlement",
                 "FoundationTestSupport",
                 "PersistenceSupport",
                 .product(

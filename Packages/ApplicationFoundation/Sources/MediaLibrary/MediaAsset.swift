@@ -106,6 +106,12 @@ public enum MediaLibraryStoreError: Error, Equatable, Sendable {
 
 /// Errors raised while importing a source file into canonical storage.
 public enum MediaImportError: Error, Equatable, Sendable {
+    /// The free logical-asset cap was reached and Pro is not verified.
+    case assetLimitReached
+    /// Entitlement verification failed, so Pro could not be established.
+    case entitlementUnavailable
+    /// The canonical Library could not verify its committed asset count.
+    case libraryUnavailable
     /// The source URL could not be accessed or copied while access was valid.
     case sourceAccessFailed
 

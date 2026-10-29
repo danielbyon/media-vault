@@ -6,6 +6,7 @@
 //
 
 import Dependencies
+import Entitlement
 import Foundation
 import PersistenceSupport
 
@@ -14,7 +15,7 @@ public struct MediaLibraryClient: Sendable {
     /// Loads all assets committed to the vault store.
     public var loadAssets: @Sendable () async throws -> [MediaAsset]
 
-    /// Imports one source URL and returns it only after canonical commit.
+    /// Recovers accepted work, checks fresh-import admission, and returns after canonical commit.
     public var importFile: @Sendable (URL) async throws -> MediaAsset
 
     /// Loads exact canonical bytes for rendering a committed resource.
@@ -68,7 +69,11 @@ extension MediaLibraryClient: DependencyKey {
             let resources = try FileMediaResourceRepository(
                 rootURL: libraryRoot.appendingPathComponent("resources", isDirectory: true),
             )
-            let importer = MediaLibraryImporter(store: store, resources: resources)
+            let importer = MediaLibraryImporter(
+                store: store,
+                resources: resources,
+                entitlement: .liveValue,
+            )
 
             return Self(
                 loadAssets: { try await importer.loadAssets() },
