@@ -97,6 +97,70 @@ final class BrowserTabOverviewScrollUITests: XCTestCase {
         XCTAssertEqual(savedAnchor.label, "anchor-38|commits-0")
     }
 
+    func testPersistentLockControlIsAccessibleAcrossAuthenticatedDestinations() {
+        for destination in ["library", "collections", "browser-start", "browser-navigation", "tab-overview"] {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "--vault-lock-control",
+                "--vault-lock-destination=\(destination)",
+            ]
+            app.launch()
+            app.activate()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), destination)
+
+            let lock = assertLockControlIsAccessible(in: app)
+
+            switch destination {
+            case "library":
+                XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
+                assertSettingsIsReachableBesideLock(in: app, lock: lock)
+            case "collections":
+                XCTAssertTrue(app.navigationBars["Collections"].waitForExistence(timeout: 10))
+                assertSettingsIsReachableBesideLock(in: app, lock: lock)
+            case "browser-start":
+                let heading = app.staticTexts["Start Page"]
+                XCTAssertTrue(heading.waitForExistence(timeout: 10), app.debugDescription)
+                assertDoesNotOverlap(lock, heading, context: destination)
+                assertBelowLock(lock, heading, context: destination)
+                let search = app.textFields["Search or enter website"]
+                XCTAssertTrue(search.waitForExistence(timeout: 10))
+                assertDoesNotOverlap(lock, search, context: destination)
+            case "browser-navigation":
+                let address = app.textFields["Search or enter website"]
+                XCTAssertTrue(address.waitForExistence(timeout: 10))
+                XCTAssertEqual(address.value as? String, "example.com")
+                assertDoesNotOverlap(lock, address, context: destination)
+                let showTabs = app.buttons
+                    .matching(
+                        NSPredicate(format: "label BEGINSWITH %@", "Show Tabs"),
+                    )
+                    .firstMatch
+                XCTAssertTrue(showTabs.exists)
+                assertDoesNotOverlap(lock, showTabs, context: destination)
+            case "tab-overview":
+                XCTAssertTrue(app.scrollViews["browser.tab-overview.scroll-view"].waitForExistence(timeout: 10))
+                let heading = app.staticTexts["Tabs"]
+                XCTAssertTrue(heading.waitForExistence(timeout: 10), app.debugDescription)
+                assertDoesNotOverlap(lock, heading, context: destination)
+                assertBelowLock(lock, heading, context: destination)
+                let newTab = app.buttons["New Tab"]
+                XCTAssertTrue(newTab.exists)
+                assertDoesNotOverlap(lock, newTab, context: destination)
+                assertBelowLock(lock, newTab, context: destination)
+                XCTAssertTrue(lock.isEnabled, app.debugDescription)
+                lock.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                let fixturePhase = app.staticTexts["vault-lock-control.fixture-phase"]
+                XCTAssertTrue(fixturePhase.waitForExistence(timeout: 10), app.debugDescription)
+                XCTAssertEqual(fixturePhase.label, "vault-phase:locked")
+                XCTAssertTrue(app.staticTexts["Calculator display"].waitForExistence(timeout: 10), app.debugDescription)
+            default:
+                XCTFail("Unexpected destination: \(destination)")
+            }
+
+            app.terminate()
+        }
+    }
+
     func testShowTabsSelectedCardPlacementRegressionFixtureA() {
         runShowTabsFixture(
             fixture: "A",
@@ -147,6 +211,38 @@ final class BrowserTabOverviewScrollUITests: XCTestCase {
             anchorIndex: 8,
             sizeClass: "compact",
             expectsTransitionTargetRequest: false,
+        )
+    }
+
+    private func assertLockControlIsAccessible(in app: XCUIApplication) -> XCUIElement {
+        let lock = app.buttons["vault.lock"]
+        XCTAssertTrue(lock.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(lock.label, "Lock")
+        XCTAssertTrue(lock.isHittable)
+        return lock
+    }
+
+    private func assertSettingsIsReachableBesideLock(in app: XCUIApplication, lock: XCUIElement) {
+        let settings = app.buttons["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10), app.debugDescription)
+        assertDoesNotOverlap(lock, settings, context: "Library Settings")
+        XCTAssertTrue(settings.isHittable, app.debugDescription)
+        settings.tap()
+        XCTAssertTrue(app.staticTexts["Auto-Lock"].waitForExistence(timeout: 10), app.debugDescription)
+    }
+
+    private func assertDoesNotOverlap(_ lock: XCUIElement, _ control: XCUIElement, context: String) {
+        XCTAssertFalse(
+            lock.frame.intersects(control.frame),
+            "\(context): Lock (\(lock.frame)) overlaps \(control.label) (\(control.frame))",
+        )
+    }
+
+    private func assertBelowLock(_ lock: XCUIElement, _ control: XCUIElement, context: String) {
+        XCTAssertGreaterThanOrEqual(
+            control.frame.minY,
+            lock.frame.maxY,
+            "\(context): \(control.label) (\(control.frame)) is inside the Lock top strip (\(lock.frame))",
         )
     }
 

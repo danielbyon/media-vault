@@ -615,6 +615,13 @@ extension BrowserFeature {
         return state.settingsRevision
     }
 
+    /// Advances the adapter profile token before configuration work is scheduled.
+    @discardableResult
+    func advanceProfileConfigurationGeneration(state: inout State) -> UInt64 {
+        state.profileConfigurationGeneration &+= 1
+        return state.profileConfigurationGeneration
+    }
+
     /// Advances the tab-session order before any session effect can be scheduled.
     @discardableResult
     func advanceOpenTabsRevision(state: inout State) -> UInt64 {
@@ -761,6 +768,7 @@ extension BrowserFeature {
         }
 
         let requestID = uuid()
+        let configurationGeneration = advanceProfileConfigurationGeneration(state: &state)
         state.profileLifecycle = .initializing(requestID: requestID)
         let loadSettings = browserSettings.load
         let loadBookmarks = browserLibrary.loadBookmarks
@@ -770,7 +778,19 @@ extension BrowserFeature {
             async let bookmarks = (try? loadBookmarks()) ?? []
             async let history = (try? loadHistory()) ?? []
             let settings = await loadSettings()
-            await execute(.configureProfile(profile: settings.browsingProfile, retiringTabIDs: []))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await execute(.configureProfileForGeneration(
+                profile: settings.browsingProfile,
+                retiringTabIDs: [],
+                generation: configurationGeneration,
+            ))
+            guard !Task.isCancelled else {
+                return
+            }
+
             await send(.loaded(
                 settings: settings,
                 bookmarks: bookmarks,
@@ -778,6 +798,7 @@ extension BrowserFeature {
                 profileConfigurationID: requestID,
             ))
         }
+        .cancellable(id: CancelID.profileConfiguration, cancelInFlight: true)
     }
 
     /// Resets the live tab session and waits for adapter configuration before releasing new work.
@@ -793,6 +814,7 @@ extension BrowserFeature {
         let retiringTabIDs = state.tabs.map(\.id)
         let revision = advanceOpenTabsRevision(state: &state)
         let settingsRevision = advanceSettingsRevision(state: &state)
+        let configurationGeneration = advanceProfileConfigurationGeneration(state: &state)
         let purgeSession = purgeOpenTabsSession(revision: revision)
         if state.openTabsEntryLifecycle != .notEntered {
             state.openTabsEntryLifecycle = .completed
@@ -840,7 +862,19 @@ extension BrowserFeature {
             .cancel(id: CancelID.providerSuggestions),
             purgeSession,
             .run { send in
-                await execute(.configureProfile(profile: profile, retiringTabIDs: retiringTabIDs))
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                await execute(.configureProfileForGeneration(
+                    profile: profile,
+                    retiringTabIDs: retiringTabIDs,
+                    generation: configurationGeneration,
+                ))
+                guard !Task.isCancelled else {
+                    return
+                }
+
                 if resetsSettings {
                     if let resetRevisioned {
                         await resetRevisioned(settingsRevision)
@@ -854,8 +888,13 @@ extension BrowserFeature {
                         await save(settings)
                     }
                 }
+                guard !Task.isCancelled else {
+                    return
+                }
+
                 await send(.profileConfigurationCompleted(profile: profile, requestID: requestID))
-            },
+            }
+            .cancellable(id: CancelID.profileConfiguration, cancelInFlight: true),
         )
     }
 }

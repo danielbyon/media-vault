@@ -29,12 +29,15 @@
 			A10000000000000000000037 /* BrowserTabTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* BrowserTabTransitionTests.swift */; };
 			A10000000000000000000038 /* BrowserViewInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* BrowserViewInteractionTests.swift */; };
 		A1000000000000000000003F /* AppHostedUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* AppHostedUITests.swift */; };
+		A10000000000000000000040 /* ScenePrivacyCoverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001A /* ScenePrivacyCoverTests.swift */; };
 			A10000000000000000000039 /* BrowserProfileConfigurationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* BrowserProfileConfigurationGate.swift */; };
 			A1000000000000000000003A /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
 			A1000000000000000000003B /* BrowserFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000005 /* BrowserFeature */; };
 			A1000000000000000000003C /* FoundationTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000003 /* FoundationTestSupport */; };
 			A1000000000000000000003D /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000002 /* ComposableArchitecture */; };
 			A1000000000000000000003E /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
+		A10000000000000000000041 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
+		A10000000000000000000042 /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -61,6 +64,7 @@
 			B10000000000000000000014 /* BrowserTabTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabTransitionTests.swift; sourceTree = "<group>"; };
 			B10000000000000000000015 /* BrowserViewInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserViewInteractionTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000019 /* AppHostedUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHostedUITests.swift; sourceTree = "<group>"; };
+		B1000000000000000000001A /* ScenePrivacyCoverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePrivacyCoverTests.swift; sourceTree = "<group>"; };
 			B10000000000000000000016 /* BrowserProfileConfigurationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserProfileConfigurationGate.swift; sourceTree = "<group>"; };
 			B10000000000000000000017 /* AppHostedTestHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppHostedTestHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 			B10000000000000000000018 /* AppHostedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppHostedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -93,6 +97,8 @@
 				A10000000000000000000027 /* BrowserFeature in Frameworks */,
 				A10000000000000000000028 /* ComposableArchitecture in Frameworks */,
 				A10000000000000000000030 /* CalculatorFeature in Frameworks */,
+				A10000000000000000000041 /* AppFeature in Frameworks */,
+				A10000000000000000000042 /* VaultFeature in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -232,6 +238,7 @@
 					B10000000000000000000014 /* BrowserTabTransitionTests.swift */,
 					B10000000000000000000015 /* BrowserViewInteractionTests.swift */,
 				B10000000000000000000019 /* AppHostedUITests.swift */,
+				B1000000000000000000001A /* ScenePrivacyCoverTests.swift */,
 				);
 				path = AppHostedTests;
 				sourceTree = "<group>";
@@ -299,6 +306,8 @@
 				120000000000000000000005 /* BrowserFeature */,
 				120000000000000000000002 /* ComposableArchitecture */,
 				120000000000000000000006 /* CalculatorFeature */,
+				120000000000000000000001 /* AppFeature */,
+				120000000000000000000007 /* VaultFeature */,
 			);
 			productName = BrowserTabOverviewUITestHost;
 			productReference = B1000000000000000000000A /* BrowserTabOverviewUITestHost.app */;
@@ -523,6 +532,7 @@
 					A10000000000000000000037,
 					A10000000000000000000038,
 				A1000000000000000000003F,
+A10000000000000000000040 /* ScenePrivacyCoverTests.swift in Sources */,
 					A10000000000000000000039,
 				);
 				runOnlyForDeploymentPostprocessing = 0;

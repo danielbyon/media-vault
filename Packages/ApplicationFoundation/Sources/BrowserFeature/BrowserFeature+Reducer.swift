@@ -11,6 +11,10 @@ import Foundation
 extension BrowserFeature {
     // swiftlint:disable:next cyclomatic_complexity function_body_length
     func coreReduce(into state: inout State, action: Action) -> Effect<Action> {
+        guard !state.isSessionLocked || action == .sessionLocked else {
+            return .none
+        }
+
         switch action {
         case .task:
             let events = webKit.events
@@ -20,6 +24,27 @@ extension BrowserFeature {
                 }
             }
             .cancellable(id: CancelID.webKitEvents, cancelInFlight: true)
+        case .sessionLocked:
+            let isProfileTransitioning =
+                if case .transitioning = state.profileLifecycle {
+                    true
+                } else {
+                    false
+                }
+            let lockEffect = state.clearTransientPresentationForLock()
+            if isProfileTransitioning {
+                _ = advanceSettingsRevision(state: &state)
+            }
+            let configurationGeneration = state.profileConfigurationGeneration
+            webKit.advanceProfileConfigurationGeneration(configurationGeneration)
+            let execute = webKit.execute
+            return .merge(
+                lockEffect,
+                .cancel(id: CancelID.profileConfiguration),
+                .run { _ in
+                    await execute(.invalidateProfileConfiguration(generation: configurationGeneration))
+                },
+            )
         case .browserEntered:
             guard state.openTabsEntryLifecycle == .notEntered else {
                 return .none

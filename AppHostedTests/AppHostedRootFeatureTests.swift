@@ -12,6 +12,7 @@ import CoreFoundation
 import CoreGraphics
 import Dependencies
 import Foundation
+import MediaLibrary
 import Sharing
 import SwiftUI
 import Testing
@@ -106,6 +107,73 @@ extension AppHostedUITests {
             browserWindow.isHidden = true
             browserWindow.rootViewController = nil
         }
+
+        @Test("The Library reloads cleared resources when authentication remounts its view")
+        @MainActor
+        func libraryResourcesReloadAfterAuthenticationRemount() async throws {
+            let suiteName = "RootFeatureTests.LibraryUnlock.\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suiteName))
+            defaults.removePersistentDomain(forName: suiteName)
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+
+            let resource = MediaResource(
+                id: UUID(),
+                role: .original,
+                relativePath: "library/original.jpg",
+                sourceFilename: "original.jpg",
+                sourceUTI: "public.jpeg",
+                byteCount: 1,
+                sha256: String(repeating: "a", count: 64),
+            )
+            let asset = MediaAsset(
+                id: UUID(),
+                kind: .stillImage,
+                importedAt: Date(timeIntervalSince1970: 1),
+                resources: [resource],
+            )
+            let loadCount = LockIsolated(0)
+            let resourceReadCount = LockIsolated(0)
+            var vault = VaultFeature.State(phase: .authenticated, configuredKind: .password)
+            vault.shell.library = MediaLibraryFeature.State(assets: [asset])
+            vault.shell.library.resourceData[resource.id] = Data([0x42])
+
+            let store = compositionStore(
+                vault: vault,
+                defaults: defaults,
+                libraryLoadAssets: {
+                    loadCount.withValue { $0 += 1 }
+                    return [asset]
+                },
+                libraryResourceData: { _ in
+                    resourceReadCount.withValue { $0 += 1 }
+                    return Data([0x43])
+                },
+                credentialVerify: { _ in .succeeded },
+            )
+            let (controller, window) = mountRootView(store)
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+            await settle(controller)
+
+            #expect(store.state.vault.shell.library.resourceData[resource.id] == Data([0x42]))
+            #expect(loadCount.value == 0)
+
+            store.send(.vault(.lock))
+            await settle(controller)
+            #expect(store.state.vault.shell.library.resourceData.isEmpty)
+
+            store.send(.vault(.beginAuthentication))
+            store.send(.vault(.authenticationCredentialChanged("valid credential")))
+            store.send(.vault(.submitAuthentication))
+            await settleUntilLibraryResourcesReload(store, controller, resourceID: resource.id)
+
+            #expect(store.state.vault.phase == .authenticated)
+            #expect(store.state.vault.shell.library.resourceData[resource.id] == Data([0x43]))
+            #expect(loadCount.value == 1)
+            #expect(resourceReadCount.value == 1)
+        }
     }
 }
 
@@ -115,11 +183,17 @@ private func compositionStore(
     defaults: UserDefaults,
     sessionLoad: @escaping @Sendable () async -> BrowserOpenTabsSessionLoadOutcome = { .missing },
     webKitExecute: @escaping @Sendable (BrowserWebKitCommand) -> Void = { _ in },
+    libraryLoadAssets: @escaping @Sendable () async throws -> [MediaAsset] = { [] },
+    libraryResourceData: @escaping @Sendable (MediaResource) async throws -> Data = { _ in Data() },
+    credentialVerify: @escaping @Sendable (String) async -> VaultCredentialVerificationResult = { _ in
+        .succeeded
+    },
 ) -> StoreOf<RootFeature> {
     withDependencies {
         $0.defaultAppStorage = defaults
         $0.uuid = .incrementing
         $0.vaultCredential.loadConfiguration = { nil }
+        $0.vaultCredential.verify = credentialVerify
         $0.calculatorPersistence.load = { nil }
         $0.calculatorPersistence.save = { _ in }
         $0.browserOpenTabsSession.load = sessionLoad
@@ -127,6 +201,8 @@ private func compositionStore(
         $0.browserLibrary.loadBookmarks = { [] }
         $0.browserLibrary.loadHistory = { [] }
         $0.browserClipboard.readHTTPURL = { nil }
+        $0.mediaLibrary.loadAssets = libraryLoadAssets
+        $0.mediaLibrary.resourceData = libraryResourceData
         $0.browserWebKit = BrowserWebKitClient(
             execute: { command in webKitExecute(command) },
             events: { AsyncStream { $0.finish() } },
@@ -137,8 +213,12 @@ private func compositionStore(
 }
 
 @MainActor
-private func mountRootView(_ store: StoreOf<RootFeature>) -> (UIHostingController<RootView>, UIWindow) {
-    let controller = UIHostingController(rootView: RootView(store: store))
+private func mountRootView(_ store: StoreOf<RootFeature>) -> (UIHostingController<AnyView>, UIWindow) {
+    // A directly created test window has no scene lifecycle to mark it foreground.
+    _ = store.send(.applicationPhaseChanged(.active))
+    let rootView = RootView(store: store)
+    let foregroundRootView = rootView.environment(\.scenePhase, ScenePhase.active)
+    let controller = UIHostingController(rootView: AnyView(foregroundRootView))
     let window = UIKitTestSupport.makeWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
     window.rootViewController = controller
     window.makeKeyAndVisible()
@@ -160,14 +240,37 @@ private func settleUntilBrowserEntryCompletes(
     _ store: StoreOf<RootFeature>,
     _ controller: UIViewController,
 ) async {
-    for _ in 0 ..< 100 {
+    await settleUntil(controller, "completed Browser entry") {
+        store.state.vault.shell.browser.openTabsEntryLifecycle == .completed
+    }
+}
+
+@MainActor
+private func settleUntilLibraryResourcesReload(
+    _ store: StoreOf<RootFeature>,
+    _ controller: UIViewController,
+    resourceID: UUID,
+) async {
+    await settleUntil(controller, "Library resource reload", timeoutIterations: 1_000) {
+        store.state.vault.shell.library.resourceData[resourceID] == Data([0x43])
+    }
+}
+
+@MainActor
+private func settleUntil(
+    _ controller: UIViewController,
+    _ description: String,
+    timeoutIterations: Int = 1_000,
+    condition: () -> Bool,
+) async {
+    for _ in 0 ..< timeoutIterations {
         await Task.yield()
         controller.view.layoutIfNeeded()
-        if store.state.vault.shell.browser.openTabsEntryLifecycle == .completed {
+        if condition() {
             return
         }
-        try? await Task.sleep(for: .milliseconds(10))
     }
+    Issue.record("Timed out waiting for \(description) after \(timeoutIterations) yields")
 }
 
 @MainActor

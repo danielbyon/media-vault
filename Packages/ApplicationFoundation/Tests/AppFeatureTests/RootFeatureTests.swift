@@ -5,17 +5,39 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import BrowserFeature
 import ComposableArchitecture
 import ConcurrencyExtras
+import CoreFoundation
 import DecoySupport
 import Dependencies
 import Foundation
+import MediaLibrary
 import Testing
-import VaultFeature
 @testable import AppFeature
+@testable import VaultFeature
 
 @Suite("Root feature decoy host")
 struct RootFeatureTests {
+    @Test("Browser top inset requires an authenticated Browser surface")
+    func browserTopInsetRequiresAuthenticatedBrowserSurface() {
+        let cases: [(VaultFeaturePhase, VaultShellTab, CGFloat)] = [
+            (.authenticated, .browser, 24),
+            (.authenticated, .library, 0),
+            (.locked, .browser, 0),
+            (.locked, .library, 0),
+        ]
+
+        for (vaultPhase, selectedTab, expectedInset) in cases {
+            #expect(
+                RootSurfaceLayout.browserTopInset(
+                    vaultPhase: vaultPhase,
+                    selectedTab: selectedTab,
+                ) == expectedInset,
+            )
+        }
+    }
+
     @Test("Trigger configuration filters declared roles through current vault policy")
     @MainActor
     func triggerConfigurationTracksVaultPolicy() async {
@@ -238,7 +260,12 @@ struct RootFeatureTests {
 
         await store.send(.decoyAttempt(attempt))
         await store.receive(.vault(.verifyHidden(attemptID: attempt.id, candidate: .init("1234"))))
-        await store.receive(.vault(.hiddenVerificationCompleted(attempt.id, .success(true))))
+        await store.receive(.vault(.hiddenVerificationCompleted(
+            sessionGeneration: 0,
+            requestGeneration: 1,
+            attemptID: attempt.id,
+            result: .success(true),
+        )))
         await store.finish()
 
         #expect(store.state.vault.phase == .authenticated)
@@ -316,7 +343,12 @@ struct RootFeatureTests {
         #expect(store.state.pendingHiddenAttemptID == nil)
         #expect(decoy.probe.completions == expectedCompletions)
 
-        await store.send(.vault(.hiddenVerificationCompleted(candidateAttempt.id, .success(true))))
+        await store.send(.vault(.hiddenVerificationCompleted(
+            sessionGeneration: 0,
+            requestGeneration: 1,
+            attemptID: candidateAttempt.id,
+            result: .success(true),
+        )))
         await store.finish()
 
         #expect(store.state.vault.phase == .authentication)
@@ -357,7 +389,12 @@ struct RootFeatureTests {
             case .unavailable:
                 .failure(.evaluationFailed)
             }
-        await store.receive(.vault(.hiddenVerificationCompleted(attempt.id, normalizedResult)))
+        await store.receive(.vault(.hiddenVerificationCompleted(
+            sessionGeneration: 0,
+            requestGeneration: 1,
+            attemptID: attempt.id,
+            result: normalizedResult,
+        )))
         await store.finish()
 
         #expect(store.state.vault.phase == .locked)
@@ -365,5 +402,438 @@ struct RootFeatureTests {
         #expect(decoy.probe.completions == [
             DecoyHiddenEntryCompletion(attemptID: attempt.id, result: expectedCompletion),
         ])
+    }
+
+    @Test("Inactive application phases do not start background auto-lock grace")
+    @MainActor
+    func inactivePhaseDoesNotStartAutoLockGrace() async {
+        let clock = ContinuousClock()
+        let backgroundStart = clock.now
+        let currentTime = LockIsolated<ContinuousClock.Instant?>(backgroundStart)
+        var vault = VaultFeature.State(phase: .authenticated)
+        vault.sessionSettings.autoLockTimeout = .seconds30
+        let store = makeRootStore(vault: vault, now: { currentTime.value })
+
+        await store.send(.applicationPhaseChanged(.inactive))
+        currentTime.withValue { $0 = backgroundStart.advanced(by: .seconds(90)) }
+        await store.send(.applicationPhaseChanged(.background)) {
+            $0.applicationReturnPending = true
+            $0.autoLockBackgroundStartedAt = backgroundStart.advanced(by: .seconds(90))
+            $0.autoLockTimeoutAtBackground = .seconds(30)
+        }
+        currentTime.withValue { $0 = backgroundStart.advanced(by: .seconds(119)) }
+        await store.send(.applicationPhaseChanged(.active))
+
+        #expect(store.state.vault.phase == .authenticated)
+        await store.finish()
+    }
+
+    @Test("An unknown application phase keeps unconfigured setup reachable")
+    @MainActor
+    func unknownApplicationPhaseKeepsSetupReachable() async {
+        let store = makeRootStore(vault: VaultFeature.State(phase: .unconfigured))
+
+        await store.send(.applicationPhaseChanged(.unknown)) {
+            $0.applicationReturnPending = true
+        }
+        #expect(store.state.vault.phase == .unconfigured)
+        #expect(store.state.applicationReturnPending)
+
+        await store.send(.applicationPhaseChanged(.active)) {
+            $0.applicationReturnPending = false
+        }
+        #expect(store.state.vault.phase == .unconfigured)
+
+        await store.send(.vault(.beginSetup)) {
+            $0.vault.phase = .setup
+            $0.vault.sessionGeneration = 1
+            $0.vault.setupKind = .pin
+            $0.vault.credentialInput = ""
+            $0.vault.confirmationInput = ""
+            $0.vault.usesHiddenEntry = false
+            $0.vault.error = nil
+        }
+        await store.finish()
+    }
+
+    @Test("An unknown application phase still locks a configured vault")
+    @MainActor
+    func unknownApplicationPhaseLocksConfiguredVault() async {
+        let store = makeRootStore(
+            vault: VaultFeature.State(phase: .authenticated, configuredKind: .password),
+        )
+
+        await store.send(.applicationPhaseChanged(.unknown))
+        await store.receive(.vault(.shell(.browser(.sessionLocked))))
+        #expect(store.state.vault.phase == .locked)
+        #expect(store.state.applicationReturnPending)
+
+        await store.send(.applicationPhaseChanged(.active)) {
+            $0.applicationReturnPending = false
+        }
+        #expect(store.state.vault.phase == .locked)
+        await store.finish()
+    }
+
+    @Test("Local scene activation cannot evaluate application background grace")
+    @MainActor
+    func localSceneActivationDoesNotEvaluateBackgroundGrace() async {
+        let clock = ContinuousClock()
+        let backgroundStart = clock.now
+        let currentTime = LockIsolated<ContinuousClock.Instant?>(backgroundStart)
+        var vault = VaultFeature.State(phase: .authenticated)
+        vault.sessionSettings.autoLockTimeout = .seconds30
+        let store = makeRootStore(vault: vault, now: { currentTime.value })
+
+        await store.send(.applicationPhaseChanged(.background)) {
+            $0.applicationReturnPending = true
+            $0.autoLockBackgroundStartedAt = backgroundStart
+            $0.autoLockTimeoutAtBackground = .seconds(30)
+        }
+        currentTime.withValue { $0 = backgroundStart.advanced(by: .seconds(30)) }
+        await store.send(.sceneBecameActive)
+
+        #expect(store.state.vault.phase == .authenticated)
+        #expect(store.state.autoLockBackgroundStartedAt == backgroundStart)
+        #expect(store.state.applicationReturnPending)
+        await store.finish()
+    }
+
+    @Test("Immediate background auto-lock commits before content can be revealed")
+    @MainActor
+    func immediateAutoLockCommitsBeforeReveal() async {
+        var vault = VaultFeature.State(phase: .authenticated)
+        vault.sessionSettings.autoLockTimeout = .immediately
+        let store = makeRootStore(vault: vault)
+
+        await store.send(.applicationPhaseChanged(.background)) {
+            $0.applicationReturnPending = true
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+        await store.finish()
+    }
+
+    @Test("Unavailable monotonic time fails closed")
+    @MainActor
+    func unavailableMonotonicTimeLocksTheVault() async {
+        let store = makeRootStore(
+            vault: VaultFeature.State(phase: .authenticated),
+            now: { nil },
+        )
+
+        await store.send(.applicationPhaseChanged(.background)) {
+            $0.applicationReturnPending = true
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+
+        #expect(store.state.vault.phase == .locked)
+        await store.finish()
+    }
+
+    @Test("A monotonic clock that moves backward fails closed on return")
+    @MainActor
+    func backwardMonotonicClockLocksTheVault() async {
+        let clock = ContinuousClock()
+        let backgroundStart = clock.now
+        let currentTime = LockIsolated<ContinuousClock.Instant?>(backgroundStart)
+        var vault = VaultFeature.State(phase: .authenticated)
+        vault.sessionSettings.autoLockTimeout = .minutes15
+        let store = makeRootStore(vault: vault, now: { currentTime.value })
+
+        await store.send(.applicationPhaseChanged(.background)) {
+            $0.applicationReturnPending = true
+            $0.autoLockBackgroundStartedAt = backgroundStart
+            $0.autoLockTimeoutAtBackground = VaultAutoLockTimeout.minutes15.duration
+        }
+        currentTime.withValue { $0 = backgroundStart.advanced(by: .seconds(-1)) }
+        await store.send(.applicationPhaseChanged(.active)) {
+            $0.autoLockBackgroundStartedAt = nil
+            $0.autoLockTimeoutAtBackground = nil
+            $0.applicationReturnPending = false
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+
+        #expect(store.state.vault.phase == .locked)
+        await store.finish()
+    }
+
+    @Test("An authenticated return without a recorded grace start fails closed")
+    @MainActor
+    func authenticatedReturnWithoutGraceStartLocksTheVault() async {
+        let store = makeRootStore(
+            vault: VaultFeature.State(phase: .authenticated),
+            applicationReturnPending: true,
+        )
+
+        await store.send(.applicationPhaseChanged(.active)) {
+            $0.applicationReturnPending = false
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+
+        #expect(store.state.vault.phase == .locked)
+        await store.finish()
+    }
+
+    @Test("A pending authentication cannot cross an unvalidated background return")
+    @MainActor
+    func pendingAuthenticationCannotCrossBackgroundReturn() async {
+        var vault = VaultFeature.State(phase: .authentication, configuredKind: .password)
+        vault.isWorking = true
+        vault.authenticationRequestGeneration = 1
+        let store = makeRootStore(
+            vault: vault,
+            applicationReturnPending: true,
+        )
+
+        await store.send(.applicationPhaseChanged(.active)) {
+            $0.applicationReturnPending = false
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+
+        #expect(store.state.vault.phase == .locked)
+        #expect(!store.state.vault.isWorking)
+        await store.finish()
+    }
+
+    @Test("Auto-lock commits at or after each selected grace boundary")
+    @MainActor
+    func autoLockCommitsAtOrAfterSelectedGraceBoundary() async {
+        let timeouts: [(VaultAutoLockTimeout, Duration)] = [
+            (.seconds30, .seconds(30)),
+            (.minute1, .seconds(60)),
+            (.minutes5, .seconds(300)),
+            (.minutes15, .seconds(900)),
+        ]
+
+        for (timeout, duration) in timeouts {
+            for (elapsed, shouldLock) in [
+                (duration - .milliseconds(1), false),
+                (duration, true),
+                (duration + .milliseconds(1), true),
+            ] {
+                let clock = ContinuousClock()
+                let backgroundStart = clock.now
+                let currentTime = LockIsolated<ContinuousClock.Instant?>(backgroundStart)
+                var vault = VaultFeature.State(phase: .authenticated)
+                vault.sessionSettings.autoLockTimeout = timeout
+                let store = makeRootStore(vault: vault, now: { currentTime.value })
+
+                await store.send(.applicationPhaseChanged(.background)) {
+                    $0.applicationReturnPending = true
+                    $0.autoLockBackgroundStartedAt = backgroundStart
+                    $0.autoLockTimeoutAtBackground = duration
+                }
+                currentTime.withValue { $0 = backgroundStart.advanced(by: elapsed) }
+                await store.send(.applicationPhaseChanged(.active)) {
+                    $0.autoLockBackgroundStartedAt = nil
+                    $0.autoLockTimeoutAtBackground = nil
+                    $0.applicationReturnPending = false
+                    if shouldLock {
+                        _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+                    }
+                }
+
+                if shouldLock {
+                    #expect(store.state.vault.phase == .locked)
+                } else {
+                    #expect(store.state.vault.phase == .authenticated)
+                }
+                await store.finish()
+            }
+        }
+
+        var immediateVault = VaultFeature.State(phase: .authenticated)
+        immediateVault.sessionSettings.autoLockTimeout = .immediately
+        let store = makeRootStore(vault: immediateVault)
+        await store.send(.applicationPhaseChanged(.background)) {
+            $0.applicationReturnPending = true
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+        #expect(store.state.vault.phase == .locked)
+        await store.finish()
+    }
+
+    @Test("Application auto-lock fences a queued Library read before dependency start")
+    @MainActor
+    func automaticLockFencesQueuedLibraryReadBeforeDependencyStart() async {
+        let resource = MediaResource(
+            id: UUID(),
+            role: .original,
+            relativePath: "queued/original.jpg",
+            sourceFilename: "queued.jpg",
+            sourceUTI: "public.jpeg",
+            byteCount: 1,
+            sha256: String(repeating: "e", count: 64),
+        )
+        let resourceCalls = LockIsolated(0)
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in
+                resourceCalls.withValue { $0 += 1 }
+                return Data([0x42])
+            },
+            resourceDataSynchronously: { _ in
+                resourceCalls.withValue { $0 += 1 }
+                return Data([0x42])
+            },
+        )
+        let readGeneration = mediaLibrary.currentResourceLoadGeneration
+        let (readGate, readGateContinuation) = AsyncStream.makeStream(of: Void.self)
+        let queuedRead = Task {
+            for await _ in readGate {
+                break
+            }
+            _ = try? await mediaLibrary.resourceDataIfCurrent(
+                resource,
+                generation: readGeneration,
+            )
+        }
+        var vault = VaultFeature.State(phase: .authenticated)
+        vault.sessionSettings.autoLockTimeout = .immediately
+        let store = makeRootStore(vault: vault, mediaLibrary: mediaLibrary)
+
+        await store.send(.applicationPhaseChanged(.background))
+        await store.receive(.vault(.shell(.browser(.sessionLocked))))
+        readGateContinuation.yield(())
+        readGateContinuation.finish()
+        await queuedRead.value
+        await store.finish()
+
+        #expect(store.state.vault.phase == .locked)
+        #expect(mediaLibrary.currentResourceLoadGeneration == 1)
+        #expect(resourceCalls.value == 0)
+    }
+
+    @Test("A settings change cannot extend an existing background grace period")
+    @MainActor
+    func settingsChangeCannotExtendBackgroundGrace() async {
+        let clock = ContinuousClock()
+        let backgroundStart = clock.now
+        let currentTime = LockIsolated<ContinuousClock.Instant?>(backgroundStart)
+        var vault = VaultFeature.State(phase: .authenticated)
+        vault.sessionSettings.autoLockTimeout = .seconds30
+        let store = makeRootStore(vault: vault, now: { currentTime.value })
+
+        await store.send(.applicationPhaseChanged(.background)) {
+            $0.applicationReturnPending = true
+            $0.autoLockBackgroundStartedAt = backgroundStart
+            $0.autoLockTimeoutAtBackground = .seconds(30)
+        }
+        currentTime.withValue { $0 = backgroundStart.advanced(by: .seconds(20)) }
+        await store.send(
+            .vault(.sessionSettingsChanged(
+                .init(autoLockTimeout: .minutes15, emergencyLockGesture: .off),
+            )),
+        )
+        currentTime.withValue { $0 = backgroundStart.advanced(by: .seconds(30)) }
+        await store.send(.applicationPhaseChanged(.active)) {
+            $0.autoLockBackgroundStartedAt = nil
+            $0.autoLockTimeoutAtBackground = nil
+            $0.applicationReturnPending = false
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+
+        #expect(store.state.vault.phase == .locked)
+        await store.finish()
+    }
+
+    @Test("Emergency locking requires the selected gesture in a foreground scene")
+    @MainActor
+    func emergencyLockGestureRequiresSelectionAndForeground() async {
+        var vault = VaultFeature.State(phase: .authenticated)
+        vault.sessionSettings.emergencyLockGesture = .off
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in Data() },
+        )
+        let store = makeRootStore(vault: vault, mediaLibrary: mediaLibrary)
+
+        await store.send(.emergencyLockGestureRecognized(gesture: .off, isForeground: true))
+        #expect(store.state.vault.phase == .authenticated)
+
+        await store.send(.vault(.sessionSettingsChanged(
+            .init(autoLockTimeout: .immediately, emergencyLockGesture: .shake),
+        )))
+        await store.send(.emergencyLockGestureRecognized(gesture: .quadrupleTap, isForeground: true))
+        await store.send(.emergencyLockGestureRecognized(gesture: .shake, isForeground: false))
+        #expect(store.state.vault.phase == .authenticated)
+
+        await store.send(.emergencyLockGestureRecognized(gesture: .shake, isForeground: true)) {
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+        #expect(store.state.vault.phase == .locked)
+        #expect(mediaLibrary.currentResourceLoadGeneration == 1)
+        await store.finish()
+    }
+
+    @Test("Late emergency gesture callbacks respect current policy and vault phase")
+    @MainActor
+    func lateEmergencyGestureCallbacksRespectCurrentState() {
+        func makeStore(vault: VaultFeature.State) -> StoreOf<RootFeature> {
+            let decoy = makeRootTestDecoy()
+            return Store(
+                initialState: RootFeature.State(decoySession: decoy.session, vault: vault),
+            ) {
+                RootFeature(definition: decoy.definition)
+            }
+        }
+
+        var disabledVault = VaultFeature.State(phase: .authenticated)
+        disabledVault.sessionSettings.emergencyLockGesture = .off
+        let disabledStore = makeStore(vault: disabledVault)
+        let disabledRootView = RootView(store: disabledStore)
+        let disabledObserver = EmergencyLockGestureObserver(
+            gesture: .shake,
+            isForeground: true,
+            onRecognized: { gesture, isForeground in
+                disabledRootView.routeEmergencyLockGesture(gesture, isForeground: isForeground)
+            },
+        )
+        disabledObserver.onRecognized(.shake, true)
+        #expect(disabledStore.vault.phase == .authenticated)
+
+        var backgroundVault = VaultFeature.State(phase: .authenticated)
+        backgroundVault.sessionSettings.emergencyLockGesture = .shake
+        let backgroundStore = makeStore(vault: backgroundVault)
+        let backgroundRootView = RootView(store: backgroundStore)
+        let backgroundObserver = EmergencyLockGestureObserver(
+            gesture: .shake,
+            isForeground: false,
+            onRecognized: { gesture, isForeground in
+                backgroundRootView.routeEmergencyLockGesture(gesture, isForeground: isForeground)
+            },
+        )
+        backgroundObserver.onRecognized(.shake, false)
+        #expect(backgroundStore.vault.phase == .authenticated)
+
+        var authenticatingVault = VaultFeature.State(phase: .authentication)
+        authenticatingVault.sessionSettings.emergencyLockGesture = .shake
+        let authenticatingStore = makeStore(vault: authenticatingVault)
+        let authenticatingRootView = RootView(store: authenticatingStore)
+        let staleObserver = EmergencyLockGestureObserver(
+            gesture: .shake,
+            isForeground: true,
+            onRecognized: { gesture, isForeground in
+                authenticatingRootView.routeEmergencyLockGesture(gesture, isForeground: isForeground)
+            },
+        )
+        staleObserver.onRecognized(.shake, true)
+        #expect(authenticatingStore.vault.phase == .authentication)
+
+        var configuredVault = VaultFeature.State(phase: .authenticated)
+        configuredVault.sessionSettings.emergencyLockGesture = .shake
+        let configuredStore = makeStore(vault: configuredVault)
+        let configuredRootView = RootView(store: configuredStore)
+        let configuredObserver = EmergencyLockGestureObserver(
+            gesture: .shake,
+            isForeground: true,
+            onRecognized: { gesture, isForeground in
+                configuredRootView.routeEmergencyLockGesture(gesture, isForeground: isForeground)
+            },
+        )
+        configuredObserver.onRecognized(.shake, true)
+        #expect(configuredStore.vault.phase == .locked)
     }
 }
