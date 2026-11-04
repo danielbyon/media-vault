@@ -12,6 +12,7 @@ SNAPSHOT_DESTINATION ?= $(IPAD_DESTINATION)
 # Snapshot suites are kept out of the iPhone gate. The App scheme owns the root
 # surface suite; the package scheme owns the remaining four suites.
 APP_SNAPSHOT_SUITE := AppTests/RootSurfaceSnapshotTests
+APP_HOSTED_PRIVACY_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacySnapshotsCoverLifecycleStates
 PACKAGE_SNAPSHOT_SUITES := \
 	AppFeatureTests/VaultFeatureViewSnapshotTests \
 	CalculatorFeatureTests/CalculatorViewSnapshotTests \
@@ -102,12 +103,12 @@ test:
 		fi; \
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
-	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) test; \
+	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' test; \
 	assert_tests_ran App "$$test_root/App.xcresult"; \
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
 	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"
 
-# Exercise only the five visual snapshot suites on the canonical 2x iPad.
+# Exercise the visual snapshot suites and hosted privacy lifecycle on the canonical 2x iPad.
 # Both schemes run even when the first suite fails so the complete failure
 # inventory is available. The canonical 2x reference baseline is required, and
 # exact snapshot comparisons must pass.
@@ -173,7 +174,7 @@ test-snapshots:
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
 	app_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(SNAPSHOT_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) test || app_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(SNAPSHOT_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
 	app_count_status=0; \
 	assert_tests_ran App "$$test_root/App.xcresult" || app_count_status=$$?; \
 	remember_failure App-xcodebuild "$$app_xcode_status"; \

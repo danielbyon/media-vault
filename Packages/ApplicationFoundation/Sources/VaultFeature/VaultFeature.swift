@@ -310,10 +310,9 @@ extension VaultFeature {
             }
 
             state.sessionSettings = settings
-            let save = sessionSettingsClient.save
-            return .run { _ in
-                save(settings)
-            }
+            // Save during reduction so rapid changes reach storage in action order.
+            sessionSettingsClient.save(settings)
+            return .none
         case .shell:
             guard state.phase == .authenticated else {
                 return .none

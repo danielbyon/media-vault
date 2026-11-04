@@ -11,12 +11,66 @@ import DecoySupport
 import Dependencies
 import Foundation
 import MediaLibrary
+import Sharing
 import Testing
 @testable import BrowserFeature
 @testable import VaultFeature
 
 @Suite("Vault feature")
 struct VaultFeatureTests {
+    @Test("Rapid settings changes retain the latest preferences when deferred effects run in reverse order")
+    @MainActor
+    func rapidSessionSettingsChangesRetainLatestPreferences() async throws {
+        let suiteName = "VaultFeatureTests.SessionSettings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let firstSettings = VaultSessionSettings(
+            autoLockTimeout: .minutes15,
+            emergencyLockGesture: .shake,
+        )
+        let latestSettings = VaultSessionSettings(
+            autoLockTimeout: .seconds30,
+            emergencyLockGesture: .quadrupleTap,
+        )
+        var state = VaultFeature.State(phase: .authenticated)
+
+        let client = withDependencies {
+            $0.defaultAppStorage = defaults
+        } operation: {
+            VaultSessionSettingsClient.liveValue
+        }
+        let effects = withDependencies {
+            $0.vaultSessionSettings = client
+        } operation: {
+            let reducer = VaultFeature()
+            let firstEffect = reducer.reduce(into: &state, action: .sessionSettingsChanged(firstSettings))
+            #expect(state.sessionSettings == firstSettings)
+
+            let latestEffect = reducer.reduce(into: &state, action: .sessionSettingsChanged(latestSettings))
+            #expect(state.sessionSettings == latestSettings)
+            return [firstEffect, latestEffect]
+        }
+
+        // Delay effects until both actions have reduced, then run the newer effect first.
+        let effectStore = TestStore(initialState: 0) {
+            Reduce<Int, VaultFeature.Action> { _, _ in
+                .concatenate(effects.reversed())
+            }
+        }
+        await effectStore.send(.sessionSettingsChanged(latestSettings))
+        await effectStore.finish()
+
+        let reloadedSettings = withDependencies {
+            $0.defaultAppStorage = defaults
+        } operation: {
+            VaultSessionSettingsClient.liveValue.load()
+        }
+        #expect(reloadedSettings.autoLockTimeout == .seconds30)
+        #expect(reloadedSettings.emergencyLockGesture == .quadrupleTap)
+    }
+
     @Test("PIN setup stores a configured PIN with explicit hidden-entry opt-in")
     @MainActor
     func pinSetupStoresConfiguredCredential() async {

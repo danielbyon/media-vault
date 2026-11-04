@@ -10,20 +10,24 @@ Run `make test`. The command uses `IPHONE_DESTINATION`, which defaults to
 `platform=iOS Simulator,name=iPhone 17,OS=27.0`.
 
 The App scheme includes both the `AppTests` and `AppHostedTests` test bundles.
-`make test` passes `-skip-testing:AppTests/RootSurfaceSnapshotTests`, so the
-root surface snapshot suite does not run and the App scheme executes the 66
-`AppHostedTests` methods. The ApplicationFoundation package scheme runs every
-test target except these four snapshot suites:
+`make test` skips the root surface snapshot suite and the hosted privacy snapshot
+method with these selectors:
+
+- `-skip-testing:AppTests/RootSurfaceSnapshotTests`
+- `-skip-testing:'AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacySnapshotsCoverLifecycleStates()'`
+
+The ApplicationFoundation package scheme runs every test target except these
+four snapshot suites:
 
 1. `AppFeatureTests/VaultFeatureViewSnapshotTests`
 2. `CalculatorFeatureTests/CalculatorViewSnapshotTests`
 3. `MediaLibraryTests/MediaLibrarySnapshotTests`
 4. `BrowserFeatureTests/BrowserViewSnapshotTests`
 
-The current selection is expected to execute 464 non-snapshot methods: 66 in
-`AppHostedTests` and 398 in the package. Verify the count from the generated
-`xcresult` bundle rather than relying on a zero exit status. A selection mistake
-can omit tests while the command still succeeds.
+For the recorded candidate, the App `xcresult` reports 77 passed tests and the
+ApplicationFoundation `xcresult` reports 446 passed tests. Check each generated
+`xcresult` rather than relying on a zero exit status. A selection mistake can
+omit tests while the command still succeeds.
 
 `make all` runs `lint`, `build`, and `test`, so it includes the iPhone functional
 gate. It does not run the snapshot suite. Snapshot evidence comes only from
@@ -47,16 +51,29 @@ The selected simulator reports:
 - Main-screen size: `1668` by `2420` pixels
 - Model identifier: `iPad17,2`
 
-The command runs only these five suites, across both the App and
-ApplicationFoundation schemes:
+The App scheme runs these selections:
 
 1. `AppTests/RootSurfaceSnapshotTests`
-2. `AppFeatureTests/VaultFeatureViewSnapshotTests`
-3. `CalculatorFeatureTests/CalculatorViewSnapshotTests`
-4. `MediaLibraryTests/MediaLibrarySnapshotTests`
-5. `BrowserFeatureTests/BrowserViewSnapshotTests`
+2. One hosted privacy snapshot method.
 
-The current inventory is 35 snapshot methods and 48 reference files: 44 PNG
+The hosted privacy method is selected with:
+
+`-only-testing:'AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacySnapshotsCoverLifecycleStates()'`
+
+The ApplicationFoundation scheme runs these four package snapshot suites:
+
+1. `AppFeatureTests/VaultFeatureViewSnapshotTests`
+2. `CalculatorFeatureTests/CalculatorViewSnapshotTests`
+3. `MediaLibraryTests/MediaLibrarySnapshotTests`
+4. `BrowserFeatureTests/BrowserViewSnapshotTests`
+
+For the recorded candidate, the App `xcresult` reports 5 passed tests and the
+ApplicationFoundation `xcresult` reports 32 passed tests. The App result
+includes four root surface snapshots and the hosted privacy snapshot. The
+privacy test is excluded from the iPhone functional gate and runs on the
+canonical iPad destination.
+
+The current inventory has 36 snapshot methods and 64 reference files: 60 PNG
 files and 4 text files.
 
 | Suite | Methods | PNG references | Text references |
@@ -66,20 +83,62 @@ files and 4 text files.
 | `CalculatorViewSnapshotTests` | 8 | 8 | 0 |
 | `MediaLibrarySnapshotTests` | 6 | 3 | 3 |
 | `BrowserViewSnapshotTests` | 11 | 24 | 0 |
+| `ScenePrivacyCoverTests` | 1 | 16 | 0 |
 
-The committed PNG references use the 2x rendering scale for the canonical
-destination. The baseline migration replaced all 44 PNG references by exact
-suite-and-method path while preserving the four text references. Each new image
-was checked against the prior 3x reference for the expected 1.5x pixel-scale
-relationship and for layout-equivalent content. Source qualification records,
-original reference hashes, and comparison manifests remain external evidence;
-they are not test inputs.
+The 44 PNG references from the original baseline migration use the 2x rendering
+scale for the canonical destination. That migration replaced all 44 PNG
+references with suite-and-method paths and preserved the four text references.
+The 44 migrated images were checked against the prior 3x references for the
+expected 1.5x pixel-scale relationship and layout-equivalent content. The 16 hosted
+privacy references cover these states and windows at compact and regular-width
+layouts. The compact-phone references are captured as compact-layout fixtures
+by the canonical iPad snapshot run:
 
-The baseline does not change selectors, snapshot precision, tolerance, rendering
-configuration, or recording behavior. Snapshot recording remains disabled by
+- Authenticated active, primary window:
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-authenticated-primary-window-compact-iphone.png`
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-authenticated-primary-window-regular-ipad.png`
+- Inactive protected, primary window:
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-inactive-protected-primary-window-compact-iphone.png`
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-inactive-protected-primary-window-regular-ipad.png`
+- Inactive protected, scene cover:
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-inactive-protected-scene-cover-compact-iphone.png`
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-inactive-protected-scene-cover-regular-ipad.png`
+- Background protected, primary window:
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-background-protected-primary-window-compact-iphone.png`
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-background-protected-primary-window-regular-ipad.png`
+- Background protected, scene cover:
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-background-protected-scene-cover-compact-iphone.png`
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-background-protected-scene-cover-regular-ipad.png`
+- Locked calculator decoy, primary window:
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-locked-decoy-primary-window-compact-iphone.png`
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-locked-decoy-primary-window-regular-ipad.png`
+- Resumed authenticated, primary window:
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-resumed-primary-window-compact-iphone.png`
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-resumed-primary-window-regular-ipad.png`
+- Expired return before authentication, primary window:
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-expired-before-authentication-primary-window-compact-iphone.png`
+  - `assertLiveWindowSnapshot-of-in-named.real-root-v3-expired-before-authentication-primary-window-regular-ipad.png`
+
+Source qualification records, original reference hashes, and comparison
+manifests remain external evidence and are not test inputs. The 2x baseline
+migration did not change snapshot precision, tolerance, or rendering
+configuration.
+
+The hosted test checks the privacy state and renders the attached UIKit window
+hierarchies, including the primary decoy and scene cover. It posts
+`UIScene` lifecycle notifications through `NotificationCenter` and uses an
+injected clock for expiry cases. The window presentation runs in process, while
+the lifecycle notifications are synthetic. These captures do not exercise the
+operating system's background and suspension path or qualify physical-device
+lifecycle behavior. TAC-3 and TAC-4 still require separate device evidence. A
+background notification or observed process identifier does not establish OS
+suspension. Accessibility qualification is tracked separately under Issue #59.
+
+Snapshot recording remains disabled by
 `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never`, so a missing reference fails instead
-of being created. Do not record or replace committed references from a failing
-run; candidate actual, reference, and difference images belong in external
+of being created. The hosted privacy test uses the same exact snapshot
+comparison policy. Do not record or replace references from a failing run;
+candidate actual, reference, and difference images belong in external
 comparison evidence.
 
 ## 3. Result bundles and failure handling

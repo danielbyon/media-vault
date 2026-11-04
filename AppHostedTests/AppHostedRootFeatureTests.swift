@@ -6,6 +6,7 @@
 //
 
 import CalculatorFeature
+import Combine
 import ComposableArchitecture
 import ConcurrencyExtras
 import CoreFoundation
@@ -133,20 +134,27 @@ extension AppHostedUITests {
             )
             let loadCount = LockIsolated(0)
             let resourceReadCount = LockIsolated(0)
+            let (libraryTaskStarted, libraryTaskStartedContinuation) = AsyncStream.makeStream(of: Int.self)
             var vault = VaultFeature.State(phase: .authenticated, configuredKind: .password)
-            vault.shell.library = MediaLibraryFeature.State(assets: [asset])
-            vault.shell.library.resourceData[resource.id] = Data([0x42])
+            vault.shell.library = MediaLibraryFeature.State()
 
             let store = compositionStore(
                 vault: vault,
                 defaults: defaults,
                 libraryLoadAssets: {
-                    loadCount.withValue { $0 += 1 }
+                    let loadNumber = loadCount.withValue { count in
+                        count += 1
+                        return count
+                    }
+                    libraryTaskStartedContinuation.yield(loadNumber)
                     return [asset]
                 },
                 libraryResourceData: { _ in
-                    resourceReadCount.withValue { $0 += 1 }
-                    return Data([0x43])
+                    let readNumber = resourceReadCount.withValue { count in
+                        count += 1
+                        return count
+                    }
+                    return Data([readNumber == 1 ? 0x42 : 0x43])
                 },
                 credentialVerify: { _ in .succeeded },
             )
@@ -155,24 +163,43 @@ extension AppHostedUITests {
                 window.isHidden = true
                 window.rootViewController = nil
             }
-            await settle(controller)
 
-            #expect(store.state.vault.shell.library.resourceData[resource.id] == Data([0x42]))
-            #expect(loadCount.value == 0)
-
+            _ = try await waitForStreamValue(
+                libraryTaskStarted,
+                description: "initial Library view task",
+                timeout: .seconds(10),
+                matching: { $0 == 1 },
+            )
+            try await waitForLibraryResourceReload(
+                store,
+                resourceID: resource.id,
+                expectedData: Data([0x42]),
+                timeout: .seconds(10),
+            )
             store.send(.vault(.lock))
-            await settle(controller)
+            #expect(store.state.vault.phase == .locked)
+            #expect(store.state.vault.shell.library.isSessionLocked)
             #expect(store.state.vault.shell.library.resourceData.isEmpty)
 
             store.send(.vault(.beginAuthentication))
             store.send(.vault(.authenticationCredentialChanged("valid credential")))
             store.send(.vault(.submitAuthentication))
-            await settleUntilLibraryResourcesReload(store, controller, resourceID: resource.id)
-
+            _ = try await waitForStreamValue(
+                libraryTaskStarted,
+                description: "remounted Library view task",
+                timeout: .seconds(10),
+                matching: { $0 == 2 },
+            )
+            try await waitForLibraryResourceReload(
+                store,
+                resourceID: resource.id,
+                expectedData: Data([0x43]),
+                timeout: .seconds(10),
+            )
             #expect(store.state.vault.phase == .authenticated)
             #expect(store.state.vault.shell.library.resourceData[resource.id] == Data([0x43]))
-            #expect(loadCount.value == 1)
-            #expect(resourceReadCount.value == 1)
+            #expect(loadCount.value == 2)
+            #expect(resourceReadCount.value == 2)
         }
     }
 }
@@ -213,7 +240,9 @@ private func compositionStore(
 }
 
 @MainActor
-private func mountRootView(_ store: StoreOf<RootFeature>) -> (UIHostingController<AnyView>, UIWindow) {
+private func mountRootView(
+    _ store: StoreOf<RootFeature>,
+) -> (UIHostingController<AnyView>, UIWindow) {
     // A directly created test window has no scene lifecycle to mark it foreground.
     _ = store.send(.applicationPhaseChanged(.active))
     let rootView = RootView(store: store)
@@ -245,15 +274,97 @@ private func settleUntilBrowserEntryCompletes(
     }
 }
 
-@MainActor
-private func settleUntilLibraryResourcesReload(
-    _ store: StoreOf<RootFeature>,
-    _ controller: UIViewController,
-    resourceID: UUID,
-) async {
-    await settleUntil(controller, "Library resource reload", timeoutIterations: 1_000) {
-        store.state.vault.shell.library.resourceData[resourceID] == Data([0x43])
+private enum StreamWaitOutcome<Value: Sendable>: Sendable {
+    case value(Value)
+    case timedOut
+    case cancelled
+    case streamEnded
+    case timerFailed
+}
+
+private struct HostedTestSynchronizationError: Error, Sendable, CustomStringConvertible {
+    let description: String
+}
+
+private func waitForStreamValue<Value: Sendable>(
+    _ stream: AsyncStream<Value>,
+    description: String,
+    timeout: Duration,
+    matching predicate: @escaping @Sendable (Value) -> Bool,
+) async throws -> Value {
+    try Task.checkCancellation()
+    let outcome = await withTaskGroup(of: StreamWaitOutcome<Value>.self) { group in
+        group.addTask {
+            for await value in stream {
+                guard !Task.isCancelled else {
+                    return .cancelled
+                }
+
+                if predicate(value) {
+                    return .value(value)
+                }
+            }
+            return Task.isCancelled ? .cancelled : .streamEnded
+        }
+        group.addTask {
+            do {
+                try await Task.sleep(for: timeout)
+                return .timedOut
+            } catch is CancellationError {
+                return .cancelled
+            } catch {
+                return .timerFailed
+            }
+        }
+
+        let winner = await group.next() ?? .streamEnded
+        let wasCancelled = Task.isCancelled
+        group.cancelAll()
+        return wasCancelled ? .cancelled : winner
     }
+
+    try Task.checkCancellation()
+    switch outcome {
+    case let .value(value):
+        return value
+    case .timedOut:
+        throw HostedTestSynchronizationError(description: "Timed out waiting for \(description)")
+    case .cancelled:
+        throw CancellationError()
+    case .streamEnded:
+        throw HostedTestSynchronizationError(description: "Event stream ended before \(description)")
+    case .timerFailed:
+        throw HostedTestSynchronizationError(description: "Timeout timer failed while waiting for \(description)")
+    }
+}
+
+@MainActor
+private func waitForLibraryResourceReload(
+    _ store: StoreOf<RootFeature>,
+    resourceID: UUID,
+    expectedData: Data,
+    timeout: Duration,
+) async throws {
+    let updates = AsyncStream.makeStream(of: RootFeature.State.self)
+    let observation = store.publisher.sink { state in
+        updates.continuation.yield(state)
+    }
+    defer {
+        observation.cancel()
+        updates.continuation.finish()
+    }
+
+    try Task.checkCancellation()
+    guard store.state.vault.shell.library.resourceData[resourceID] != expectedData else {
+        return
+    }
+
+    _ = try await waitForStreamValue(
+        updates.stream,
+        description: "Library resource reload state",
+        timeout: timeout,
+        matching: { $0.vault.shell.library.resourceData[resourceID] == expectedData },
+    )
 }
 
 @MainActor
