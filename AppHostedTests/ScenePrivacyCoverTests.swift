@@ -478,10 +478,15 @@ extension AppHostedUITests {
                         coverVisible: true,
                         expectedCoverWindow: coverWindow,
                     )
+                    let stablePrimaryWindowFrame = try await awaitStableRegularWidthPrimaryWindowFrame(
+                        horizontalSizeClass: layout.horizontalSizeClass,
+                        in: host.window,
+                    )
                     try assertRootPrivacySnapshot(
                         host,
                         name: "real-root-v3-inactive-protected",
                         coverVisible: true,
+                        preRenderedPrimaryWindowImage: stablePrimaryWindowFrame?.image,
                     )
 
                     store.send(.applicationPhaseChanged(.background))
@@ -499,10 +504,15 @@ extension AppHostedUITests {
                     )
                     #expect(store.state.autoLockBackgroundStartedAt == start)
                     #expect(store.state.autoLockTimeoutAtBackground == .seconds(30))
+                    let backgroundPrimaryWindowFrame = try await awaitStableRegularWidthPrimaryWindowFrame(
+                        horizontalSizeClass: layout.horizontalSizeClass,
+                        in: host.window,
+                    )
                     try assertRootPrivacySnapshot(
                         host,
                         name: "real-root-v3-background-protected",
                         coverVisible: true,
+                        preRenderedPrimaryWindowImage: backgroundPrimaryWindowFrame?.image,
                     )
 
                     clock.withValue { $0 = start.advanced(by: .seconds(9)) }
@@ -533,20 +543,16 @@ extension AppHostedUITests {
                     host.window.layoutIfNeeded()
                     host.controller.view.layoutIfNeeded()
                     try await awaitCoreAnimationCommit()
-                    var stableResumedCompactImage: UIImage?
-                    if layout.horizontalSizeClass == .compact {
-                        let stableFrame = try await awaitStableResumedCompactWindowFrames(in: host.window)
-                        stableResumedCompactImage = stableFrame.image
-                        print(
-                            "Resumed compact primary window stabilized after "
-                                + "\(stableFrame.frameCount) display frames",
-                        )
-                    }
+                    let stableResumedFrame = try await awaitStablePrimaryWindowFrames(in: host.window)
+                    print(
+                        "Resumed primary window stabilized after "
+                            + "\(stableResumedFrame.frameCount) display frames",
+                    )
                     try assertRootPrivacySnapshot(
                         host,
                         name: "real-root-v3-resumed",
                         coverVisible: false,
-                        preRenderedPrimaryWindowImage: stableResumedCompactImage,
+                        preRenderedPrimaryWindowImage: stableResumedFrame.image,
                     )
 
                     let secondBackgroundStart = start.advanced(by: .seconds(10))
@@ -770,7 +776,30 @@ extension AppHostedUITests {
             assertSnapshot(of: image, as: .image, named: name)
         }
 
-        private func awaitStableResumedCompactWindowFrames(
+        /// Waits for two matching rendered frames after laying out a regular-width window.
+        private func awaitStableRegularWidthPrimaryWindowFrame(
+            horizontalSizeClass: UserInterfaceSizeClass,
+            in window: UIWindow,
+        ) async throws -> RootPrivacyStableWindowFrame? {
+            guard horizontalSizeClass == .regular else {
+                return nil
+            }
+
+            window.setNeedsLayout()
+            window.rootViewController?.view.setNeedsLayout()
+            window.layoutIfNeeded()
+            window.rootViewController?.view.layoutIfNeeded()
+            try await awaitCoreAnimationCommit()
+            let frame = try await awaitStablePrimaryWindowFrames(in: window)
+            print(
+                "Regular-width primary window stabilized after "
+                    + "\(frame.frameCount) display frames",
+            )
+            return frame
+        }
+
+        /// Samples the window until consecutive display frames have identical pixels.
+        private func awaitStablePrimaryWindowFrames(
             in window: UIWindow,
         ) async throws -> RootPrivacyStableWindowFrame {
             let sampler = RootPrivacySnapshotFrameStabilitySampler(maximumFrames: 60) {
@@ -815,7 +844,7 @@ extension AppHostedUITests {
                     if Task.isCancelled {
                         throw CancellationError()
                     }
-                    throw ScenePrivacyCallbackTimeout(event: "resumed compact window display frames")
+                    throw ScenePrivacyCallbackTimeout(event: "primary window display frames")
                 }
 
                 switch outcome {
@@ -823,12 +852,12 @@ extension AppHostedUITests {
                     return frame
                 case let .frameLimit(frameCount):
                     throw ScenePrivacyCallbackTimeout(
-                        event: "resumed compact window pixel stability within 60 display frames "
+                        event: "primary window pixel stability within 60 display frames "
                             + "(observed \(frameCount) frames)",
                     )
                 case let .deadline(frameCount):
                     throw ScenePrivacyCallbackTimeout(
-                        event: "resumed compact window pixel stability within 5 seconds "
+                        event: "primary window pixel stability within 5 seconds "
                             + "(observed \(frameCount) frames)",
                     )
                 }
