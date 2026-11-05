@@ -1,0 +1,55 @@
+name: Issue #9 Failure B CI diagnostic
+
+on:
+  push:
+    tags:
+      - 'issue9-failure-b-20261105-*'
+
+permissions:
+  contents: read
+
+jobs:
+  privacy-snapshot-diagnostic:
+    name: Xcode 27.1 privacy snapshots (10 runs, 2x iPad)
+    runs-on: xcode-27
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out diagnostic scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check out published application source
+        uses: actions/checkout@v7
+        with:
+          ref: a20d5e1bc94e0c7305bebd91ad2d4ab35a81412e
+          path: source
+          persist-credentials: false
+
+      - name: Verify tag trigger and prepare evidence directory
+        run: |
+          if [[ "$GITHUB_REF_TYPE" != "tag" || "$GITHUB_REF_NAME" != issue9-failure-b-20261105-* ]]; then
+            echo "Expected the approved Issue #9 Failure B diagnostic tag." >&2
+            exit 2
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/.failure-b-diagnostic"
+
+      - name: Run ten sequential iPad privacy snapshot tests
+        timeout-minutes: 105
+        run: |
+          python3 Scripts/issue9_failure_b_diagnostic.py \
+            --source-root "$GITHUB_WORKSPACE/source" \
+            --diagnostic-root "$GITHUB_WORKSPACE" \
+            --output-root "$GITHUB_WORKSPACE/.failure-b-diagnostic"
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue9-failure-b-diagnostic
+          path: .failure-b-diagnostic/
+          if-no-files-found: error
+          retention-days: 14
