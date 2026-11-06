@@ -11,7 +11,7 @@ permissions:
 jobs:
   privacy-snapshot-diagnostic:
     name: Xcode 27.1 privacy snapshots (10 runs, 2x iPad)
-    runs-on: xcode-27-arm64
+    runs-on: xcode-27
     timeout-minutes: 120
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
