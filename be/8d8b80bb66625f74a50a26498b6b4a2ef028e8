@@ -1,0 +1,29 @@
+.github/workflows/issue9-failure-b-diagnostic.yml
+  s_572fff539c3fed::t_5be7419649833f 14,17,34-50,62,69
+Scripts/issue9_failure_b_diagnostic.py
+  s_572fff539c3fed::t_9de0379784c798 379-388
+  s_572fff539c3fed::t_459f4eb0539a7c 192
+  s_572fff539c3fed::t_67e27bb16e0049 36-38,42
+  s_572fff539c3fed::t_2a17a99ede0a14 213,215,244-252,262-290,361,363,480-481
+  s_572fff539c3fed::t_7920c8fb4e0054 86-87,91,94-95,174-179,211,223-229,359,456-462,464-468,482-486
+  s_572fff539c3fed::t_d7bd4df4779e32 169-173,180-191,193-194,196,198,203-207,209-210,212,214,217-222,230-243,253-261,291-299,336,353-356,390,394,401,403,405,407,413,418,420,432-455,463,469-479,487-496,499,501-502,504
+  s_572fff539c3fed::t_5be7419649833f 530
+  s_572fff539c3fed::t_5da78e1ca21b6e 88-90,92-93
+  s_572fff539c3fed::t_b62e8c11d8e118 216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "be8d8b80bb66625f74a50a26498b6b4a2ef028e8",
+  "prompts": {},
+  "sessions": {
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
