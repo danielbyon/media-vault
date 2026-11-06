@@ -33,10 +33,13 @@ TEST_CASE_IDENTIFIER_URL = (
 )
 SIMULATOR_NAME = "iPad Pro 11-inch (M5)"
 SIMULATOR_TYPE_IDENTIFIER = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5-12GB"
+EXPECTED_DEVELOPER_DIR = "/Applications/Xcode_27.1.app/Contents/Developer"
+SYSTEM_XCODE_SELECT = "/usr/bin/xcode-select"
+SYSTEM_XCRUN = "/usr/bin/xcrun"
 EXPECTED_RUNTIME_VERSION = "27.0"
 EXPECTED_RUNTIME_BUILD = "24A434"
 EXPECTED_XCODE_VERSION = "27.1"
-EXPECTED_XCODE_BUILD = "27A266a"
+EXPECTED_XCODE_BUILD = "27A9275"
 ITERATIONS = 10
 PER_ITERATION_TIMEOUT_SECONDS = 540
 DIAGNOSTIC_FILES = (
@@ -78,6 +81,16 @@ def parse_json(text: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("expected a JSON object")
     return value
+
+
+def path_is_within(path: str, directory: str) -> bool:
+    try:
+        candidate = Path(os.path.abspath(path))
+        parent = Path(os.path.abspath(directory))
+    except (OSError, ValueError):
+        return False
+    # Keep containment lexical so an Xcode tool symlink remains attached to its selected bundle.
+    return candidate == parent or parent in candidate.parents
 
 
 def find_test_case(node: object) -> dict[str, Any] | None:
@@ -153,72 +166,137 @@ def collect_environment(
     diagnostic: Path,
     env: dict[str, str],
 ) -> dict[str, Any]:
-    developer = Path(env.get("DEVELOPER_DIR", ""))
-    xcodebuild = str(developer / "usr/bin/xcodebuild")
-    xcrun = str(developer / "usr/bin/xcrun")
-    commands = {
-        "xcode": [xcodebuild, "-version"],
-        "swiftPath": [xcrun, "--find", "swift"],
-        "sdks": [xcodebuild, "-showsdks"],
-        "runtimes": [xcrun, "simctl", "list", "-j", "runtimes"],
-        "devices": [xcrun, "simctl", "list", "-j", "devices", "available"],
-        "macos": ["sw_vers"],
-        "uname": ["uname", "-a"],
+    developer_dir = env.get("DEVELOPER_DIR", "")
+    xcodebuild = str(Path(developer_dir) / "usr/bin/xcodebuild") if developer_dir else ""
+
+    def check(command: list[str]) -> dict[str, Any]:
+        exit_code, output = capture(command, env)
+        return {
+            "command": command,
+            "exit": exit_code,
+            "output": output,
+            "developerDirectory": env.get("DEVELOPER_DIR", ""),
+        }
+
+    def skipped(reason: str) -> dict[str, Any]:
+        return {"command": [], "exit": None, "output": f"Skipped: {reason}"}
+
+    checks: dict[str, dict[str, Any]] = {
+        "xcodeSelect": check([SYSTEM_XCODE_SELECT, "-p"]),
+        "xcode": check([xcodebuild, "-version"]) if xcodebuild else {
+            "command": [], "exit": 127, "output": "DEVELOPER_DIR is not set"
+        },
+        "sdks": skipped("selected Xcode did not pass qualification"),
+        "swiftPath": skipped("selected Xcode did not pass qualification"),
+        "runtimes": skipped("system xcrun has not been validated"),
+        "devices": skipped("system xcrun or runtime inventory has not been validated"),
+        "macos": check(["sw_vers"]),
+        "uname": check(["uname", "-a"]),
     }
-    checks = {
-        name: {"exit": rc, "output": text}
-        for name, (rc, text) in (
-            (name, capture(command, env)) for name, command in commands.items()
-        )
-    }
+
     xcode_lines = checks["xcode"]["output"].splitlines()
+    xcode_version = next((line for line in xcode_lines if line.startswith("Xcode ")), "")
     xcode_build = next(
         (line.removeprefix("Build version ") for line in xcode_lines if line.startswith("Build version ")),
         "",
     )
-    swift_path = checks["swiftPath"]["output"].strip()
-    parse_error = ""
-    try:
-        runtimes_data = parse_json(checks["runtimes"]["output"])
-        devices_data = parse_json(checks["devices"]["output"])
-        if not isinstance(runtimes_data, dict):
-            raise ValueError("runtime inventory root must be a JSON object")
-        if not isinstance(runtimes_data.get("runtimes"), list):
-            raise ValueError("runtime inventory must contain a runtimes list")
-        if any(not isinstance(item, dict) for item in runtimes_data["runtimes"]):
-            raise ValueError("runtime inventory entries must be JSON objects")
-        if not isinstance(devices_data, dict):
-            raise ValueError("device inventory root must be a JSON object")
-        if not isinstance(devices_data.get("devices"), dict):
-            raise ValueError("device inventory must contain a devices object")
-        if any(
-            not isinstance(devices, list)
-            or any(not isinstance(device, dict) for device in devices)
-            for devices in devices_data["devices"].values()
-        ):
-            raise ValueError("device inventory entries must be lists of JSON objects")
-    except (ValueError, json.JSONDecodeError) as error:
-        runtimes_data = {}
-        devices_data = {}
-        parse_error = str(error)
-
-    runtime = next(
-        (
-            item for item in runtimes_data.get("runtimes", [])
-            if item.get("version") == EXPECTED_RUNTIME_VERSION
-            and item.get("buildversion") == EXPECTED_RUNTIME_BUILD
-            and item.get("isAvailable") is True
-        ),
-        None,
+    exact_xcode = (
+        developer_dir == EXPECTED_DEVELOPER_DIR
+        and checks["xcode"]["exit"] == 0
+        and xcode_version == f"Xcode {EXPECTED_XCODE_VERSION}"
+        and xcode_build == EXPECTED_XCODE_BUILD
     )
-    runtime_id = runtime.get("identifier") if runtime else None
-    matching_devices = [
-        device
-        for runtime_key, devices in devices_data.get("devices", {}).items()
-        if runtime_key == runtime_id
-        for device in devices
-        if device.get("name") == SIMULATOR_NAME
-    ]
+
+    swift_path = ""
+    swift_path_matches_developer_directory = False
+    runtime: dict[str, Any] | None = None
+    runtime_candidates: list[dict[str, Any]] = []
+    matching_devices: list[dict[str, Any]] = []
+    simulator_candidates: list[dict[str, Any]] = []
+    parse_error = ""
+    parse_error_source = ""
+
+    if exact_xcode:
+        checks["sdks"] = check([xcodebuild, "-showsdks"])
+        checks["swiftPath"] = check([SYSTEM_XCRUN, "--find", "swift"])
+        swift_path = checks["swiftPath"]["output"].strip()
+        swift_path_matches_developer_directory = (
+            checks["swiftPath"]["exit"] == 0
+            and bool(swift_path)
+            and path_is_within(swift_path, EXPECTED_DEVELOPER_DIR)
+            and checks["swiftPath"].get("developerDirectory") == EXPECTED_DEVELOPER_DIR
+        )
+        if swift_path_matches_developer_directory:
+            checks["runtimes"] = check([SYSTEM_XCRUN, "simctl", "list", "-j", "runtimes"])
+            if checks["runtimes"]["exit"] == 0:
+                try:
+                    runtimes_data = parse_json(checks["runtimes"]["output"])
+                    if not isinstance(runtimes_data, dict):
+                        raise ValueError("runtime inventory root must be a JSON object")
+                    if not isinstance(runtimes_data.get("runtimes"), list):
+                        raise ValueError("runtime inventory must contain a runtimes list")
+                    if any(not isinstance(item, dict) for item in runtimes_data["runtimes"]):
+                        raise ValueError("runtime inventory entries must be JSON objects")
+                except (ValueError, json.JSONDecodeError) as error:
+                    parse_error = str(error)
+                    parse_error_source = "runtime inventory"
+                else:
+                    runtime_candidates = [
+                        {
+                            "version": item.get("version"),
+                            "buildversion": item.get("buildversion"),
+                            "identifier": item.get("identifier"),
+                            "isAvailable": item.get("isAvailable"),
+                        }
+                        for item in runtimes_data["runtimes"]
+                    ]
+                    runtime = next(
+                        (
+                            item for item in runtimes_data["runtimes"]
+                            if item.get("version") == EXPECTED_RUNTIME_VERSION
+                            and item.get("buildversion") == EXPECTED_RUNTIME_BUILD
+                            and item.get("isAvailable") is True
+                        ),
+                        None,
+                    )
+                    checks["devices"] = check(
+                        [SYSTEM_XCRUN, "simctl", "list", "-j", "devices", "available"]
+                    )
+                    if checks["devices"]["exit"] == 0:
+                        try:
+                            devices_data = parse_json(checks["devices"]["output"])
+                            if not isinstance(devices_data, dict):
+                                raise ValueError("device inventory root must be a JSON object")
+                            if not isinstance(devices_data.get("devices"), dict):
+                                raise ValueError("device inventory must contain a devices object")
+                            if any(
+                                not isinstance(devices, list)
+                                or any(not isinstance(device, dict) for device in devices)
+                                for devices in devices_data["devices"].values()
+                            ):
+                                raise ValueError(
+                                    "device inventory entries must be lists of JSON objects"
+                                )
+                        except (ValueError, json.JSONDecodeError) as error:
+                            parse_error = str(error)
+                            parse_error_source = "device inventory"
+                        else:
+                            simulator_candidates = [
+                                {**device, "runtimeIdentifier": runtime_key}
+                                for runtime_key, devices in devices_data["devices"].items()
+                                for device in devices
+                                if device.get("name") == SIMULATOR_NAME
+                            ]
+                            if runtime is not None:
+                                runtime_id = runtime.get("identifier")
+                                matching_devices = [
+                                    device
+                                    for runtime_key, devices in devices_data["devices"].items()
+                                    if runtime_key == runtime_id
+                                    for device in devices
+                                    if device.get("name") == SIMULATOR_NAME
+                                ]
+
     git_env = dict(env, GIT_OPTIONAL_LOCKS="0")
     source_sha_rc, source_sha = source_git(source, "rev-parse", "HEAD", env=git_env)
     source_status_rc, source_status = source_git(
@@ -255,6 +333,7 @@ def collect_environment(
         "expected": {
             "baselineSHA": BASELINE_SHA,
             "diagnosticSHA": env.get("GITHUB_SHA", ""),
+            "developerDirectory": EXPECTED_DEVELOPER_DIR,
             "xcodeVersion": EXPECTED_XCODE_VERSION,
             "xcodeBuild": EXPECTED_XCODE_BUILD,
             "simulatorName": SIMULATOR_NAME,
@@ -271,11 +350,17 @@ def collect_environment(
             "diagnosticSHA": diagnostic_sha.strip(),
             "diagnosticStatus": diagnostic_status,
             "trackedDiagnosticFiles": tracked_paths.strip().splitlines(),
-            "xcodeVersion": xcode_lines[0] if xcode_lines else "",
+            "developerDirectory": developer_dir,
+            "developerDirectoryMatchesExpected": developer_dir == EXPECTED_DEVELOPER_DIR,
+            "xcodeSelectPath": checks["xcodeSelect"]["output"].strip(),
+            "xcodeVersion": xcode_version,
             "xcodeBuild": xcode_build,
             "swiftPath": swift_path,
+            "swiftPathMatchesDeveloperDirectory": swift_path_matches_developer_directory,
             "runtime": runtime,
+            "runtimeCandidates": runtime_candidates,
             "simulator": matching_devices[0] if len(matching_devices) == 1 else None,
+            "simulatorCandidates": simulator_candidates,
             "destinationID": destination_id,
             "baselineWorkspacePresent": (source / "App.xcworkspace").is_dir(),
         },
@@ -291,38 +376,48 @@ def collect_environment(
             "diagnosticCachedDiffOutput": cached_diff_output,
         },
         "checks": checks,
+        "commandFailures": [
+            {
+                "check": name,
+                "command": check.get("command", []),
+                "exit": check.get("exit"),
+                "output": check.get("output", ""),
+            }
+            for name, check in checks.items()
+            if check.get("exit") not in (0, None)
+        ],
         "parseError": parse_error,
+        "parseErrorSource": parse_error_source,
     }
 
-
 def qualify_environment(info: dict[str, Any]) -> list[str]:
-    env = info["event"]
+    event = info["event"]
     expected = info["expected"]
     observed = info["observed"]
     exits = info["exitCodes"]
     checks = info["checks"]
     errors: list[str] = []
 
-    if env["name"] != "push":
+    if event["name"] != "push":
         errors.append("workflow event must be push")
-    if env["refType"] != "tag":
+    if event["refType"] != "tag":
         errors.append("workflow ref must be a tag")
-    if not env["refName"].startswith(DIAGNOSTIC_TAG_PREFIX):
+    if not event["refName"].startswith(DIAGNOSTIC_TAG_PREFIX):
         errors.append("tag name is outside the approved diagnostic pattern")
-    if not env["sha"]:
+    if not event["sha"]:
         errors.append("GITHUB_SHA is missing")
     if observed["baselineSHA"] != BASELINE_SHA or exits["baselineRevision"] != 0:
         errors.append("application source revision does not match the published baseline")
     if observed["baselineStatus"].strip() or exits["baselineStatus"] != 0:
         errors.append("application source checkout is not clean")
-    if observed["diagnosticSHA"] != env["sha"] or exits["diagnosticRevision"] != 0:
+    if observed["diagnosticSHA"] != event["sha"] or exits["diagnosticRevision"] != 0:
         errors.append("diagnostic scripts are not checked out at the tag commit")
     if observed["diagnosticStatus"].strip() or exits["diagnosticStatus"] != 0:
         errors.append("diagnostic checkout has tracked changes")
     if set(observed["trackedDiagnosticFiles"]) != set(DIAGNOSTIC_FILES):
-        errors.append("diagnostic workflow and helpers are not all tracked at the tag commit")
+        errors.append("diagnostic workflow and helpers are not all tracked at tag commit")
     if exits["diagnosticTrackedFiles"] != 0:
-        errors.append("could not verify diagnostic files in the tag commit")
+        errors.append("could not verify diagnostic files in tag commit")
     diff_codes = (exits["diagnosticDiff"], exits["diagnosticCachedDiff"])
     if 1 in diff_codes:
         errors.append("diagnostic workflow or helper content differs from the tag commit")
@@ -334,29 +429,79 @@ def qualify_environment(info: dict[str, Any]) -> list[str]:
         )
     if not observed["baselineWorkspacePresent"]:
         errors.append("baseline application workspace is missing")
-    if checks["xcode"]["exit"] != 0 or not checks["xcode"]["output"].splitlines():
-        errors.append("could not read the selected Xcode version")
-    elif (
-        observed["xcodeVersion"] != f"Xcode {expected['xcodeVersion']}"
-        or observed["xcodeBuild"] != expected["xcodeBuild"]
-    ):
-        errors.append("Xcode does not match 27.1 build 27A266a")
-    if checks["swiftPath"]["exit"] != 0 or not observed["swiftPath"]:
-        errors.append("could not locate Swift in the selected Xcode")
-    if checks["runtimes"]["exit"] != 0 or observed["runtime"] is None:
-        errors.append("iOS 27.0 runtime build 24A434 is unavailable")
-    if checks["devices"]["exit"] != 0 or observed["simulator"] is None:
-        errors.append("the canonical iPad simulator is missing or ambiguous")
+
+    def command_details(check: dict[str, Any]) -> str:
+        command = " ".join(check.get("command", [])) or "not run"
+        return f"command={command!r} exit={check.get('exit')!r} output={check.get('output', '')!r}"
+
+    xcode_check = checks["xcode"]
+    xcode_path_matches = observed["developerDirectory"] == expected["developerDirectory"]
+    xcode_build_matches = (
+        observed["xcodeVersion"] == f"Xcode {expected['xcodeVersion']}"
+        and observed["xcodeBuild"] == expected["xcodeBuild"]
+    )
+    if not xcode_path_matches or xcode_check["exit"] != 0 or not xcode_build_matches:
+        errors.append(
+            "Xcode prerequisite failed: "
+            f"expected DEVELOPER_DIR={expected['developerDirectory']!r}, "
+            f"Xcode {expected['xcodeVersion']} build {expected['xcodeBuild']}; "
+            f"observed DEVELOPER_DIR={observed['developerDirectory']!r}, "
+            f"xcode-select -p={observed['xcodeSelectPath']!r}, "
+            f"Xcode={observed['xcodeVersion']!r} build={observed['xcodeBuild']!r}; "
+            f"{command_details(xcode_check)}"
+        )
+    elif checks["swiftPath"]["exit"] != 0 or not observed["swiftPath"]:
+        errors.append(
+            "system xcrun could not locate Swift: "
+            f"{command_details(checks['swiftPath'])}"
+        )
+    elif not observed["swiftPathMatchesDeveloperDirectory"]:
+        errors.append(
+            "system xcrun resolved Swift outside the validated Xcode: "
+            f"expected DEVELOPER_DIR={expected['developerDirectory']!r}, "
+            f"observed Swift={observed['swiftPath']!r}; "
+            f"{command_details(checks['swiftPath'])}"
+        )
+    elif checks["runtimes"].get("developerDirectory") != expected["developerDirectory"]:
+        errors.append(
+            "system xcrun runtime inventory did not use the validated DEVELOPER_DIR: "
+            f"{command_details(checks['runtimes'])}"
+        )
+    elif checks["runtimes"]["exit"] != 0:
+        errors.append(
+            "system xcrun runtime inventory command failed: "
+            f"{command_details(checks['runtimes'])}"
+        )
+    elif info["parseErrorSource"] == "runtime inventory":
+        errors.append(f"runtime inventory JSON is invalid: {info['parseError']}")
+    elif observed["runtime"] is None:
+        errors.append(
+            "required iOS runtime was not found: "
+            f"expected iOS {expected['runtimeVersion']} build {expected['runtimeBuild']}; "
+            f"observed runtimes={observed['runtimeCandidates']!r}"
+        )
+    elif checks["devices"].get("developerDirectory") != expected["developerDirectory"]:
+        errors.append(
+            "system xcrun simulator inventory did not use the validated DEVELOPER_DIR: "
+            f"{command_details(checks['devices'])}"
+        )
+    elif checks["devices"]["exit"] != 0:
+        errors.append(
+            "system xcrun simulator device inventory command failed: "
+            f"{command_details(checks['devices'])}"
+        )
+    elif info["parseErrorSource"] == "device inventory":
+        errors.append(f"simulator device inventory JSON is invalid: {info['parseError']}")
+    elif observed["simulator"] is None:
+        errors.append("canonical iPad simulator is missing or ambiguous for the required runtime")
     elif observed["simulator"].get("deviceTypeIdentifier") != expected["simulatorTypeIdentifier"]:
         errors.append(
-            "the selected simulator does not match the canonical iPad Pro 11-inch M5 device type"
+            "selected simulator does not match the canonical iPad Pro 11-inch M5 device type"
         )
-    if observed["destinationID"] is None:
-        errors.append("the canonical iPad simulator UDID could not be resolved")
-    if info["parseError"]:
-        errors.append(f"simulator inventory JSON could not be parsed: {info['parseError']}")
-    return errors
+    elif observed["destinationID"] is None:
+        errors.append("canonical iPad simulator UDID could not be resolved")
 
+    return errors
 
 def verify_environment(
     source: Path,
@@ -382,7 +527,7 @@ def inspect_result(
     iteration: int,
     env: dict[str, str],
 ) -> tuple[dict[str, Any], list[dict[str, object]]]:
-    xcrun = str(Path(env["DEVELOPER_DIR"]) / "usr/bin/xcrun")
+    xcrun = SYSTEM_XCRUN
     row: dict[str, Any] = {"simulator": simulator, "iteration": iteration, "resultBundle": str(bundle)}
     if not bundle.is_dir():
         row["resultInspectionError"] = "xcresult bundle is missing"

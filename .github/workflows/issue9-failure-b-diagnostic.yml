@@ -11,10 +11,10 @@ permissions:
 jobs:
   privacy-snapshot-diagnostic:
     name: Xcode 27.1 privacy snapshots (10 runs, 2x iPad)
-    runs-on: xcode-27
+    runs-on: xcode-27-arm64
     timeout-minutes: 120
     env:
-      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       PYTHONUNBUFFERED: "1"
     steps:
       - name: Check out diagnostic scripts
@@ -31,11 +31,27 @@ jobs:
 
       - name: Verify tag trigger and prepare evidence directory
         run: |
+          evidence_dir="$GITHUB_WORKSPACE/failure-b-diagnostic"
+          mkdir -p "$evidence_dir"
+          {
+            printf 'GITHUB_REF=%s\nGITHUB_SHA=%s\nRUNNER_NAME=%s\nRUNNER_ARCH=%s\nImageOS=%s\nImageVersion=%s\nDEVELOPER_DIR=%s\n' \
+              "$GITHUB_REF" "$GITHUB_SHA" "$RUNNER_NAME" "$RUNNER_ARCH" \
+              "${ImageOS:-unavailable}" "${ImageVersion:-unavailable}" "$DEVELOPER_DIR"
+            printf '\n--- xcode-select -p ---\n'
+            /usr/bin/xcode-select -p || true
+            printf '\n--- selected Xcode version ---\n'
+            "$DEVELOPER_DIR/usr/bin/xcodebuild" -version || true
+            printf '\n--- system xcrun Swift lookup ---\n'
+            /usr/bin/xcrun --find swift || true
+            printf '\n--- iOS runtime inventory ---\n'
+            /usr/bin/xcrun simctl list -j runtimes || true
+            printf '\n--- available simulator devices ---\n'
+            /usr/bin/xcrun simctl list -j devices available || true
+          } > "$evidence_dir/workflow-context.txt" 2>&1
           if [[ "$GITHUB_REF_TYPE" != "tag" || "$GITHUB_REF_NAME" != issue9-failure-b-20261105-* ]]; then
             echo "Expected the approved Issue #9 Failure B diagnostic tag." >&2
             exit 2
           fi
-          mkdir -p "$GITHUB_WORKSPACE/.failure-b-diagnostic"
 
       - name: Run ten sequential iPad privacy snapshot tests
         timeout-minutes: 105
@@ -43,13 +59,13 @@ jobs:
           python3 Scripts/issue9_failure_b_diagnostic.py \
             --source-root "$GITHUB_WORKSPACE/source" \
             --diagnostic-root "$GITHUB_WORKSPACE" \
-            --output-root "$GITHUB_WORKSPACE/.failure-b-diagnostic"
+            --output-root "$GITHUB_WORKSPACE/failure-b-diagnostic"
 
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: issue9-failure-b-diagnostic
-          path: .failure-b-diagnostic/
+          path: failure-b-diagnostic/
           if-no-files-found: error
           retention-days: 14
