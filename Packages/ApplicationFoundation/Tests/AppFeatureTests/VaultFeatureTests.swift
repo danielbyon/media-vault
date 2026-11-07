@@ -8,12 +8,69 @@
 import ComposableArchitecture
 import ConcurrencyExtras
 import DecoySupport
+import Dependencies
 import Foundation
+import MediaLibrary
+import Sharing
 import Testing
+@testable import BrowserFeature
 @testable import VaultFeature
 
 @Suite("Vault feature")
 struct VaultFeatureTests {
+    @Test("Rapid settings changes retain the latest preferences when deferred effects run in reverse order")
+    @MainActor
+    func rapidSessionSettingsChangesRetainLatestPreferences() async throws {
+        let suiteName = "VaultFeatureTests.SessionSettings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let firstSettings = VaultSessionSettings(
+            autoLockTimeout: .minutes15,
+            emergencyLockGesture: .shake,
+        )
+        let latestSettings = VaultSessionSettings(
+            autoLockTimeout: .seconds30,
+            emergencyLockGesture: .quadrupleTap,
+        )
+        var state = VaultFeature.State(phase: .authenticated)
+
+        let client = withDependencies {
+            $0.defaultAppStorage = defaults
+        } operation: {
+            VaultSessionSettingsClient.liveValue
+        }
+        let effects = withDependencies {
+            $0.vaultSessionSettings = client
+        } operation: {
+            let reducer = VaultFeature()
+            let firstEffect = reducer.reduce(into: &state, action: .sessionSettingsChanged(firstSettings))
+            #expect(state.sessionSettings == firstSettings)
+
+            let latestEffect = reducer.reduce(into: &state, action: .sessionSettingsChanged(latestSettings))
+            #expect(state.sessionSettings == latestSettings)
+            return [firstEffect, latestEffect]
+        }
+
+        // Delay effects until both actions have reduced, then run the newer effect first.
+        let effectStore = TestStore(initialState: 0) {
+            Reduce<Int, VaultFeature.Action> { _, _ in
+                .concatenate(effects.reversed())
+            }
+        }
+        await effectStore.send(.sessionSettingsChanged(latestSettings))
+        await effectStore.finish()
+
+        let reloadedSettings = withDependencies {
+            $0.defaultAppStorage = defaults
+        } operation: {
+            VaultSessionSettingsClient.liveValue.load()
+        }
+        #expect(reloadedSettings.autoLockTimeout == .seconds30)
+        #expect(reloadedSettings.emergencyLockGesture == .quadrupleTap)
+    }
+
     @Test("PIN setup stores a configured PIN with explicit hidden-entry opt-in")
     @MainActor
     func pinSetupStoresConfiguredCredential() async {
@@ -30,6 +87,7 @@ struct VaultFeatureTests {
 
         await store.send(.beginSetup) {
             $0.phase = .setup
+            $0.sessionGeneration = 1
         }
         await store.send(.setupCredentialChanged("1234")) {
             $0.credentialInput = "1234"
@@ -42,14 +100,22 @@ struct VaultFeatureTests {
         }
         await store.send(.submitSetup) {
             $0.isWorking = true
+            $0.setupRequestGeneration = 1
         }
-        await store.receive(.setupCompleted(.success(.init(kind: .pin, usesHiddenEntry: true)))) {
+        await store.receive(.setupCompleted(
+            sessionGeneration: 1,
+            requestGeneration: 1,
+            result: .success(.init(kind: .pin, usesHiddenEntry: true)),
+        )) {
             $0.phase = .authenticated
             $0.configuredKind = .pin
             $0.usesHiddenEntry = true
             $0.credentialInput = ""
             $0.confirmationInput = ""
             $0.isWorking = false
+            $0.shell.isSessionLocked = false
+            $0.shell.library.isSessionLocked = false
+            $0.shell.browser.isSessionLocked = false
         }
     }
 
@@ -68,6 +134,7 @@ struct VaultFeatureTests {
 
         await store.send(.beginSetup) {
             $0.phase = .setup
+            $0.sessionGeneration = 1
         }
         await store.send(.setupCredentialChanged("１２３４")) {
             $0.credentialInput = "１２３４"
@@ -117,6 +184,7 @@ struct VaultFeatureTests {
 
         await store.send(.task) {
             $0.isWorking = true
+            $0.sessionSettingsLoaded = true
         }
         await store.receive(.configurationLoaded(.failure(.unavailable))) {
             $0.phase = .unavailable
@@ -141,6 +209,7 @@ struct VaultFeatureTests {
 
         await store.send(.beginSetup) {
             $0.phase = .setup
+            $0.sessionGeneration = 1
         }
         await store.send(.setupKindSelected(.password)) {
             $0.setupKind = .password
@@ -154,14 +223,22 @@ struct VaultFeatureTests {
         }
         await store.send(.submitSetup) {
             $0.isWorking = true
+            $0.setupRequestGeneration = 1
         }
-        await store.receive(.setupCompleted(.success(.init(kind: .password, usesHiddenEntry: false)))) {
+        await store.receive(.setupCompleted(
+            sessionGeneration: 1,
+            requestGeneration: 1,
+            result: .success(.init(kind: .password, usesHiddenEntry: false)),
+        )) {
             $0.phase = .authenticated
             $0.configuredKind = .password
             $0.usesHiddenEntry = false
             $0.credentialInput = ""
             $0.confirmationInput = ""
             $0.isWorking = false
+            $0.shell.isSessionLocked = false
+            $0.shell.library.isSessionLocked = false
+            $0.shell.browser.isSessionLocked = false
         }
     }
 
@@ -185,18 +262,625 @@ struct VaultFeatureTests {
 
         await store.send(.beginAuthentication) {
             $0.phase = .authentication
+            $0.sessionGeneration = 1
         }
         await store.send(.authenticationCredentialChanged("пароль")) {
             $0.credentialInput = "пароль"
         }
         await store.send(.submitAuthentication) {
             $0.isWorking = true
+            $0.authenticationRequestGeneration = 1
         }
-        await store.receive(.authenticationCompleted(.succeeded)) {
+        await store.receive(.authenticationCompleted(
+            sessionGeneration: 1,
+            requestGeneration: 1,
+            result: .succeeded,
+        )) {
             $0.phase = .authenticated
             $0.credentialInput = ""
             $0.isWorking = false
+            $0.shell.isSessionLocked = false
+            $0.shell.library.isSessionLocked = false
+            $0.shell.browser.isSessionLocked = false
         }
+    }
+
+    @Test("A stale authentication completion cannot unlock a locked vault")
+    @MainActor
+    func authenticationCompletionAfterLockIsIgnored() async {
+        let store = TestStore(
+            initialState: VaultFeature.State(phase: .authenticated, configuredKind: .password),
+        ) {
+            VaultFeature()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.lock)
+        await store.send(.authenticationCompleted(
+            sessionGeneration: 0,
+            requestGeneration: 1,
+            result: .succeeded,
+        ))
+
+        #expect(store.state.phase == .locked)
+    }
+
+    @Test("Global vault lock fences a pending Browser profile transition", .timeLimit(.minutes(1)))
+    @MainActor
+    func globalLockFencesPendingBrowserProfileTransition() async {
+        let tabID = BrowserTabID(UUID(84))
+        var initialState = VaultFeature.State(phase: .authenticated)
+        initialState.shell.browser = BrowserFeature.State(initialTabID: tabID)
+        initialState.shell.browser.profileLifecycle = .ready
+
+        let adapter = BrowserWebKitAdapter()
+        _ = adapter.ensureContext(for: tabID)
+        #expect(adapter.hasContext(for: tabID))
+
+        let executedCommands = LockIsolated<[BrowserWebKitCommand]>([])
+        let (started, startedContinuation) = AsyncStream.makeStream(of: Void.self)
+        let (release, releaseContinuation) = AsyncStream.makeStream(of: Void.self)
+        let (invalidationCompleted, invalidationContinuation) = AsyncStream.makeStream(of: Void.self)
+
+        var startedIterator = started.makeAsyncIterator()
+        var invalidationIterator = invalidationCompleted.makeAsyncIterator()
+
+        let store = TestStore(initialState: initialState) {
+            VaultFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in
+                    executedCommands.withValue { $0.append(command) }
+                    if case let .configureProfileForGeneration(_, _, generation) = command,
+                       generation == 1 {
+                        startedContinuation.yield(())
+                        for await _ in release {
+                            break
+                        }
+                    }
+                    await adapter.execute(command)
+                    if command == .invalidateProfileConfiguration(generation: 2) {
+                        invalidationContinuation.yield(())
+                    }
+                },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.shell(.browser(.profileChangeRequested(.ephemeral))))
+        await store.send(.shell(.browser(.profileChangeConfirmed)))
+        let transitionStarted: Void? = await startedIterator.next()
+        #expect(transitionStarted != nil)
+        #expect(executedCommands.value.contains(.configureProfileForGeneration(
+            profile: .ephemeral,
+            retiringTabIDs: [tabID],
+            generation: 1,
+        )))
+
+        await store.send(.lock)
+        await store.receive(.shell(.browser(.sessionLocked)))
+
+        let invalidationDidComplete: Void? = await invalidationIterator.next()
+        #expect(invalidationDidComplete != nil)
+
+        releaseContinuation.yield(())
+        await store.finish()
+
+        #expect(store.state.phase == .locked)
+        #expect(executedCommands.value.contains(.invalidateProfileConfiguration(generation: 2)))
+        #expect(adapter.hasContext(for: tabID))
+
+        startedContinuation.finish()
+        releaseContinuation.finish()
+        invalidationContinuation.finish()
+    }
+
+    @Test("A locked vault rejects retained authenticated shell actions")
+    @MainActor
+    func lockedVaultRejectsSettingsPresentation() async {
+        let store = TestStore(
+            initialState: VaultFeature.State(phase: .locked),
+        ) {
+            VaultFeature()
+        }
+
+        await store.send(.shell(.settingsTapped))
+
+        #expect(store.state.phase == .locked)
+        #expect(!store.state.shell.settingsPresented)
+    }
+
+    @Test("A durable Library import completion remains effective after global lock")
+    @MainActor
+    func lockedVaultAcceptsDurableImportCompletion() async {
+        var initialState = VaultFeature.State(phase: .authenticated)
+        initialState.shell.library.isImporting = true
+        initialState.shell.library.resourceData[UUID(90_003)] = Data([0x42])
+        let store = TestStore(initialState: initialState) { VaultFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.lock)
+        await store.send(.shell(.library(.importCompleted(.failure(.persistenceFailed)))))
+
+        #expect(store.state.phase == .locked)
+        #expect(!store.state.shell.library.isImporting)
+        #expect(store.state.shell.library.resourceData.isEmpty)
+    }
+
+    @Test("Library completions after lock skip private reads and preserve durable ingestion")
+    @MainActor
+    func libraryCompletionsAfterLockDeferPrivateResourceReads() async {
+        let existingResource = MediaResource(
+            id: UUID(),
+            role: .original,
+            relativePath: "existing/original.jpg",
+            sourceFilename: "existing.jpg",
+            sourceUTI: "public.jpeg",
+            byteCount: 1,
+            sha256: String(repeating: "a", count: 64),
+        )
+        let existingAsset = MediaAsset(
+            id: UUID(),
+            kind: .stillImage,
+            importedAt: Date(timeIntervalSince1970: 1),
+            resources: [existingResource],
+        )
+        let importedResource = MediaResource(
+            id: UUID(),
+            role: .original,
+            relativePath: "imported/original.jpg",
+            sourceFilename: "imported.jpg",
+            sourceUTI: "public.jpeg",
+            byteCount: 1,
+            sha256: String(repeating: "b", count: 64),
+        )
+        let importedAsset = MediaAsset(
+            id: UUID(),
+            kind: .stillImage,
+            importedAt: Date(timeIntervalSince1970: 2),
+            resources: [importedResource],
+        )
+        let (loadedAssets, loadedAssetsContinuation) = AsyncStream.makeStream(of: [MediaAsset].self)
+        let (loadStarted, loadStartedContinuation) = AsyncStream.makeStream(of: Void.self)
+        let (importedAssetResult, importedAssetContinuation) = AsyncStream.makeStream(of: MediaAsset.self)
+        let (importStarted, importStartedContinuation) = AsyncStream.makeStream(of: Void.self)
+        var loadStartedIterator = loadStarted.makeAsyncIterator()
+        var importStartedIterator = importStarted.makeAsyncIterator()
+        let resourceReads = LockIsolated<[UUID]>([])
+
+        let store = TestStore(initialState: VaultFeature.State(phase: .authenticated)) {
+            VaultFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: {
+                    loadStartedContinuation.yield(())
+                    for await assets in loadedAssets {
+                        return assets
+                    }
+                    return []
+                },
+                importFile: { _ in
+                    importStartedContinuation.yield(())
+                    for await asset in importedAssetResult {
+                        return asset
+                    }
+                    throw MediaImportError.persistenceFailed
+                },
+                resourceData: { resource in
+                    resourceReads.withValue { $0.append(resource.id) }
+                    return Data([0x42])
+                },
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.shell(.library(.task)))
+        let loadDidStart: Void? = await loadStartedIterator.next()
+        #expect(loadDidStart != nil)
+        await store.send(.shell(.library(.importTapped)))
+        await store.send(.shell(.library(.fileSelected(URL(fileURLWithPath: "/provider/imported.jpg")))))
+        let importDidStart: Void? = await importStartedIterator.next()
+        #expect(importDidStart != nil)
+
+        await store.send(.lock)
+        await store.receive(.shell(.browser(.sessionLocked)))
+        loadedAssetsContinuation.yield([existingAsset])
+        await store.receive(.shell(.library(.assetsLoadCompleted(
+            generation: 0,
+            result: .success([existingAsset]),
+        ))))
+        #expect(store.state.shell.library.resourceData.isEmpty)
+        #expect(resourceReads.value.isEmpty)
+
+        importedAssetContinuation.yield(importedAsset)
+        await store.receive(.shell(.library(.importCompleted(.success(importedAsset)))))
+        await store.finish()
+
+        #expect(store.state.phase == .locked)
+        #expect(store.state.shell.library.isSessionLocked)
+        #expect(!store.state.shell.library.isImporting)
+        #expect(!store.state.shell.library.isPickerPresented)
+        #expect(store.state.shell.library.assets == [existingAsset, importedAsset])
+        #expect(store.state.shell.library.resourceData.isEmpty)
+        #expect(resourceReads.value.isEmpty)
+
+        loadedAssetsContinuation.finish()
+        loadStartedContinuation.finish()
+        importedAssetContinuation.finish()
+        importStartedContinuation.finish()
+    }
+
+    @Test("Global lock cancels a pending Library resource read")
+    @MainActor
+    func globalLockCancelsPendingLibraryResourceRead() async {
+        let resource = MediaResource(
+            id: UUID(),
+            role: .original,
+            relativePath: "pending/original.jpg",
+            sourceFilename: "pending.jpg",
+            sourceUTI: "public.jpeg",
+            byteCount: 1,
+            sha256: String(repeating: "c", count: 64),
+        )
+        let asset = MediaAsset(
+            id: UUID(),
+            kind: .stillImage,
+            importedAt: Date(timeIntervalSince1970: 3),
+            resources: [resource],
+        )
+        let (started, startedContinuation) = AsyncStream.makeStream(of: UUID.self)
+        let (release, releaseContinuation) = AsyncStream.makeStream(of: Void.self)
+        var startedIterator = started.makeAsyncIterator()
+        let resourceReads = LockIsolated<[UUID]>([])
+        let cancellationObserved = LockIsolated(false)
+
+        let store = TestStore(initialState: VaultFeature.State(phase: .authenticated)) {
+            VaultFeature()
+        } withDependencies: {
+            $0.mediaLibrary.resourceData = { resource in
+                startedContinuation.yield(resource.id)
+                for await _ in release {
+                    break
+                }
+                guard !Task.isCancelled else {
+                    cancellationObserved.withValue { $0 = true }
+                    return Data([0x42])
+                }
+
+                resourceReads.withValue { $0.append(resource.id) }
+                return Data([0x42])
+            }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.shell(.library(.assetsLoadCompleted(
+            generation: 0,
+            result: .success([asset]),
+        ))))
+        let startedResourceID = await startedIterator.next()
+        #expect(startedResourceID == resource.id)
+
+        await store.send(.lock)
+        await store.receive(.shell(.browser(.sessionLocked)))
+        releaseContinuation.yield(())
+        await store.finish()
+
+        #expect(store.state.shell.library.isSessionLocked)
+        #expect(store.state.shell.library.resourceData.isEmpty)
+        #expect(resourceReads.value.isEmpty)
+        #expect(cancellationObserved.value)
+
+        startedContinuation.finish()
+        releaseContinuation.finish()
+    }
+
+    @Test("A queued Library read never reaches its dependency after global lock")
+    @MainActor
+    func globalLockFencesQueuedLibraryReadBeforeDependencyStart() async {
+        let resource = MediaResource(
+            id: UUID(),
+            role: .original,
+            relativePath: "queued/original.jpg",
+            sourceFilename: "queued.jpg",
+            sourceUTI: "public.jpeg",
+            byteCount: 1,
+            sha256: String(repeating: "d", count: 64),
+        )
+        let asset = MediaAsset(
+            id: UUID(),
+            kind: .stillImage,
+            importedAt: Date(timeIntervalSince1970: 4),
+            resources: [resource],
+        )
+        let resourceCalls = LockIsolated(0)
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [asset] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in
+                resourceCalls.withValue { $0 += 1 }
+                return Data([0x42])
+            },
+            resourceDataSynchronously: { _ in
+                resourceCalls.withValue { $0 += 1 }
+                return Data([0x42])
+            },
+        )
+        let readGeneration = mediaLibrary.currentResourceLoadGeneration
+        let (readGate, readGateContinuation) = AsyncStream.makeStream(of: Void.self)
+        let queuedRead = Task {
+            for await _ in readGate {
+                break
+            }
+            _ = try? await mediaLibrary.resourceDataIfCurrent(
+                resource,
+                generation: readGeneration,
+            )
+        }
+
+        let store = TestStore(initialState: VaultFeature.State(
+            phase: .authenticated,
+            configuredKind: .password,
+        )) {
+            VaultFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+            $0.vaultCredential.verify = { _ in .succeeded }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.lock)
+        readGateContinuation.yield(())
+        readGateContinuation.finish()
+        await queuedRead.value
+
+        #expect(mediaLibrary.currentResourceLoadGeneration == 1)
+        #expect(resourceCalls.value == 0)
+
+        await store.send(.beginAuthentication) {
+            $0.phase = .authentication
+            $0.sessionGeneration = 2
+        }
+        await store.send(.authenticationCredentialChanged("password")) {
+            $0.credentialInput = "password"
+        }
+        await store.send(.submitAuthentication) {
+            $0.isWorking = true
+            $0.authenticationRequestGeneration = 2
+        }
+        await store.receive(.authenticationCompleted(
+            sessionGeneration: 2,
+            requestGeneration: 2,
+            result: .succeeded,
+        )) {
+            $0.phase = .authenticated
+            $0.credentialInput = ""
+            $0.isWorking = false
+            $0.shell.isSessionLocked = false
+            $0.shell.library.isSessionLocked = false
+            $0.shell.browser.isSessionLocked = false
+        }
+
+        await store.send(.shell(.library(.resourceLoadCompleted(
+            resourceID: resource.id,
+            generation: 0,
+            result: .success(Data([0x24])),
+        ))))
+        await store.send(.shell(.library(.resourceLoadCompleted(
+            resourceID: resource.id,
+            generation: 0,
+            result: .failure(.unavailable),
+        ))))
+        #expect(store.state.shell.library.resourceData.isEmpty)
+        #expect(store.state.shell.library.error == nil)
+
+        await store.send(.shell(.library(.task))) {
+            $0.shell.library.isLoading = true
+        }
+        await store.receive(.shell(.library(.assetsLoadCompleted(
+            generation: 1,
+            result: .success([asset]),
+        )))) {
+            $0.shell.library.isLoading = false
+            $0.shell.library.assets = [asset]
+        }
+        await store.receive(.shell(.library(.resourceLoadCompleted(
+            resourceID: resource.id,
+            generation: 1,
+            result: .success(Data([0x42])),
+        )))) {
+            $0.shell.library.resourceData[resource.id] = Data([0x42])
+        }
+
+        #expect(mediaLibrary.currentResourceLoadGeneration == 1)
+        #expect(resourceCalls.value == 1)
+        #expect(store.state.shell.library.resourceData[resource.id] == Data([0x42]))
+
+        await store.send(.lock)
+        await store.receive(.shell(.browser(.sessionLocked)))
+        #expect(mediaLibrary.currentResourceLoadGeneration == 2)
+        #expect(store.state.shell.library.resourceData.isEmpty)
+        await store.send(.lock)
+        #expect(mediaLibrary.currentResourceLoadGeneration == 2)
+        await store.finish()
+    }
+
+    @Test("A pre-lock Library load cannot replace the post-unlock snapshot")
+    @MainActor
+    func staleLibraryLoadCannotOverwriteFreshSnapshotAfterUnlock() async {
+        let staleAsset = MediaAsset(
+            id: UUID(),
+            kind: .stillImage,
+            importedAt: Date(timeIntervalSince1970: 5),
+            resources: [],
+        )
+        let freshAsset = MediaAsset(
+            id: UUID(),
+            kind: .stillImage,
+            importedAt: Date(timeIntervalSince1970: 6),
+            resources: [],
+        )
+        let (loadStarted, loadStartedContinuation) = AsyncStream.makeStream(of: Int.self)
+        let (staleLoadResults, staleLoadContinuation) =
+            AsyncStream.makeStream(of: Result<[MediaAsset], MediaLibraryStoreError>.self)
+        let (freshLoadResults, freshLoadContinuation) =
+            AsyncStream.makeStream(of: Result<[MediaAsset], MediaLibraryStoreError>.self)
+        var loadStartedIterator = loadStarted.makeAsyncIterator()
+        let loadCallIndex = LockIsolated(0)
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: {
+                let requestIndex = loadCallIndex.withValue { currentIndex in
+                    defer { currentIndex += 1 }
+                    return currentIndex
+                }
+                loadStartedContinuation.yield(requestIndex)
+                let responses = requestIndex == 0 ? staleLoadResults : freshLoadResults
+                for await result in responses {
+                    return try result.get()
+                }
+                throw MediaLibraryStoreError.unavailable
+            },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in Data([0x42]) },
+        )
+        let store = TestStore(initialState: VaultFeature.State(
+            phase: .authenticated,
+            configuredKind: .password,
+        )) {
+            VaultFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+            $0.vaultCredential.verify = { _ in .succeeded }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.shell(.library(.task))) {
+            $0.shell.library.isLoading = true
+        }
+        #expect(await loadStartedIterator.next() == 0)
+
+        await store.send(.lock)
+        await store.receive(.shell(.browser(.sessionLocked)))
+        #expect(mediaLibrary.currentResourceLoadGeneration == 1)
+
+        await store.send(.beginAuthentication) {
+            $0.phase = .authentication
+            $0.sessionGeneration = 2
+        }
+        await store.send(.authenticationCredentialChanged("password")) {
+            $0.credentialInput = "password"
+        }
+        await store.send(.submitAuthentication) {
+            $0.isWorking = true
+            $0.authenticationRequestGeneration = 2
+        }
+        await store.receive(.authenticationCompleted(
+            sessionGeneration: 2,
+            requestGeneration: 2,
+            result: .succeeded,
+        )) {
+            $0.phase = .authenticated
+            $0.credentialInput = ""
+            $0.isWorking = false
+            $0.shell.isSessionLocked = false
+            $0.shell.library.isSessionLocked = false
+            $0.shell.browser.isSessionLocked = false
+        }
+
+        await store.send(.shell(.library(.task))) {
+            $0.shell.library.isLoading = true
+        }
+        #expect(await loadStartedIterator.next() == 1)
+        freshLoadContinuation.yield(.success([freshAsset]))
+        await store.receive(.shell(.library(.assetsLoadCompleted(
+            generation: 1,
+            result: .success([freshAsset]),
+        )))) {
+            $0.shell.library.isLoading = false
+            $0.shell.library.assets = [freshAsset]
+        }
+
+        staleLoadContinuation.yield(.success([staleAsset]))
+        await store.receive(.shell(.library(.assetsLoadCompleted(
+            generation: 0,
+            result: .success([staleAsset]),
+        ))))
+        await store.send(.shell(.library(.assetsLoadCompleted(
+            generation: 0,
+            result: .failure(.unavailable),
+        ))))
+
+        #expect(store.state.shell.library.assets == [freshAsset])
+        #expect(store.state.shell.library.error == nil)
+        #expect(!store.state.shell.library.isLoading)
+        await store.finish()
+
+        loadStartedContinuation.finish()
+        staleLoadContinuation.finish()
+        freshLoadContinuation.finish()
+    }
+
+    @Test("An admitted Library read does not delay the lock boundary", .timeLimit(.minutes(1)))
+    @MainActor
+    func admittedLibraryReadDoesNotBlockLockGenerationAdvance() async {
+        let resource = MediaResource(
+            id: UUID(),
+            role: .original,
+            relativePath: "in-flight/original.jpg",
+            sourceFilename: "in-flight.jpg",
+            sourceUTI: "public.jpeg",
+            byteCount: 1,
+            sha256: String(repeating: "f", count: 64),
+        )
+        let resourceCalls = LockIsolated(0)
+        let (readerStarted, readerStartedContinuation) = AsyncStream.makeStream(of: Void.self)
+        let (readRelease, readReleaseContinuation) = AsyncStream.makeStream(of: Void.self)
+        var readerStartedIterator = readerStarted.makeAsyncIterator()
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in
+                resourceCalls.withValue { $0 += 1 }
+                readerStartedContinuation.yield(())
+                for await _ in readRelease {
+                    break
+                }
+                return Data([0x42])
+            },
+        )
+        let store = TestStore(initialState: VaultFeature.State(phase: .authenticated)) {
+            VaultFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        let readGeneration = mediaLibrary.currentResourceLoadGeneration
+        let read = Task.detached {
+            try? await mediaLibrary.resourceDataIfCurrent(resource, generation: readGeneration)
+        }
+        #expect(await readerStartedIterator.next() != nil)
+
+        await store.send(.lock)
+        await store.receive(.shell(.browser(.sessionLocked)))
+        #expect(store.state.phase == .locked)
+        #expect(mediaLibrary.currentResourceLoadGeneration == 1)
+        #expect(resourceCalls.value == 1)
+
+        let staleRead = try? await mediaLibrary.resourceDataIfCurrent(
+            resource,
+            generation: readGeneration,
+        )
+        #expect(staleRead == nil)
+        #expect(resourceCalls.value == 1)
+
+        readReleaseContinuation.yield(())
+        readReleaseContinuation.finish()
+        let inFlightRead = await read.value
+        #expect(inFlightRead == nil)
+        #expect(resourceCalls.value == 1)
+        await store.finish()
+        readerStartedContinuation.finish()
     }
 
     @Test("Normal authentication cancels a pending hidden verification")
@@ -224,11 +908,13 @@ struct VaultFeatureTests {
         await store.send(.verifyHidden(attemptID: attemptID, candidate: .init("1234"))) {
             $0.isWorking = true
             $0.pendingHiddenVerificationID = attemptID
+            $0.hiddenVerificationRequestGeneration = 1
         }
         await store.send(.beginAuthentication) {
             $0.phase = .authentication
             $0.isWorking = false
             $0.pendingHiddenVerificationID = nil
+            $0.sessionGeneration = 1
         }
 
         continuation.yield(.succeeded)
@@ -263,8 +949,13 @@ struct VaultFeatureTests {
         }
         await store.send(.submitSetup) {
             $0.isWorking = true
+            $0.setupRequestGeneration = 1
         }
-        await store.receive(.setupCompleted(.failure(.alreadyConfigured))) {
+        await store.receive(.setupCompleted(
+            sessionGeneration: 0,
+            requestGeneration: 1,
+            result: .failure(.alreadyConfigured),
+        )) {
             $0.phase = .loading
             $0.error = nil
             $0.credentialInput = ""
@@ -273,6 +964,7 @@ struct VaultFeatureTests {
         }
         await store.receive(.task) {
             $0.isWorking = true
+            $0.sessionSettingsLoaded = true
         }
         await store.receive(.configurationLoaded(.success(configuration))) {
             $0.phase = .locked
@@ -294,13 +986,18 @@ struct VaultFeatureTests {
         )
         initialState.isWorking = true
         initialState.pendingHiddenVerificationID = pendingID
+        initialState.hiddenVerificationRequestGeneration = 1
         let store = TestStore(
             initialState: initialState,
         ) {
             VaultFeature()
         }
-
-        await store.send(.hiddenVerificationCompleted(staleID, .success(true)))
+        await store.send(.hiddenVerificationCompleted(
+            sessionGeneration: 0,
+            requestGeneration: 1,
+            attemptID: staleID,
+            result: .success(true),
+        ))
         #expect(store.state.phase == .locked)
         #expect(store.state.isWorking)
         #expect(store.state.pendingHiddenVerificationID == pendingID)

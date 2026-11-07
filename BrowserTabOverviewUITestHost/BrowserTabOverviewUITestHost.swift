@@ -5,13 +5,16 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import AppFeature
 import CalculatorFeature
 import Combine
 import ComposableArchitecture
 import CoreFoundation
+import Dependencies
 import Foundation
 import SwiftUI
 import UIKit
+import VaultFeature
 @testable import BrowserFeature
 
 @main
@@ -21,6 +24,9 @@ struct BrowserTabOverviewUITestHost: App {
             if ProcessInfo.processInfo.arguments.contains("--calculator-basic") {
                 CalculatorUITestHostView()
                     .environment(\.horizontalSizeClass, .regular)
+            } else if ProcessInfo.processInfo.arguments.contains("--vault-lock-control") {
+                VaultLockControlUITestHostView()
+                    .environment(\.horizontalSizeClass, .compact)
             } else if let configuration = ShowTabsPlacementConfiguration.current {
                 ShowTabsPlacementHostView(configuration: configuration)
                     .environment(\.horizontalSizeClass, configuration.sizeClass.value)
@@ -29,6 +35,90 @@ struct BrowserTabOverviewUITestHost: App {
                     .environment(\.horizontalSizeClass, .compact)
             }
         }
+    }
+}
+
+/// Hosts the production authenticated root with isolated, inert Browser dependencies.
+@MainActor
+private struct VaultLockControlUITestHostView: View {
+    @State
+    private var store: StoreOf<RootFeature>
+    @Environment(\.scenePhase)
+    private var scenePhase
+
+    init() {
+        let destinationArgument = ProcessInfo.processInfo
+            .arguments
+            .first(where: { $0.hasPrefix("--vault-lock-destination=") })?
+            .replacing("--vault-lock-destination=", with: "")
+        var initialVaultState = VaultFeature.State(phase: .authenticated)
+        switch destinationArgument {
+        case "collections":
+            initialVaultState.shell.selectedTab = .collections
+        case "browser-start":
+            initialVaultState.shell.selectedTab = .browser
+            let selectedTabID = initialVaultState.shell.browser.selectedTabID
+            initialVaultState.shell.browser.tabs = [.startPage(id: selectedTabID)]
+            initialVaultState.shell.browser.presentation = .browsing
+        case "browser-navigation":
+            initialVaultState.shell.selectedTab = .browser
+            let selectedTabID = initialVaultState.shell.browser.selectedTabID
+            if let url = URL(string: "https://example.com") {
+                var webTab = BrowserTab.web(id: selectedTabID, url: url)
+                webTab.metadata.committedURL = url
+                initialVaultState.shell.browser.tabs = [webTab]
+            }
+            initialVaultState.shell.browser.presentation = .browsing
+        case "tab-overview":
+            initialVaultState.shell.selectedTab = .browser
+            initialVaultState.shell.browser.presentation = .tabOverview
+        default:
+            initialVaultState.shell.selectedTab = .library
+        }
+
+        let vaultState = initialVaultState
+        let rootStore = withDependencies {
+            $0.vaultSessionSettings.load = { .init() }
+            $0.vaultSessionSettings.save = { _ in }
+            $0.vaultCredential.loadConfiguration = { nil }
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in }
+            $0.browserOpenTabsSession.load = { .missing }
+            $0.browserSettings.load = { .init() }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserClipboard.readHTTPURL = { nil }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { _ in },
+                events: { AsyncStream { $0.finish() } },
+            )
+        } operation: {
+            RootComposition.makeStore(vault: vaultState)
+        }
+        _store = State(initialValue: rootStore)
+    }
+
+    var body: some View {
+        RootView(store: store)
+            .overlay(alignment: .topLeading) {
+                Text(verbatim: "vault-phase:\(store.vault.phase)")
+                    .font(.system(size: 1))
+                    .accessibilityIdentifier("vault-lock-control.fixture-phase")
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+            }
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                switch phase {
+                case .active:
+                    store.send(.applicationPhaseChanged(.active))
+                case .inactive:
+                    store.send(.applicationPhaseChanged(.inactive))
+                case .background:
+                    store.send(.applicationPhaseChanged(.background))
+                @unknown default:
+                    store.send(.applicationPhaseChanged(.unknown))
+                }
+            }
     }
 }
 

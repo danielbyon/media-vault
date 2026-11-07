@@ -1,17 +1,21 @@
 SHELL := /bin/bash
 
-XCODE_WRAPPER := ./Scripts/with-xcode-27-rc.sh
+XCODE_WRAPPER := ./Scripts/with-xcode-27.2.sh
+DESTINATION_VERIFIER := ./Scripts/verify-xcode-27.2-destination.sh
+# CI supplies the preflight UDID. Local runs resolve once and reuse it for both schemes.
+VERIFIED_SIMULATOR_UDID ?=
 # xcodebuild cannot present first-use trust prompts in this noninteractive gate.
 XCODEBUILD_OPTIONS := -skipMacroValidation
-IPHONE_DESTINATION ?= platform=iOS Simulator,name=iPhone 17,OS=27.0
-IPAD_DESTINATION ?= platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.0
+IPHONE_DESTINATION ?= platform=iOS Simulator,name=iPhone 17,OS=27.2
+IPAD_DESTINATION ?= platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.2
 # Canonical snapshot destination. The iPad mini was considered, but its
 # availability on the xcode-27 CI runner is unverified. Local and CI runs use
-# one model consistently: iPad Pro 11-inch (M5), iOS 27.0, at 2x scale.
+# one model consistently: iPad Pro 11-inch (M5), iOS 27.2, at 2x scale.
 SNAPSHOT_DESTINATION ?= $(IPAD_DESTINATION)
 # Snapshot suites are kept out of the iPhone gate. The App scheme owns the root
 # surface suite; the package scheme owns the remaining four suites.
 APP_SNAPSHOT_SUITE := AppTests/RootSurfaceSnapshotTests
+APP_HOSTED_PRIVACY_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacySnapshotsCoverLifecycleStates
 PACKAGE_SNAPSHOT_SUITES := \
 	AppFeatureTests/VaultFeatureViewSnapshotTests \
 	CalculatorFeatureTests/CalculatorViewSnapshotTests \
@@ -34,7 +38,7 @@ SOURCE_PACKAGES_DIRECTORY := $(CURDIR)/.build/SourcePackages
 # cleanup helper rejects invocation outside its owning checkout before
 # inspecting any artifact.
 
-.PHONY: all build clean clean-test format lint lint-analyze test test-snapshots tools
+.PHONY: all build clean clean-test destination-test format lint lint-analyze test test-snapshots tools verify-test-destination verify-snapshot-destination
 
 all: lint build test
 
@@ -59,6 +63,7 @@ build:
 
 test:
 	@set -euo pipefail; \
+	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
 	mkdir -p "$(CURDIR)/.build"; \
 	test_root=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-test.XXXXXX"); \
 	test_results=""; \
@@ -102,17 +107,18 @@ test:
 		fi; \
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
-	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) test; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' test; \
 	assert_tests_ran App "$$test_root/App.xcresult"; \
-	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
 	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"
 
-# Exercise only the five visual snapshot suites on the canonical 2x iPad.
+# Exercise the visual snapshot suites and hosted privacy lifecycle on the canonical 2x iPad.
 # Both schemes run even when the first suite fails so the complete failure
 # inventory is available. The canonical 2x reference baseline is required, and
 # exact snapshot comparisons must pass.
 test-snapshots:
 	@set -euo pipefail; \
+	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
 	mkdir -p "$(CURDIR)/.build"; \
 	test_root=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-snapshot-test.XXXXXX"); \
 	test_results=""; \
@@ -173,13 +179,13 @@ test-snapshots:
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
 	app_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(SNAPSHOT_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) test || app_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
 	app_count_status=0; \
 	assert_tests_ran App "$$test_root/App.xcresult" || app_count_status=$$?; \
 	remember_failure App-xcodebuild "$$app_xcode_status"; \
 	remember_failure App-test-count "$$app_count_status"; \
 	package_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -destination '$(SNAPSHOT_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-only-testing:$(suite)) test || package_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-only-testing:$(suite)) test || package_xcode_status=$$?; \
 	package_count_status=0; \
 	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult" || package_count_status=$$?; \
 	remember_failure ApplicationFoundation-xcodebuild "$$package_xcode_status"; \
@@ -220,3 +226,14 @@ clean-test:
 	makefile_path="$${makefile_path% }"; \
 	script_directory=$$(dirname -- "$$makefile_path"); \
 	bash "$$script_directory/Scripts/tests/test-clean-build-artifacts.sh"
+
+# Read canonical destinations from Make for both CI preflight and local checks.
+verify-test-destination:
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)'
+
+verify-snapshot-destination:
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)'
+
+# Synthetic inventories exercise the resolver and actual Make execution arguments.
+destination-test:
+	python3 ./Scripts/tests/test-xcode-27.2-destination.py
