@@ -773,7 +773,180 @@ extension AppHostedUITests {
             #expect(window.windowScene === scene)
             #expect(scene.windows.contains { $0 === window })
             #expect(window.isKeyWindow == wasKeyWindow)
+            recordWorkstreamBProbe(window: window, image: image, name: name)
             assertSnapshot(of: image, as: .image, named: name)
+        }
+
+        private func recordWorkstreamBProbe(window: UIWindow, image: UIImage, name: String) {
+            guard ProcessInfo.processInfo.environment["MV_BPIX_DIAGNOSTICS"] == "1",
+                  name.hasSuffix("primary-window-regular-ipad"),
+                  name.contains("inactive-protected") || name.contains("background-protected")
+                  || name.contains("resumed")
+            else {
+                return
+            }
+
+            let prefix = "BPIX-55ddaf0-\(name)"
+            func rect(_ value: CGRect) -> String {
+                NSCoder.string(for: value)
+            }
+            func point(_ value: CGPoint) -> String {
+                NSCoder.string(for: value)
+            }
+            func color(_ value: UIColor?, traits: UITraitCollection) -> String {
+                guard let value else {
+                    return "nil"
+                }
+
+                let resolved = value.resolvedColor(with: traits).cgColor
+                return "space=\(String(describing: resolved.colorSpace?.name)) components=\(resolved.components ?? [])"
+            }
+            func imageInfo(_ value: UIImage) -> [String: Any] {
+                guard let cg = value.cgImage else {
+                    return ["cgImage": false]
+                }
+
+                return [
+                    "size": NSCoder.string(for: value.size),
+                    "scale": value.scale,
+                    "width": cg.width,
+                    "height": cg.height,
+                    "bitsPerComponent": cg.bitsPerComponent,
+                    "bitsPerPixel": cg.bitsPerPixel,
+                    "bytesPerRow": cg.bytesPerRow,
+                    "bitmapInfo": cg.bitmapInfo.rawValue,
+                    "alphaInfo": cg.alphaInfo.rawValue,
+                    "colorSpace": String(describing: cg.colorSpace?.name),
+                    "renderingIntent": cg.renderingIntent.rawValue,
+                ]
+            }
+            let traits = window.traitCollection
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = window.screen.scale
+            let renderer = UIGraphicsImageRenderer(bounds: window.bounds, format: format)
+            let layerImage = renderer.image { context in
+                window.layer.render(in: context.cgContext)
+            }
+            let extendedFormat = UIGraphicsImageRendererFormat()
+            extendedFormat.scale = window.screen.scale
+            extendedFormat.preferredRange = .extended
+            let extendedLayerImage = UIGraphicsImageRenderer(bounds: window.bounds, format: extendedFormat)
+                .image { context in window.layer.render(in: context.cgContext) }
+            let pixelPoints = name.contains("resumed")
+                ? [CGPoint(x: 723, y: 275)]
+                : [
+                    CGPoint(x: 1_455, y: 866),
+                    CGPoint(x: 1_461, y: 1_087),
+                    CGPoint(x: 1_455, y: 1_333),
+                    CGPoint(x: 1_498, y: 1_375),
+                ]
+            let windowPoints = pixelPoints.map { CGPoint(x: $0.x / image.scale, y: $0.y / image.scale) }
+            var views: [[String: Any]] = []
+            func visit(_ view: UIView, path: String) {
+                let box = view.convert(view.bounds, to: window)
+                let matches = windowPoints.enumerated().compactMap { index, p in
+                    box.contains(p) ? index : nil
+                }
+                let layer = view.layer
+                var info: [String: Any] = [
+                    "path": path,
+                    "class": String(reflecting: type(of: view)),
+                    "frame": rect(view.frame),
+                    "bounds": rect(view.bounds),
+                    "windowBounds": rect(box),
+                    "center": point(view.center),
+                    "safeArea": NSCoder.string(for: view.safeAreaInsets),
+                    "hidden": view.isHidden,
+                    "alpha": view.alpha,
+                    "opaque": view.isOpaque,
+                    "accessibilityIdentifier": view.accessibilityIdentifier ?? "nil",
+                    "backgroundColor": color(view.backgroundColor, traits: view.traitCollection),
+                    "tintColor": color(view.tintColor, traits: view.traitCollection),
+                    "containsPixelPointIndices": matches,
+                    "layerFrame": rect(layer.frame),
+                    "layerBounds": rect(layer.bounds),
+                    "layerPosition": point(layer.position),
+                    "anchorPoint": point(layer.anchorPoint),
+                    "contentsScale": layer.contentsScale,
+                    "rasterizationScale": layer.rasterizationScale,
+                    "shouldRasterize": layer.shouldRasterize,
+                    "layerOpaque": layer.isOpaque,
+                    "layerOpacity": layer.opacity,
+                    "cornerRadius": layer.cornerRadius,
+                    "borderWidth": layer.borderWidth,
+                    "masksToBounds": layer.masksToBounds,
+                    "transform": String(describing: layer.transform),
+                    "presentationFrame": layer.presentation().map { rect($0.frame) } ?? "nil",
+                ]
+                if let label = view as? UILabel {
+                    info["text"] = label.text ?? "nil"
+                    info["font"] = label.font.fontName
+                    info["fontSize"] = label.font.pointSize
+                    info["textColor"] = color(label.textColor, traits: label.traitCollection)
+                    info["textAlignment"] = label.textAlignment.rawValue
+                }
+                if !matches.isEmpty || view is UILabel
+                    || view.accessibilityIdentifier?.hasPrefix("MediaVault.ScenePrivacyCover") == true {
+                    views.append(info)
+                }
+                for (index, child) in view.subviews.enumerated() {
+                    visit(child, path: "\(path)/\(index)")
+                }
+            }
+            visit(window, path: "window")
+            let metadata: [String: Any] = [
+                "probe": prefix,
+                "capturePath": "UIGraphicsImageRenderer + UIWindow.drawHierarchy(afterScreenUpdates: true); original sampled image",
+                "independentPath": "UIGraphicsImageRenderer + CALayer.render(in:); native visual effects may differ",
+                "osVersion": UIDevice.current.systemVersion,
+                "simulatorModel": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "nil",
+                "simulatorRuntime": ProcessInfo.processInfo.environment["SIMULATOR_RUNTIME_VERSION"] ?? "nil",
+                "windowFrame": rect(window.frame),
+                "windowBounds": rect(window.bounds),
+                "windowSafeArea": NSCoder.string(for: window.safeAreaInsets),
+                "windowLevel": window.windowLevel.rawValue,
+                "keyWindow": window.isKeyWindow,
+                "sceneActivation": window.windowScene?.activationState.rawValue ?? -100,
+                "screenBounds": rect(window.screen.bounds),
+                "screenNativeBounds": rect(window.screen.nativeBounds),
+                "screenScale": window.screen.scale,
+                "screenNativeScale": window.screen.nativeScale,
+                "displayScale": traits.displayScale,
+                "displayGamut": traits.displayGamut.rawValue,
+                "horizontalSizeClass": traits.horizontalSizeClass.rawValue,
+                "verticalSizeClass": traits.verticalSizeClass.rawValue,
+                "interfaceStyle": traits.userInterfaceStyle.rawValue,
+                "contrast": traits.accessibilityContrast.rawValue,
+                "legibilityWeight": traits.legibilityWeight.rawValue,
+                "layoutDirection": traits.layoutDirection.rawValue,
+                "contentSizeCategory": traits.preferredContentSizeCategory.rawValue,
+                "rendererPreferredRange": format.preferredRange.rawValue,
+                "rendererOpaque": format.opaque,
+                "rendererScale": format.scale,
+                "drawHierarchyImage": imageInfo(image),
+                "layerImage": imageInfo(layerImage),
+                "extendedLayerImage": imageInfo(extendedLayerImage),
+                "pixelPoints": pixelPoints.map(point),
+                "windowPoints": windowPoints.map(point),
+                "views": views,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: metadata, options: [
+                .prettyPrinted,
+                .sortedKeys,
+            ]) {
+                Attachment.record(data, named: "\(prefix)-metadata.json")
+            }
+            if let data = image.pngData() {
+                Attachment.record(data, named: "\(prefix)-drawHierarchy.png")
+            }
+            if let data = layerImage.pngData() {
+                Attachment.record(data, named: "\(prefix)-layer.png")
+            }
+            if let data = extendedLayerImage
+                .pngData() {
+                Attachment.record(data, named: "\(prefix)-layer-extended.png")
+            }
+            print("[BPIX-55ddaf0] \(name) recorded geometry, traits, and independent layer captures")
         }
 
         /// Waits for two matching rendered frames after laying out a regular-width window.
