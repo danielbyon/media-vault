@@ -1,0 +1,27 @@
+App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
+  s_572fff539c3fed::t_e7267fe369cc28 30-36
+  s_572fff539c3fed::t_c7dd866316f131 29
+AppHostedTests/ScenePrivacyCoverTests.swift
+  s_572fff539c3fed::t_26d1fa23a844f7 784-788,790-795,797-800,805-821,837-842,852-857,859-861,866-877,889-891,898-899,904-905,907-908,910-915,924-927,929-930,933-936,938-947
+  s_572fff539c3fed::t_c6f5b1dc339585 858,906
+  s_572fff539c3fed::t_d5c29e513452b4 776,780,783,789,796,801-804,822-829,834-836,843-851,862-865,878-888,892-897,900-903,909,916-923,931-932,937,948-949
+  s_572fff539c3fed::t_05ead5ff5936bd 781-782
+  s_572fff539c3fed::t_9d98c0281a75e9 830-833,928
+  s_572fff539c3fed::t_0991e7d1a23209 950-951
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "63aa85114d8b824fa5399ea21137eb69db79cc98",
+  "prompts": {},
+  "sessions": {
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
