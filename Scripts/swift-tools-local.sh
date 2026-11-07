@@ -7,4 +7,4 @@
 SWIFT_TOOLS_SOURCE_PATHS=(App AppTests AppHostedTestHost AppHostedTests BrowserTabOverviewUITestHost BrowserTabOverviewUITests Packages)
 SWIFT_TOOLS_SWIFTFORMAT_CONFIG=.swiftformat
 SWIFT_TOOLS_SWIFTLINT_CONFIG=.swiftlint.yml
-SWIFT_TOOLS_COMMAND_PREFIX=("$SWIFT_TOOLS_ROOT/Scripts/with-xcode-27-rc.sh")
+SWIFT_TOOLS_COMMAND_PREFIX=("$SWIFT_TOOLS_ROOT/Scripts/with-xcode-27.2.sh")

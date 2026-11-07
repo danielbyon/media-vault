@@ -1,5 +1,11 @@
 # Test Gates
 
+Local and CI test gates require Xcode 27.2 release build `27B52` and the iOS
+27.2 simulator runtime build `24B8117`. The toolchain wrapper checks both before
+running a command and stops if either is missing. It does not download simulator
+runtimes. CI also records the runner image, source revision, and selected
+simulator UDID.
+
 This repository has two test commands with different jobs. The iPhone command
 checks functional behavior. The iPad command compares visual snapshots against
 the committed 2x baseline. In CI, both commands are required gates.
@@ -7,7 +13,7 @@ the committed 2x baseline. In CI, both commands are required gates.
 ## 1. iPhone functional gate
 
 Run `make test`. The command uses `IPHONE_DESTINATION`, which defaults to
-`platform=iOS Simulator,name=iPhone 17,OS=27.0`.
+`platform=iOS Simulator,name=iPhone 17,OS=27.2`.
 
 The App scheme includes both the `AppTests` and `AppHostedTests` test bundles.
 `make test` skips the root surface snapshot suite and the hosted privacy snapshot
@@ -37,16 +43,16 @@ gate. It does not run the snapshot suite. Snapshot evidence comes only from
 
 Run `make test-snapshots`. The command uses `SNAPSHOT_DESTINATION`, which
 defaults to `IPAD_DESTINATION`:
-`platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.0`.
+`platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.2`.
 
-The canonical model is the iPad Pro 11-inch (M5) on iOS 27.0. The iPad mini
+The canonical model is the iPad Pro 11-inch (M5) on iOS 27.2. The iPad mini
 (A17 Pro) is available locally, but its availability on the `xcode-27` CI
 runner is unverified. The implementation keeps one model for local and CI use
 and does not switch models automatically.
 
 The selected simulator reports:
 
-- Runtime build: `24A434`
+- Runtime build: `24B8117`
 - Main-screen scale: `2.000000`
 - Main-screen size: `1668` by `2420` pixels
 - Model identifier: `iPad17,2`
@@ -217,9 +223,29 @@ timeout so a hung test run still reaches that upload step. A missing artifact is
 reported as a warning, and a skipped job or missing artifact must not be read as
 snapshot qualification.
 
-If the `xcode-27` runner does not have the iPad Pro 11-inch (M5) iOS 27.0
+If the `xcode-27` runner does not have the iPad Pro 11-inch (M5) iOS 27.2
 destination, the snapshot job fails and therefore the `Tests` workflow fails.
-Its logs and result bundle are preserved for diagnosis.
+The preflight also requires Xcode 27.2 build `27B52` and runtime build
+`24B8117`. Its logs and result bundle are preserved for diagnosis.
+
+Each CI job resolves its own simulator UDID through `make verify-test-destination`
+or `make verify-snapshot-destination`. The Makefile owns the expected device names
+and OS versions. The resolver reads structured simulator inventories, requires an
+available device with the complete expected name in the pinned runtime and build,
+and checks that the App scheme lists its UDID as an available destination. Duplicate
+names fail unless `VERIFIED_SIMULATOR_UDID` selects one valid device explicitly.
+
+CI passes the preflight step's `simulator_udid` output to the test Make target as
+`VERIFIED_SIMULATOR_UDID`. Local runs resolve once at the start of the target. Both
+schemes reuse that identity. Before each test invocation, the helper checks the
+intended scheme's destinations and rechecks simulator availability, then executes
+`xcodebuild -destination 'platform=iOS Simulator,id=<verified-UDID>'`. Its log records
+the expected and resolved names, runtime identifier and build, UDID, and executed
+command. A device that becomes unavailable causes that invocation to fail.
+
+Run `make destination-test` for the host regression suite. It uses synthetic
+inventories and records the commands received at the execution boundary, including
+both Make test targets. It does not create, erase, or modify simulators.
 
 ## 5. Changing the selection
 
