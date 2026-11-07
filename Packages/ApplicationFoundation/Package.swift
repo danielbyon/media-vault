@@ -93,6 +93,8 @@ let package = Package(
                 ),
                 "CalculatorFeature",
                 "DecoySupport",
+                "MediaLibrary",
+                "PresentationSupport",
                 "VaultFeature",
             ],
         ),
@@ -203,7 +205,9 @@ let package = Package(
             name: "AppFeatureTests",
             dependencies: [
                 "AppFeature",
+                "BrowserFeature",
                 "DecoySupport",
+                "MediaLibrary",
                 "VaultFeature",
                 "FoundationTestSupport",
                 .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),

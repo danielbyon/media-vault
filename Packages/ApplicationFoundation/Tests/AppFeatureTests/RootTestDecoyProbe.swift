@@ -8,6 +8,7 @@
 import AppFeature
 import ComposableArchitecture
 import DecoySupport
+import MediaLibrary
 import SwiftUI
 import VaultFeature
 
@@ -111,15 +112,26 @@ func makeRootStore(
     decoy: RootTestDecoyFixture? = nil,
     verify: @escaping @Sendable (String) async -> VaultCredentialVerificationResult = { _ in .unavailable },
     loadConfiguration: @escaping @Sendable () async throws -> VaultCredentialConfiguration? = { nil },
+    now: @escaping @Sendable () -> ContinuousClock.Instant? = { ContinuousClock().now },
+    applicationReturnPending: Bool = false,
+    mediaLibrary: MediaLibraryClient? = nil,
 ) -> TestStoreOf<RootFeature> {
     let fixture = decoy ?? makeRootTestDecoy()
+    var initialState = RootFeature.State(decoySession: fixture.session, vault: vault)
+    initialState.applicationReturnPending = applicationReturnPending
     let store = TestStore(
-        initialState: RootFeature.State(decoySession: fixture.session, vault: vault),
+        initialState: initialState,
     ) {
         RootFeature(definition: fixture.definition)
     } withDependencies: {
         $0.vaultCredential.verify = verify
         $0.vaultCredential.loadConfiguration = loadConfiguration
+        $0.vaultSessionClock.now = now
+        $0.vaultSessionSettings.load = { .init() }
+        $0.vaultSessionSettings.save = { _ in }
+        if let mediaLibrary {
+            $0.mediaLibrary = mediaLibrary
+        }
     }
     store.exhaustivity = .off(showSkippedAssertions: false)
     return store

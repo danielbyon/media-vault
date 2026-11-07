@@ -165,6 +165,79 @@ struct BrowserPresentationTests {
         }
     }
 
+    @Test("Lock clears transient presentation state while preserving logical tabs")
+    func sessionLockClearsTransientPresentationAndPreservesTabs() async throws {
+        let firstTabID = BrowserTabID()
+        let secondTabID = BrowserTabID()
+        let privateURL = try #require(URL(string: "https://private.example/path"))
+        var state = BrowserFeature.State.readyForTesting(
+            tabs: [
+                .web(id: firstTabID, url: privateURL),
+                .startPage(id: secondTabID),
+            ],
+            selectedTabID: firstTabID,
+            presentation: .tabOverview,
+            focusedField: .chrome,
+            omniboxDraft: "unsubmitted private draft",
+        )
+        state.tabOverviewFocusID = secondTabID
+        state.tabOverviewScrollPosition = secondTabID
+        state.hasUnsubmittedOmniboxDraft = true
+        state.suggestions = [.init(
+            id: "private",
+            title: "Private suggestion",
+            subtitle: nil,
+            kind: .provider("private"),
+        )]
+        state.providerSuggestionValues = ["private suggestion"]
+        state.copiedLink = privateURL
+        state.library = .init(section: .history, referenceDate: .distantPast)
+        state.bookmarkEditor = .init(bookmarkID: nil, title: "Private bookmark", urlDraft: privateURL.absoluteString)
+        state.findDraft = "private search"
+        state.backForwardList = .init(tabID: firstTabID, direction: .back, entries: [])
+        state.javaScriptDialogTabID = firstTabID
+        state.shareURL = privateURL
+        state.shareTitle = "Private page"
+        state.destructiveConfirmation = .clearHistory
+        state.pendingNewTab = .init(url: privateURL, openerID: firstTabID)
+        state.pendingWebAction = .navigate(tabID: firstTabID, url: privateURL)
+        state.pendingProfileChange = .profile(.ephemeral)
+
+        let expectedTabs = state.tabs
+        let expectedSelectedTabID = state.selectedTabID
+        let expectedOpenTabsLifecycle = state.openTabsEntryLifecycle
+        let store = TestStore(initialState: state) { BrowserFeature() }
+
+        await store.send(.sessionLocked) {
+            $0.isSessionLocked = true
+            $0.profileConfigurationGeneration = 1
+            $0.presentation = .browsing
+            $0.tabOverviewFocusID = nil
+            $0.tabOverviewScrollPosition = nil
+            $0.focusedField = .none
+            $0.omniboxDraft = ""
+            $0.hasUnsubmittedOmniboxDraft = false
+            $0.suggestions = []
+            $0.providerSuggestionValues = []
+            $0.copiedLink = nil
+            $0.library = nil
+            $0.bookmarkEditor = nil
+            $0.findDraft = nil
+            $0.backForwardList = nil
+            $0.javaScriptDialogTabID = nil
+            $0.shareURL = nil
+            $0.shareTitle = nil
+            $0.destructiveConfirmation = nil
+            $0.pendingNewTab = nil
+            $0.pendingWebAction = nil
+            $0.pendingProfileChange = nil
+        }
+
+        #expect(store.state.tabs == expectedTabs)
+        #expect(store.state.selectedTabID == expectedSelectedTabID)
+        #expect(store.state.openTabsEntryLifecycle == expectedOpenTabsLifecycle)
+    }
+
     @Test("Delete All Bookmarks confirmation carries the available count")
     func deleteAllBookmarksConfirmation() async throws {
         var state = BrowserFeature.State.readyForTesting(initialTabID: BrowserTabID())

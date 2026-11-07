@@ -5,10 +5,13 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+// swiftformat:options --test-case-name-format standard-identifiers
+
 import ConcurrencyExtras
 import Dispatch
 import Foundation
 import Testing
+import XCTest
 @testable import BrowserFeature
 
 @Suite("Browser open-tabs session projection and persistence")
@@ -120,53 +123,65 @@ struct BrowserOpenTabsSessionTests {
 
     @Test("Revision reservations stay responsive during storage mutations")
     func revisionReservationDoesNotWaitForMutation() async {
+        let waitTimeout: TimeInterval = 10
+        let cleanupTimeout: TimeInterval = 5
         let gate = BrowserPersistenceRevisionGate()
-        let operationStarted = DispatchSemaphore(value: 0)
+        let operationStarted = XCTestExpectation(description: "storage mutation started")
+        let workerFinished = XCTestExpectation(description: "storage mutation worker finished")
         let releaseOperation = DispatchSemaphore(value: 0)
         let operationFinished = LockIsolated(false)
+        let mutationWasAccepted = LockIsolated(false)
         let mutation = Task.detached {
-            gate.perform(revision: 1) {
-                operationStarted.signal()
-                // The mutation stays in flight until this test releases it, so a
-                // reservation made below runs against a mutation that has not
-                // finished. The bounded wait only keeps a failing run from
-                // blocking forever; it never gates a passing run.
+            defer { workerFinished.fulfill() }
+            guard !Task.isCancelled else {
+                return
+            }
+
+            mutationWasAccepted.setValue(gate.perform(revision: 1) {
+                operationStarted.fulfill()
                 _ = releaseOperation.wait(timeout: .now() + 30)
                 operationFinished.setValue(true)
+            })
+        }
+
+        await withTaskCancellationHandler {
+            let didStart = await XCTWaiter.fulfillment(of: [operationStarted], timeout: waitTimeout)
+            if Task.isCancelled || didStart != .completed {
+                releaseOperation.signal()
+                mutation.cancel()
+                let didFinish = await XCTWaiter.fulfillment(of: [workerFinished], timeout: cleanupTimeout)
+                if Task.isCancelled {
+                    return
+                }
+                #expect(didStart == .completed)
+                #expect(didFinish == .completed)
+                return
             }
-        }
 
-        // Starting the detached fixture is test setup rather than product
-        // behavior, so it gets a wide budget: scheduler latency on a loaded
-        // machine must not be mistaken for latency inside the revision gate.
-        let didStartOperation = waitForSignal(operationStarted, timeout: 30)
-        #expect(didStartOperation)
-        guard didStartOperation else {
+            let revision = gate.reserve(after: 1)
+            let reservedDuringMutation = operationFinished.value == false
             releaseOperation.signal()
-            _ = await mutation.value
-            return
+
+            let didFinish = await XCTWaiter.fulfillment(of: [workerFinished], timeout: cleanupTimeout)
+            if Task.isCancelled || didFinish != .completed {
+                releaseOperation.signal()
+                mutation.cancel()
+                let cleanupFinished = await XCTWaiter.fulfillment(of: [workerFinished], timeout: cleanupTimeout)
+                if Task.isCancelled {
+                    return
+                }
+                #expect(didFinish == .completed)
+                #expect(cleanupFinished == .completed)
+                return
+            }
+
+            #expect(reservedDuringMutation)
+            #expect(mutationWasAccepted.value)
+            #expect(revision == 2)
+        } onCancel: {
+            releaseOperation.signal()
+            mutation.cancel()
         }
-
-        // The mutation cannot finish before this test signals
-        // `releaseOperation`, so a reservation that returns while the mutation
-        // is still blocked provably did not wait for it. Asserting that order
-        // replaces an elapsed-time budget, which previously counted scheduler
-        // latency as if it were gate latency and failed on loaded machines.
-        let revision = gate.reserve(after: 1)
-        let reservedDuringMutation = operationFinished.value == false
-        releaseOperation.signal()
-
-        let mutationWasAccepted = await mutation.value
-        #expect(reservedDuringMutation)
-        #expect(mutationWasAccepted)
-        #expect(revision == 2)
-    }
-
-    private func waitForSignal(
-        _ semaphore: DispatchSemaphore,
-        timeout: TimeInterval = 1,
-    ) -> Bool {
-        semaphore.wait(timeout: .now() + timeout) == .success
     }
 
     @Test("Newer save and purge revisions reject older asynchronous work")

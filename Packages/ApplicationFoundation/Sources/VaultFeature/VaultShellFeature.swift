@@ -36,6 +36,9 @@ public struct VaultShellFeature {
         /// Whether navigation-presented settings is visible.
         public var settingsPresented: Bool
 
+        /// Whether shell navigation and presentations are blocked by a vault lock.
+        public var isSessionLocked: Bool
+
         /// The authenticated Library feature state.
         public var library: MediaLibraryFeature.State
 
@@ -46,11 +49,13 @@ public struct VaultShellFeature {
         public init(
             selectedTab: VaultShellTab = .library,
             settingsPresented: Bool = false,
+            isSessionLocked: Bool = false,
             library: MediaLibraryFeature.State = .init(),
             browser: BrowserFeature.State = .init(),
         ) {
             self.selectedTab = selectedTab
             self.settingsPresented = settingsPresented
+            self.isSessionLocked = isSessionLocked
             self.library = library
             self.browser = browser
         }
@@ -88,12 +93,24 @@ public struct VaultShellFeature {
         Reduce { state, action in
             switch action {
             case let .tabSelected(tab):
+                guard !state.isSessionLocked else {
+                    return .none
+                }
+
                 let leavesBrowser = state.selectedTab == .browser && tab != .browser
                 state.selectedTab = tab
                 return leavesBrowser ? .send(.browser(.topLevelDeselected)) : .none
             case .browser(.settingsTapped):
+                guard !state.isSessionLocked else {
+                    return .none
+                }
+
                 state.settingsPresented = true
             case .settingsTapped:
+                guard !state.isSessionLocked else {
+                    return .none
+                }
+
                 state.settingsPresented = true
             case .settingsDismissed:
                 state.settingsPresented = false

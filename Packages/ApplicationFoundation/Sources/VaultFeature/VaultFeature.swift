@@ -5,9 +5,11 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import BrowserFeature
 import ComposableArchitecture
 import DecoySupport
 import Dependencies
+import MediaLibrary
 
 /// The visible lifecycle of the vault boundary.
 public enum VaultFeaturePhase: Equatable, Sendable {
@@ -93,6 +95,58 @@ public struct VaultFeature {
         /// The authenticated navigation shell state.
         public var shell: VaultShellFeature.State
 
+        /// Persisted choices that govern session timeout and emergency locking.
+        public var sessionSettings: VaultSessionSettings = .init()
+
+        /// Indicates whether the process-local settings client has initialized this state.
+        public var sessionSettingsLoaded = false
+
+        /// Advances whenever authentication is invalidated by a new session or global lock.
+        public var sessionGeneration: UInt64 = 0
+
+        /// Distinguishes setup requests that may finish out of order.
+        public var setupRequestGeneration: UInt64 = 0
+
+        /// Distinguishes authentication requests that may finish out of order.
+        public var authenticationRequestGeneration: UInt64 = 0
+
+        /// Distinguishes hidden-entry verification requests within one session.
+        public var hiddenVerificationRequestGeneration: UInt64 = 0
+
+        /// Commits global authorization loss before a scene can reveal private content.
+        public mutating func commitGlobalLock(
+            advanceResourceLoadGeneration: () -> Void,
+        ) -> Effect<VaultFeature.Action> {
+            guard phase != .locked || isWorking || pendingHiddenVerificationID != nil else {
+                return .none
+            }
+
+            advanceResourceLoadGeneration()
+            sessionGeneration &+= 1
+            setupRequestGeneration &+= 1
+            authenticationRequestGeneration &+= 1
+            hiddenVerificationRequestGeneration &+= 1
+            phase = .locked
+            credentialInput = ""
+            confirmationInput = ""
+            setupKind = .pin
+            error = nil
+            isWorking = false
+            pendingHiddenVerificationID = nil
+
+            shell.settingsPresented = false
+            shell.isSessionLocked = true
+            let libraryLock = shell.library.commitSessionLock()
+
+            return .merge(
+                .cancel(id: VaultEffectID.setup),
+                .cancel(id: VaultEffectID.authentication),
+                .cancel(id: VaultEffectID.hiddenVerification),
+                libraryLock.map { .shell(.library($0)) },
+                .send(.shell(.browser(.sessionLocked))),
+            )
+        }
+
         /// Creates vault state for a lifecycle phase.
         public init(
             phase: VaultFeaturePhase = .loading,
@@ -108,7 +162,9 @@ public struct VaultFeature {
             error = nil
             isWorking = false
             pendingHiddenVerificationID = nil
-            shell = .init()
+            shell = .init(isSessionLocked: phase != .authenticated)
+            shell.library.isSessionLocked = phase != .authenticated
+            shell.browser.isSessionLocked = phase != .authenticated
         }
 
         /// Whether the configured credential can participate in hidden decoy entry.
@@ -147,7 +203,11 @@ public struct VaultFeature {
         case submitSetup
 
         /// Delivers the setup operation result.
-        case setupCompleted(Result<VaultCredentialConfiguration, VaultCredentialError>)
+        case setupCompleted(
+            sessionGeneration: UInt64,
+            requestGeneration: UInt64,
+            result: Result<VaultCredentialConfiguration, VaultCredentialError>,
+        )
 
         /// Opens normal authentication for a configured vault.
         case beginAuthentication
@@ -159,7 +219,11 @@ public struct VaultFeature {
         case submitAuthentication
 
         /// Delivers the normal authentication result.
-        case authenticationCompleted(VaultCredentialVerificationResult)
+        case authenticationCompleted(
+            sessionGeneration: UInt64,
+            requestGeneration: UInt64,
+            result: VaultCredentialVerificationResult,
+        )
 
         /// Verifies a transient decoy candidate without exposing its plaintext to host policy.
         case verifyHidden(
@@ -169,9 +233,17 @@ public struct VaultFeature {
 
         /// Delivers a correlated hidden candidate result without returning the candidate.
         case hiddenVerificationCompleted(
-            DecoyHiddenEntryAttempt.ID,
-            Result<Bool, DecoyHiddenEntryError>,
+            sessionGeneration: UInt64,
+            requestGeneration: UInt64,
+            attemptID: DecoyHiddenEntryAttempt.ID,
+            result: Result<Bool, DecoyHiddenEntryError>,
         )
+
+        /// Commits a global lock and invalidates authenticated operations.
+        case lock
+
+        /// Updates authenticated session choices and persists them through the settings client.
+        case sessionSettingsChanged(VaultSessionSettings)
 
         /// Forwards navigation actions after authentication.
         case shell(VaultShellFeature.Action)
@@ -179,6 +251,12 @@ public struct VaultFeature {
 
     @Dependency(\.vaultCredential)
     var credential
+
+    @Dependency(\.vaultSessionSettings)
+    var sessionSettingsClient
+
+    @Dependency(\.mediaLibrary)
+    var mediaLibrary
 
     /// Creates the vault feature.
     public init() {}
@@ -197,10 +275,15 @@ public struct VaultFeature {
 extension VaultFeature {
     private func handle(into state: inout State, action: Action) -> Effect<Action> {
         switch action {
-        case .task,
-             .retryConfiguration,
+        case .task:
+            if !state.sessionSettingsLoaded {
+                state.sessionSettings = sessionSettingsClient.load()
+                state.sessionSettingsLoaded = true
+            }
+            return handleLoading(into: &state, action: action)
+        case .retryConfiguration,
              .configurationLoaded:
-            handleLoading(into: &state, action: action)
+            return handleLoading(into: &state, action: action)
         case .beginSetup,
              .setupKindSelected,
              .setupCredentialChanged,
@@ -208,17 +291,34 @@ extension VaultFeature {
              .pinEqualsChanged,
              .submitSetup,
              .setupCompleted:
-            handleSetup(into: &state, action: action)
+            return handleSetup(into: &state, action: action)
         case .beginAuthentication,
              .authenticationCredentialChanged,
              .submitAuthentication,
              .authenticationCompleted:
-            handleAuthentication(into: &state, action: action)
+            return handleAuthentication(into: &state, action: action)
         case .verifyHidden,
              .hiddenVerificationCompleted:
-            handleHiddenVerification(into: &state, action: action)
+            return handleHiddenVerification(into: &state, action: action)
+        case .lock:
+            return state.commitGlobalLock(
+                advanceResourceLoadGeneration: mediaLibrary.advanceResourceLoadGeneration,
+            )
+        case let .sessionSettingsChanged(settings):
+            guard state.phase == .authenticated, state.sessionSettings != settings else {
+                return .none
+            }
+
+            state.sessionSettings = settings
+            // Save during reduction so rapid changes reach storage in action order.
+            sessionSettingsClient.save(settings)
+            return .none
         case .shell:
-            .none
+            guard state.phase == .authenticated else {
+                return .none
+            }
+
+            return .none
         }
     }
 
@@ -281,6 +381,7 @@ extension VaultFeature {
                 return .none
             }
 
+            state.sessionGeneration &+= 1
             state.phase = .setup
             state.setupKind = .pin
             state.credentialInput = ""
@@ -321,7 +422,15 @@ extension VaultFeature {
             state.usesHiddenEntry = enabled
         case .submitSetup:
             return submitSetup(state: &state)
-        case let .setupCompleted(result):
+        case let .setupCompleted(sessionGeneration, requestGeneration, result):
+            guard state.phase == .setup,
+                  state.isWorking,
+                  state.sessionGeneration == sessionGeneration,
+                  state.setupRequestGeneration == requestGeneration
+            else {
+                return .none
+            }
+
             return completeSetup(result, state: &state)
         default:
             return .none
@@ -338,6 +447,7 @@ extension VaultFeature {
         case let .success(configuration):
             apply(configuration, to: &state)
             state.phase = .authenticated
+            unlockShell(state: &state)
             state.credentialInput = ""
             state.confirmationInput = ""
             state.error = nil
@@ -361,13 +471,17 @@ extension VaultFeature {
                 return .none
             }
 
+            state.sessionGeneration &+= 1
             state.phase = .authentication
             state.isWorking = false
             state.pendingHiddenVerificationID = nil
             state.credentialInput = ""
             state.confirmationInput = ""
             state.error = nil
-            return .cancel(id: VaultEffectID.hiddenVerification)
+            return .merge(
+                .cancel(id: VaultEffectID.authentication),
+                .cancel(id: VaultEffectID.hiddenVerification),
+            )
         case let .authenticationCredentialChanged(value):
             guard state.phase == .authentication else {
                 return .none
@@ -381,13 +495,29 @@ extension VaultFeature {
             }
 
             state.isWorking = true
+            state.authenticationRequestGeneration &+= 1
+            let sessionGeneration = state.sessionGeneration
+            let requestGeneration = state.authenticationRequestGeneration
             let verify = credential.verify
             let candidate = state.credentialInput
             return .run { send in
                 let result = await verify(candidate)
-                await send(.authenticationCompleted(result))
+                await send(.authenticationCompleted(
+                    sessionGeneration: sessionGeneration,
+                    requestGeneration: requestGeneration,
+                    result: result,
+                ))
             }
-        case let .authenticationCompleted(result):
+            .cancellable(id: VaultEffectID.authentication, cancelInFlight: true)
+        case let .authenticationCompleted(sessionGeneration, requestGeneration, result):
+            guard state.phase == .authentication,
+                  state.isWorking,
+                  state.sessionGeneration == sessionGeneration,
+                  state.authenticationRequestGeneration == requestGeneration
+            else {
+                return .none
+            }
+
             completeAuthentication(result, state: &state)
         default:
             return .none
@@ -403,6 +533,7 @@ extension VaultFeature {
         switch result {
         case .succeeded:
             state.phase = .authenticated
+            unlockShell(state: &state)
             state.credentialInput = ""
             state.error = nil
         case .incorrect:
@@ -428,6 +559,9 @@ extension VaultFeature {
 
             state.isWorking = true
             state.pendingHiddenVerificationID = attemptID
+            state.hiddenVerificationRequestGeneration &+= 1
+            let sessionGeneration = state.sessionGeneration
+            let requestGeneration = state.hiddenVerificationRequestGeneration
             let verify = credential.verify
             return .run { send in
                 guard !Task.isCancelled else {
@@ -448,13 +582,20 @@ extension VaultFeature {
                     return
                 }
 
-                await send(.hiddenVerificationCompleted(attemptID, result))
+                await send(.hiddenVerificationCompleted(
+                    sessionGeneration: sessionGeneration,
+                    requestGeneration: requestGeneration,
+                    attemptID: attemptID,
+                    result: result,
+                ))
             }
             .cancellable(id: VaultEffectID.hiddenVerification, cancelInFlight: true)
-        case let .hiddenVerificationCompleted(attemptID, result):
+        case let .hiddenVerificationCompleted(sessionGeneration, requestGeneration, attemptID, result):
             guard state.phase == .locked,
                   state.isWorking,
-                  state.pendingHiddenVerificationID == attemptID
+                  state.pendingHiddenVerificationID == attemptID,
+                  state.sessionGeneration == sessionGeneration,
+                  state.hiddenVerificationRequestGeneration == requestGeneration
             else {
                 return .none
             }
@@ -485,8 +626,15 @@ extension VaultFeature {
         }
 
         state.phase = .authenticated
+        unlockShell(state: &state)
         state.credentialInput = ""
         state.error = nil
+    }
+
+    private func unlockShell(state: inout State) {
+        state.shell.isSessionLocked = false
+        state.shell.library.isSessionLocked = false
+        state.shell.browser.isSessionLocked = false
     }
 
     private func submitSetup(state: inout State) -> Effect<Action> {
@@ -505,23 +653,39 @@ extension VaultFeature {
         }
 
         state.isWorking = true
+        state.setupRequestGeneration &+= 1
+        let sessionGeneration = state.sessionGeneration
+        let requestGeneration = state.setupRequestGeneration
         let configure = credential.configure
         let kind = state.setupKind
         let credentialInput = state.credentialInput
         let usesHiddenEntry = state.usesHiddenEntry
         return .run { send in
             do {
-                try await send(.setupCompleted(.success(configure(
-                    kind,
-                    credentialInput,
-                    usesHiddenEntry,
-                ))))
+                try await send(.setupCompleted(
+                    sessionGeneration: sessionGeneration,
+                    requestGeneration: requestGeneration,
+                    result: .success(configure(
+                        kind,
+                        credentialInput,
+                        usesHiddenEntry,
+                    )),
+                ))
             } catch let error as VaultCredentialError {
-                await send(.setupCompleted(.failure(error)))
+                await send(.setupCompleted(
+                    sessionGeneration: sessionGeneration,
+                    requestGeneration: requestGeneration,
+                    result: .failure(error),
+                ))
             } catch {
-                await send(.setupCompleted(.failure(.unavailable)))
+                await send(.setupCompleted(
+                    sessionGeneration: sessionGeneration,
+                    requestGeneration: requestGeneration,
+                    result: .failure(.unavailable),
+                ))
             }
         }
+        .cancellable(id: VaultEffectID.setup, cancelInFlight: true)
     }
 
     private func apply(
@@ -545,5 +709,7 @@ extension VaultFeature {
 }
 
 private enum VaultEffectID: Hashable {
+    case setup
+    case authentication
     case hiddenVerification
 }

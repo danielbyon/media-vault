@@ -83,6 +83,255 @@ struct BrowserProfileTests {
         adapter.destroyContext(for: selectedTabID)
     }
 
+    @Test("Lock invalidates interrupted profile and open-tab startup requests")
+    func lockResetsInterruptedStartupLifecycles() async {
+        let staleProfileRequestID = UUID(90_001)
+        let staleOpenTabsRequestID = UUID(90_002)
+        let openTabsRevision: UInt64 = 3
+        var state = BrowserFeature.State()
+        state.profileLifecycle = .initializing(requestID: staleProfileRequestID)
+        state.openTabsEntryLifecycle = .restoring(
+            requestID: staleOpenTabsRequestID,
+            revision: openTabsRevision,
+        )
+        state.openTabsRevision = openTabsRevision
+
+        let lockedStore = TestStore(initialState: state) { BrowserFeature() }
+        lockedStore.exhaustivity = .off
+
+        await lockedStore.send(.sessionLocked)
+
+        #expect(lockedStore.state.isSessionLocked)
+        #expect(lockedStore.state.profileLifecycle == .notStarted)
+        #expect(lockedStore.state.openTabsEntryLifecycle == .notEntered)
+
+        let staleSettings = BrowserSettings(browsingProfile: .ephemeral)
+        await lockedStore.send(.loaded(
+            settings: staleSettings,
+            bookmarks: [],
+            history: [],
+            profileConfigurationID: staleProfileRequestID,
+        ))
+        await lockedStore.send(.openTabsSessionLoaded(
+            requestID: staleOpenTabsRequestID,
+            revision: openTabsRevision,
+            data: nil,
+        ))
+        #expect(lockedStore.state.profileLifecycle == .notStarted)
+        #expect(lockedStore.state.openTabsEntryLifecycle == .notEntered)
+
+        let profileGate = BrowserProfileConfigurationGate()
+        let adapter = BrowserWebKitAdapter(requiresProfileConfiguration: true)
+        let fixture = BrowserProfileWebKitFixture(adapter: adapter, gate: profileGate)
+        let sessionLoad = AsyncStream<BrowserOpenTabsSessionLoadOutcome>.makeStream()
+        var settings = BrowserSettings(browsingProfile: .persistentPrivate)
+        settings.preserveOpenTabs = true
+        let persistedSettings = settings
+
+        var unlockedState = lockedStore.state
+        unlockedState.isSessionLocked = false
+        let resumedStore = TestStore(initialState: unlockedState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.load = { persistedSettings }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in await fixture.execute(command) },
+                events: { AsyncStream { $0.finish() } },
+            )
+            $0.browserOpenTabsSession.load = {
+                for await outcome in sessionLoad.stream {
+                    return outcome
+                }
+                return .failed
+            }
+        }
+        resumedStore.exhaustivity = .off
+
+        await resumedStore.send(.browserEntered)
+        await resumedStore.send(.profileInitializationRequested)
+        guard case let .initializing(profileRequestID) = resumedStore.state.profileLifecycle,
+              profileRequestID != staleProfileRequestID
+        else {
+            #expect(Bool(false))
+            return
+        }
+
+        #expect(await profileGate.waitUntilStarted() == .persistentPrivate)
+
+        await resumedStore.send(.loaded(
+            settings: staleSettings,
+            bookmarks: [],
+            history: [],
+            profileConfigurationID: staleProfileRequestID,
+        ))
+        #expect(resumedStore.state.profileLifecycle == .initializing(requestID: profileRequestID))
+
+        await profileGate.release()
+        await resumedStore.receive(.loaded(
+            settings: persistedSettings,
+            bookmarks: [],
+            history: [],
+            profileConfigurationID: profileRequestID,
+        ))
+        guard case let .restoring(openTabsRequestID, resumedRevision) = resumedStore.state.openTabsEntryLifecycle,
+              openTabsRequestID != staleOpenTabsRequestID
+        else {
+            #expect(Bool(false))
+            return
+        }
+
+        #expect(resumedRevision == openTabsRevision)
+
+        await resumedStore.send(.openTabsSessionLoaded(
+            requestID: staleOpenTabsRequestID,
+            revision: openTabsRevision,
+            data: nil,
+        ))
+        await resumedStore.send(.openTabsSessionLoadFailed(
+            requestID: staleOpenTabsRequestID,
+            revision: openTabsRevision,
+        ))
+        #expect(resumedStore.state.openTabsEntryLifecycle == .restoring(
+            requestID: openTabsRequestID,
+            revision: resumedRevision,
+        ))
+
+        sessionLoad.continuation.yield(.missing)
+        await resumedStore.receive(.openTabsSessionLoaded(
+            requestID: openTabsRequestID,
+            revision: resumedRevision,
+            data: nil,
+        ))
+        await resumedStore.finish()
+        #expect(resumedStore.state.profileLifecycle == .ready)
+        #expect(resumedStore.state.openTabsEntryLifecycle == .completed)
+    }
+
+    @Test("A stale profile transition cannot overwrite the profile resumed after lock")
+    func lockedProfileTransitionCannotOverwriteResumedProfile() async throws {
+        let gate = BrowserProfileConfigurationGate()
+        let adapter = BrowserWebKitAdapter(requiresProfileConfiguration: true)
+        let fixture = BrowserProfileWebKitFixture(adapter: adapter, gate: gate)
+        let persistedSettings = BrowserSettings(browsingProfile: .persistentPrivate)
+        let savedSettings = LockIsolated<[BrowserSettings]>([])
+        var initialState = BrowserFeature.State.readyForTesting()
+        initialState.settings = persistedSettings
+        let lockedStore = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.saveRevisioned = { settings, _ in
+                savedSettings.withValue { $0.append(settings) }
+            }
+            $0.browserSettings.load = { persistedSettings }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in await fixture.execute(command) },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        lockedStore.exhaustivity = .off
+
+        await lockedStore.send(.profileChangeRequested(.ephemeral))
+        await lockedStore.send(.profileChangeConfirmed)
+        #expect(await gate.waitUntilStarted() == .ephemeral)
+        await lockedStore.send(.sessionLocked)
+
+        var unlockedState = lockedStore.state
+        unlockedState.isSessionLocked = false
+        let resumedStore = TestStore(initialState: unlockedState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.saveRevisioned = { settings, _ in
+                savedSettings.withValue { $0.append(settings) }
+            }
+            $0.browserSettings.load = { persistedSettings }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in await fixture.execute(command) },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+        resumedStore.exhaustivity = .off
+
+        await resumedStore.send(.browserEntered)
+        await resumedStore.send(.profileInitializationRequested)
+        let resumedRequestID = try #require(resumedStore.state.profileConfigurationRequestID)
+        await resumedStore.receive(.loaded(
+            settings: persistedSettings,
+            bookmarks: [],
+            history: [],
+            profileConfigurationID: resumedRequestID,
+        ))
+        let resumedTabID = resumedStore.state.selectedTabID
+        _ = adapter.ensureContext(for: resumedTabID)
+        let resumedWebView = try #require(adapter.webView(for: resumedTabID))
+        #expect(resumedWebView.configuration.websiteDataStore === WKWebsiteDataStore.default())
+        #expect(savedSettings.value.isEmpty)
+
+        await gate.release()
+        await lockedStore.finish()
+        await resumedStore.finish()
+
+        #expect(lockedStore.state.isSessionLocked)
+        #expect(resumedStore.state.profileLifecycle == .ready)
+        #expect(resumedStore.state.settings.browsingProfile == .persistentPrivate)
+        #expect(adapter.hasContext(for: resumedTabID))
+        #expect(adapter.webView(for: resumedTabID)?.configuration.websiteDataStore === WKWebsiteDataStore.default())
+        #expect(savedSettings.value.isEmpty)
+    }
+
+    @Test("Lock rejects a queued profile configuration before asynchronous invalidation")
+    func lockFencesQueuedProfileConfigurationBeforeAsyncInvalidation() async {
+        let invalidationGate = BrowserProfileConfigurationGate()
+        let profileFence = BrowserWebKitProfileConfigurationFence()
+        let adapter = BrowserWebKitAdapter(
+            requiresProfileConfiguration: true,
+            profileConfigurationFence: profileFence,
+        )
+        let initialState = BrowserFeature.State.readyForTesting()
+        let staleGeneration = initialState.profileConfigurationGeneration
+        let staleConfiguration = BrowserWebKitCommand.configureProfileForGeneration(
+            profile: .ephemeral,
+            retiringTabIDs: [],
+            generation: staleGeneration,
+        )
+        let store = TestStore(initialState: initialState) {
+            BrowserFeature()
+        } withDependencies: {
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in
+                    if case .invalidateProfileConfiguration = command {
+                        await invalidationGate.pause(.ephemeral)
+                    }
+                    await adapter.execute(command)
+                },
+                events: { AsyncStream { $0.finish() } },
+                advanceProfileConfigurationGeneration: { generation in
+                    profileFence.advance(to: generation)
+                },
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.sessionLocked)
+        #expect(await invalidationGate.waitUntilStarted() == .ephemeral)
+
+        adapter.execute(staleConfiguration)
+        let tabID = BrowserTabID(UUID())
+        #expect(adapter.ensureActiveContext(for: tabID) == nil)
+        #expect(!adapter.hasContext(for: tabID))
+
+        await invalidationGate.release()
+        await store.finish()
+    }
+
     @Test("Confirmed switching cancels cleanly, resets the session, and gates immediate navigation")
     func confirmedTransitionGatesNavigationAndPreservesLibrary() async throws {
         let gate = BrowserProfileConfigurationGate()
@@ -424,8 +673,12 @@ struct BrowserProfileTests {
             $0.browserWebKit = BrowserWebKitClient(
                 execute: { command in
                     executedCommands.withValue { $0.append(command) }
-                    if case let .configureProfile(profile, _) = command {
+                    switch command {
+                    case let .configureProfile(profile, _),
+                         let .configureProfileForGeneration(profile, _, _):
                         await gate.pause(profile)
+                    default:
+                        break
                     }
                 },
                 events: { AsyncStream { $0.finish() } },
@@ -445,7 +698,11 @@ struct BrowserProfileTests {
         let configurationID = try #require(store.state.profileConfigurationRequestID)
         #expect(await gate.waitUntilStarted() == .ephemeral)
         #expect(executedCommands.value == [
-            .configureProfile(profile: .ephemeral, retiringTabIDs: []),
+            .configureProfileForGeneration(
+                profile: .ephemeral,
+                retiringTabIDs: [],
+                generation: 1,
+            ),
         ])
 
         await gate.release()
@@ -457,7 +714,11 @@ struct BrowserProfileTests {
         ))
         await store.finish()
 
-        #expect(executedCommands.value.first == .configureProfile(profile: .ephemeral, retiringTabIDs: []))
+        #expect(executedCommands.value.first == .configureProfileForGeneration(
+            profile: .ephemeral,
+            retiringTabIDs: [],
+            generation: 1,
+        ))
         #expect(executedCommands.value.contains(.ensureContext(tabID: targetTabID)))
         let loads = executedCommands.value.compactMap { command -> (BrowserTabID, URL)? in
             guard case let .load(tabID: tabID, url: url, operationID: _) = command else {
@@ -489,8 +750,12 @@ struct BrowserProfileTests {
             $0.browserWebKit = BrowserWebKitClient(
                 execute: { command in
                     executedCommands.withValue { $0.append(command) }
-                    if case let .configureProfile(profile, _) = command {
+                    switch command {
+                    case let .configureProfile(profile, _),
+                         let .configureProfileForGeneration(profile, _, _):
                         await gate.pause(profile)
+                    default:
+                        break
                     }
                 },
                 events: { AsyncStream { $0.finish() } },

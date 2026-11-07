@@ -7,6 +7,7 @@
 
 import BrowserFeature
 import ComposableArchitecture
+import MediaLibrary
 import Testing
 @testable import VaultFeature
 
@@ -56,5 +57,24 @@ struct VaultShellFeatureTests {
             $0.selectedTab = .library
         }
         await store.receive(.browser(.topLevelDeselected))
+    }
+
+    @Test("A locked shell rejects private navigation and settings actions")
+    @MainActor
+    func lockedShellRejectsNavigationAndSettings() async {
+        var state = VaultShellFeature.State(isSessionLocked: true)
+        state.library.isSessionLocked = true
+        state.browser.isSessionLocked = true
+        let store = TestStore(initialState: state) {
+            VaultShellFeature()
+        }
+
+        await store.send(.tabSelected(.browser))
+        await store.send(.settingsTapped)
+        await store.send(.browser(.settingsTapped))
+
+        #expect(store.state.isSessionLocked)
+        #expect(store.state.selectedTab == .library)
+        #expect(!store.state.settingsPresented)
     }
 }
