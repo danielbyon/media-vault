@@ -1,0 +1,66 @@
+Scripts/select-xcode-27.2.sh
+  s_572fff539c3fed::t_858b161910738b 20,34
+  s_572fff539c3fed::t_ec0635e0d0e6ba 1-19,21-33,35-72
+docs/development/testing.md
+  s_572fff539c3fed::t_e87f061bf5b67c 231-248
+  s_572fff539c3fed::t_9c162e1d45c28e 3-8,16,46,48,55,226,228-229
+  s_788102547fc7cb::t_45dd81caa23a8b 230
+Scripts/resolve-xcode-27.2-destination.py
+  s_572fff539c3fed::t_ec691d221af601 116,119
+  s_572fff539c3fed::t_1674352ce6ab3d 1-78,106-115,117-118,120-123,125-167
+  s_572fff539c3fed::t_2b80aaeacfdd8b 79-105,124
+Scripts/ensure-ios-27.2-runtime.sh
+  s_572fff539c3fed::t_ec0635e0d0e6ba 1,4,6-8,11-13,17-20,23-24
+Scripts/with-xcode-27.2.sh
+  s_572fff539c3fed::t_ec0635e0d0e6ba 1,4-5,10,13,36-45
+  s_572fff539c3fed::t_a91386eda87789 12,16,31-34
+  s_572fff539c3fed::t_b64b114e49e684 25
+  s_572fff539c3fed::t_858b161910738b 14-15,17-24,26-30,35
+.github/workflows/tests.yml
+  s_572fff539c3fed::t_59e0f22b33412d 34,36-37,63,100-101,116
+  s_572fff539c3fed::t_e68b81cdee2da3 88-89,99,102,193
+  s_572fff539c3fed::t_cc64d463d2f1fb 23-24,32,35
+  s_572fff539c3fed::t_b152c74990fc0d 33
+Scripts/tests/test-xcode-27.2-destination.py
+  s_572fff539c3fed::t_852c47b60d9f46 170-194
+  s_572fff539c3fed::t_701ba002a7d274 17-18
+  s_572fff539c3fed::t_63645ce4ba6b6c 220
+  s_572fff539c3fed::t_ca129ab1532035 102,221
+  s_572fff539c3fed::t_56d980e5d7b474 1-16,19-53,55,57-101,103-169,195-219,222-232
+  s_572fff539c3fed::t_288bacff0a77f8 54,56
+Scripts/swift-tools-local.sh
+  s_572fff539c3fed::t_ec0635e0d0e6ba 10
+Makefile
+  s_572fff539c3fed::t_59e0f22b33412d 4-6,41,66,110,112,121,182,188,229-239
+  s_572fff539c3fed::t_ec0635e0d0e6ba 3,9-10,13
+Scripts/run-swiftlint-analysis.sh
+  s_572fff539c3fed::t_ec0635e0d0e6ba 7,15
+Scripts/verify-xcode-27.2-destination.sh
+  s_572fff539c3fed::t_22e9f1d0b182fd 1,4-5,7,18,20-22
+  s_572fff539c3fed::t_1674352ce6ab3d 9-16,19,24-25
+  s_572fff539c3fed::t_37b14400949749 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "55ddaf063154e896fa8e5ede43b54447bd29bb95",
+  "prompts": {},
+  "sessions": {
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    },
+    "s_788102547fc7cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b3ca-8578-7dd1-8495-4aae9be5201a",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
