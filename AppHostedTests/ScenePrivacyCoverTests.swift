@@ -773,7 +773,112 @@ extension AppHostedUITests {
             #expect(window.windowScene === scene)
             #expect(scene.windows.contains { $0 === window })
             #expect(window.isKeyWindow == wasKeyWindow)
+            recordCaptureLab(window: window, original: image, name: name)
             assertSnapshot(of: image, as: .image, named: name)
+        }
+
+        /// Records full-precision capture controls for synthetic privacy fixtures.
+        private func recordCaptureLab(window: UIWindow, original: UIImage, name: String) {
+            guard ProcessInfo.processInfo.environment["MV_CAPTURELAB"] == "1",
+                  name.hasSuffix("primary-window-regular-ipad"),
+                  name.contains("inactive-protected") || name.contains("background-protected")
+                  || name.contains("resumed")
+            else { return }
+
+            let prefix = "CAPTURELAB-8ff369f-\(name)"
+            var records: [[String: Any]] = []
+            func record(_ image: UIImage, variant: String, rendered: Bool = true) {
+                guard let cg = image.cgImage else { return }
+                if let png = image.pngData() {
+                    Attachment.record(png, named: "\(prefix)-\(variant).png")
+                }
+                if let raw = cg.dataProvider?.data {
+                    Attachment.record(raw as Data, named: "\(prefix)-\(variant).raw")
+                }
+                records.append([
+                    "variant": variant, "renderedHierarchy": rendered,
+                    "width": cg.width, "height": cg.height, "scale": image.scale,
+                    "bitsPerComponent": cg.bitsPerComponent, "bitsPerPixel": cg.bitsPerPixel,
+                    "bytesPerRow": cg.bytesPerRow, "bitmapInfo": cg.bitmapInfo.rawValue,
+                    "alphaInfo": cg.alphaInfo.rawValue,
+                    "colorSpace": String(describing: cg.colorSpace?.name),
+                    "renderingIntent": cg.renderingIntent.rawValue,
+                ])
+            }
+            func render(_ variant: String, configure: (UIGraphicsImageRendererFormat) -> Void = { _ in },
+                        antialias: Bool? = nil, allowsAntialias: Bool? = nil,
+                        afterUpdates: Bool = true)
+            {
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = window.screen.scale
+                configure(format)
+                var rendered = false
+                let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { context in
+                    if let antialias {
+                        context.cgContext.setShouldAntialias(antialias)
+                    }
+                    if let allowsAntialias {
+                        context.cgContext.setAllowsAntialiasing(allowsAntialias)
+                    }
+                    rendered = window.drawHierarchy(in: window.bounds, afterScreenUpdates: afterUpdates)
+                }
+                record(image, variant: variant, rendered: rendered)
+            }
+            record(original, variant: "original-sampled")
+            render("automatic-control")
+            render("range-extended") { $0.preferredRange = .extended }
+            render("range-standard") { $0.preferredRange = .standard }
+            render("opaque-true") { $0.opaque = true }
+            render("should-antialias-false", antialias: false)
+            render("allows-antialias-false", allowsAntialias: false)
+            render("after-updates-false", afterUpdates: false)
+
+            // Keep the sampled pixel descriptor while replacing the renderer's destination allocation.
+            if let descriptor = original.cgImage,
+               let colorSpace = descriptor.colorSpace,
+               let bitmap = CGContext(
+                   data: nil,
+                   width: descriptor.width,
+                   height: descriptor.height,
+                   bitsPerComponent: descriptor.bitsPerComponent,
+                   bytesPerRow: descriptor.bytesPerRow,
+                   space: colorSpace,
+                   bitmapInfo: descriptor.bitmapInfo.rawValue,
+               )
+            {
+                bitmap.translateBy(x: 0, y: CGFloat(descriptor.height))
+                bitmap.scaleBy(x: original.scale, y: -original.scale)
+                UIGraphicsPushContext(bitmap)
+                let rendered = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                UIGraphicsPopContext()
+                if let image = bitmap.makeImage() {
+                    record(
+                        UIImage(cgImage: image, scale: original.scale, orientation: .up),
+                        variant: "bitmap-original-descriptor",
+                        rendered: rendered,
+                    )
+                } else {
+                    records.append(["variant": "bitmap-original-descriptor", "error": "makeImage failed"])
+                }
+            } else {
+                records.append(["variant": "bitmap-original-descriptor", "error": "context allocation failed"])
+            }
+
+            let metadata: [String: Any] = [
+                "probe": prefix,
+                "originalPath": "UIGraphicsImageRenderer + UIWindow.drawHierarchy; unchanged sampled image",
+                "bounds": NSCoder.string(for: window.bounds),
+                "screenScale": window.screen.scale,
+                "displayScale": window.traitCollection.displayScale,
+                "displayGamut": window.traitCollection.displayGamut.rawValue,
+                "osVersion": UIDevice.current.systemVersion,
+                "simulatorModel": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "nil",
+                "captures": records,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys, .prettyPrinted]) {
+                Attachment.record(data, named: "\(prefix)-metadata.json")
+            }
+            print("[CAPTURELAB-8ff369f] \(name) recorded raw samples and controlled renderer variants")
         }
 
         /// Waits for two matching rendered frames after laying out a regular-width window.
