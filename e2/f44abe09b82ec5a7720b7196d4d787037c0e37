@@ -1,0 +1,25 @@
+AppHostedTests/ScenePrivacyCoverTests.swift
+  s_572fff539c3fed::t_11781be2986498 836-846,849-866
+  s_572fff539c3fed::t_123f6cccad0247 776,780-809,812-816,823-835,867-881
+  s_572fff539c3fed::t_c5ed23f445068b 847-848
+  s_572fff539c3fed::t_8d2da617506c31 810-811,817-822
+  s_572fff539c3fed::t_0d1169be5e1de5 882-883
+App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
+  s_572fff539c3fed::t_61d4a26354400a 29-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e2f44abe09b82ec5a7720b7196d4d787037c0e37",
+  "prompts": {},
+  "sessions": {
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
