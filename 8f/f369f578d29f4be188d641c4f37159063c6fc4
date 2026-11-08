@@ -1,0 +1,19 @@
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserOpenTabsSessionTests.swift
+  s_dc91d14cda0e5d::t_0041311622d613 131-132,136-137,146-152,158-161,187,189-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8ff369f578d29f4be188d641c4f37159063c6fc4",
+  "prompts": {},
+  "sessions": {
+    "s_dc91d14cda0e5d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a915-74f7-7c52-a7c8-bdcf5296b7a3",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
