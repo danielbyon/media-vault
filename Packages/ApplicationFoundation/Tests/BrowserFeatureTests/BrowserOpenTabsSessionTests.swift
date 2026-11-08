@@ -128,9 +128,13 @@ struct BrowserOpenTabsSessionTests {
         let gate = BrowserPersistenceRevisionGate()
         let operationStarted = XCTestExpectation(description: "storage mutation started")
         let workerFinished = XCTestExpectation(description: "storage mutation worker finished")
+        let reservationFinished = XCTestExpectation(description: "revision reservation finished")
+        let reservationQueue = DispatchQueue(label: "BrowserOpenTabsSessionTests.reservation")
         let releaseOperation = DispatchSemaphore(value: 0)
         let operationFinished = LockIsolated(false)
         let mutationWasAccepted = LockIsolated(false)
+        let mutationWasReleased = LockIsolated(false)
+        let reservation = LockIsolated<(revision: UInt64, occurredDuringMutation: Bool)?>(nil)
         let mutation = Task.detached {
             defer { workerFinished.fulfill() }
             guard !Task.isCancelled else {
@@ -139,13 +143,22 @@ struct BrowserOpenTabsSessionTests {
 
             mutationWasAccepted.setValue(gate.perform(revision: 1) {
                 operationStarted.fulfill()
-                _ = releaseOperation.wait(timeout: .now() + 30)
+                reservationQueue.async {
+                    let revision = gate.reserve(after: 1)
+                    reservation.setValue((revision, operationFinished.value == false))
+                    releaseOperation.signal()
+                    reservationFinished.fulfill()
+                }
+                mutationWasReleased.setValue(releaseOperation.wait(timeout: .now() + 30) == .success)
                 operationFinished.setValue(true)
             })
         }
 
         await withTaskCancellationHandler {
-            let didStart = await XCTWaiter.fulfillment(of: [operationStarted], timeout: waitTimeout)
+            let didStart = await XCTWaiter.fulfillment(
+                of: [operationStarted, reservationFinished],
+                timeout: waitTimeout,
+            )
             if Task.isCancelled || didStart != .completed {
                 releaseOperation.signal()
                 mutation.cancel()
@@ -157,10 +170,6 @@ struct BrowserOpenTabsSessionTests {
                 #expect(didFinish == .completed)
                 return
             }
-
-            let revision = gate.reserve(after: 1)
-            let reservedDuringMutation = operationFinished.value == false
-            releaseOperation.signal()
 
             let didFinish = await XCTWaiter.fulfillment(of: [workerFinished], timeout: cleanupTimeout)
             if Task.isCancelled || didFinish != .completed {
@@ -175,9 +184,10 @@ struct BrowserOpenTabsSessionTests {
                 return
             }
 
-            #expect(reservedDuringMutation)
+            #expect(reservation.value?.occurredDuringMutation == true)
             #expect(mutationWasAccepted.value)
-            #expect(revision == 2)
+            #expect(mutationWasReleased.value)
+            #expect(reservation.value?.revision == 2)
         } onCancel: {
             releaseOperation.signal()
             mutation.cancel()
