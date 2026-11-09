@@ -40,6 +40,7 @@
 		A10000000000000000000043 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000004 /* SnapshotTesting */; };
 		A10000000000000000000041 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
 		A10000000000000000000042 /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
+		A10000000000000000000044 /* ScenePrivacyCoverSentinelTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001B /* ScenePrivacyCoverSentinelTestSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +88,7 @@
 		B10000000000000000000018 /* AppHostedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppHostedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000019 /* AppHostedUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHostedUITests.swift; sourceTree = "<group>"; };
 		B1000000000000000000001A /* ScenePrivacyCoverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePrivacyCoverTests.swift; sourceTree = "<group>"; };
+		B1000000000000000000001B /* ScenePrivacyCoverSentinelTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePrivacyCoverSentinelTestSupport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,6 +271,7 @@
 				B10000000000000000000015 /* BrowserViewInteractionTests.swift */,
 				B10000000000000000000019 /* AppHostedUITests.swift */,
 				B1000000000000000000001A /* ScenePrivacyCoverTests.swift */,
+				B1000000000000000000001B /* ScenePrivacyCoverSentinelTestSupport.swift */,
 			);
 			path = AppHostedTests;
 			sourceTree = "<group>";
@@ -564,6 +567,7 @@
 				A10000000000000000000038 /* BrowserViewInteractionTests.swift in Sources */,
 				A1000000000000000000003F /* AppHostedUITests.swift in Sources */,
 				A10000000000000000000040 /* ScenePrivacyCoverTests.swift in Sources */,
+				A10000000000000000000044 /* ScenePrivacyCoverSentinelTestSupport.swift in Sources */,
 				A10000000000000000000039 /* Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserProfileConfigurationGate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

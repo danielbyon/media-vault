@@ -242,13 +242,18 @@ private func compositionStore(
 @MainActor
 private func mountRootView(
     _ store: StoreOf<RootFeature>,
+    frame: CGRect = CGRect(x: 0, y: 0, width: 390, height: 844),
+    horizontalSizeClass: UIUserInterfaceSizeClass = .compact,
+    verticalSizeClass: UIUserInterfaceSizeClass = .regular,
 ) -> (UIHostingController<AnyView>, UIWindow) {
     // A directly created test window has no scene lifecycle to mark it foreground.
     _ = store.send(.applicationPhaseChanged(.active))
     let rootView = RootView(store: store)
     let foregroundRootView = rootView.environment(\.scenePhase, ScenePhase.active)
     let controller = UIHostingController(rootView: AnyView(foregroundRootView))
-    let window = UIKitTestSupport.makeWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    controller.traitOverrides.horizontalSizeClass = horizontalSizeClass
+    controller.traitOverrides.verticalSizeClass = verticalSizeClass
+    let window = UIKitTestSupport.makeWindow(frame: frame)
     window.rootViewController = controller
     window.makeKeyAndVisible()
     controller.view.frame = window.bounds

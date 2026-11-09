@@ -433,7 +433,7 @@ private final class ScenePrivacyCoverViewController: UIViewController {
 /// The fixed labels do not accept input or appear in the accessibility tree. Their layout stays
 /// inside the safe area and caps the content width on iPad.
 @MainActor
-private final class ScenePrivacyCoverCalculatorView: UIView {
+final class ScenePrivacyCoverCalculatorView: UIView {
     private static let keypadGlyphs = [
         ["⌫", "AC", "%", "÷"],
         ["7", "8", "9", "×"],

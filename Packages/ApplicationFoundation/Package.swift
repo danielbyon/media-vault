@@ -160,6 +160,8 @@ let package = Package(
             name: "PresentationSupportTests",
             dependencies: [
                 "PresentationSupport",
+                "FoundationTestSupport",
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
         ),
         .testTarget(

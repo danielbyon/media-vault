@@ -13,14 +13,17 @@ IPAD_DESTINATION ?= platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.2
 # one model consistently: iPad Pro 11-inch (M5), iOS 27.2, at 2x scale.
 SNAPSHOT_DESTINATION ?= $(IPAD_DESTINATION)
 # Snapshot suites are kept out of the iPhone gate. The App scheme owns the root
-# surface suite; the package scheme owns the remaining four suites.
+# surface and hosted privacy snapshots; the package scheme owns five snapshot suites.
 APP_SNAPSHOT_SUITE := AppTests/RootSurfaceSnapshotTests
+# Keep the legacy lifecycle snapshots selected until their replacement coverage passes.
 APP_HOSTED_PRIVACY_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacySnapshotsCoverLifecycleStates
+APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates
 PACKAGE_SNAPSHOT_SUITES := \
 	AppFeatureTests/VaultFeatureViewSnapshotTests \
 	CalculatorFeatureTests/CalculatorViewSnapshotTests \
 	MediaLibraryTests/MediaLibrarySnapshotTests \
-	BrowserFeatureTests/BrowserViewSnapshotTests
+	BrowserFeatureTests/BrowserViewSnapshotTests \
+	PresentationSupportTests/ScenePrivacyCoverCalculatorSnapshotTests
 # Optional external directory for preserving xcresult bundles. Each test
 # invocation writes a bundle below its temporary test root; the bundle is
 # copied here before the temporary root is removed.
@@ -107,7 +110,7 @@ test:
 		fi; \
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' test; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test; \
 	assert_tests_ran App "$$test_root/App.xcresult"; \
 	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
 	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"
@@ -179,7 +182,7 @@ test-snapshots:
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
 	app_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' -only-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
 	app_count_status=0; \
 	assert_tests_ran App "$$test_root/App.xcresult" || app_count_status=$$?; \
 	remember_failure App-xcodebuild "$$app_xcode_status"; \

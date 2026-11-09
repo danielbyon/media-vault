@@ -58,6 +58,7 @@ struct ScenePrivacyCoverPolicyTests {
 
         policy.sceneWillDeactivate()
         policy.update(isCoveredByCaller: false)
+        policy.update(isCoveredByCaller: false)
         policy.sceneDidActivate()
 
         #expect(policy.shouldShowCover)
@@ -66,6 +67,28 @@ struct ScenePrivacyCoverPolicyTests {
         #expect(policy.shouldShowCover)
 
         policy.update(isCoveredByCaller: false)
+
+        #expect(!policy.shouldShowCover)
+    }
+
+    @Test("A repeated deactivation preserves a validated coverage transition")
+    func repeatedDeactivationPreservesValidatedCoverageTransition() {
+        var policy = ScenePrivacyCoverPolicy(isCoveredByCaller: false, isSceneActive: true)
+
+        policy.sceneWillDeactivate()
+        #expect(policy.shouldShowCover)
+
+        policy.update(isCoveredByCaller: true)
+        #expect(policy.shouldShowCover)
+
+        policy.update(isCoveredByCaller: false)
+        #expect(policy.shouldShowCover)
+
+        policy.sceneWillDeactivate()
+
+        #expect(policy.shouldShowCover)
+
+        policy.sceneDidActivate()
 
         #expect(!policy.shouldShowCover)
     }

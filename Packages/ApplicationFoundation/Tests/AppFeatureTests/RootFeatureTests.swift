@@ -357,6 +357,82 @@ struct RootFeatureTests {
         #expect(decoy.probe.completions == expectedCompletions)
     }
 
+    @Test("A background return cancels a pending hidden verification", .timeLimit(.minutes(1)))
+    @MainActor
+    func backgroundReturnCancelsPendingHiddenVerification() async {
+        let verificationStarted = PendingVerificationStart()
+        let pendingVerification = PendingVerificationResponse()
+        let verificationCancellationObserved = LockIsolated<Bool?>(nil)
+        let decoy = makeRootTestDecoy()
+        let attempt = DecoyHiddenEntryAttempt(
+            id: .init(UUID()),
+            triggerID: decoy.credentialTrigger.id,
+            intent: .credentialCandidate(.init("1234")),
+        )
+        let store = makeRootStore(
+            vault: VaultFeature.State(
+                phase: .locked,
+                configuredKind: .pin,
+                usesHiddenEntry: true,
+            ),
+            decoy: decoy,
+            verify: { _ in
+                let result = await pendingVerification.suspend {
+                    verificationStarted.resumeOnce(started: true)
+                }
+                verificationCancellationObserved.withValue { $0 = Task.isCancelled }
+                return result
+            },
+        )
+        defer {
+            verificationStarted.resumeOnce(started: false)
+            pendingVerification.resumeOnce(with: .unavailable)
+        }
+
+        await store.send(.decoyAttempt(attempt))
+        await store.receive(
+            .vault(.verifyHidden(attemptID: attempt.id, candidate: .init("1234"))),
+        )
+        let didStartVerification = await withTaskCancellationHandler(
+            operation: {
+                await verificationStarted.wait()
+            },
+            onCancel: {
+                verificationStarted.resumeOnce(started: false)
+                pendingVerification.resumeOnce(with: .unavailable)
+            },
+        )
+        #expect(didStartVerification)
+        #expect(store.state.vault.phase == .locked)
+        #expect(store.state.vault.isWorking)
+        #expect(store.state.vault.pendingHiddenVerificationID == attempt.id)
+
+        await store.send(.applicationPhaseChanged(.background))
+
+        #expect(store.state.applicationReturnPending)
+        #expect(store.state.vault.phase == .locked)
+        #expect(store.state.vault.isWorking)
+        #expect(store.state.vault.pendingHiddenVerificationID == attempt.id)
+
+        await store.send(.applicationPhaseChanged(.active))
+
+        #expect(!store.state.applicationReturnPending)
+        #expect(store.state.vault.phase == .locked)
+        #expect(!store.state.vault.isWorking)
+        #expect(store.state.vault.pendingHiddenVerificationID == nil)
+        #expect(store.state.pendingHiddenAttemptID == nil)
+        #expect(store.state.vault.shell.isSessionLocked)
+
+        pendingVerification.resumeOnce(with: .succeeded)
+        await store.finish()
+
+        #expect(verificationCancellationObserved.value == true)
+        #expect(store.state.vault.phase == .locked)
+        #expect(store.state.vault.pendingHiddenVerificationID == nil)
+        #expect(store.state.pendingHiddenAttemptID == nil)
+        #expect(store.state.vault.shell.isSessionLocked)
+    }
+
     @MainActor
     private func assertCredentialResult(
         _ verification: VaultCredentialVerificationResult,
@@ -738,6 +814,41 @@ struct RootFeatureTests {
         await store.finish()
     }
 
+    @Test("Repeated background and intervening inactive notifications preserve the original grace period")
+    @MainActor
+    func repeatedBackgroundAndInactiveNotificationsPreserveOriginalGracePeriod() async {
+        let clock = ContinuousClock()
+        let backgroundStart = clock.now
+        let currentTime = LockIsolated<ContinuousClock.Instant?>(backgroundStart)
+        var vault = VaultFeature.State(phase: .authenticated)
+        vault.sessionSettings.autoLockTimeout = .seconds30
+        let store = makeRootStore(vault: vault, now: { currentTime.value })
+
+        await store.send(.applicationPhaseChanged(.background)) {
+            $0.applicationReturnPending = true
+            $0.autoLockBackgroundStartedAt = backgroundStart
+            $0.autoLockTimeoutAtBackground = .seconds(30)
+        }
+        currentTime.withValue { $0 = backgroundStart.advanced(by: .seconds(10)) }
+        await store.send(.applicationPhaseChanged(.inactive))
+        await store.send(.applicationPhaseChanged(.background))
+
+        #expect(store.state.applicationReturnPending)
+        #expect(store.state.autoLockBackgroundStartedAt == backgroundStart)
+        #expect(store.state.autoLockTimeoutAtBackground == .seconds(30))
+
+        currentTime.withValue { $0 = backgroundStart.advanced(by: .seconds(30)) }
+        await store.send(.applicationPhaseChanged(.active)) {
+            $0.autoLockBackgroundStartedAt = nil
+            $0.autoLockTimeoutAtBackground = nil
+            $0.applicationReturnPending = false
+            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+        }
+
+        #expect(store.state.vault.phase == .locked)
+        await store.finish()
+    }
+
     @Test("Emergency locking requires the selected gesture in a foreground scene")
     @MainActor
     func emergencyLockGestureRequiresSelectionAndForeground() async {
@@ -835,5 +946,96 @@ struct RootFeatureTests {
         )
         configuredObserver.onRecognized(.shake, true)
         #expect(configuredStore.vault.phase == .locked)
+    }
+}
+
+private final class PendingVerificationResponse: @unchecked Sendable {
+    private enum State {
+        case awaitingContinuation
+        case suspended(CheckedContinuation<VaultCredentialVerificationResult, Never>)
+        case completed(VaultCredentialVerificationResult)
+    }
+
+    private let state = LockIsolated<State>(.awaitingContinuation)
+
+    func suspend(onStart: @Sendable () -> Void) async -> VaultCredentialVerificationResult {
+        await withCheckedContinuation { continuation in
+            let immediateResult = state.withValue { state -> VaultCredentialVerificationResult? in
+                switch state {
+                case .awaitingContinuation:
+                    state = .suspended(continuation)
+                    onStart()
+                    return nil
+                case let .completed(result):
+                    return result
+                case .suspended:
+                    return .unavailable
+                }
+            }
+            if let immediateResult {
+                continuation.resume(returning: immediateResult)
+            }
+        }
+    }
+
+    func resumeOnce(with result: VaultCredentialVerificationResult) {
+        let continuation = state.withValue { state -> CheckedContinuation<VaultCredentialVerificationResult, Never>? in
+            switch state {
+            case .awaitingContinuation:
+                state = .completed(result)
+                return nil
+            case let .suspended(continuation):
+                state = .completed(result)
+                return continuation
+            case .completed:
+                return nil
+            }
+        }
+        continuation?.resume(returning: result)
+    }
+}
+
+private final class PendingVerificationStart: @unchecked Sendable {
+    private enum State {
+        case awaitingContinuation
+        case suspended(CheckedContinuation<Bool, Never>)
+        case completed(Bool)
+    }
+
+    private let state = LockIsolated<State>(.awaitingContinuation)
+
+    func wait() async -> Bool {
+        await withCheckedContinuation { continuation in
+            let immediateResult = state.withValue { state -> Bool? in
+                switch state {
+                case .awaitingContinuation:
+                    state = .suspended(continuation)
+                    return nil
+                case let .completed(started):
+                    return started
+                case .suspended:
+                    return false
+                }
+            }
+            if let immediateResult {
+                continuation.resume(returning: immediateResult)
+            }
+        }
+    }
+
+    func resumeOnce(started: Bool) {
+        let continuation = state.withValue { state -> CheckedContinuation<Bool, Never>? in
+            switch state {
+            case .awaitingContinuation:
+                state = .completed(started)
+                return nil
+            case let .suspended(continuation):
+                state = .completed(started)
+                return continuation
+            case .completed:
+                return nil
+            }
+        }
+        continuation?.resume(returning: started)
     }
 }

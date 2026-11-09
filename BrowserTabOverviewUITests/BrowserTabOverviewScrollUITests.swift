@@ -97,6 +97,31 @@ final class BrowserTabOverviewScrollUITests: XCTestCase {
         XCTAssertEqual(savedAnchor.label, "anchor-38|commits-0")
     }
 
+    func testAuthenticatedShellTabsAreAccessibleAndChangeDestinations() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--vault-lock-control"]
+        app.launch()
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+
+        let collections = app.tabBars.buttons["Collections"]
+        XCTAssertTrue(collections.waitForExistence(timeout: 10), app.debugDescription)
+        collections.tap()
+        XCTAssertTrue(app.navigationBars["Collections"].waitForExistence(timeout: 10), app.debugDescription)
+
+        let browser = app.tabBars.buttons["Browser"]
+        XCTAssertTrue(browser.waitForExistence(timeout: 10), app.debugDescription)
+        browser.tap()
+        XCTAssertTrue(app.staticTexts["Start Page"].waitForExistence(timeout: 10), app.debugDescription)
+
+        let library = app.tabBars.buttons["Library"]
+        XCTAssertTrue(library.waitForExistence(timeout: 10), app.debugDescription)
+        library.tap()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10), app.debugDescription)
+
+        app.terminate()
+    }
+
     func testPersistentLockControlIsAccessibleAcrossAuthenticatedDestinations() {
         for destination in ["library", "collections", "browser-start", "browser-navigation", "tab-overview"] {
             let app = XCUIApplication()
