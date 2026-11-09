@@ -1,0 +1,19 @@
+Scripts/tests/test-xcode-27.2-destination.py
+  s_572fff539c3fed::t_4c5bd8f524d6b2 209,214-215,217-233,242-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1242330a88449527c697fc3970c600d2807a6a53",
+  "prompts": {},
+  "sessions": {
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
