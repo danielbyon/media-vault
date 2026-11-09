@@ -1,0 +1,45 @@
+Makefile
+  s_572fff539c3fed::t_3f6aa9081eb7e3 17,114,121-122,189
+  s_572fff539c3fed::t_5ae46e4323df18 7,70,117,119
+  s_572fff539c3fed::t_bf7225b4b18f8d 5
+  s_572fff539c3fed::t_89655a8da16bd3 20,118
+docs/development/testing.md
+  s_572fff539c3fed::t_54bd7f6703cf14 47-51
+  s_572fff539c3fed::t_4159698b17ec1b 30-32
+  s_572fff539c3fed::t_9e22c10e461b3f 72
+  s_572fff539c3fed::t_4d5523039fa2fe 53,66-67,69,74-75
+  s_572fff539c3fed::t_0a3576735c8ac5 398-405,410
+  s_572fff539c3fed::t_6928b888b084c8 146
+  s_572fff539c3fed::t_accc812092e946 213-217,260-264,276-277
+  s_572fff539c3fed::t_bd1ec3319d5517 46,247-249
+  s_572fff539c3fed::t_b2baff967c142c 57-58,92,97-99,115-122
+  s_572fff539c3fed::t_086becf9899643 80,86-90
+  s_572fff539c3fed::t_1a7d96d1771596 246
+  s_572fff539c3fed::t_7b565062a63a8c 370,376-377
+  s_572fff539c3fed::t_a4d26cdf31c9bc 371-372
+  s_572fff539c3fed::t_3ab5a2738b60ec 392-397,406-409,411
+  s_572fff539c3fed::t_6256170a75cc02 24-29,34-36,39-42
+  s_572fff539c3fed::t_e61d239879c165 373-375
+  s_572fff539c3fed::t_83b2e37f02a087 21
+  s_572fff539c3fed::t_5f0ab1afd37680 188-191,194-195,197,207
+  s_572fff539c3fed::t_0234c122bb2d82 52
+  s_572fff539c3fed::t_37d813bc371557 91
+AppHostedTests/ScenePrivacyCoverTests.swift
+  s_572fff539c3fed::t_8384f093728ca2 1007
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d7215e5498d1136434d6457d4fd5bb3bac4cfed6",
+  "prompts": {},
+  "sessions": {
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
