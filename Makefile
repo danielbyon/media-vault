@@ -2,8 +2,9 @@ SHELL := /bin/bash
 
 XCODE_WRAPPER := ./Scripts/with-xcode-27.2.sh
 DESTINATION_VERIFIER := ./Scripts/verify-xcode-27.2-destination.sh
-# CI supplies the preflight UDID. Local runs resolve once and reuse it for both schemes.
+# CI may supply verified device IDs; local runs resolve one per destination.
 VERIFIED_SIMULATOR_UDID ?=
+VERIFIED_IPAD_SIMULATOR_UDID ?=
 # xcodebuild cannot present first-use trust prompts in this noninteractive gate.
 XCODEBUILD_OPTIONS := -skipMacroValidation
 IPHONE_DESTINATION ?= platform=iOS Simulator,name=iPhone 17,OS=27.2
@@ -13,11 +14,10 @@ IPAD_DESTINATION ?= platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.2
 # one model consistently: iPad Pro 11-inch (M5), iOS 27.2, at 2x scale.
 SNAPSHOT_DESTINATION ?= $(IPAD_DESTINATION)
 # Snapshot suites are kept out of the iPhone gate. The App scheme owns the root
-# surface and hosted privacy snapshots; the package scheme owns five snapshot suites.
+# surface and hosted privacy-presentation snapshots; the package scheme owns five snapshot suites.
 APP_SNAPSHOT_SUITE := AppTests/RootSurfaceSnapshotTests
-# Keep the legacy lifecycle snapshots selected until their replacement coverage passes.
-APP_HOSTED_PRIVACY_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacySnapshotsCoverLifecycleStates
 APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates
+APP_HOSTED_PRIVACY_OCCLUSION_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)
 PACKAGE_SNAPSHOT_SUITES := \
 	AppFeatureTests/VaultFeatureViewSnapshotTests \
 	CalculatorFeatureTests/CalculatorViewSnapshotTests \
@@ -67,6 +67,7 @@ build:
 test:
 	@set -euo pipefail; \
 	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
+	ipad_simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' '$(VERIFIED_IPAD_SIMULATOR_UDID)' | tail -n 1); \
 	mkdir -p "$(CURDIR)/.build"; \
 	test_root=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-test.XXXXXX"); \
 	test_results=""; \
@@ -110,12 +111,15 @@ test:
 		fi; \
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test; \
 	assert_tests_ran App "$$test_root/App.xcresult"; \
 	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
-	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"
+	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$test_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
+	assert_tests_ran App-iPad-privacy "$$test_root/App-iPadPrivacy.xcresult"
 
-# Exercise the visual snapshot suites and hosted privacy lifecycle on the canonical 2x iPad.
+# Exercise the native presentation snapshot suites on the canonical 2x iPad.
+# UIKit lifecycle protection remains covered by behavioral tests in `make test`.
 # Both schemes run even when the first suite fails so the complete failure
 # inventory is available. The canonical 2x reference baseline is required, and
 # exact snapshot comparisons must pass.
@@ -182,7 +186,7 @@ test-snapshots:
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
 	app_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_PRIVACY_SNAPSHOT_TEST)()' -only-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
 	app_count_status=0; \
 	assert_tests_ran App "$$test_root/App.xcresult" || app_count_status=$$?; \
 	remember_failure App-xcodebuild "$$app_xcode_status"; \
