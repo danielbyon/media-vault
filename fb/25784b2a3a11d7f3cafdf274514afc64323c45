@@ -1,0 +1,148 @@
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserSettingsPersistenceTests.swift
+  s_572fff539c3fed::t_f5b5c4befb6ea0 19,28,51,65,81,97,144,167,177-178,192-193,255,262-264
+  s_572fff539c3fed::t_562b39c6df054a 190-191,194-202,280
+  s_572fff539c3fed::t_5cbf27a2a576c5 114-137,206-209,220-223,238-241,265-279
+  s_572fff539c3fed::t_c6bb015c8ae5da 188-189
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootFeatureTests.swift
+  s_572fff539c3fed::t_0fba855b2e982b 364,380,387,389-390,426,951-994
+  s_572fff539c3fed::t_96eb9a0593ef42 360
+  s_572fff539c3fed::t_66409ca559a0c1 397,399-400,402-404
+  s_572fff539c3fed::t_792c49f2460ab4 365,383-384,429
+  s_572fff539c3fed::t_136ba81521018d 363,381,388,396,398,401,405,995-1041
+  s_572fff539c3fed::t_7c9d965c6dfc23 361,366-379,382,385-386,391-395,406-425,427-428,430-435
+  s_572fff539c3fed::t_7528b45638fe94 817-851
+  s_572fff539c3fed::t_f89503eed5aa00 362
+AppHostedTests/ScenePrivacyCoverTests.swift
+  s_572fff539c3fed::t_ae84b36a8fa949 431,434-437,448-449,475,481,495-497,539-541,547-549,551-553,556-560,562-564,567-568,573-575,587-589,600-602,624-626,640-642,659-661,679-683,694-695,992-995,997-1000,1002-1005,1007-1009,1011-1013,1015-1018,1020-1023,1029-1038,1040-1044,1046-1049,1051-1060,1062-1063,1410-1417,1424-1427,1431,1433-1434,1436-1461
+  s_572fff539c3fed::t_f89503eed5aa00 498-499,542-543,554-555,565-566,576-577,590-591,603-604,627-628,643-644,662-663,1488-1489,1582,2242
+  s_572fff539c3fed::t_9884f8d206449e 686-690
+  s_572fff539c3fed::t_d3c96dc1e93b7c 1515
+  s_572fff539c3fed::t_435d32ceec21d3 2207
+  s_572fff539c3fed::t_6f352c3ffd8e94 502-503,505,511-519
+  s_572fff539c3fed::t_645d1637a9bd5e 433,2328-2332
+  s_572fff539c3fed::t_06cf7b536d5a52 608,618,713,731,766,772
+  s_572fff539c3fed::t_d0f829acf3f813 1174-1176,1181-1187,1192-1193
+  s_572fff539c3fed::t_08becf7b5d7430 1514,1575
+  s_572fff539c3fed::t_5260f5ad3252f9 142-144,146
+  s_572fff539c3fed::t_1b737f33382cdb 440-444
+  s_572fff539c3fed::t_9ea83e4233cb88 1576
+  s_572fff539c3fed::t_e28f70f6f21032 2212
+  s_572fff539c3fed::t_1ced3d65420f2b 1010,1014,1024-1028,1045,1050
+  s_572fff539c3fed::t_80cc02967a26d2 2324
+  s_572fff539c3fed::t_e3108c52445728 121,145,533,2127,2203,2208,2220
+  s_572fff539c3fed::t_9dfd948749f383 459,464-474,476-480,482,484-488,490-493,500-501,504,506-510,520-524,528,534-537,544-546,569-571,578-585,592-597,622,629-638,645,647-655,657,664,667,669,673-678,684-685,691-693,696-699,701,704-712,714-730,732-758,761-765,767-771,773-796
+  s_572fff539c3fed::t_5eeacfd94373fc 2214,2230-2231
+  s_572fff539c3fed::t_a4765b3a3422cc 828-832
+  s_572fff539c3fed::t_3ae83f428535eb 2217-2219
+  s_572fff539c3fed::t_9d88927d61170e 118-120,122,529-532,1064,2124-2126,2128,2200-2202,2204-2205,2209,2211,2213,2215-2216,2221-2222,2232-2237,2240-2241,2245-2246,2248-2249
+  s_572fff539c3fed::t_50bdb6302e672e 702-703,759-760,856-857,946-947
+  s_572fff539c3fed::t_49020137dbfeb5 1435
+  s_572fff539c3fed::t_122ec0c9566357 525-527
+  s_572fff539c3fed::t_dc753f7114e352 1516-1556,1560,1562-1566,1572,1584-1585,1607,1613-1616,1619,1623,1627-1630
+  s_572fff539c3fed::t_e734bd8715a52e 2210
+  s_572fff539c3fed::t_3f89142c6a935b 1071-1074,1078-1080,1082,1111-1116
+  s_572fff539c3fed::t_756ffbc0753f3a 432
+  s_572fff539c3fed::t_7fa0290493ce8b 445-447,450-451,458,460-461,463,483,489,646,656,665-666,668,670-672,797-801,2250-2251
+  s_572fff539c3fed::t_a0a71f2fb4d236 438-439,598,605-607,609-617,619-621
+  s_572fff539c3fed::t_ebe98f1d3fdf80 452-457
+  s_572fff539c3fed::t_e6b6dca2a24d84 2206
+  s_572fff539c3fed::t_5276758eec5855 23
+  s_572fff539c3fed::t_66a12155e6e924 991,1006,1019,1039,1061,1418-1423,1428-1430,1432,1462-1487,1490-1503
+  s_572fff539c3fed::t_b80aae2aa81d9f 2223-2229
+  s_572fff539c3fed::t_92a4389322e680 1065,1504,2351-2368
+  s_572fff539c3fed::t_889de49c223630 102
+  s_572fff539c3fed::t_98382ae8cbb327 462,700,841,1163,1169-1171,1188,1191
+  s_572fff539c3fed::t_01d0ccd8c7dd2b 809,814
+  s_572fff539c3fed::t_2fc737b9d0e8bd 996,1001
+  s_572fff539c3fed::t_5bc1a898e35cb0 1577-1581,1583,1586-1590
+  s_572fff539c3fed::t_ef43cb3ea98d1a 2238-2239,2243-2244,2247
+  s_572fff539c3fed::t_fb374617226efd 494,538,550,561,572,586,599,623,639,658,1066,1505,2333
+AppHostedTests/AppHostedRootFeatureTests.swift
+  s_572fff539c3fed::t_068343454df1b9 245-247,254-256
+App.xcodeproj/project.pbxproj
+  s_572fff539c3fed::t_5276758eec5855 43,91,274,570
+Makefile
+  s_572fff539c3fed::t_9b5c486e44f5f1 18
+  s_572fff539c3fed::t_997959d72b26f5 20,25-26,113,185
+  s_572fff539c3fed::t_aeb6ebd767fc63 16
+Packages/ApplicationFoundation/Tests/PresentationSupportTests/ScenePrivacyCoverPolicyTests.swift
+  s_572fff539c3fed::t_beea54119e90bb 61,74-78,81,87-91
+  s_572fff539c3fed::t_414aa33d96cce9 79-80,82-86
+  s_572fff539c3fed::t_66f4b435410639 92-94
+  s_afbe65b1c4ced0::t_d836ad11b500ac 95
+AppHostedTests/ScenePrivacyCoverSentinelTestSupport.swift
+  s_572fff539c3fed::t_1e3ed304566993 8,10
+  s_572fff539c3fed::t_99ee2941cb7ca8 1-7,9,11-24,26-143,145-166
+  s_572fff539c3fed::t_f89503eed5aa00 25,144
+Packages/ApplicationFoundation/Package.swift
+  s_572fff539c3fed::t_d330c32f1e4d3c 163-164
+BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests.swift
+  s_572fff539c3fed::t_d41f88adb35b75 115
+  s_572fff539c3fed::t_a5d7f6d0dd3e2a 100-114,116-124
+docs/development/testing.md
+  s_572fff539c3fed::t_5c11ca34f802b7 270-273,276
+  s_572fff539c3fed::t_2775f10c279d27 291-298
+  s_572fff539c3fed::t_7cb89ec29d9245 302-303
+  s_572fff539c3fed::t_ca50570ab65deb 13-14,17-19,23,29
+  s_572fff539c3fed::t_3e98df20fd9ee5 20,22,174
+  s_572fff539c3fed::t_4f45c69214288c 15-16
+  s_572fff539c3fed::t_215a3b71b50a87 43-44,48-53,61,78,213-218
+  s_572fff539c3fed::t_633494b64eab4d 285-286
+  s_572fff539c3fed::t_b06b61f6c799e7 54-55,57
+  s_572fff539c3fed::t_6fec34a3f68055 38-42,92-106,175-176
+  s_572fff539c3fed::t_7187391a248a2d 167-173,209-211
+  s_572fff539c3fed::t_4bdf792079101b 207-208,220
+  s_572fff539c3fed::t_f86a10e8bacd67 73-74
+  s_572fff539c3fed::t_7f69656a559f38 114-115,119,122,128,160-161,184,198-199,205,227,304
+  s_572fff539c3fed::t_9f9f65280f8f7a 31,36-37,45-47,58-60,71,75-76,85-91
+  s_572fff539c3fed::t_9d1f40bcca181e 130-133,135-136
+  s_572fff539c3fed::t_2eb3933c26f411 21,24-28,185-197
+  s_572fff539c3fed::t_54eca9b80e5879 62-70,282-284
+  s_572fff539c3fed::t_e05d3afd0aade8 107
+  s_572fff539c3fed::t_08f364da90e7e6 32,34-35,72
+  s_572fff539c3fed::t_869e0665a2ccfe 228,264-268,274-275,287-290
+  s_572fff539c3fed::t_d4a289d1f1a3aa 223
+  s_572fff539c3fed::t_a94a56d21e9944 269
+  s_572fff539c3fed::t_959f6c0996b308 56
+  s_572fff539c3fed::t_ee8fc2ffc223a8 30,33,77,79-84,177-181
+  s_572fff539c3fed::t_756ffbc0753f3a 182
+  s_464319f20482ed::t_56c58b6430af70 183
+Packages/ApplicationFoundation/Tests/PresentationSupportTests/ScenePrivacyCoverCalculatorSnapshotTests.swift
+  s_572fff539c3fed::t_d330c32f1e4d3c 1-7,10-48,50-55
+  s_572fff539c3fed::t_1e3ed304566993 8-9
+  s_572fff539c3fed::t_e2ac97d9f9034f 49
+Packages/ApplicationFoundation/Sources/PresentationSupport/ScenePrivacyCover.swift
+  s_572fff539c3fed::t_d405a11739665c 436
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fb25784b2a3a11d7f3cafdf274514afc64323c45",
+  "prompts": {},
+  "sessions": {
+    "s_464319f20482ed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bb94-ad04-7fa1-b0aa-30ac37cc603e",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    },
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    },
+    "s_afbe65b1c4ced0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ba41-d149-70f2-adf1-a4dcf80b3003",
+        "model": "unknown"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
