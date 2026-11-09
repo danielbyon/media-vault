@@ -206,15 +206,31 @@ class DestinationTests(unittest.TestCase):
         self.assertEqual(executed[executed.index("-destination") + 1],
                          "platform=iOS Simulator,id=11111111-1111-4111-8111-111111111111")
 
-    def test_make_binds_both_schemes_to_one_device_for_each_target(self):
+    def test_make_binds_each_invocation_to_its_expected_destination(self):
         checkout = self.root / "checkout"
         checkout.mkdir()
         shutil.copy2(ROOT / "Makefile", checkout / "Makefile")
         (checkout / "Scripts").symlink_to(ROOT / "Scripts", target_is_directory=True)
-        for target, name in (("test", NAME), ("test-snapshots", "iPad Pro 11-inch (M5)")):
+        ipad_name = "iPad Pro 11-inch (M5)"
+        for target in ("test", "test-snapshots"):
             with self.subTest(target=target):
-                self.devices = {"devices": {RUNTIME: [self.device(name=name)]}}
-                self.destinations = [self.destination(name=name)]
+                if target == "test":
+                    ipad_udid = OTHER_UDID
+                    self.devices = {"devices": {RUNTIME: [
+                        self.device(name=NAME, udid=UDID),
+                        self.device(name=ipad_name, udid=ipad_udid),
+                    ]}}
+                    self.destinations = [
+                        self.destination(name=NAME, udid=UDID),
+                        self.destination(name=ipad_name, udid=ipad_udid),
+                    ]
+                    expected_schemes = ["App", "ApplicationFoundation-Package", "App"]
+                    expected_udids = [UDID, UDID, ipad_udid]
+                else:
+                    self.devices = {"devices": {RUNTIME: [self.device(name=ipad_name)]}}
+                    self.destinations = [self.destination(name=ipad_name)]
+                    expected_schemes = ["App", "ApplicationFoundation-Package"]
+                    expected_udids = [UDID, UDID]
                 self.write_inventory()
                 (self.root / "executed.jsonl").unlink(missing_ok=True)
                 result = subprocess.run([MAKE, target, f"XCODE_WRAPPER={self.wrapper}",
@@ -223,9 +239,9 @@ class DestinationTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 commands = self.executions()
                 self.assertEqual([args[args.index("-scheme") + 1] for args in commands],
-                                 ["App", "ApplicationFoundation-Package"])
-                self.assertEqual([args[args.index("-destination") + 1] for args in commands],
-                                 ["platform=iOS Simulator,id=11111111-1111-4111-8111-111111111111"] * 2)
+                                 expected_schemes)
+                self.assertEqual([args[args.index("-destination") + 1].rsplit("=", 1)[-1]
+                                  for args in commands], expected_udids)
 
 
 if __name__ == "__main__":
