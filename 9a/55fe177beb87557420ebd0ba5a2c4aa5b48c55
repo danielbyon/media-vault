@@ -1,0 +1,19 @@
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureTests.swift
+  s_948253f4dead0b::t_57e348650fa35b 484,486-487,489,495,506-511,520-523,535-536,546-551,557-558,560-562,569-571
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9a55fe177beb87557420ebd0ba5a2c4aa5b48c55",
+  "prompts": {},
+  "sessions": {
+    "s_948253f4dead0b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c4ec-e8f5-7501-8836-4d88b22df5cf",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
