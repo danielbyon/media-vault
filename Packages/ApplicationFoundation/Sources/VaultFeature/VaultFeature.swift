@@ -136,6 +136,7 @@ public struct VaultFeature {
 
             shell.settingsPresented = false
             shell.isSessionLocked = true
+            shell.browser.isSessionLocked = true
             let libraryLock = shell.library.commitSessionLock()
 
             return .merge(

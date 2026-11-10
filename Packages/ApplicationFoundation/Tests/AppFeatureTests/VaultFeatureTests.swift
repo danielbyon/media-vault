@@ -245,18 +245,22 @@ struct VaultFeatureTests {
     @Test("Authentication succeeds without exposing verifier material")
     @MainActor
     func authenticationSuccessEntersShell() async {
-        let store = TestStore(
-            initialState: VaultFeature.State(
-                phase: .locked,
-                configuredKind: .password,
-                usesHiddenEntry: false,
-            ),
-        ) {
+        let savedSettings = LockIsolated<[BrowserSettings]>([])
+        var initialState = VaultFeature.State(
+            phase: .locked,
+            configuredKind: .password,
+            usesHiddenEntry: false,
+        )
+        initialState.shell.browser.profileLifecycle = .ready
+        let store = TestStore(initialState: initialState) {
             VaultFeature()
         } withDependencies: {
             $0.vaultCredential.verify = { credential in
                 #expect(credential == "пароль")
                 return .succeeded
+            }
+            $0.browserSettings.saveRevisioned = { settings, _ in
+                savedSettings.withValue { $0.append(settings) }
             }
         }
 
@@ -283,6 +287,14 @@ struct VaultFeatureTests {
             $0.shell.library.isSessionLocked = false
             $0.shell.browser.isSessionLocked = false
         }
+
+        await store.send(.shell(.browser(.copiedLinkSuggestionsChanged(true)))) {
+            $0.shell.browser.settings.copiedLinkSuggestionsEnabled = true
+            $0.shell.browser.settingsRevision = 1
+        }
+        await store.finish()
+
+        #expect(savedSettings.value == [store.state.shell.browser.settings])
     }
 
     @Test("A stale authentication completion cannot unlock a locked vault")
@@ -294,7 +306,6 @@ struct VaultFeatureTests {
             VaultFeature()
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
-
         await store.send(.lock)
         await store.send(.authenticationCompleted(
             sessionGeneration: 0,
@@ -305,6 +316,94 @@ struct VaultFeatureTests {
         #expect(store.state.phase == .locked)
     }
 
+    @Test("Global lock synchronously fences Browser actions before its lock effect")
+    @MainActor
+    func globalLockSynchronouslyFencesBrowserActions() async throws {
+        let tabID = BrowserTabID(UUID(84_001))
+        let destination = try #require(URL(string: "https://locked.example"))
+        var initialState = VaultFeature.State(phase: .authenticated)
+        var browserState = BrowserFeature.State(initialTabID: tabID)
+        browserState.profileLifecycle = .ready
+        browserState.settings.copiedLinkSuggestionsEnabled = false
+        browserState.omniboxDraft = "synthetic private draft"
+        browserState.focusedField = .chrome
+        initialState.shell.browser = browserState
+
+        let savedSettings = LockIsolated<[BrowserSettings]>([])
+        let executedCommands = LockIsolated<[BrowserWebKitCommand]>([])
+        let deferredLockEffect = withDependencies {
+            $0.uuid = .incrementing
+        } operation: {
+            VaultFeature().reduce(into: &initialState, action: .lock)
+        }
+
+        #expect(initialState.phase == .locked)
+        #expect(initialState.shell.isSessionLocked)
+        #expect(initialState.shell.library.isSessionLocked)
+        #expect(initialState.shell.browser.isSessionLocked)
+
+        let store = TestStore(initialState: initialState) {
+            VaultFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.browserSettings.saveRevisioned = { settings, _ in
+                savedSettings.withValue { $0.append(settings) }
+            }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { command in executedCommands.withValue { $0.append(command) } },
+                events: { AsyncStream { $0.finish() } },
+            )
+        }
+
+        await store.send(.shell(.browser(.copiedLinkSuggestionsChanged(true))))
+        await store.send(.shell(.browser(.profileChangeRequested(.ephemeral))))
+        await store.send(.shell(.browser(.profileChangeConfirmed)))
+        await store.send(.shell(.browser(.navigate(destination))))
+        await store.finish()
+
+        #expect(!store.state.shell.browser.settings.copiedLinkSuggestionsEnabled)
+        #expect(store.state.shell.browser.pendingProfileChange == nil)
+        #expect(store.state.shell.browser.settings.browsingProfile == .persistentPrivate)
+        #expect(store.state.shell.browser.selectedTab?.isStartPage == true)
+        #expect(store.state.shell.browser.pendingWebAction == nil)
+        #expect(store.state.shell.browser.omniboxDraft == "synthetic private draft")
+        #expect(store.state.shell.browser.focusedField == .chrome)
+        #expect(savedSettings.value.isEmpty)
+        #expect(executedCommands.value.isEmpty)
+
+        await store.send(.shell(.browser(.sessionLocked))) {
+            $0.shell.browser.focusedField = .none
+            $0.shell.browser.omniboxDraft = ""
+            $0.shell.browser.profileConfigurationGeneration = 1
+        }
+        await store.finish()
+
+        #expect(store.state.shell.browser.isSessionLocked)
+        #expect(store.state.shell.browser.omniboxDraft.isEmpty)
+        #expect(store.state.shell.browser.focusedField == .none)
+        #expect(savedSettings.value.isEmpty)
+        withExtendedLifetime(deferredLockEffect) {}
+        let invalidatedGenerations = executedCommands.value.compactMap { command -> UInt64? in
+            guard case let .invalidateProfileConfiguration(generation) = command else {
+                return nil
+            }
+
+            return generation
+        }
+        #expect(invalidatedGenerations == [1])
+
+        await store.send(.lock)
+        await store.finish()
+        #expect(invalidatedGenerations.count == 1)
+        #expect(executedCommands.value.compactMap { command -> UInt64? in
+            guard case let .invalidateProfileConfiguration(generation) = command else {
+                return nil
+            }
+
+            return generation
+        } == [1])
+    }
+
     @Test("Global vault lock fences a pending Browser profile transition", .timeLimit(.minutes(1)))
     @MainActor
     func globalLockFencesPendingBrowserProfileTransition() async {
@@ -312,6 +411,8 @@ struct VaultFeatureTests {
         var initialState = VaultFeature.State(phase: .authenticated)
         initialState.shell.browser = BrowserFeature.State(initialTabID: tabID)
         initialState.shell.browser.profileLifecycle = .ready
+        initialState.shell.browser.omniboxDraft = "synthetic private query"
+        initialState.shell.browser.focusedField = .chrome
 
         let adapter = BrowserWebKitAdapter()
         _ = adapter.ensureContext(for: tabID)
@@ -362,8 +463,33 @@ struct VaultFeatureTests {
         await store.send(.lock)
         await store.receive(.shell(.browser(.sessionLocked)))
 
+        #expect(store.state.shell.browser.isSessionLocked)
+        #expect(store.state.shell.browser.profileLifecycle == .notStarted)
+        #expect(store.state.shell.browser.profileConfigurationGeneration == 2)
+        #expect(store.state.shell.browser.omniboxDraft.isEmpty)
+        #expect(store.state.shell.browser.focusedField == .none)
+
         let invalidationDidComplete: Void? = await invalidationIterator.next()
         #expect(invalidationDidComplete != nil)
+        let invalidatedGenerations = executedCommands.value.compactMap { command -> UInt64? in
+            guard case let .invalidateProfileConfiguration(generation) = command else {
+                return nil
+            }
+
+            return generation
+        }
+        #expect(invalidatedGenerations == [2])
+
+        await store.send(.lock)
+        await store.finish()
+        let invalidatedGenerationsAfterRepeatedLock = executedCommands.value.compactMap { command -> UInt64? in
+            guard case let .invalidateProfileConfiguration(generation) = command else {
+                return nil
+            }
+
+            return generation
+        }
+        #expect(invalidatedGenerationsAfterRepeatedLock == [2])
 
         releaseContinuation.yield(())
         await store.finish()
