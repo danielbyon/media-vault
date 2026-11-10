@@ -1,0 +1,88 @@
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserWebKitClient.swift
+  s_948253f4dead0b::t_8db4a6fb2e6555 221,223
+  s_948253f4dead0b::t_f46e5357804863 201-220,222,224-228
+docs/development/testing.md
+  s_948253f4dead0b::t_c38d6da85d52e8 429-454
+  s_948253f4dead0b::t_d2d25dbbdcc25f 50
+  s_948253f4dead0b::t_f6aa8430daba8b 49,51
+  s_948253f4dead0b::t_8d5addc0479158 48,52-56,92-94,401,415-428
+  s_948253f4dead0b::t_6db127152f35a1 163-169,184
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultCredentialView.swift
+  s_948253f4dead0b::t_1a09d0057299c8 334,340-342,344-347
+  s_948253f4dead0b::t_10a55a6750c836 300
+  s_948253f4dead0b::t_9e8cfc36095ce1 348-351
+  s_948253f4dead0b::t_8db4a6fb2e6555 248
+  s_948253f4dead0b::t_f0aecdf8945be8 343
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureTests.swift
+  s_948253f4dead0b::t_bd0e7abf45839b 16,498
+  s_948253f4dead0b::t_ad265b911f8230 363,464-465,523-525
+  s_948253f4dead0b::t_fc150a9581271e 485-488
+  s_948253f4dead0b::t_d530c2ee0a3cce 583
+  s_948253f4dead0b::t_a2fd40bedaccbb 415,417,425-426,429-431,467-470,500-508,568-571,575,579-582,584,589-598
+  s_948253f4dead0b::t_a8187142e444e5 335,338-340,361-362
+  s_948253f4dead0b::t_f0b575ffc6de50 441-459,463,472,474-475,484,490-491,499,510-522,526-539,551-552,562-567,573-574,576-578,585-587,600
+  s_948253f4dead0b::t_8db4a6fb2e6555 492-497
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultFeature.swift
+  s_948253f4dead0b::t_d811c6cb8dfb20 119,266-268,314
+  s_948253f4dead0b::t_a5974302ffb243 130-132
+Packages/ApplicationFoundation/Sources/BrowserFeature/BrowserFeature.swift
+  s_948253f4dead0b::t_7727d801d45c3b 315
+  s_948253f4dead0b::t_8db4a6fb2e6555 310-314,318,348-350
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserProfileTests.swift
+  s_948253f4dead0b::t_d405179c37b75b 106,124-125
+  s_c7322073c3be8f::t_cc161d31b77b8e 126
+BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests.swift
+  s_948253f4dead0b::t_8db4a6fb2e6555 203-207,213
+  s_948253f4dead0b::t_38388a5cce105a 209-212
+  s_948253f4dead0b::t_4d09ed5723268a 208
+  s_948253f4dead0b::t_c7b1a7bc3afa17 221-223,236-238
+  s_948253f4dead0b::t_3a95a8ab7e00a0 189-202,214-220,224-235,239-253,324-343
+  s_e2e7babb639d7f::t_eee4fd97abaa0a 344
+Packages/ApplicationFoundation/Tests/AppFeatureTests/RootFeatureTests.swift
+  s_948253f4dead0b::t_1dfba160011909 754-757
+  s_948253f4dead0b::t_b87fef9c33cb7f 841-844
+  s_948253f4dead0b::t_0faf718b71df73 733-736
+  s_948253f4dead0b::t_7c9a96a66388f8 665-668
+  s_948253f4dead0b::t_51fd0be23eddfc 879-882
+  s_948253f4dead0b::t_b105225d998696 645-648
+  s_948253f4dead0b::t_e633a685ecfee5 912-915
+  s_948253f4dead0b::t_21a3b5c8aa6ad5 688-691
+  s_948253f4dead0b::t_f1e5ae42c3c6c4 596-599
+  s_948253f4dead0b::t_670a03d9de5021 615-618
+  s_948253f4dead0b::t_e95a75eb06049d 583-592,601
+Packages/ApplicationFoundation/Sources/AppFeature/RootFeature.swift
+  s_948253f4dead0b::t_4d5f690daf3c5f 116-118,269
+  s_948253f4dead0b::t_8db4a6fb2e6555 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "26fb9b2c53bcb200885991f515899ddaf05be852",
+  "prompts": {},
+  "sessions": {
+    "s_948253f4dead0b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c4ec-e8f5-7501-8836-4d88b22df5cf",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    },
+    "s_c7322073c3be8f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ba0c-52c4-7f73-a566-c996b89fea2d",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    },
+    "s_e2e7babb639d7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c3e7-ca1d-7aa0-8482-20dc1fc291da",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
