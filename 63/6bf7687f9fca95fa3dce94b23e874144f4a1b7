@@ -1,0 +1,31 @@
+Packages/ApplicationFoundation/Sources/VaultFeature/VaultFeature.swift
+  s_572fff539c3fed::t_5c1baba776e873 139
+Packages/ApplicationFoundation/Tests/AppFeatureTests/VaultFeatureTests.swift
+  s_572fff539c3fed::t_d135d78b9d018f 319-327,330-333,347-356,363,379-380,384,405-406
+  s_572fff539c3fed::t_8b8646ad798bd9 328-329,345-346,357-361,364-370,373,381-383,386-389,391-401,403-404
+  s_572fff539c3fed::t_066bd35baab457 483-488,490-492
+  s_572fff539c3fed::t_7ec3f20c065ad5 248,262-264,290-292,294-297,414,469-470
+  s_572fff539c3fed::t_238a745529a804 249-255
+  s_572fff539c3fed::t_c214ab742ad406 293
+  s_572fff539c3fed::t_b7b9c85f2221bd 334-344,362,371-372,374-378,385
+  s_572fff539c3fed::t_8b1e21693f21bc 415
+  s_572fff539c3fed::t_751869f346c327 390,402,478,489
+  s_572fff539c3fed::t_d47877d6afee3f 466-468,471,474-477,479-481
+  s_572fff539c3fed::t_eb9f6292f7d770 482
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "636bf7687f9fca95fa3dce94b23e874144f4a1b7",
+  "prompts": {},
+  "sessions": {
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
