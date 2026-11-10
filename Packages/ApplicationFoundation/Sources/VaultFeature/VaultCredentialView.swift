@@ -245,6 +245,7 @@ public struct VaultShellView: View {
                 AuthenticatedSettingsView(
                     browserStore: store.scope(state: \.browser, action: \.browser),
                     sessionSettings: sessionSettings,
+                    onLock: onLock,
                     onSessionSettingsChanged: onSessionSettingsChanged,
                 )
             }
@@ -296,6 +297,7 @@ public struct VaultShellView: View {
 private struct AuthenticatedSettingsView: View {
     let browserStore: StoreOf<BrowserFeature>
     let sessionSettings: VaultSessionSettings
+    let onLock: () -> Void
     let onSessionSettingsChanged: (VaultSessionSettings) -> Void
 
     var body: some View {
@@ -329,11 +331,24 @@ private struct AuthenticatedSettingsView: View {
 
                 NavigationLink {
                     BrowserSettingsView(store: browserStore)
+                        .toolbar { lockToolbar }
                 } label: {
                     Label("Browser", systemImage: "safari")
                 }
             }
             .navigationTitle("Settings")
+            .toolbar {
+                lockToolbar
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var lockToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Lock", systemImage: "lock.fill", action: onLock)
+                .accessibilityHint("Locks vault and returns to calculator.")
+                .accessibilityIdentifier("vault.lock")
         }
     }
 

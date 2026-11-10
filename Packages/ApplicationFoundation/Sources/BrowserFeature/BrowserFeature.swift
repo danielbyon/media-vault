@@ -307,8 +307,15 @@ public struct BrowserFeature {
             tabs.count > 99 ? "99+" : String(tabs.count)
         }
 
+        /// Advances and returns the generation used to reject stale WebKit profile work.
+        public mutating func advanceProfileConfigurationGenerationForLock() -> UInt64 {
+            profileConfigurationGeneration &+= 1
+            return profileConfigurationGeneration
+        }
+
         /// Clears session-sensitive presentation state while retaining logical navigation.
         public mutating func clearTransientPresentationForLock() -> Effect<Action> {
+            let shouldAdvanceProfileConfigurationGeneration = !isSessionLocked
             isSessionLocked = true
             presentation = .browsing
             tabOverviewFocusID = nil
@@ -338,7 +345,9 @@ public struct BrowserFeature {
                  .ready:
                 break
             }
-            profileConfigurationGeneration &+= 1
+            if shouldAdvanceProfileConfigurationGeneration {
+                _ = advanceProfileConfigurationGenerationForLock()
+            }
             switch openTabsEntryLifecycle {
             case .waitingForProfile,
                  .restoring,

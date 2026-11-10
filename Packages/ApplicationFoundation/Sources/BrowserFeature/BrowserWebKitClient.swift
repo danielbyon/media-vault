@@ -198,6 +198,34 @@ struct BrowserWebKitClient: Sendable {
     }
 }
 
+/// Synchronously fences WebKit profile commands when the authenticated session locks.
+public struct BrowserProfileConfigurationFenceClient: Sendable {
+    /// Advances the minimum profile generation accepted by the live WebKit adapter.
+    public var advance: @Sendable (UInt64) -> Void
+
+    /// Creates a client backed by the supplied generation fence.
+    public init(advance: @escaping @Sendable (UInt64) -> Void) {
+        self.advance = advance
+    }
+}
+
+private enum BrowserProfileConfigurationFenceClientKey: DependencyKey {
+    static let liveValue = BrowserProfileConfigurationFenceClient(
+        advance: { generation in
+            BrowserWebKitProfileConfigurationFence.live.advance(to: generation)
+        },
+    )
+    static let testValue = BrowserProfileConfigurationFenceClient(advance: { _ in })
+}
+
+extension DependencyValues {
+    /// Dependency used to invalidate stale WebKit profile work during a global lock.
+    public var browserProfileConfigurationFence: BrowserProfileConfigurationFenceClient {
+        get { self[BrowserProfileConfigurationFenceClientKey.self] }
+        set { self[BrowserProfileConfigurationFenceClientKey.self] = newValue }
+    }
+}
+
 extension BrowserWebKitClient: DependencyKey {
     /// Main-actor live adapter bridge.
     static let liveValue = Self(

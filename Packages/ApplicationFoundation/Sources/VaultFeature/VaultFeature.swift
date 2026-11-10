@@ -116,6 +116,7 @@ public struct VaultFeature {
         /// Commits global authorization loss before a scene can reveal private content.
         public mutating func commitGlobalLock(
             advanceResourceLoadGeneration: () -> Void,
+            advanceBrowserProfileConfigurationGeneration: @Sendable (UInt64) -> Void,
         ) -> Effect<VaultFeature.Action> {
             guard phase != .locked || isWorking || pendingHiddenVerificationID != nil else {
                 return .none
@@ -126,6 +127,9 @@ public struct VaultFeature {
             setupRequestGeneration &+= 1
             authenticationRequestGeneration &+= 1
             hiddenVerificationRequestGeneration &+= 1
+            let browserProfileConfigurationGeneration = shell.browser
+                .advanceProfileConfigurationGenerationForLock()
+            advanceBrowserProfileConfigurationGeneration(browserProfileConfigurationGeneration)
             phase = .locked
             credentialInput = ""
             confirmationInput = ""
@@ -259,6 +263,9 @@ public struct VaultFeature {
     @Dependency(\.mediaLibrary)
     var mediaLibrary
 
+    @Dependency(\.browserProfileConfigurationFence)
+    var browserProfileConfigurationFence
+
     /// Creates the vault feature.
     public init() {}
 
@@ -304,6 +311,7 @@ extension VaultFeature {
         case .lock:
             return state.commitGlobalLock(
                 advanceResourceLoadGeneration: mediaLibrary.advanceResourceLoadGeneration,
+                advanceBrowserProfileConfigurationGeneration: browserProfileConfigurationFence.advance,
             )
         case let .sessionSettingsChanged(settings):
             guard state.phase == .authenticated, state.sessionSettings != settings else {

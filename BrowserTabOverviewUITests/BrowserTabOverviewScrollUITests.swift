@@ -186,6 +186,71 @@ final class BrowserTabOverviewScrollUITests: XCTestCase {
         }
     }
 
+    func testSettingsLockReturnsToCalculatorFromTopLevelAndBrowserSettings() {
+        for destination in ["top-level", "browser"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--vault-lock-control", "--vault-lock-destination=library"]
+            app.launch()
+            app.activate()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), destination)
+
+            let shellSettings = app.buttons["Settings"]
+            XCTAssertTrue(shellSettings.waitForExistence(timeout: 10), app.debugDescription)
+            shellSettings.tap()
+            XCTAssertTrue(app.staticTexts["Auto-Lock"].waitForExistence(timeout: 10), app.debugDescription)
+
+            if destination == "browser" {
+                let browserSettingsCandidates = app.buttons
+                    .matching(
+                        NSPredicate(format: "label == %@", "Browser"),
+                    )
+                    .allElementsBoundByIndex
+                guard let browserSettings = browserSettingsCandidates.first(where: { $0.isHittable }) else {
+                    XCTFail("Browser Settings link was not hittable. \(app.debugDescription)")
+                    app.terminate()
+                    continue
+                }
+
+                browserSettings.tap()
+                XCTAssertTrue(app.navigationBars["Browser"].waitForExistence(timeout: 10), app.debugDescription)
+
+                let browserNavigationBar = app.navigationBars["Browser"]
+                let navigationButtons = browserNavigationBar.buttons
+                XCTAssertGreaterThanOrEqual(navigationButtons.count, 2, app.debugDescription)
+                let backButton = navigationButtons.element(boundBy: 0)
+                let nestedLockButtons = browserNavigationBar.buttons.matching(identifier: "vault.lock")
+                XCTAssertEqual(nestedLockButtons.count, 1, app.debugDescription)
+                let nestedLock = nestedLockButtons.firstMatch
+                XCTAssertTrue(nestedLock.waitForExistence(timeout: 10), app.debugDescription)
+                XCTAssertEqual(nestedLock.label, "Lock")
+                XCTAssertFalse(nestedLock.frame.intersects(backButton.frame), app.debugDescription)
+                tapSettingsLockAndAssertCalculator(
+                    nestedLock,
+                    dismissing: browserNavigationBar,
+                    in: app,
+                    context: destination,
+                )
+            } else {
+                let settingsNavigationBar = app.navigationBars["Settings"]
+                XCTAssertTrue(settingsNavigationBar.waitForExistence(timeout: 10), app.debugDescription)
+                let lockButtons = settingsNavigationBar.buttons.matching(identifier: "vault.lock")
+                XCTAssertEqual(lockButtons.count, 1, app.debugDescription)
+                let lock = lockButtons.firstMatch
+                XCTAssertTrue(lock.waitForExistence(timeout: 10), app.debugDescription)
+                XCTAssertEqual(lock.label, "Lock")
+                XCTAssertFalse(lock.frame.intersects(app.staticTexts["Auto-Lock"].frame), app.debugDescription)
+                tapSettingsLockAndAssertCalculator(
+                    lock,
+                    dismissing: settingsNavigationBar,
+                    in: app,
+                    context: destination,
+                )
+            }
+
+            app.terminate()
+        }
+    }
+
     func testShowTabsSelectedCardPlacementRegressionFixtureA() {
         runShowTabsFixture(
             fixture: "A",
@@ -254,6 +319,27 @@ final class BrowserTabOverviewScrollUITests: XCTestCase {
         XCTAssertTrue(settings.isHittable, app.debugDescription)
         settings.tap()
         XCTAssertTrue(app.staticTexts["Auto-Lock"].waitForExistence(timeout: 10), app.debugDescription)
+    }
+
+    private func tapSettingsLockAndAssertCalculator(
+        _ lock: XCUIElement,
+        dismissing settingsNavigationBar: XCUIElement,
+        in app: XCUIApplication,
+        context: String,
+    ) {
+        XCTAssertTrue(lock.isHittable, "\(context): \(app.debugDescription)")
+        lock.tap()
+
+        let fixturePhase = app.staticTexts["vault-lock-control.fixture-phase"]
+        XCTAssertTrue(fixturePhase.waitForExistence(timeout: 10), "\(context): \(app.debugDescription)")
+        XCTAssertEqual(fixturePhase.label, "vault-phase:locked", context)
+        XCTAssertTrue(app.staticTexts["Calculator display"].waitForExistence(timeout: 10), app.debugDescription)
+
+        let settingsDismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: settingsNavigationBar,
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [settingsDismissed], timeout: 10), .completed, context)
     }
 
     private func assertDoesNotOverlap(_ lock: XCUIElement, _ control: XCUIElement, context: String) {

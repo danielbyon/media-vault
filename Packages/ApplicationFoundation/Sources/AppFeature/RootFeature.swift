@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import BrowserFeature
 import ComposableArchitecture
 import CoreFoundation
 import DecoySupport
@@ -111,6 +112,9 @@ public struct RootFeature {
 
     @Dependency(\.mediaLibrary)
     var mediaLibrary
+
+    @Dependency(\.browserProfileConfigurationFence)
+    var browserProfileConfigurationFence
 
     private let definition: DecoyDefinition
 
@@ -262,6 +266,7 @@ public struct RootFeature {
         let lock = state.vault
             .commitGlobalLock(
                 advanceResourceLoadGeneration: mediaLibrary.advanceResourceLoadGeneration,
+                advanceBrowserProfileConfigurationGeneration: browserProfileConfigurationFence.advance,
             )
             .map(Action.vault)
         let update = updateTriggerConfiguration(state: state)

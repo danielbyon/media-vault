@@ -45,10 +45,15 @@ behavior and snapshot layers.
 
 The tables map each former lifecycle assertion and the 16 full-window
 references removed by this candidate to its replacement coverage. Before the
-removal, the replacement behavior tests and presentation snapshots passed on
-local and matching CI runners. The CI run still failed on the three known
-cross-host full-window captures. The final candidate needs a CI run with the
-old paths removed and the updated selector in effect.
+removal, the replacement behavior tests and presentation snapshots passed
+locally. The evidence statuses in this migration table record the
+pre-correction baseline; the corrective qualification is recorded in Section 7.
+Historical CI run `42738343511` failed on three full-window captures
+from a different host; the cause remains unknown. Later CI run `42774304680`
+passed on the pre-correction candidate at `636bf7687f9fca95fa3dce94b23e874144f4a1b7`.
+Its first snapshot attempt stopped when the XCTest runner hung before it
+connected to the simulator. The successful second attempt passed the updated
+snapshot suites. That CI result does not cover later corrective commits.
 
 | Former assertion group | Layer | Current test or identity | Coverage | Evidence status | Qualification gate |
 | --- | --- | --- | --- | --- | --- |
@@ -84,10 +89,9 @@ The four Layer C content identities are
 `root-content-v1-library-regular-ipad`. Locked and expired states share the
 calculator identity. Authenticated and resumed states share the Library
 identity. Xcode 27.2 build 27B52 and iOS 27.2 build 24B8117 recorded these
-references on the canonical 2x iPad Pro 11-inch (M5). The first matching-runner
-CI attempt passed the root-content and package snapshots, then failed on the
-three known full-window captures. Those 16 old images have now been removed;
-the final qualification results below record the updated gate.
+references on the canonical 2x iPad Pro 11-inch (M5). The three old
+cross-host full-window failures belong to the historical run above. The later
+green run used the migrated selectors after those references were removed.
 
 ## 1. Functional test gate
 
@@ -156,10 +160,13 @@ calculator and Library content, not shell toolbar, tabs, or material surfaces.
 Settings reducer transitions. The separate `BrowserTabOverviewUITests` scheme
 contains
 `BrowserTabOverviewScrollUITests.testAuthenticatedShellTabsAreAccessibleAndChangeDestinations`,
-which navigates among Collections, Browser, and Library. Its Lock-control test
-checks accessibility across selected authenticated destinations. These UI
-tests are outside `make test`; they do not prove the two-layout fixture matrix
-or PAC-1/TAC-5, which remain deferred to Issue #59.
+which navigates among Collections, Browser, and Library;
+`testPersistentLockControlIsAccessibleAcrossAuthenticatedDestinations`, which
+checks the persistent Lock control in selected authenticated destinations; and
+`testSettingsLockReturnsToCalculatorFromTopLevelAndBrowserSettings`, which
+checks the Settings Lock action from top-level Settings and Browser Settings.
+These UI tests are outside `make test`; they do not prove the two-layout
+fixture matrix or PAC-1/TAC-5, which remain deferred to Issue #59.
 The hosted Layer C selector is:
 
 `-only-testing:'AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates()'`
@@ -174,6 +181,7 @@ The separate shell UI command targets the simulator's default layout:
   -parallel-testing-enabled NO \
   -only-testing:BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests/testAuthenticatedShellTabsAreAccessibleAndChangeDestinations \
   -only-testing:BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests/testPersistentLockControlIsAccessibleAcrossAuthenticatedDestinations \
+  -only-testing:BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests/testSettingsLockReturnsToCalculatorFromTopLevelAndBrowserSettings \
   test
 ```
 
@@ -390,7 +398,7 @@ the Makefile. When adding or removing a snapshot suite, update both the Makefile
 selector and this document, then verify executed and skipped counts from a fresh
 `xcresult` bundle.
 
-## 6. Current local qualification
+## 6. Baseline local qualification (2026-11-09)
 
 The separated privacy candidate passed its local gates on 2026-11-09 with
 Xcode 27.2 release build `27B52` and the iOS 27.2 runtime build `24B8117`.
@@ -404,8 +412,43 @@ arguments on iPad Pro 11-inch (M5), `EF3E9282-D537-4E4A-953E-E21DBBD838DB`.
 snapshots on that iPad. Snapshot recording was set to `never`. Logs and result
 bundles are preserved under the Qwizlab qualification directory.
 
-The final candidate still needs a matching GitHub Actions run after the
-full-window lifecycle snapshots were removed. The earlier run passed the
-functional jobs and unaffected snapshot suites, then failed on the three known
-cross-host full-window comparisons. Treat this as local qualification only
-until CI finishes on the published commit.
+The pre-correction candidate at `636bf7687f9fca95fa3dce94b23e874144f4a1b7`
+passed CI run [42774304680](https://github.com/danielbyon/media-vault/actions/runs/42774304680).
+The iOS test job passed 79 App tests, 452 ApplicationFoundation tests, and the
+iPad privacy test. The initial snapshot attempt stopped before XCTest connected
+to the simulator because the runner hung during launch; it reported no snapshot
+assertion failure. The successful rerun passed 5 App snapshots and 34
+ApplicationFoundation snapshots. The workflow finished green. Its evidence
+artifacts are [iPhone tests](https://github.com/danielbyon/media-vault/actions/runs/42774304680/artifacts/13744168171),
+[initial snapshot attempt](https://github.com/danielbyon/media-vault/actions/runs/42774304680/artifacts/13744383108),
+and [successful snapshot rerun](https://github.com/danielbyon/media-vault/actions/runs/42774304680/artifacts/13746151239).
+
+The Debug configuration retains `DEVELOPMENT_TEAM = HSX7X97PF8` for owner
+signing of physical-device builds. Simulator qualification does not rely on
+this team setting, and it does not substitute for physical-device evidence.
+
+## 7. Corrective local qualification (2026-11-10)
+
+The PR #118 correction passed its local gates with Xcode 27.2 release build
+`27B52` and the iOS 27.2 runtime build `24B8117`. `make lint` passed four
+complete-corpus analyzer runs over 146 files with zero violations. `make build`
+passed Debug iPhone, Release iPhone, and Debug iPad builds. `make test` passed
+79 App tests and 452 ApplicationFoundation tests on iPhone 17; the canonical
+iPad invocation passed the sentinel-occlusion test with both compact and
+regular fixture parameters. `make test-snapshots` passed 5 App and 34
+ApplicationFoundation snapshots on iPad Pro 11-inch (M5). Snapshot recording
+was disabled and every comparison remained exact.
+
+`VaultFeatureTests.globalLockFencesPendingBrowserProfileTransition` failed
+against the pre-correction implementation: the lock state stayed at generation
+1 and the adapter retired the existing context. It passed 1/1 after the
+correction and again in `make test`. The
+`BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests.testSettingsLockReturnsToCalculatorFromTopLevelAndBrowserSettings`
+selector passed 1/1 on iPhone 17 and 1/1 on iPad Pro 11-inch (M5). It exercises
+both Settings destinations on each device, asserts one visible Lock control,
+activates it, and checks that the locked calculator replaces Settings.
+
+The correction changed no snapshot references. CI run `42774304680` applies to
+the pre-correction SHA `636bf7687f9fca95fa3dce94b23e874144f4a1b7`; it does not
+qualify this correction. Corrective logs and result bundles are preserved in
+the Qwizlab corrective-review evidence directory.

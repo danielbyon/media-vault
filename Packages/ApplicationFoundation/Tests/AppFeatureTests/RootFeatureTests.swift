@@ -580,12 +580,25 @@ struct RootFeatureTests {
     func immediateAutoLockCommitsBeforeReveal() async {
         var vault = VaultFeature.State(phase: .authenticated)
         vault.sessionSettings.autoLockTimeout = .immediately
-        let store = makeRootStore(vault: vault)
+        let advancedGenerations = LockIsolated<[UInt64]>([])
+        let store = withDependencies {
+            $0.browserProfileConfigurationFence = BrowserProfileConfigurationFenceClient(
+                advance: { generation in
+                    advancedGenerations.withValue { $0.append(generation) }
+                },
+            )
+        } operation: {
+            makeRootStore(vault: vault)
+        }
 
         await store.send(.applicationPhaseChanged(.background)) {
             $0.applicationReturnPending = true
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
+        #expect(advancedGenerations.value == [1])
         await store.finish()
     }
 
@@ -599,7 +612,10 @@ struct RootFeatureTests {
 
         await store.send(.applicationPhaseChanged(.background)) {
             $0.applicationReturnPending = true
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
 
         #expect(store.state.vault.phase == .locked)
@@ -626,7 +642,10 @@ struct RootFeatureTests {
             $0.autoLockBackgroundStartedAt = nil
             $0.autoLockTimeoutAtBackground = nil
             $0.applicationReturnPending = false
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
 
         #expect(store.state.vault.phase == .locked)
@@ -643,7 +662,10 @@ struct RootFeatureTests {
 
         await store.send(.applicationPhaseChanged(.active)) {
             $0.applicationReturnPending = false
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
 
         #expect(store.state.vault.phase == .locked)
@@ -663,7 +685,10 @@ struct RootFeatureTests {
 
         await store.send(.applicationPhaseChanged(.active)) {
             $0.applicationReturnPending = false
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
 
         #expect(store.state.vault.phase == .locked)
@@ -705,7 +730,10 @@ struct RootFeatureTests {
                     $0.autoLockTimeoutAtBackground = nil
                     $0.applicationReturnPending = false
                     if shouldLock {
-                        _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+                        _ = $0.vault.commitGlobalLock(
+                            advanceResourceLoadGeneration: {},
+                            advanceBrowserProfileConfigurationGeneration: { _ in },
+                        )
                     }
                 }
 
@@ -723,7 +751,10 @@ struct RootFeatureTests {
         let store = makeRootStore(vault: immediateVault)
         await store.send(.applicationPhaseChanged(.background)) {
             $0.applicationReturnPending = true
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
         #expect(store.state.vault.phase == .locked)
         await store.finish()
@@ -807,7 +838,10 @@ struct RootFeatureTests {
             $0.autoLockBackgroundStartedAt = nil
             $0.autoLockTimeoutAtBackground = nil
             $0.applicationReturnPending = false
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
 
         #expect(store.state.vault.phase == .locked)
@@ -842,7 +876,10 @@ struct RootFeatureTests {
             $0.autoLockBackgroundStartedAt = nil
             $0.autoLockTimeoutAtBackground = nil
             $0.applicationReturnPending = false
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
 
         #expect(store.state.vault.phase == .locked)
@@ -872,7 +909,10 @@ struct RootFeatureTests {
         #expect(store.state.vault.phase == .authenticated)
 
         await store.send(.emergencyLockGestureRecognized(gesture: .shake, isForeground: true)) {
-            _ = $0.vault.commitGlobalLock(advanceResourceLoadGeneration: {})
+            _ = $0.vault.commitGlobalLock(
+                advanceResourceLoadGeneration: {},
+                advanceBrowserProfileConfigurationGeneration: { _ in },
+            )
         }
         #expect(store.state.vault.phase == .locked)
         #expect(mediaLibrary.currentResourceLoadGeneration == 1)

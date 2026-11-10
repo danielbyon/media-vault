@@ -103,6 +103,7 @@ struct BrowserProfileTests {
 
         #expect(lockedStore.state.isSessionLocked)
         #expect(lockedStore.state.profileLifecycle == .notStarted)
+        #expect(lockedStore.state.profileConfigurationGeneration == 1)
         #expect(lockedStore.state.openTabsEntryLifecycle == .notEntered)
 
         let staleSettings = BrowserSettings(browsingProfile: .ephemeral)
@@ -119,6 +120,9 @@ struct BrowserProfileTests {
         ))
         #expect(lockedStore.state.profileLifecycle == .notStarted)
         #expect(lockedStore.state.openTabsEntryLifecycle == .notEntered)
+
+        await lockedStore.send(.sessionLocked)
+        #expect(lockedStore.state.profileConfigurationGeneration == 1)
 
         let profileGate = BrowserProfileConfigurationGate()
         let adapter = BrowserWebKitAdapter(requiresProfileConfiguration: true)
