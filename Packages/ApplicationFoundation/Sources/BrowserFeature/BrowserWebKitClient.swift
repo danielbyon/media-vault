@@ -22,6 +22,14 @@ public struct BrowserNavigationOperationID: Hashable, Sendable {
 public enum BrowserWebKitCommand: Equatable, Sendable {
     /// Installs the global website-data profile before Browser permits WebKit-backed navigation.
     case configureProfile(profile: BrowserBrowsingProfile, retiringTabIDs: [BrowserTabID])
+    /// Installs a profile only while its request is active and its generation remains current.
+    case configureProfileForGeneration(
+        profile: BrowserBrowsingProfile,
+        retiringTabIDs: [BrowserTabID],
+        generation: UInt64,
+    )
+    /// Fences configuration work from a profile request invalidated by lock.
+    case invalidateProfileConfiguration(generation: UInt64)
     /// Creates a live context if one does not already exist.
     case ensureContext(tabID: BrowserTabID)
     /// Destroys one live context and resolves its transient UI.
@@ -175,14 +183,46 @@ struct BrowserWebKitClient: Sendable {
     var execute: @Sendable (BrowserWebKitCommand) async -> Void
     /// Creates a stream of stable, Sendable adapter events.
     var events: @Sendable () async -> AsyncStream<BrowserWebKitEvent>
+    /// Advances the adapter's profile generation fence synchronously during lock reduction.
+    var advanceProfileConfigurationGeneration: @Sendable (UInt64) -> Void
 
     /// Creates a reducer-facing WebKit client.
     init(
         execute: @escaping @Sendable (BrowserWebKitCommand) async -> Void,
         events: @escaping @Sendable () async -> AsyncStream<BrowserWebKitEvent>,
+        advanceProfileConfigurationGeneration: @escaping @Sendable (UInt64) -> Void = { _ in },
     ) {
         self.execute = execute
         self.events = events
+        self.advanceProfileConfigurationGeneration = advanceProfileConfigurationGeneration
+    }
+}
+
+/// Synchronously fences WebKit profile commands when the authenticated session locks.
+public struct BrowserProfileConfigurationFenceClient: Sendable {
+    /// Advances the minimum profile generation accepted by the live WebKit adapter.
+    public var advance: @Sendable (UInt64) -> Void
+
+    /// Creates a client backed by the supplied generation fence.
+    public init(advance: @escaping @Sendable (UInt64) -> Void) {
+        self.advance = advance
+    }
+}
+
+private enum BrowserProfileConfigurationFenceClientKey: DependencyKey {
+    static let liveValue = BrowserProfileConfigurationFenceClient(
+        advance: { generation in
+            BrowserWebKitProfileConfigurationFence.live.advance(to: generation)
+        },
+    )
+    static let testValue = BrowserProfileConfigurationFenceClient(advance: { _ in })
+}
+
+extension DependencyValues {
+    /// Dependency used to invalidate stale WebKit profile work during a global lock.
+    public var browserProfileConfigurationFence: BrowserProfileConfigurationFenceClient {
+        get { self[BrowserProfileConfigurationFenceClientKey.self] }
+        set { self[BrowserProfileConfigurationFenceClientKey.self] = newValue }
     }
 }
 
@@ -191,6 +231,9 @@ extension BrowserWebKitClient: DependencyKey {
     static let liveValue = Self(
         execute: { command in await BrowserWebKitAdapter.shared.execute(command) },
         events: { await BrowserWebKitAdapter.shared.makeEventStream() },
+        advanceProfileConfigurationGeneration: { generation in
+            BrowserWebKitProfileConfigurationFence.live.advance(to: generation)
+        },
     )
     /// Deterministic no-op client used unless a test overrides it.
     static let testValue = Self(execute: { _ in }, events: { AsyncStream { $0.finish() } })

@@ -16,7 +16,7 @@ struct BrowserSettingsPersistenceTests {
     @Test("An isolated app-storage suite loads Browser defaults when no keys exist")
     func loadsDefaultsFromIsolatedAppStorage() async throws {
         let defaults = try isolatedDefaults()
-        let client = liveClient(using: defaults)
+        let client = liveValueClient(using: defaults)
 
         #expect(await client.load() == BrowserSettings())
         #expect(await client.load().preserveOpenTabs)
@@ -25,7 +25,7 @@ struct BrowserSettingsPersistenceTests {
     @Test("Preserve Open Tabs defaults on for absent and invalid values")
     func preserveOpenTabsDefaultsToEnabled() async throws {
         let defaults = try isolatedDefaults()
-        let client = liveClient(using: defaults)
+        let client = isolatedClient(using: defaults)
 
         #expect(await client.load().preserveOpenTabs)
 
@@ -48,7 +48,7 @@ struct BrowserSettingsPersistenceTests {
     @Test("Preserve Open Tabs persists and reset restores its default")
     func preserveOpenTabsRoundTripAndReset() async throws {
         let defaults = try isolatedDefaults()
-        let client = liveClient(using: defaults)
+        let client = isolatedClient(using: defaults)
 
         await client.save(BrowserSettings(preserveOpenTabs: false))
         #expect(defaults.object(forKey: "browser.preserveOpenTabs") as? Bool == false)
@@ -62,7 +62,7 @@ struct BrowserSettingsPersistenceTests {
     @Test("Profile storage defaults invalid values and round-trips Ephemeral")
     func browsingProfileDefaultsAndRoundTrips() async throws {
         let defaults = try isolatedDefaults()
-        let client = liveClient(using: defaults)
+        let client = isolatedClient(using: defaults)
 
         #expect(await client.load().browsingProfile == .persistentPrivate)
 
@@ -78,7 +78,7 @@ struct BrowserSettingsPersistenceTests {
     @Test("Browser settings save and load form an isolated round trip")
     func savesAndLoadsRoundTrip() async throws {
         let defaults = try isolatedDefaults()
-        let client = liveClient(using: defaults)
+        let client = isolatedClient(using: defaults)
         let settings = BrowserSettings(
             searchProvider: .bing,
             providerSuggestionsEnabled: true,
@@ -94,7 +94,7 @@ struct BrowserSettingsPersistenceTests {
     @Test("Ask Every Time round-trips through the existing Browser settings client")
     func askEveryTimeRoundTrip() async throws {
         let defaults = try isolatedDefaults()
-        let client = liveClient(using: defaults)
+        let client = isolatedClient(using: defaults)
         let settings = BrowserSettings(openLinksInNewTabs: .askEveryTime)
 
         await client.save(settings)
@@ -111,16 +111,37 @@ struct BrowserSettingsPersistenceTests {
         let invalidDefaults = try isolatedDefaults()
         invalidDefaults.set("unsupported", forKey: "browser.openLinksInNewTabs")
 
-        #expect(await BrowserSettingsStorage(userDefaults: backgroundDefaults).load().openLinksInNewTabs == .background)
-        #expect(await BrowserSettingsStorage(userDefaults: foregroundDefaults).load().openLinksInNewTabs == .foreground)
-        #expect(await BrowserSettingsStorage(userDefaults: invalidDefaults).load().openLinksInNewTabs == .background)
+        #expect(
+            await BrowserSettingsStorage(
+                userDefaults: backgroundDefaults,
+                revisionGate: BrowserPersistenceRevisionGate(),
+            )
+            .load()
+            .openLinksInNewTabs == .background,
+        )
+        #expect(
+            await BrowserSettingsStorage(
+                userDefaults: foregroundDefaults,
+                revisionGate: BrowserPersistenceRevisionGate(),
+            )
+            .load()
+            .openLinksInNewTabs == .foreground,
+        )
+        #expect(
+            await BrowserSettingsStorage(
+                userDefaults: invalidDefaults,
+                revisionGate: BrowserPersistenceRevisionGate(),
+            )
+            .load()
+            .openLinksInNewTabs == .background,
+        )
     }
 
     @Test("Reset removes only Browser-owned namespaced keys")
     func resetPreservesOtherAppStorage() async throws {
         let defaults = try isolatedDefaults()
         defaults.set("keep", forKey: "other.feature.key")
-        let client = liveClient(using: defaults)
+        let client = isolatedClient(using: defaults)
 
         await client.save(BrowserSettings(
             searchProvider: .google,
@@ -143,7 +164,7 @@ struct BrowserSettingsPersistenceTests {
     func copiedLinkDefaultIsTrueWhenAbsent() async throws {
         let defaults = try isolatedDefaults()
         defaults.removeObject(forKey: "browser.copiedLinkSuggestionsEnabled")
-        let client = liveClient(using: defaults)
+        let client = isolatedClient(using: defaults)
 
         let settings = await client.load()
         #expect(settings.copiedLinkSuggestionsEnabled)
@@ -153,8 +174,8 @@ struct BrowserSettingsPersistenceTests {
     func isolatedSuitesDoNotBleed() async throws {
         let first = try isolatedDefaults()
         let second = try isolatedDefaults()
-        let firstClient = liveClient(using: first)
-        let secondClient = liveClient(using: second)
+        let firstClient = isolatedClient(using: first)
+        let secondClient = isolatedClient(using: second)
 
         await firstClient.save(BrowserSettings(searchProvider: .google))
 
@@ -164,10 +185,28 @@ struct BrowserSettingsPersistenceTests {
         #expect(secondSettings.searchProvider == .duckDuckGo)
     }
 
+    @Test("Isolated settings clients do not supersede each other's pending revisions")
+    func isolatedClientsDoNotSupersedeEachOther() async throws {
+        let firstDefaults = try isolatedDefaults()
+        let secondDefaults = try isolatedDefaults()
+        let firstClient = isolatedClient(using: firstDefaults)
+        let secondClient = isolatedClient(using: secondDefaults)
+
+        let firstRevision = firstClient.reserveRevision(0)
+        _ = secondClient.reserveRevision(firstRevision)
+        let saveRevisioned = try #require(firstClient.saveRevisioned)
+        await saveRevisioned(BrowserSettings(browsingProfile: .ephemeral), firstRevision)
+
+        #expect(firstDefaults.string(forKey: "browser.browsingProfile") == "ephemeral")
+    }
+
     @Test("The concrete settings storage uses the injected UserDefaults instance")
     func concreteStorageUsesInjectedDefaults() async throws {
         let defaults = try isolatedDefaults()
-        let storage = BrowserSettingsStorage(userDefaults: defaults)
+        let storage = BrowserSettingsStorage(
+            userDefaults: defaults,
+            revisionGate: BrowserPersistenceRevisionGate(),
+        )
 
         await storage.save(BrowserSettings(searchProvider: .bing))
 
@@ -178,7 +217,10 @@ struct BrowserSettingsPersistenceTests {
     @Test("Newer settings revisions reject delayed saves and resets")
     func staleSettingsWritesCannotUndoNewerPreferences() async throws {
         let defaults = try isolatedDefaults()
-        let storage = BrowserSettingsStorage(userDefaults: defaults)
+        let storage = BrowserSettingsStorage(
+            userDefaults: defaults,
+            revisionGate: BrowserPersistenceRevisionGate(),
+        )
 
         await storage.save(BrowserSettings(preserveOpenTabs: true), revision: 3)
         await storage.save(BrowserSettings(preserveOpenTabs: false), revision: 2)
@@ -193,7 +235,10 @@ struct BrowserSettingsPersistenceTests {
     func askEveryTimeDecodesThroughExistingKey() async throws {
         let defaults = try isolatedDefaults()
         defaults.set("askEveryTime", forKey: "browser.openLinksInNewTabs")
-        let storage = BrowserSettingsStorage(userDefaults: defaults)
+        let storage = BrowserSettingsStorage(
+            userDefaults: defaults,
+            revisionGate: BrowserPersistenceRevisionGate(),
+        )
 
         let settings = await storage.load()
 
@@ -207,11 +252,30 @@ struct BrowserSettingsPersistenceTests {
         return defaults
     }
 
-    private func liveClient(using defaults: UserDefaults) -> BrowserSettingsClient {
+    private func liveValueClient(using defaults: UserDefaults) -> BrowserSettingsClient {
         withDependencies {
             $0.defaultAppStorage = defaults
         } operation: {
             BrowserSettingsClient.liveValue
+        }
+    }
+
+    private func isolatedClient(using defaults: UserDefaults) -> BrowserSettingsClient {
+        let gate = BrowserPersistenceRevisionGate()
+        return withDependencies {
+            $0.defaultAppStorage = defaults
+        } operation: {
+            @Dependency(\.defaultAppStorage)
+            var defaultAppStorage
+            let storage = BrowserSettingsStorage(userDefaults: defaultAppStorage, revisionGate: gate)
+            return BrowserSettingsClient(
+                load: { await storage.load() },
+                save: { await storage.save($0) },
+                reset: { await storage.reset() },
+                reserveRevision: { gate.reserve(after: $0) },
+                saveRevisioned: { settings, revision in await storage.save(settings, revision: revision) },
+                resetRevisioned: { revision in await storage.reset(revision: revision) },
+            )
         }
     }
 }

@@ -8,6 +8,28 @@
 import Dependencies
 import Foundation
 import PersistenceSupport
+import Synchronization
+
+/// Linearizes resource-read permission claims with the global vault-lock boundary.
+final class MediaLibraryResourceLoadFence: Sendable {
+    private let generation = Mutex<UInt64>(0)
+
+    var currentGeneration: UInt64 {
+        generation.withLock { $0 }
+    }
+
+    func advance() {
+        generation.withLock { $0 &+= 1 }
+    }
+
+    func claimRead(generation requestedGeneration: UInt64) -> Bool {
+        generation.withLock { $0 == requestedGeneration }
+    }
+
+    func isCurrent(_ requestedGeneration: UInt64) -> Bool {
+        generation.withLock { $0 == requestedGeneration }
+    }
+}
 
 /// The dependency boundary used by the TCA media-library feature.
 public struct MediaLibraryClient: Sendable {
@@ -20,15 +42,56 @@ public struct MediaLibraryClient: Sendable {
     /// Loads exact canonical bytes for rendering a committed resource.
     public var resourceData: @Sendable (MediaResource) async throws -> Data
 
+    private let resourceDataSynchronously: (@Sendable (MediaResource) throws -> Data)?
+    private let resourceLoadFence: MediaLibraryResourceLoadFence
+
+    /// The generation captured by resource-load effects before they start.
+    public var currentResourceLoadGeneration: UInt64 {
+        resourceLoadFence.currentGeneration
+    }
+
     /// Creates an explicit media-library dependency.
     public init(
         loadAssets: @escaping @Sendable () async throws -> [MediaAsset],
         importFile: @escaping @Sendable (URL) async throws -> MediaAsset,
         resourceData: @escaping @Sendable (MediaResource) async throws -> Data,
+        resourceDataSynchronously: (@Sendable (MediaResource) throws -> Data)? = nil,
     ) {
         self.loadAssets = loadAssets
         self.importFile = importFile
         self.resourceData = resourceData
+        self.resourceDataSynchronously = resourceDataSynchronously
+        resourceLoadFence = MediaLibraryResourceLoadFence()
+    }
+
+    /// Advances the resource-read generation at the synchronous global-lock boundary.
+    public func advanceResourceLoadGeneration() {
+        resourceLoadFence.advance()
+    }
+
+    /// Starts a resource read only when its captured session generation is still current.
+    ///
+    /// Live file reads claim permission synchronously before starting I/O. A read authorized
+    /// before lock may finish afterward, but its result is discarded when its generation is stale.
+    public func resourceDataIfCurrent(
+        _ resource: MediaResource,
+        generation: UInt64,
+    ) async throws -> Data? {
+        if let resourceDataSynchronously {
+            guard resourceLoadFence.claimRead(generation: generation) else {
+                return nil
+            }
+
+            let data = try resourceDataSynchronously(resource)
+            return resourceLoadFence.isCurrent(generation) ? data : nil
+        }
+
+        guard resourceLoadFence.claimRead(generation: generation) else {
+            return nil
+        }
+
+        let data = try await resourceData(resource)
+        return resourceLoadFence.isCurrent(generation) ? data : nil
     }
 }
 
@@ -37,11 +100,13 @@ extension MediaLibraryClient: DependencyKey {
     public static let liveValue = makeLive()
 
     /// The deterministic dependency used when tests do not override the client.
-    public static let testValue = Self(
-        loadAssets: { [] },
-        importFile: { _ in throw MediaLibraryStoreError.unavailable },
-        resourceData: { _ in throw MediaLibraryStoreError.unavailable },
-    )
+    public static var testValue: Self {
+        Self(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaLibraryStoreError.unavailable },
+            resourceData: { _ in throw MediaLibraryStoreError.unavailable },
+        )
+    }
 
     private static func makeLive() -> Self {
         do {
@@ -74,6 +139,7 @@ extension MediaLibraryClient: DependencyKey {
                 loadAssets: { try await importer.loadAssets() },
                 importFile: { try await importer.importFile(at: $0) },
                 resourceData: { try resources.data(for: $0) },
+                resourceDataSynchronously: { try resources.data(for: $0) },
             )
         } catch {
             return unavailableValue

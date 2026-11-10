@@ -4,7 +4,7 @@ set -o pipefail
 
 script_directory=$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repository_root=$(cd -- "$script_directory/.." && pwd)
-xcode_wrapper="$script_directory/with-xcode-27-rc.sh"
+xcode_wrapper="$script_directory/with-xcode-27.2.sh"
 swift_tools_adapter="$script_directory/swift-tools.sh"
 swift_tools_local_config="$script_directory/swift-tools-local.sh"
 compiler_log_directory="$repository_root/.build/swiftlint"
@@ -12,7 +12,7 @@ compiler_log_directory="$repository_root/.build/swiftlint"
 # dependencies once; only compiler and build products live in the per-run
 # analyzer directory below.
 source_packages_directory="$repository_root/.build/SourcePackages"
-iphone_destination="${IPHONE_DESTINATION:-platform=iOS Simulator,name=iPhone 17,OS=27.0}"
+iphone_destination="${IPHONE_DESTINATION:-platform=iOS Simulator,name=iPhone 17,OS=27.2}"
 
 if [ ! -x "$swift_tools_adapter" ]; then
 	printf '%s\n' "Shared Swift tooling is not installed. Run Scripts/swift-tools.sh bootstrap first." >&2

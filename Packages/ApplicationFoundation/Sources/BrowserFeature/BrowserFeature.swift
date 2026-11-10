@@ -169,8 +169,12 @@ public struct BrowserFeature {
         var bookmarks: [BrowserBookmark]
         var history: [BrowserHistoryEntry]
         var settings: BrowserSettings
+        /// Whether Browser actions are blocked by a vault lock.
+        public var isSessionLocked: Bool
         /// Serializes stored-profile initialization and confirmed profile transitions.
         var profileLifecycle: BrowserProfileLifecycle
+        /// Fences adapter configuration commands that complete after lock or a newer request.
+        var profileConfigurationGeneration: UInt64
         /// Browser entry and session restoration are independent from profile initialization.
         var openTabsEntryLifecycle: BrowserOpenTabsEntryLifecycle
         /// Orders session writes before their effects reach the session storage actor.
@@ -211,7 +215,9 @@ public struct BrowserFeature {
             bookmarks = []
             history = []
             settings = .init()
+            isSessionLocked = false
             profileLifecycle = .notStarted
+            profileConfigurationGeneration = 0
             openTabsEntryLifecycle = .notEntered
             openTabsRevision = 0
             settingsRevision = 0
@@ -254,7 +260,9 @@ public struct BrowserFeature {
             bookmarks = []
             history = []
             settings = .init()
+            isSessionLocked = false
             profileLifecycle = .notStarted
+            profileConfigurationGeneration = 0
             openTabsEntryLifecycle = .notEntered
             openTabsRevision = 0
             settingsRevision = 0
@@ -299,6 +307,63 @@ public struct BrowserFeature {
             tabs.count > 99 ? "99+" : String(tabs.count)
         }
 
+        /// Advances and returns the generation used to reject stale WebKit profile work.
+        public mutating func advanceProfileConfigurationGenerationForLock() -> UInt64 {
+            profileConfigurationGeneration &+= 1
+            return profileConfigurationGeneration
+        }
+
+        /// Clears session-sensitive presentation state while retaining logical navigation.
+        public mutating func clearTransientPresentationForLock() -> Effect<Action> {
+            let shouldAdvanceProfileConfigurationGeneration = !isSessionLocked
+            isSessionLocked = true
+            presentation = .browsing
+            tabOverviewFocusID = nil
+            tabOverviewScrollPosition = nil
+            focusedField = .none
+            omniboxDraft = ""
+            hasUnsubmittedOmniboxDraft = false
+            suggestions = []
+            providerSuggestionValues = []
+            copiedLink = nil
+            library = nil
+            bookmarkEditor = nil
+            findDraft = nil
+            backForwardList = nil
+            javaScriptDialogTabID = nil
+            shareURL = nil
+            shareTitle = nil
+            destructiveConfirmation = nil
+            pendingNewTab = nil
+            pendingWebAction = nil
+            pendingProfileChange = nil
+            switch profileLifecycle {
+            case .initializing,
+                 .transitioning:
+                profileLifecycle = .notStarted
+            case .notStarted,
+                 .ready:
+                break
+            }
+            if shouldAdvanceProfileConfigurationGeneration {
+                _ = advanceProfileConfigurationGenerationForLock()
+            }
+            switch openTabsEntryLifecycle {
+            case .waitingForProfile,
+                 .restoring,
+                 .persistWhenProfileReady:
+                openTabsEntryLifecycle = .notEntered
+            case .notEntered,
+                 .completed:
+                break
+            }
+            previewState.clearData()
+            return .merge(
+                .cancel(id: BrowserFeature.CancelID.providerSuggestions),
+                .cancel(id: BrowserFeature.CancelID.webKitEvents),
+            )
+        }
+
         /// Rebuilds transient suggestions only while an omnibox field owns focus.
         mutating func rebuildSuggestions() {
             guard focusedField != .none else {
@@ -329,6 +394,8 @@ public struct BrowserFeature {
     public enum Action: Equatable, Sendable {
         /// Starts or restarts Browser view-scoped WebKit event observation.
         case task
+        /// Clears session-sensitive presentation state without discarding logical tab navigation.
+        case sessionLocked
         /// Marks entry into the authenticated Browser surface exactly once per reducer state.
         case browserEntered
         /// Requests idempotent stored settings, library, and profile initialization.
@@ -516,6 +583,7 @@ public struct BrowserFeature {
     enum CancelID {
         case providerSuggestions
         case webKitEvents
+        case profileConfiguration
     }
 
     /// Creates the browser reducer.

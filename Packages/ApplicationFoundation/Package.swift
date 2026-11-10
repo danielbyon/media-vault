@@ -93,6 +93,8 @@ let package = Package(
                 ),
                 "CalculatorFeature",
                 "DecoySupport",
+                "MediaLibrary",
+                "PresentationSupport",
                 "VaultFeature",
             ],
         ),
@@ -158,6 +160,8 @@ let package = Package(
             name: "PresentationSupportTests",
             dependencies: [
                 "PresentationSupport",
+                "FoundationTestSupport",
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
         ),
         .testTarget(
@@ -203,7 +207,9 @@ let package = Package(
             name: "AppFeatureTests",
             dependencies: [
                 "AppFeature",
+                "BrowserFeature",
                 "DecoySupport",
+                "MediaLibrary",
                 "VaultFeature",
                 "FoundationTestSupport",
                 .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
