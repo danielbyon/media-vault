@@ -1,0 +1,40 @@
+Packages/ApplicationFoundation/Tests/BrowserFeatureTests/BrowserOpenTabsSessionTests.swift
+  s_572fff539c3fed::t_df466a169797ad 816-817,854-866,868-894
+  s_572fff539c3fed::t_e6b28147b2dfea 330,819-853
+  s_572fff539c3fed::t_b3072b04ef37c1 176-179,191,199-202,204-207,211-214,217-220,272-281,305
+  s_572fff539c3fed::t_03dff82f4f8eee 142,147-148,172,186,188-190,197,210,259,263-269,271,282-284,287-304,307-314,318-320,322-327,329,332,334,336-338,340,342-345
+  s_572fff539c3fed::t_4ddf2b84484ab0 285,317,333,339
+  s_572fff539c3fed::t_97f9da506555ad 346,812-815,895-906
+  s_572fff539c3fed::t_76b270ee3bb586 335,341
+  s_572fff539c3fed::t_a6d547f0ceafaa 160
+  s_572fff539c3fed::t_edea8c264931ba 223-236,867
+  s_572fff539c3fed::t_1f09dee6629478 129-135,137-141,143,145,149-153,155-159,161-170,173-175,180-184,187,194-195,198,203,209,222,237,241-245,247-250,252-257
+  s_572fff539c3fed::t_13b483b806911c 286,315-316,328
+  s_572fff539c3fed::t_2c8d74b9aed8f0 331
+  s_572fff539c3fed::t_ae99996793f7ca 136,154,192,215-216,246,270,306,321
+  s_c7322073c3be8f::t_c54f6f096ffc1f 347,818
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ae06b57bfad52a7aef25d55277496c17b7213680",
+  "prompts": {},
+  "sessions": {
+    "s_572fff539c3fed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188a8-3280-7891-9d5c-5b2049a8842a",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    },
+    "s_c7322073c3be8f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ba0c-52c4-7f73-a566-c996b89fea2d",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
