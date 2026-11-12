@@ -2295,11 +2295,20 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             }
     }
 
+    /// Reads observation JSON from controls in one reachable window.
+    ///
+    /// Reusing the scope found by the wait avoids a second accessibility query across a scene transition.
     private func observations(_ app: XCUIApplication) throws -> [Observation] {
+        var reachableScope: ControlScope?
         try wait(app, milestone: "qualification observation refresh control") {
-            self.hittableScope("downloadQualificationRefreshObservations", in: app) != nil
+            guard let scope = self.hittableScope("downloadQualificationRefreshObservations", in: app) else {
+                return false
+            }
+
+            reachableScope = scope
+            return true
         }
-        let scope = try XCTUnwrap(hittableScope("downloadQualificationRefreshObservations", in: app))
+        let scope = try XCTUnwrap(reachableScope)
         scope.button.tap()
         guard let value = scope.window.staticTexts["downloadQualificationObservations"].value as? String else {
             throw QualificationError.missingObservation

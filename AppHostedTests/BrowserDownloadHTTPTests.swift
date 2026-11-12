@@ -791,6 +791,10 @@ private enum HTTPDownloadDiagnosticEvidence {
             switch command {
             case .configureProfile:
                 "configureProfile"
+            case .configureProfileForGeneration:
+                "configureProfileForGeneration"
+            case .invalidateProfileConfiguration:
+                "invalidateProfileConfiguration"
             case .ensureContext:
                 "ensureContext"
             case let .load(_, url, _):
@@ -1134,6 +1138,12 @@ private final class HTTPDownloadFixture {
             events: { await recorder.webKitStream(fixtureAdapter) },
         )
         let downloads = BrowserDownloadClient(
+            invalidateAuthorization: {
+                MainActor.assumeIsolated {
+                    fixtureOwner.invalidateAuthorization()
+                    return fixtureOwner.snapshot
+                }
+            },
             execute: { await fixtureOwner.execute($0) },
             events: { await recorder.downloadStream(fixtureOwner) },
         )

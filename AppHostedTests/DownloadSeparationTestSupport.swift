@@ -102,6 +102,12 @@ func makeBrowserDownloadWebKitClients(
             events: { await adapter.makeEventStream() },
         ),
         downloads: BrowserDownloadClient(
+            invalidateAuthorization: {
+                MainActor.assumeIsolated {
+                    owner.invalidateAuthorization()
+                    return owner.snapshot
+                }
+            },
             execute: { await owner.execute($0) },
             events: { await owner.subscribe() },
         ),

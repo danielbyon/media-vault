@@ -300,6 +300,12 @@ private final class BrowserDownloadProductionQualificationProcess {
                 events: { await webKitAdapter.makeEventStream() },
             )
             $0.browserDownloads = BrowserDownloadClient(
+                invalidateAuthorization: {
+                    MainActor.assumeIsolated {
+                        downloadOwner.invalidateAuthorization()
+                        return downloadOwner.snapshot
+                    }
+                },
                 execute: { await downloadOwner.execute($0) },
                 events: { await downloadOwner.subscribe() },
             )
@@ -576,6 +582,12 @@ private struct BrowserDownloadProductionQualificationRoot: View {
         RootView(
             store: process.store,
             downloads: BrowserDownloadClient(
+                invalidateAuthorization: {
+                    MainActor.assumeIsolated {
+                        process.owner.invalidateAuthorization()
+                        return process.owner.snapshot
+                    }
+                },
                 execute: { await process.owner.execute($0) },
                 events: { await process.owner.subscribe() },
             ),

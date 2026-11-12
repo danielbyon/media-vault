@@ -906,6 +906,38 @@ struct BrowserDownloadCoreTests {
         #expect(store.state.tabs == tabs)
     }
 
+    @Test("A delayed pre-lock snapshot cannot reappear after immediate reauthentication")
+    func delayedPreLockSnapshotAfterReauthenticationIsRejected() async {
+        var initialState = BrowserFeature.State.readyForTesting()
+        var revoked = BrowserDownloadSnapshot()
+        revoked.revision = 12
+        revoked.generation = 2
+        initialState.downloads = revoked
+
+        let store = TestStore(initialState: initialState) { BrowserFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        var delayed = BrowserDownloadSnapshot()
+        delayed.revision = 13
+        delayed.generation = 1
+        delayed.isAvailable = true
+        delayed.records = [
+            BrowserDownloadRecord(
+                id: BrowserDownloadID(),
+                tabID: store.state.selectedTabID,
+                filename: "private-document.pdf",
+                receivedBytes: 8,
+                expectedBytes: 8,
+                isReady: true,
+            ),
+        ]
+
+        await store.send(.downloadsChanged(delayed))
+
+        #expect(store.state.downloads == revoked)
+        #expect(!store.state.downloadsArePresented)
+    }
+
     #if DEBUG
     /// The startup-purge projection reports the persisted expectation, the enumerated count, and
     /// whether every entry name parses as a UUID without ever carrying a path, filename leaf, or

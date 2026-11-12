@@ -125,6 +125,8 @@ public struct BrowserDownloadCommand: Equatable, Sendable {
 
 /// Reducer bridge to shared transient download ownership.
 public struct BrowserDownloadClient: Sendable {
+    /// Revokes download authorization synchronously with the shared vault lock commit.
+    public var invalidateAuthorization: @Sendable () -> BrowserDownloadSnapshot
     /// Executes an opaque command on the main actor.
     public var execute: @Sendable (BrowserDownloadCommand) async -> Void
     /// Atomically subscribes and yields the current snapshot before subsequent revisions.
@@ -134,11 +136,21 @@ public struct BrowserDownloadClient: Sendable {
 extension BrowserDownloadClient: DependencyKey {
     /// Live shared-browser owner; authorization starts disabled.
     public static let liveValue = Self(
+        invalidateAuthorization: {
+            MainActor.assumeIsolated {
+                BrowserDownloadPrivacy.invalidate()
+                return BrowserDownloadOwner.shared.snapshot
+            }
+        },
         execute: { await BrowserDownloadOwner.shared.execute($0) },
         events: { await BrowserDownloadOwner.shared.subscribe() },
     )
     /// No-op dependency leaves unrelated reducer tests independent of native storage.
-    public static let testValue = Self(execute: { _ in }, events: { AsyncStream { $0.finish() } })
+    public static let testValue = Self(
+        invalidateAuthorization: { BrowserDownloadSnapshot() },
+        execute: { _ in },
+        events: { AsyncStream { $0.finish() } },
+    )
 }
 
 extension DependencyValues {

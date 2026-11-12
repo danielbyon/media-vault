@@ -13,9 +13,9 @@ import CoreFoundation
 import CoreGraphics
 import Dependencies
 import Foundation
+import MediaLibrary
 import QuartzCore
 import QuickLook
-import MediaLibrary
 import Sharing
 import SnapshotTesting
 import SwiftUI
@@ -475,6 +475,29 @@ extension AppHostedUITests {
             }
         }
 
+        @Test("Global lock revokes a pending native share before presentation")
+        func globalLockRevokesPendingNativeShareBeforePresentation() async throws {
+            try await withDownloadRoot { fixture in
+                let file = try fixture.completedPDF()
+                fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .present(file.id, .share)))
+                let pending = try #require(fixture.owner.snapshot.presentation)
+                #expect(pending.kind == .share)
+
+                fixture.store.send(.vault(.lock))
+
+                #expect(fixture.store.state.vault.phase == .locked)
+                #expect(fixture.owner.snapshot.generation > pending.generation)
+                #expect(fixture.owner.snapshot.presentation == nil)
+                #expect(fixture.owner.snapshot.records.isEmpty)
+                #expect(!fixture.owner.snapshot.isAvailable)
+                #expect(fixture.coordinator.coverWindow(in: fixture.scene)?.isHidden == false)
+                #expect(fixture.owner.admit(RootDownloadWriter(), tabID: .init()) == nil)
+                try await fixture.wait("revoked Share request cannot be presented after Lock") {
+                    fixture.coordinator.nativeController == nil && fixture.owner.snapshot.presentation == nil
+                }
+            }
+        }
+
         @Test("Full-screen Quick Look retains its scene and inactivity cannot resurrect its source")
         func quickLookDetachedRootRetainsScene() async throws {
             try await withDownloadRoot { fixture in
@@ -808,9 +831,9 @@ private func withDownloadRoot(
     await fixture.remove()
 }
 
-/// A controlled lifecycle reducer drives phase changes while the actual RootView supplies live
-/// Store.publisher observation and immutable body tokens. This does not test credential policy.
-/// Only simulator protection readback is injected; ownership, backup exclusion and UIKit are real.
+/// A controlled reducer routes Lock through the real vault commit while the actual RootView supplies
+/// live Store.publisher observation and immutable body tokens. Only simulator protection readback
+/// is injected; ownership, backup exclusion, native concealment, and UIKit are real.
 @MainActor
 private final class MountedDownloadRoot {
     final class Faults {
@@ -869,9 +892,27 @@ private final class MountedDownloadRoot {
         } operation: {
             RootComposition.makeStore(vault: .init(phase: .authenticated)).state
         }
+        let downloads = BrowserDownloadClient(
+            invalidateAuthorization: {
+                MainActor.assumeIsolated {
+                    fixtureOwner.invalidateAuthorization()
+                    return fixtureOwner.snapshot
+                }
+            },
+            execute: { await fixtureOwner.execute($0) },
+            events: { await fixtureOwner.subscribe() },
+        )
         store = Store(initialState: initial) {
             Reduce<RootFeature.State, RootFeature.Action> { state, action in
                 switch action {
+                case .vault(.lock):
+                    return state.vault
+                        .commitGlobalLock(
+                            advanceResourceLoadGeneration: {},
+                            advanceBrowserProfileConfigurationGeneration: { _ in },
+                            invalidateBrowserDownloadAuthorization: downloads.invalidateAuthorization,
+                        )
+                        .map(RootFeature.Action.vault)
                 case .vault(.retryConfiguration):
                     state.vault.phase = .locked
                 case .vault(.beginAuthentication):
@@ -882,10 +923,6 @@ private final class MountedDownloadRoot {
                 return .none
             }
         }
-        let downloads = BrowserDownloadClient(
-            execute: { await fixtureOwner.execute($0) },
-            events: { await fixtureOwner.subscribe() },
-        )
         root = DownloadRootAppearanceController(rootView: RootView(
             store: store,
             downloads: downloads,

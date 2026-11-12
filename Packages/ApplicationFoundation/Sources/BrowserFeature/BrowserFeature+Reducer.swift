@@ -840,7 +840,9 @@ extension BrowserFeature {
             return .none
 
         case let .downloadsChanged(snapshot):
-            guard snapshot.revision > state.downloads.revision else {
+            guard snapshot.generation >= state.downloads.generation,
+                  snapshot.revision > state.downloads.revision
+            else {
                 return .none
             }
 

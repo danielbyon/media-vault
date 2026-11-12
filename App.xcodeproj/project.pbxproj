@@ -683,6 +683,7 @@
 				A10000000000000000000053 /* BrowserDownloadPersistenceFixture+RootHosting.swift in Sources */,
 				A10000000000000000000046 /* BrowserDownloadLoopbackServerTests.swift in Sources */,
 				A10000000000000000000045 /* BrowserDownloadHTTPTests.swift in Sources */,
+				A20000000000000000000044 /* BrowserDownloadLoopbackServer.swift in Sources */,
                 A10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

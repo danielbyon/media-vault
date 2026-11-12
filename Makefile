@@ -18,6 +18,9 @@ SNAPSHOT_DESTINATION ?= $(IPAD_DESTINATION)
 APP_SNAPSHOT_SUITE := AppTests/RootSurfaceSnapshotTests
 APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates
 APP_HOSTED_PRIVACY_OCCLUSION_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)
+BROWSER_DOWNLOAD_MULTI_SCENE_TESTS := \
+	BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene \
+	BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable
 PACKAGE_SNAPSHOT_SUITES := \
 	AppFeatureTests/VaultFeatureViewSnapshotTests \
 	CalculatorFeatureTests/CalculatorViewSnapshotTests \
@@ -116,7 +119,9 @@ test:
 	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
 	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"; \
 	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$test_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
-	assert_tests_ran App-iPad-privacy "$$test_root/App-iPadPrivacy.xcresult"
+	assert_tests_ran App-iPad-privacy "$$test_root/App-iPadPrivacy.xcresult"; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme BrowserTabOverviewUITests -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/BrowserDownloadMultiScene" -resultBundlePath "$$test_root/BrowserDownloadMultiScene.xcresult" -parallel-testing-enabled NO $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS),-only-testing:BrowserTabOverviewUITests/$(test)) test; \
+	$(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$test_root/BrowserDownloadMultiScene.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS),--expected-test $(test))
 
 # Exercise the native presentation snapshot suites on the canonical 2x iPad.
 # UIKit lifecycle protection remains covered by behavioral tests in `make test`.
@@ -236,7 +241,14 @@ clean-test:
 
 # Read canonical destinations from Make for both CI preflight and local checks.
 verify-test-destination:
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)'
+	@set -euo pipefail; \
+	simulator_udid=$$(GITHUB_OUTPUT= $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
+	ipad_simulator_udid=$$(GITHUB_OUTPUT= $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' '$(VERIFIED_IPAD_SIMULATOR_UDID)' | tail -n 1); \
+	printf 'Verified iPhone simulator: %s\n' "$$simulator_udid"; \
+	printf 'Verified iPad simulator: %s\n' "$$ipad_simulator_udid"; \
+	if [[ -n "$${GITHUB_OUTPUT:-}" ]]; then \
+		printf 'simulator_udid=%s\nipad_simulator_udid=%s\n' "$$simulator_udid" "$$ipad_simulator_udid" >> "$$GITHUB_OUTPUT"; \
+	fi
 
 verify-snapshot-destination:
 	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)'

@@ -328,13 +328,41 @@ struct VaultFeatureTests {
         browserState.settings.copiedLinkSuggestionsEnabled = false
         browserState.omniboxDraft = "synthetic private draft"
         browserState.focusedField = .chrome
+        var preLockDownloads = BrowserDownloadSnapshot()
+        preLockDownloads.revision = 10
+        preLockDownloads.generation = 1
+        preLockDownloads.isAvailable = true
+        preLockDownloads.records = [
+            BrowserDownloadRecord(
+                id: BrowserDownloadID(),
+                tabID: tabID,
+                filename: "private-document.pdf",
+                receivedBytes: 8,
+                expectedBytes: 8,
+                isReady: true,
+            ),
+        ]
+        browserState.downloads = preLockDownloads
+        browserState.downloadsArePresented = true
         initialState.shell.browser = browserState
 
         let savedSettings = LockIsolated<[BrowserSettings]>([])
         let executedCommands = LockIsolated<[BrowserWebKitCommand]>([])
+        let downloadInvalidationCount = LockIsolated(0)
+        let revokedDownloadSnapshot = {
+            var snapshot = BrowserDownloadSnapshot()
+            snapshot.revision = 11
+            snapshot.generation = 2
+            snapshot.notice = .unauthorized
+            return snapshot
+        }()
         let fence = BrowserWebKitProfileConfigurationFence()
         let deferredLockEffect = withDependencies {
             $0.uuid = .incrementing
+            $0.browserDownloads.invalidateAuthorization = {
+                downloadInvalidationCount.withValue { $0 += 1 }
+                return revokedDownloadSnapshot
+            }
             $0.browserProfileConfigurationFence = BrowserProfileConfigurationFenceClient(
                 advance: { fence.advance(to: $0) },
             )
@@ -342,15 +370,19 @@ struct VaultFeatureTests {
             VaultFeature().reduce(into: &initialState, action: .lock)
         }
 
+        #expect(downloadInvalidationCount.value == 1)
         #expect(initialState.phase == .locked)
         #expect(initialState.shell.isSessionLocked)
         #expect(initialState.shell.library.isSessionLocked)
         #expect(initialState.shell.browser.isSessionLocked)
+        #expect(initialState.shell.browser.downloads == revokedDownloadSnapshot)
+        #expect(!initialState.shell.browser.downloadsArePresented)
 
         let store = TestStore(initialState: initialState) {
             VaultFeature()
         } withDependencies: {
             $0.uuid = .incrementing
+            $0.vaultCredential.verify = { _ in .succeeded }
             $0.browserSettings.saveRevisioned = { settings, _ in
                 savedSettings.withValue { $0.append(settings) }
             }
@@ -410,6 +442,51 @@ struct VaultFeatureTests {
 
             return generation
         } == [1])
+
+        await store.send(.beginAuthentication) {
+            $0.phase = .authentication
+            $0.sessionGeneration = 2
+        }
+        await store.send(.authenticationCredentialChanged("test credential")) {
+            $0.credentialInput = "test credential"
+        }
+        await store.send(.submitAuthentication) {
+            $0.isWorking = true
+            $0.authenticationRequestGeneration = 2
+        }
+        await store.receive(.authenticationCompleted(
+            sessionGeneration: 2,
+            requestGeneration: 2,
+            result: .succeeded,
+        )) {
+            $0.phase = .authenticated
+            $0.isWorking = false
+            $0.credentialInput = ""
+            $0.shell.isSessionLocked = false
+            $0.shell.library.isSessionLocked = false
+            $0.shell.browser.isSessionLocked = false
+        }
+
+        var delayedPreLockSnapshot = BrowserDownloadSnapshot()
+        delayedPreLockSnapshot.revision = 12
+        delayedPreLockSnapshot.generation = 1
+        delayedPreLockSnapshot.isAvailable = true
+        delayedPreLockSnapshot.records = [
+            BrowserDownloadRecord(
+                id: BrowserDownloadID(),
+                tabID: tabID,
+                filename: "private-document.pdf",
+                receivedBytes: 8,
+                expectedBytes: 8,
+                isReady: true,
+            ),
+        ]
+        await store.send(.shell(.browser(.downloadsChanged(delayedPreLockSnapshot))))
+
+        #expect(store.state.phase == .authenticated)
+        #expect(!store.state.shell.browser.isSessionLocked)
+        #expect(store.state.shell.browser.downloads == revokedDownloadSnapshot)
+        #expect(!store.state.shell.browser.downloadsArePresented)
     }
 
     @Test("Global vault lock fences pending profile configuration before child cleanup", .timeLimit(.minutes(1)))

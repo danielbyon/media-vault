@@ -238,6 +238,60 @@ struct BrowserDownloadSceneRegistryTests {
         #expect(!render.confirmed)
     }
 
+    @Test("A delayed root layout from before lock cannot confirm after immediate reauthentication")
+    func delayedRootLayoutCannotConfirmAfterImmediateReauthentication() {
+        var authenticated = true
+        let registry = BrowserDownloadSceneRegistry(authenticated: { authenticated })
+        registry.register(UUID(), active: true)
+
+        var render = BrowserDownloadRootRenderState()
+        let oldAuthenticatedSurface = testRootRenderToken(true, generation: 5)
+        let oldSurfaceAccepted = render.update(
+            token: oldAuthenticatedSurface,
+            liveToken: oldAuthenticatedSurface,
+        )
+        #expect(oldSurfaceAccepted)
+        let oldRevision = render.revision
+
+        authenticated = false
+        #expect(!registry.isAuthorized)
+        let lockedSurface = testRootRenderToken(false, generation: 6, surface: "locked")
+        let lockedSurfaceAccepted = render.update(token: lockedSurface, liveToken: lockedSurface)
+        #expect(lockedSurfaceAccepted)
+
+        authenticated = true
+        #expect(registry.isAuthorized)
+        let reauthenticatedSurface = testRootRenderToken(true, generation: 6)
+        let reauthenticatedSurfaceAccepted = render.update(
+            token: reauthenticatedSurface,
+            liveToken: reauthenticatedSurface,
+        )
+        #expect(reauthenticatedSurfaceAccepted)
+        let reauthenticatedRevision = render.revision
+
+        render.confirm(
+            revision: oldRevision,
+            token: oldAuthenticatedSurface,
+            liveToken: reauthenticatedSurface,
+            rootAttached: true,
+            modalsAbsent: true,
+            layoutCommitted: true,
+        )
+        #expect(render.revision == reauthenticatedRevision)
+        #expect(render.token == reauthenticatedSurface)
+        #expect(!render.confirmed)
+        #expect(!render.canReleaseCover(sceneActive: true, nativeAdmissionHeld: false))
+
+        let delayedOldBodyAccepted = render.update(
+            token: oldAuthenticatedSurface,
+            liveToken: reauthenticatedSurface,
+        )
+        #expect(!delayedOldBodyAccepted)
+        #expect(render.token == nil)
+        #expect(!render.confirmed)
+        #expect(!render.canReleaseCover(sceneActive: true, nativeAdmissionHeld: false))
+    }
+
     @Test("Authentication change between reconciliation and layout completion rejects confirmation")
     func changedAuthenticationRejectsLayoutCompletion() {
         var render = BrowserDownloadRootRenderState()

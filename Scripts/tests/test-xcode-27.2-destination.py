@@ -43,7 +43,33 @@ elif tool == "xcrun":
         else:
             print("iOS 27.2 (27.2 - 24B8117) - com.apple.CoreSimulator.SimRuntime.iOS-27-2")
     elif args[:4] == ["xcresulttool", "get", "test-results", "summary"]:
-        print('{"totalTestCount": 3}')
+        bundle = args[args.index("--path") + 1]
+        if bundle.endswith("BrowserDownloadMultiScene.xcresult"):
+            print(json.dumps({
+                "result": "Passed",
+                "totalTestCount": 2,
+                "passedTests": 2,
+                "failedTests": 0,
+                "skippedTests": 0,
+                "expectedFailures": 0,
+                "devicesAndConfigurations": [{"device": {
+                    "deviceId": "22222222-2222-4222-8222-222222222222",
+                    "deviceName": "iPad Pro 11-inch (M5)",
+                    "osVersion": "27.2",
+                    "platform": "iOS Simulator",
+                }}],
+            }))
+        else:
+            print('{"totalTestCount": 3}')
+    elif args[:4] == ["xcresulttool", "get", "test-results", "tests"]:
+        print(json.dumps({"testNodes": [
+            {"nodeType": "Test Case", "nodeIdentifier":
+             "BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene()",
+             "result": "Passed"},
+            {"nodeType": "Test Case", "nodeIdentifier":
+             "BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable()",
+             "result": "Passed"},
+        ]}))
     else:
         sys.exit("Unexpected xcrun arguments: " + repr(args))
 elif tool == "xcodebuild":
@@ -206,6 +232,34 @@ class DestinationTests(unittest.TestCase):
         self.assertEqual(executed[executed.index("-destination") + 1],
                          "platform=iOS Simulator,id=11111111-1111-4111-8111-111111111111")
 
+    def test_test_destination_preflight_exports_both_verified_devices(self):
+        ipad_name = "iPad Pro 11-inch (M5)"
+        self.devices = {"devices": {RUNTIME: [
+            self.device(name=NAME, udid=UDID),
+            self.device(name=ipad_name, udid=OTHER_UDID),
+        ]}}
+        self.destinations = [
+            self.destination(name=NAME, udid=UDID),
+            self.destination(name=ipad_name, udid=OTHER_UDID),
+        ]
+        self.write_inventory()
+
+        result = subprocess.run(
+            [MAKE, "verify-test-destination", f"XCODE_WRAPPER={self.wrapper}",
+             f"VERIFIED_SIMULATOR_UDID={UDID}",
+             f"VERIFIED_IPAD_SIMULATOR_UDID={OTHER_UDID}",
+             f"PATH={self.env['PATH']}"],
+            cwd=ROOT,
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        outputs = (self.root / "outputs").read_text().splitlines()
+        self.assertIn(f"simulator_udid={UDID}", outputs)
+        self.assertIn(f"ipad_simulator_udid={OTHER_UDID}", outputs)
+
     def test_make_binds_each_invocation_to_its_expected_destination(self):
         checkout = self.root / "checkout"
         checkout.mkdir()
@@ -224,8 +278,9 @@ class DestinationTests(unittest.TestCase):
                         self.destination(name=NAME, udid=UDID),
                         self.destination(name=ipad_name, udid=ipad_udid),
                     ]
-                    expected_schemes = ["App", "ApplicationFoundation-Package", "App"]
-                    expected_udids = [UDID, UDID, ipad_udid]
+                    expected_schemes = ["App", "ApplicationFoundation-Package", "App",
+                                        "BrowserTabOverviewUITests"]
+                    expected_udids = [UDID, UDID, ipad_udid, ipad_udid]
                 else:
                     self.devices = {"devices": {RUNTIME: [self.device(name=ipad_name)]}}
                     self.destinations = [self.destination(name=ipad_name)]
@@ -234,7 +289,9 @@ class DestinationTests(unittest.TestCase):
                 self.write_inventory()
                 (self.root / "executed.jsonl").unlink(missing_ok=True)
                 result = subprocess.run([MAKE, target, f"XCODE_WRAPPER={self.wrapper}",
-                                         f"VERIFIED_SIMULATOR_UDID={UDID}", f"PATH={self.env['PATH']}"],
+                                         f"VERIFIED_SIMULATOR_UDID={UDID}",
+                                         f"VERIFIED_IPAD_SIMULATOR_UDID={ipad_udid if target == 'test' else ''}",
+                                         f"PATH={self.env['PATH']}"],
                                         cwd=checkout, env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 commands = self.executions()
@@ -242,6 +299,16 @@ class DestinationTests(unittest.TestCase):
                                  expected_schemes)
                 self.assertEqual([args[args.index("-destination") + 1].rsplit("=", 1)[-1]
                                   for args in commands], expected_udids)
+                if target == "test":
+                    multi_scene_command = commands[-1]
+                    self.assertEqual(
+                        [argument for argument in multi_scene_command
+                         if argument.startswith("-only-testing:")],
+                        [
+                            "-only-testing:BrowserTabOverviewUITests/BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene",
+                            "-only-testing:BrowserTabOverviewUITests/BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable",
+                        ],
+                    )
 
 
 if __name__ == "__main__":

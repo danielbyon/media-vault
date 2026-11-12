@@ -25,14 +25,18 @@ pixel-perfect full-window images.
 invocations skip root-surface snapshots, hosted presentation snapshots, and
 the five package snapshot suites. A separate App invocation on the canonical
 iPad runs `rootPrivacyCoverSynchronouslyOccludesPrivateSentinel`; on iPad that
-test exercises both the compact and regular fixtures. Shell navigation and
-Lock-control UI tests run separately in the `BrowserTabOverviewUITests`
-scheme. `make test-snapshots` runs Layer C and the repository's other exact
+test exercises both the compact and regular fixtures. The same gate runs the
+two `BrowserDownloadMultiSceneUITests` cases through the diagnostic
+`BrowserTabOverviewUITests` scheme on the canonical iPad. It checks the exact
+test identities, device, and pass/fail/skip counts. This host-only coverage
+does not enable multiple scenes in the shipping app or replace physical
+scene/privacy qualification. Shell navigation and Lock-control UI tests remain
+separate. `make test-snapshots` runs Layer C and the repository's other exact
 visual suites. UIKit protection is checked through state, accessibility,
 hit-testing, and synthetic private-pixel occlusion assertions.
 
 The hosted privacy behavior tests cover compact and regular fixtures in
-`make test`. Shell-control UI tests run in the separate
+`make test`. The remaining shell-control UI tests run in the separate
 `BrowserTabOverviewUITests` scheme.
 
 Layer B privacy fixtures use 320x568 compact and 1024x1366 regular dimensions.
@@ -165,8 +169,8 @@ which navigates among Collections, Browser, and Library;
 checks the persistent Lock control in selected authenticated destinations; and
 `testSettingsLockReturnsToCalculatorFromTopLevelAndBrowserSettings`, which
 checks the Settings Lock action from top-level Settings and Browser Settings.
-These UI tests are outside `make test`; they do not prove the two-layout
-fixture matrix or PAC-1/TAC-5, which remain deferred to Issue #59.
+These three shell UI tests are outside `make test`; they do not prove the
+two-layout fixture matrix or PAC-1/TAC-5, which remain deferred to Issue #59.
 The hosted Layer C selector is:
 
 `-only-testing:'AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates()'`

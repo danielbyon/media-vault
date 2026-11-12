@@ -117,6 +117,9 @@ public struct RootFeature {
     @Dependency(\.browserProfileConfigurationFence)
     var browserProfileConfigurationFence
 
+    @Dependency(\.browserDownloads)
+    var browserDownloads
+
     private let definition: DecoyDefinition
 
     /// Creates the generic host for one statically registered decoy.
@@ -268,6 +271,7 @@ public struct RootFeature {
             .commitGlobalLock(
                 advanceResourceLoadGeneration: mediaLibrary.advanceResourceLoadGeneration,
                 advanceBrowserProfileConfigurationGeneration: browserProfileConfigurationFence.advance,
+                invalidateBrowserDownloadAuthorization: browserDownloads.invalidateAuthorization,
             )
             .map(Action.vault)
         let update = updateTriggerConfiguration(state: state)

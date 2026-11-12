@@ -152,6 +152,12 @@ private final class RootAdapterFixture {
                 events: { await recorder.stream(commandAdapter) },
             )
             $0.browserDownloads = .init(
+                invalidateAuthorization: {
+                    MainActor.assumeIsolated {
+                        downloadOwner.invalidateAuthorization()
+                        return downloadOwner.snapshot
+                    }
+                },
                 execute: { await downloadOwner.execute($0) },
                 events: { await downloadOwner.subscribe() },
             )
@@ -160,7 +166,16 @@ private final class RootAdapterFixture {
         }
         root = UIHostingController(rootView: AnyView(RootView(
             store: store,
-            downloads: .init(execute: { await downloadOwner.execute($0) }, events: { await downloadOwner.subscribe() }),
+            downloads: .init(
+                invalidateAuthorization: {
+                    MainActor.assumeIsolated {
+                        downloadOwner.invalidateAuthorization()
+                        return downloadOwner.snapshot
+                    }
+                },
+                execute: { await downloadOwner.execute($0) },
+                events: { await downloadOwner.subscribe() },
+            ),
             privacyGeneration: { downloadOwner.snapshot.generation },
             downloadHost: { $0.using(coordinator: coordinator) },
         ).environment(\.qualificationBrowserHostingContext, BrowserQualificationWebKitHostingContext(

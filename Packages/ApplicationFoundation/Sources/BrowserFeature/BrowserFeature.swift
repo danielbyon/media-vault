@@ -338,6 +338,12 @@ public struct BrowserFeature {
             return profileConfigurationGeneration
         }
 
+        /// Clears the download projection and records the owner watermark established by lock.
+        public mutating func commitDownloadAuthorizationLoss(_ snapshot: BrowserDownloadSnapshot) {
+            downloads = snapshot
+            downloadsArePresented = false
+        }
+
         /// Clears session-sensitive presentation state while retaining logical navigation.
         public mutating func clearTransientPresentationForLock() -> Effect<Action> {
             let shouldAdvanceProfileConfigurationGeneration = !isSessionLocked

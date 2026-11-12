@@ -393,6 +393,7 @@ struct BrowserViewSnapshotTests {
         state.downloadsArePresented = false
         return withDependencies {
             $0.browserDownloads = BrowserDownloadClient(
+                invalidateAuthorization: { BrowserDownloadSnapshot() },
                 execute: { _ in },
                 events: { AsyncStream { $0.finish() } },
             )
