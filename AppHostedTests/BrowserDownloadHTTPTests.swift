@@ -641,6 +641,29 @@ extension AppHostedUITests {
                         && !fixture.owner.privacyCleanupPending
                         && fixture.store.downloads.records.isEmpty
                 }
+                try await fixture.wait("loopback peer close is observed after native cancellation") {
+                    fixture.server.connectionEvidence.contains { evidence in
+                        evidence["sendStackState"] == "stackPrefixProcessed"
+                            && evidence["closed"] == "true"
+                            && ["peerClosedDuringResponse", "peerReceiveFailedDuringResponse"]
+                            .contains(evidence["closeReason"] ?? "")
+                    }
+                }
+                let slowRequests = fixture.server.requests.filter {
+                    ["slow-known", "slow-unknown"].contains(fixtureRouteName($0.path))
+                }
+                #expect(slowRequests.count == 1)
+                let slowRequest = try #require(slowRequests.first)
+                #expect(fixtureRouteName(slowRequest.path) == route)
+                let slowConnection = try #require(
+                    fixture.server.connectionEvidence.last { $0["sendStackState"] == "stackPrefixProcessed" },
+                )
+                #expect(slowConnection["closed"] == "true")
+                #expect(slowConnection["responseComplete"] == "false")
+                #expect(
+                    slowConnection["closeReason"] == "peerClosedDuringResponse"
+                        || slowConnection["closeReason"] == "peerReceiveFailedDuringResponse",
+                )
                 let received = fixture.observations
                     .snapshots
                     .flatMap(\.records)

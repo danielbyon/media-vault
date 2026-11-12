@@ -380,10 +380,14 @@ final class BrowserDownloadLoopbackServer {
         """.utf8)
     }
 
-    /// Each connection accepts one bounded request, then closes. Slow responses deliberately keep
-    /// the remainder behind a barrier: tests must observe native owner progress before cancelling.
+    /// Each connection parses its first bounded request and records later pipelined bytes.
+    /// Slow-response routes hold the body remainder until the test cancels the native download.
+    /// Peer draining is bounded by byte, callback, and connection deadlines.
     @MainActor
     final class Connection {
+        private static let maximumPostResponseBytes = 81_920
+        private static let maximumPostResponseReceiveCallbacks = 128
+
         let id = UUID()
         private let native: NWConnection
         private weak var server: BrowserDownloadLoopbackServer?
@@ -396,6 +400,12 @@ final class BrowserDownloadLoopbackServer {
         private var headerBoundaryObserved = false
         private var parserRejected = false
         private var receiveComplete = false
+        private var responseComplete = false
+        private var peerClosedAfterResponse = false
+        private var peerClosedDuringResponse = false
+        private var extraRequestBytesObserved = false
+        private var extraRequestBytesReceived = 0
+        private var postResponseReceiveCallbacks = 0
         private var networkError = "none"
         private var transportState = "created"
         private var closeReason = "none"
@@ -412,6 +422,12 @@ final class BrowserDownloadLoopbackServer {
                 "parserRejected": String(parserRejected),
                 "requestParsed": String(responded),
                 "receiveComplete": String(receiveComplete),
+                "responseComplete": String(responseComplete),
+                "peerClosedAfterResponse": String(peerClosedAfterResponse),
+                "peerClosedDuringResponse": String(peerClosedDuringResponse),
+                "extraRequestBytesObserved": String(extraRequestBytesObserved),
+                "extraRequestBytesReceived": String(extraRequestBytesReceived),
+                "postResponseReceiveCallbacks": String(postResponseReceiveCallbacks),
                 "networkErrorDomainCode": networkError,
                 "transportState": transportState,
                 "closed": String(closed),
@@ -509,6 +525,12 @@ final class BrowserDownloadLoopbackServer {
             if let error {
                 recordNetworkError(error)
             }
+
+            if responded {
+                handlePostResponseReceive(data, complete: complete, failed: failed)
+                return
+            }
+
             if let data {
                 buffer.append(data)
             }
@@ -528,6 +550,43 @@ final class BrowserDownloadLoopbackServer {
                 parserRejected = true
                 recordEvidence()
                 close(reason: "parserRejected")
+            }
+        }
+
+        private func handlePostResponseReceive(_ data: Data?, complete: Bool, failed: Bool) {
+            if let data, !data.isEmpty {
+                postResponseReceiveCallbacks += 1
+                extraRequestBytesObserved = true
+                extraRequestBytesReceived += data.count
+                recordEvidence()
+                if postResponseReceiveCallbacks > Self.maximumPostResponseReceiveCallbacks {
+                    close(reason: "postResponseReceiveLimit")
+                    return
+                }
+                if extraRequestBytesReceived > Self.maximumPostResponseBytes {
+                    close(reason: "postResponseByteLimit")
+                    return
+                }
+            }
+
+            if failed {
+                let receiveFailureReason = responseComplete
+                    ? "peerReceiveFailedAfterResponse"
+                    : "peerReceiveFailedDuringResponse"
+                close(reason: receiveFailureReason)
+            } else if complete {
+                if responseComplete {
+                    peerClosedAfterResponse = true
+                } else {
+                    peerClosedDuringResponse = true
+                }
+                recordEvidence()
+                let peerCloseReason = responseComplete
+                    ? "peerClosedAfterResponse"
+                    : "peerClosedDuringResponse"
+                close(reason: peerCloseReason)
+            } else {
+                receive()
             }
         }
 
@@ -561,15 +620,21 @@ final class BrowserDownloadLoopbackServer {
 
             let headers = try parseHeaders(Array(lines.dropFirst()))
             let length = try bodyLength(headers)
-            guard buffer.count >= boundary.upperBound + length else {
+            let requestEnd = boundary.upperBound + length
+            guard buffer.count >= requestEnd else {
                 return nil
+            }
+
+            if buffer.count > requestEnd {
+                extraRequestBytesObserved = true
+                extraRequestBytesReceived = buffer.count - requestEnd
             }
 
             return Request(
                 method: String(start[0]),
                 path: String(start[1]),
                 headers: headers,
-                body: buffer.subdata(in: boundary.upperBound ..< boundary.upperBound + length),
+                body: buffer.subdata(in: boundary.upperBound ..< requestEnd),
             )
         }
 
@@ -627,19 +692,31 @@ final class BrowserDownloadLoopbackServer {
             recordEvidence()
             native.send(
                 content: data,
+                // A completed final-message send half-closes TCP's write side. Keep the
+                // receive side active until peer EOF before fully tearing down the connection.
                 contentContext: .finalMessage,
                 isComplete: true,
                 completion: .contentProcessed { [weak self] error in
                     MainActor.assumeIsolated {
-                        guard let self else {
-                            return
-                        }
-
-                        self.sendStackState = error == nil ? "stackProcessed" : "stackFailed"
-                        self.close(reason: error == nil ? "sendStackProcessed" : "sendStackFailed")
+                        self?.didFinishResponseSend(failed: error != nil)
                     }
                 },
             )
+        }
+
+        func didFinishResponseSend(failed: Bool) {
+            guard !closed, server?.stopped == false else {
+                return
+            }
+
+            responseComplete = !failed
+            sendStackState = failed ? "stackFailed" : "stackProcessed"
+            recordEvidence()
+            if failed {
+                close(reason: "sendStackFailed")
+            } else {
+                receive()
+            }
         }
 
         func sendSlow(_ body: Data, knownLength: Bool) {
@@ -676,6 +753,7 @@ final class BrowserDownloadLoopbackServer {
                 sendStackState = "stackPrefixProcessed"
                 server?.slowPrefixSent = true
                 recordEvidence()
+                receive()
             }
         }
 
