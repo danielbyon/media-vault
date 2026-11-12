@@ -639,10 +639,29 @@ public actor MediaLibraryImporter {
             do {
                 _ = try await resume(entry)
             } catch {
-                blockedIDs.insert(entry.id)
+                let hasVerifiedTerminalState = await hasVerifiedTerminalRecoveryState(for: entry.id)
+                if !hasVerifiedTerminalState {
+                    blockedIDs.insert(entry.id)
+                }
             }
         }
         return blockedIDs
+    }
+
+    private func hasVerifiedTerminalRecoveryState(for assetID: UUID) async -> Bool {
+        do {
+            let snapshot = try await store.ingestionJournal.snapshot()
+            guard !snapshot.hasUnidentifiedAssetRows,
+                  snapshot.unreadableAssetIDs.isEmpty,
+                  let state = snapshot.entries.first(where: { $0.id == assetID })?.state
+            else {
+                return false
+            }
+
+            return state == .failed || state == .cancelled
+        } catch {
+            return false
+        }
     }
 
     private func resume(_ initialEntry: MediaIngestionJournalEntry) async throws -> MediaAsset {
@@ -665,7 +684,7 @@ public actor MediaLibraryImporter {
                         throw AcceptedResourceReadError()
                     }
                 } catch let error as MediaImportError {
-                    _ = try? await store.ingestionJournal.transition(entry, to: .failed)
+                    _ = try await store.ingestionJournal.transition(entry, to: .failed)
                     throw error
                 }
                 entry = try await store.ingestionJournal.transition(

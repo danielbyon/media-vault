@@ -110,7 +110,7 @@ public enum MediaImportError: Error, Equatable, Sendable {
     case assetLimitReached
     /// Entitlement verification failed, so Pro could not be established.
     case entitlementUnavailable
-    /// The canonical Library could not verify its committed asset count.
+    /// The canonical Library could not be read while admitting or recovering an import.
     case libraryUnavailable
     /// The source URL could not be accessed or copied while access was valid.
     case sourceAccessFailed

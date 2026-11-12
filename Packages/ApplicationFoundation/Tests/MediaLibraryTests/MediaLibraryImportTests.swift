@@ -199,6 +199,134 @@ struct MediaLibraryImportTests {
         #expect(try Data(contentsOf: environment.resources.stagingURL(for: failedResourceID)) == rejectedBytes)
     }
 
+    @Test("A rejected interrupted validation does not block admission after reopen")
+    func rejectedInterruptedValidationDoesNotBlockFreshImportAfterReopen() async throws {
+        let root = FileManager.default
+            .temporaryDirectory
+            .appendingPathComponent("interrupted-validation-library-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let databaseURL = root.appendingPathComponent("library.sqlite")
+        let resourceRoot = root.appendingPathComponent("resources", isDirectory: true)
+        let rejectedAssetID = requiredUUID("00000000-0000-0000-0000-000000000130")
+        let rejectedResourceID = requiredUUID("00000000-0000-0000-0000-000000000131")
+        let importedAssetID = requiredUUID("00000000-0000-0000-0000-000000000132")
+        let importedResourceID = requiredUUID("00000000-0000-0000-0000-000000000133")
+        let rejectedBytes = Data([0x00, 0x01, 0x02, 0x03])
+        let freshSourceURL = root.appendingPathComponent("fresh.png")
+        try TestFixtures.pngData.write(to: freshSourceURL)
+
+        func persistInterruptedValidation() async throws -> MediaIngestionJournalEntry {
+            let database = try PersistenceStore.makePersistent(at: databaseURL)
+            let store = SQLiteMediaLibraryStore(database: database)
+            let resources = try FileMediaResourceRepository(rootURL: resourceRoot)
+            let stagingURL = resources.stagingURL(for: rejectedResourceID)
+            try rejectedBytes.write(to: stagingURL)
+            try resources.protectStaging(for: rejectedResourceID)
+
+            let acceptedEntry = MediaIngestionJournalEntry(
+                id: rejectedAssetID,
+                resourceID: rejectedResourceID,
+                state: .received,
+                sourceFilename: "interrupted.png",
+                importedAt: TestFixtures.importedAt,
+            )
+            try await store.ingestionJournal.accept(acceptedEntry)
+            return try await store.ingestionJournal.transition(acceptedEntry, to: .validating)
+        }
+
+        let interruptedEntry = try await persistInterruptedValidation()
+        #expect(interruptedEntry.state == .validating)
+
+        let reopenedDatabase = try PersistenceStore.makePersistent(at: databaseURL)
+        let reopenedStore = SQLiteMediaLibraryStore(database: reopenedDatabase)
+        let reopenedResources = try FileMediaResourceRepository(rootURL: resourceRoot)
+        let importer = makeImporter(
+            store: reopenedStore,
+            resources: reopenedResources,
+            identifiers: [importedAssetID, importedResourceID],
+        )
+
+        let beforeRecovery = try #require(
+            try await reopenedStore.ingestionJournal.snapshot().entries.first(where: { $0.id == rejectedAssetID }),
+        )
+        #expect(beforeRecovery.state == .validating)
+        #expect(try Data(contentsOf: reopenedResources.stagingURL(for: rejectedResourceID)) == rejectedBytes)
+
+        let importedAsset = try? await importer.importFile(at: freshSourceURL)
+
+        #expect(
+            importedAsset?.id == importedAssetID,
+            "A durably failed interrupted import must not block a fresh valid import",
+        )
+        let recoveredEntry = try #require(
+            try await reopenedStore.ingestionJournal.snapshot().entries.first(where: { $0.id == rejectedAssetID }),
+        )
+        #expect(recoveredEntry.state == .failed)
+        #expect(try await reopenedStore.loadAssets().map(\.id) == [importedAssetID])
+        #expect(try await reopenedStore.logicalAssetCount() == 1)
+        #expect(try Data(contentsOf: reopenedResources.stagingURL(for: rejectedResourceID)) == rejectedBytes)
+
+        let verifiedDatabase = try PersistenceStore.makePersistent(at: databaseURL)
+        let verifiedStore = SQLiteMediaLibraryStore(database: verifiedDatabase)
+        let verifiedResources = try FileMediaResourceRepository(rootURL: resourceRoot)
+        let persistedEntry = try #require(
+            try await verifiedStore.ingestionJournal.snapshot().entries.first(where: { $0.id == rejectedAssetID }),
+        )
+        #expect(persistedEntry.state == .failed)
+        let persistedAssets = try await verifiedStore.loadAssets()
+        #expect(persistedAssets.map(\.id) == [importedAssetID])
+        let importedResource = try #require(persistedAssets.first?.resources.first)
+        #expect(try verifiedResources.data(for: importedResource) == TestFixtures.pngData)
+        #expect(try Data(contentsOf: verifiedResources.stagingURL(for: rejectedResourceID)) == rejectedBytes)
+    }
+
+    @Test("An unverified failed transition keeps interrupted work blocking admission")
+    func unverifiedFailedTransitionKeepsAdmissionBlocked() async throws {
+        let environment = try makeEnvironment()
+        let rejectedAssetID = requiredUUID("00000000-0000-0000-0000-000000000134")
+        let rejectedResourceID = requiredUUID("00000000-0000-0000-0000-000000000135")
+        let rejectedBytes = Data([0x10, 0x20, 0x30, 0x40])
+        let stagingURL = environment.resources.stagingURL(for: rejectedResourceID)
+        try rejectedBytes.write(to: stagingURL)
+        try environment.resources.protectStaging(for: rejectedResourceID)
+
+        let acceptedEntry = MediaIngestionJournalEntry(
+            id: rejectedAssetID,
+            resourceID: rejectedResourceID,
+            state: .received,
+            sourceFilename: "unverified-failure.png",
+            importedAt: TestFixtures.importedAt,
+        )
+        try await environment.store.ingestionJournal.accept(acceptedEntry)
+        let validatingEntry = try await environment.store.ingestionJournal.transition(acceptedEntry, to: .validating)
+        #expect(validatingEntry.state == .validating)
+        try await environment.database.write { db in
+            try db.execute(
+                sql: """
+                CREATE TRIGGER prevent_failed_journal_transition
+                BEFORE UPDATE OF state ON media_ingestion_journal
+                WHEN NEW.state = 'failed'
+                BEGIN
+                    SELECT RAISE(ABORT, 'failed transition intentionally blocked');
+                END
+                """,
+            )
+        }
+
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await environment.importer.importFile(at: environment.sourceURL)
+        }
+        let remainingEntry = try #require(
+            try await environment.store.ingestionJournal.snapshot().entries.first(where: { $0.id == rejectedAssetID }),
+        )
+        #expect(remainingEntry.state == .validating)
+        #expect(try await environment.store.loadAssets().isEmpty)
+        #expect(try await environment.store.logicalAssetCount() == 0)
+        #expect(try Data(contentsOf: stagingURL) == rejectedBytes)
+    }
+
     @Test("Failed and cancelled journal rows remain preserved without blocking admission")
     func terminalJournalRowsDoNotBlockFreshImport() async throws {
         let environment = try makeEnvironment()
