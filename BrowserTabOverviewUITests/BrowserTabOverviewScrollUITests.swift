@@ -357,6 +357,64 @@ final class BrowserTabOverviewScrollUITests: XCTestCase {
         )
     }
 
+    func testContextualQuotaUpgradePresentationCapturesSimulatorEvidence() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--library-quota-review"]
+        app.launch()
+        app.activate()
+
+        let quotaHeading = app.staticTexts["Free limit reached"]
+        XCTAssertTrue(quotaHeading.waitForExistence(timeout: 10), app.debugDescription)
+        let purchase = app.buttons["Purchase Pro"]
+        let restore = app.buttons["Restore Purchases"]
+        scrollToVisible(restore, in: app)
+        XCTAssertTrue(purchase.isHittable, app.debugDescription)
+        XCTAssertTrue(restore.isHittable, app.debugDescription)
+
+        captureSimulatorEvidence(named: "contextual-quota-upgrade-available", in: app)
+        app.terminate()
+    }
+
+    func testRevokedEntitlementPresentationCapturesSimulatorEvidence() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--library-quota-review", "--library-revoked"]
+        app.launch()
+        app.activate()
+
+        let notice = app.staticTexts
+            .containing(
+                NSPredicate(format: "label CONTAINS %@", "Pro is not active or could not be verified"),
+            )
+            .firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 10), app.debugDescription)
+        let purchase = app.buttons["Purchase Pro"]
+        let restore = app.buttons["Restore Purchases"]
+        scrollToVisible(restore, in: app)
+        XCTAssertTrue(purchase.isHittable, app.debugDescription)
+        XCTAssertTrue(restore.isHittable, app.debugDescription)
+
+        captureSimulatorEvidence(named: "contextual-quota-upgrade-revoked", in: app)
+        app.terminate()
+    }
+
+    private func captureSimulatorEvidence(named name: String, in app: XCUIApplication) {
+        XCTContext.runActivity(named: name) { activity in
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            activity.add(attachment)
+        }
+    }
+
+    private func scrollToVisible(_ element: XCUIElement, in app: XCUIApplication) {
+        let scrollView = app.scrollViews.firstMatch
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 10), app.debugDescription)
+        for _ in 0 ..< 50 where !element.isHittable {
+            scrollView.swipeUp()
+        }
+        XCTAssertTrue(element.isHittable, app.debugDescription)
+    }
+
     private func runShowTabsFixture(
         fixture: String,
         selectedIndex: Int,

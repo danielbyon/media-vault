@@ -16,6 +16,12 @@ public protocol MediaLibraryStore: Sendable {
     /// Loads committed assets and their resources in import order.
     func loadAssets() async throws -> [MediaAsset]
 
+    /// Counts committed logical assets in the canonical Library.
+    ///
+    /// Each row in `media_assets` contributes one to the count. Additional
+    /// resources and byte size within an asset do not change the result.
+    func logicalAssetCount() async throws -> Int
+
     /// Commits one asset and all of its resource metadata atomically.
     func commit(_ asset: MediaAsset) async throws
 }
@@ -23,13 +29,33 @@ public protocol MediaLibraryStore: Sendable {
 /// A SQLiteData-backed canonical media store.
 public actor SQLiteMediaLibraryStore: MediaLibraryStore {
     private let database: any DatabaseWriter
+    private let logicalAssetCountOverride: (@Sendable () async throws -> Int)?
     nonisolated let ingestionJournal: SQLiteMediaLibraryIngestionJournal
+    private var hasActiveDurableOperation = false
+    private var durableOperationWaiters: [DurableOperationWaiter] = []
+    private var durableOperationWaiterObservers: [CheckedContinuation<Void, Never>] = []
+
+    private struct DurableOperationWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
 
     /// Creates a store backed by the caller-owned SQLiteData connection.
     ///
     /// - Parameter database: The SQLiteData writer used for this media domain.
     public init(database: any DatabaseWriter) {
         self.database = database
+        logicalAssetCountOverride = nil
+        ingestionJournal = SQLiteMediaLibraryIngestionJournal(database: database)
+    }
+
+    /// Creates a store with a deterministic logical-count operation for failure tests.
+    init(
+        database: any DatabaseWriter,
+        logicalAssetCountOverride: @escaping @Sendable () async throws -> Int,
+    ) {
+        self.database = database
+        self.logicalAssetCountOverride = logicalAssetCountOverride
         ingestionJournal = SQLiteMediaLibraryIngestionJournal(database: database)
     }
 
@@ -46,6 +72,74 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
         } catch {
             throw MediaLibraryStoreError.unavailable
         }
+    }
+
+    /// Counts committed logical assets after preparing a new database schema.
+    ///
+    /// Schema preparation makes an empty database report zero while keeping
+    /// database and schema failures visible to import admission.
+    public func logicalAssetCount() async throws -> Int {
+        if let logicalAssetCountOverride {
+            do {
+                return try await logicalAssetCountOverride()
+            } catch let error as MediaLibraryStoreError {
+                throw error
+            } catch {
+                throw MediaLibraryStoreError.unavailable
+            }
+        }
+
+        do {
+            try await prepareSchema()
+            return try await database.read { db in
+                guard let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM media_assets") else {
+                    throw MediaLibraryStoreError.unavailable
+                }
+
+                return count
+            }
+        } catch let error as MediaLibraryStoreError {
+            throw error
+        } catch {
+            throw MediaLibraryStoreError.unavailable
+        }
+    }
+
+    /// Runs one import or recovery operation while excluding other store users.
+    ///
+    /// Each ``MediaLibraryImporter`` can create its own actor, but importers that
+    /// share this store must also share admission and recovery ordering. The
+    /// gate remains held across every await in `operation`, including admission,
+    /// staging, journal acceptance, reconciliation, and canonical commit.
+    func withDurableOperation<T: Sendable>(
+        _ operation: @Sendable () async throws -> T,
+    ) async throws -> T {
+        try await acquireDurableOperation()
+        do {
+            try Task.checkCancellation()
+            let result = try await operation()
+            releaseDurableOperation()
+            return result
+        } catch {
+            releaseDurableOperation()
+            throw error
+        }
+    }
+
+    /// Waits until another durable operation is queued for this store.
+    func waitForDurableOperationWaiterForTesting() async {
+        guard durableOperationWaiters.isEmpty else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            durableOperationWaiterObservers.append(continuation)
+        }
+    }
+
+    /// Returns the shared gate state for deterministic ordering tests.
+    func durableOperationGateStateForTesting() -> (isActive: Bool, waiterCount: Int) {
+        (hasActiveDurableOperation, durableOperationWaiters.count)
     }
 
     private func loadAssetRows() async throws -> [(String, String, Double, Double?)] {
@@ -123,6 +217,49 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
                 capturedAt: row.3.map(Date.init(timeIntervalSince1970:)),
             )
         }
+    }
+
+    private func acquireDurableOperation() async throws {
+        try Task.checkCancellation()
+        guard hasActiveDurableOperation else {
+            hasActiveDurableOperation = true
+            return
+        }
+
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                durableOperationWaiters.append(
+                    DurableOperationWaiter(id: waiterID, continuation: continuation),
+                )
+                let observers = durableOperationWaiterObservers
+                durableOperationWaiterObservers.removeAll(keepingCapacity: true)
+                observers.forEach { $0.resume() }
+            }
+        } onCancel: {
+            Task {
+                await self.cancelDurableOperationWaiter(waiterID)
+            }
+        }
+    }
+
+    private func cancelDurableOperationWaiter(_ waiterID: UUID) {
+        guard let index = durableOperationWaiters.firstIndex(where: { $0.id == waiterID }) else {
+            return
+        }
+
+        let waiter = durableOperationWaiters.remove(at: index)
+        waiter.continuation.resume(throwing: CancellationError())
+    }
+
+    private func releaseDurableOperation() {
+        guard !durableOperationWaiters.isEmpty else {
+            hasActiveDurableOperation = false
+            return
+        }
+
+        let next = durableOperationWaiters.removeFirst()
+        next.continuation.resume()
     }
 
     /// Commits an asset and its resources in one SQLite transaction.
