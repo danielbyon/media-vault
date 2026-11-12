@@ -91,6 +91,9 @@ struct MediaIngestionJournalSnapshot: Sendable {
     /// Asset IDs whose rows could not be decoded and must stay hidden if committed.
     let unreadableAssetIDs: Set<UUID>
 
+    /// Whether any row lacks a usable asset identifier and cannot be reconciled by ID.
+    let hasUnidentifiedAssetRows: Bool
+
     /// Resource IDs present in any row, including rows that could not be decoded.
     let knownResourceIDs: Set<UUID>
 }
@@ -98,12 +101,33 @@ struct MediaIngestionJournalSnapshot: Sendable {
 /// Persists journal state in the vault database without exposing transitions to callers.
 actor SQLiteMediaLibraryIngestionJournal {
     private let database: any DatabaseWriter
+    private var beforeAcceptanceWriteForTesting: @Sendable () async -> Void = {}
 
     init(database: any DatabaseWriter) {
         self.database = database
     }
 
+    func setBeforeAcceptanceWriteForTesting(_ operation: @escaping @Sendable () async -> Void) {
+        beforeAcceptanceWriteForTesting = operation
+    }
+
     func accept(_ entry: MediaIngestionJournalEntry) async throws {
+        try await persistAcceptedEntry(entry)
+    }
+
+    func accept(
+        _ entry: MediaIngestionJournalEntry,
+        admittedBy admission: MediaLibraryImportAdmission,
+        sessionGeneration: UInt64?,
+    ) async throws {
+        guard admission.matches(sessionGeneration) else {
+            throw MediaLibraryStoreError.corrupt
+        }
+
+        try await persistAcceptedEntry(entry)
+    }
+
+    private func persistAcceptedEntry(_ entry: MediaIngestionJournalEntry) async throws {
         guard entry.state == .received,
               entry.sourceUTI == nil,
               entry.byteCount == nil,
@@ -114,6 +138,7 @@ actor SQLiteMediaLibraryIngestionJournal {
 
         do {
             try await prepareSchema()
+            await beforeAcceptanceWriteForTesting()
             try await database.write { db in
                 try db.execute(
                     sql: """
@@ -131,6 +156,8 @@ actor SQLiteMediaLibraryIngestionJournal {
                     ],
                 )
             }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw MediaLibraryStoreError.unavailable
         }
@@ -276,12 +303,14 @@ actor SQLiteMediaLibraryIngestionJournal {
 
             var entries: [MediaIngestionJournalEntry] = []
             var unreadableAssetIDs = Set<UUID>()
+            var hasUnidentifiedAssetRows = false
             var knownResourceIDs = Set<UUID>()
             for row in rows {
                 if let resourceID = row.resourceID {
                     knownResourceIDs.insert(resourceID)
                 }
                 guard let assetID = row.assetID else {
+                    hasUnidentifiedAssetRows = true
                     continue
                 }
                 guard let entry = row.entry else {
@@ -294,6 +323,7 @@ actor SQLiteMediaLibraryIngestionJournal {
             return MediaIngestionJournalSnapshot(
                 entries: entries,
                 unreadableAssetIDs: unreadableAssetIDs,
+                hasUnidentifiedAssetRows: hasUnidentifiedAssetRows,
                 knownResourceIDs: knownResourceIDs,
             )
         } catch {

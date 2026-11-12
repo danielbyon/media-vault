@@ -6,11 +6,27 @@
 //
 
 import Dependencies
+import Entitlement
 import Foundation
 import PersistenceSupport
 import Synchronization
 
-/// Linearizes resource-read permission claims with the global vault-lock boundary.
+/// Records a fresh-import authorization granted by the session fence.
+struct MediaLibraryImportAdmission: Sendable {
+    private let generation: UInt64?
+
+    fileprivate init(generation: UInt64?) {
+        self.generation = generation
+    }
+
+    static let unscoped = Self(generation: nil)
+
+    func matches(_ generation: UInt64?) -> Bool {
+        self.generation == generation
+    }
+}
+
+/// Linearizes resource reads and fresh-import admission with the global vault-lock boundary.
 final class MediaLibraryResourceLoadFence: Sendable {
     private let generation = Mutex<UInt64>(0)
 
@@ -29,6 +45,17 @@ final class MediaLibraryResourceLoadFence: Sendable {
     func isCurrent(_ requestedGeneration: UInt64) -> Bool {
         generation.withLock { $0 == requestedGeneration }
     }
+
+    /// Grants admission atomically with lock generation changes, then releases the mutex before I/O.
+    func claimImportAdmission(generation requestedGeneration: UInt64) -> MediaLibraryImportAdmission? {
+        generation.withLock { currentGeneration in
+            guard currentGeneration == requestedGeneration else {
+                return nil
+            }
+
+            return MediaLibraryImportAdmission(generation: requestedGeneration)
+        }
+    }
 }
 
 /// The dependency boundary used by the TCA media-library feature.
@@ -36,7 +63,7 @@ public struct MediaLibraryClient: Sendable {
     /// Loads all assets committed to the vault store.
     public var loadAssets: @Sendable () async throws -> [MediaAsset]
 
-    /// Imports one source URL and returns it only after canonical commit.
+    /// Recovers accepted work, checks fresh-import admission, and returns after canonical commit.
     public var importFile: @Sendable (URL) async throws -> MediaAsset
 
     /// Loads exact canonical bytes for rendering a committed resource.
@@ -44,6 +71,7 @@ public struct MediaLibraryClient: Sendable {
 
     private let resourceDataSynchronously: (@Sendable (MediaResource) throws -> Data)?
     private let resourceLoadFence: MediaLibraryResourceLoadFence
+    private let importFileForSession: (@Sendable (URL, UInt64) async throws -> MediaAsset)?
 
     /// The generation captured by resource-load effects before they start.
     public var currentResourceLoadGeneration: UInt64 {
@@ -57,16 +85,51 @@ public struct MediaLibraryClient: Sendable {
         resourceData: @escaping @Sendable (MediaResource) async throws -> Data,
         resourceDataSynchronously: (@Sendable (MediaResource) throws -> Data)? = nil,
     ) {
+        let newResourceLoadFence = MediaLibraryResourceLoadFence()
+        self.init(
+            loadAssets: loadAssets,
+            importFile: importFile,
+            resourceData: resourceData,
+            resourceDataSynchronously: resourceDataSynchronously,
+            resourceLoadFence: newResourceLoadFence,
+            importFileForSession: nil,
+        )
+    }
+
+    fileprivate init(
+        loadAssets: @escaping @Sendable () async throws -> [MediaAsset],
+        importFile: @escaping @Sendable (URL) async throws -> MediaAsset,
+        resourceData: @escaping @Sendable (MediaResource) async throws -> Data,
+        resourceDataSynchronously: (@Sendable (MediaResource) throws -> Data)?,
+        resourceLoadFence: MediaLibraryResourceLoadFence,
+        importFileForSession: (@Sendable (URL, UInt64) async throws -> MediaAsset)?,
+    ) {
         self.loadAssets = loadAssets
         self.importFile = importFile
         self.resourceData = resourceData
         self.resourceDataSynchronously = resourceDataSynchronously
-        resourceLoadFence = MediaLibraryResourceLoadFence()
+        self.resourceLoadFence = resourceLoadFence
+        self.importFileForSession = importFileForSession
     }
 
     /// Advances the resource-read generation at the synchronous global-lock boundary.
     public func advanceResourceLoadGeneration() {
         resourceLoadFence.advance()
+    }
+
+    /// Runs an import only while its starting session remains current.
+    ///
+    /// The live importer checks again after serialized recovery and entitlement lookup, before it
+    /// stages a new file.
+    public func importFileIfCurrent(_ url: URL, generation: UInt64) async throws -> MediaAsset {
+        guard resourceLoadFence.isCurrent(generation) else {
+            throw CancellationError()
+        }
+        guard let sessionAwareImport = importFileForSession else {
+            return try await importFile(url)
+        }
+
+        return try await sessionAwareImport(url, generation)
     }
 
     /// Starts a resource read only when its captured session generation is still current.
@@ -133,13 +196,24 @@ extension MediaLibraryClient: DependencyKey {
             let resources = try FileMediaResourceRepository(
                 rootURL: libraryRoot.appendingPathComponent("resources", isDirectory: true),
             )
-            let importer = MediaLibraryImporter(store: store, resources: resources)
+            let resourceLoadFence = MediaLibraryResourceLoadFence()
+            let importer = MediaLibraryImporter(
+                store: store,
+                resources: resources,
+                entitlement: .liveValue,
+                sessionIsCurrent: { resourceLoadFence.isCurrent($0) },
+                sessionAdmission: { resourceLoadFence.claimImportAdmission(generation: $0) },
+            )
 
             return Self(
                 loadAssets: { try await importer.loadAssets() },
                 importFile: { try await importer.importFile(at: $0) },
                 resourceData: { try resources.data(for: $0) },
                 resourceDataSynchronously: { try resources.data(for: $0) },
+                resourceLoadFence: resourceLoadFence,
+                importFileForSession: { url, generation in
+                    try await importer.importFile(at: url, sessionGeneration: generation)
+                },
             )
         } catch {
             return unavailableValue

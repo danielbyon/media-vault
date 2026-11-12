@@ -11,7 +11,9 @@ import Combine
 import ComposableArchitecture
 import CoreFoundation
 import Dependencies
+import Entitlement
 import Foundation
+import MediaLibrary
 import SwiftUI
 import UIKit
 import VaultFeature
@@ -24,6 +26,9 @@ struct BrowserTabOverviewUITestHost: App {
             if ProcessInfo.processInfo.arguments.contains("--calculator-basic") {
                 CalculatorUITestHostView()
                     .environment(\.horizontalSizeClass, .regular)
+            } else if ProcessInfo.processInfo.arguments.contains("--library-quota-review") {
+                LibraryQuotaReviewUITestHostView()
+                    .environment(\.horizontalSizeClass, .compact)
             } else if ProcessInfo.processInfo.arguments.contains("--vault-lock-control") {
                 VaultLockControlUITestHostView()
                     .environment(\.horizontalSizeClass, .compact)
@@ -35,6 +40,69 @@ struct BrowserTabOverviewUITestHost: App {
                     .environment(\.horizontalSizeClass, .compact)
             }
         }
+    }
+}
+
+/// Shows the production Library quota notice in a controlled UI-test state.
+@MainActor
+private struct LibraryQuotaReviewUITestHostView: View {
+    private let store: StoreOf<MediaLibraryFeature>
+
+    init() {
+        let assets = Self.quotaAssets
+        let isRevoked = ProcessInfo.processInfo.arguments.contains("--library-revoked")
+        var state = MediaLibraryFeature.State(assets: assets)
+        state.error = .assetLimitReached
+        state.entitlementStatus = isRevoked ? .refreshing : .available
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { assets },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in throw MediaLibraryStoreError.unavailable },
+        )
+        store = withDependencies {
+            $0.mediaLibrary = mediaLibrary
+        } operation: {
+            Store(initialState: state) {
+                MediaLibraryFeature()
+            }
+        }
+        if isRevoked {
+            store.send(.entitlementStateLoaded(generation: 0, result: .success(.revoked)))
+        }
+    }
+
+    var body: some View {
+        MediaLibraryView(store: store)
+    }
+
+    private static var quotaAssets: [MediaAsset] {
+        (0 ..< MediaLibraryQuota.freeLogicalAssetLimit).map { index in
+            let assetID = requiredUUID(100 + index * 2)
+            let resourceID = requiredUUID(101 + index * 2)
+            let resource = MediaResource(
+                id: resourceID,
+                role: .original,
+                relativePath: resourceID.uuidString.lowercased(),
+                sourceFilename: "quota-item-\(index + 1).png",
+                sourceUTI: "public.png",
+                byteCount: 1,
+                sha256: String(repeating: "0", count: 64),
+            )
+            return MediaAsset(
+                id: assetID,
+                kind: .stillImage,
+                importedAt: Date(timeIntervalSince1970: 1_725_000_000 + Double(index)),
+                resources: [resource],
+            )
+        }
+    }
+
+    private static func requiredUUID(_ suffix: Int) -> UUID {
+        guard let id = UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", suffix)) else {
+            preconditionFailure("Invalid deterministic quota fixture identifier")
+        }
+
+        return id
     }
 }
 

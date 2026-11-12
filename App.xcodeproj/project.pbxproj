@@ -67,6 +67,8 @@
 		A10000000000000000000041 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
 		A10000000000000000000042 /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
 		A10000000000000000000044 /* ScenePrivacyCoverSentinelTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001B /* ScenePrivacyCoverSentinelTestSupport.swift */; };
+		A10000000000000000000045 /* MediaLibrary in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000008 /* MediaLibrary */; };
+		A10000000000000000000046 /* Entitlement in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000009 /* Entitlement */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -168,6 +170,8 @@
 				A10000000000000000000030 /* CalculatorFeature in Frameworks */,
 				A10000000000000000000041 /* AppFeature in Frameworks */,
 				A10000000000000000000042 /* VaultFeature in Frameworks */,
+				A10000000000000000000045 /* MediaLibrary in Frameworks */,
+				A10000000000000000000046 /* Entitlement in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -418,6 +422,8 @@
 				120000000000000000000006 /* CalculatorFeature */,
 				120000000000000000000001 /* AppFeature */,
 				120000000000000000000007 /* VaultFeature */,
+				120000000000000000000008 /* MediaLibrary */,
+				120000000000000000000009 /* Entitlement */,
 			);
 			productName = BrowserTabOverviewUITestHost;
 			productReference = B1000000000000000000000A /* BrowserTabOverviewUITestHost.app */;
@@ -1174,6 +1180,16 @@
 		120000000000000000000007 /* VaultFeature */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VaultFeature;
+		};
+		120000000000000000000008 /* MediaLibrary */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */;
+			productName = MediaLibrary;
+		};
+		120000000000000000000009 /* Entitlement */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 110000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ApplicationFoundation" */;
+			productName = Entitlement;
 		};
 /* End XCSwiftPackageProductDependency section */
 
