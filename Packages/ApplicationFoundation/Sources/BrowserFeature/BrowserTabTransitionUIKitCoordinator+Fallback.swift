@@ -215,6 +215,10 @@ extension BrowserTabTransitionUIKitCoordinator {
                 return true
             }
             guard activeSession.destinationWaitTurnsRemaining > 0 else {
+                if !activeSession.missingDestinationWasRecorded {
+                    record(.missingDestination)
+                    activeSession.missingDestinationWasRecorded = true
+                }
                 abortUnprovableTransition()
                 return true
             }

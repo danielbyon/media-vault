@@ -629,9 +629,27 @@ struct BrowserTabTests {
 
         #expect(adapter.requestTransitionTarget(second) == .alreadyUsable)
         #expect(adapter.transitionDrivenPosition == nil)
+        #expect(adapter.transitionScrollAnchor == nil)
         #expect(adapter.livePosition == first)
         #expect(adapter.scrollPositionBindingValue == first)
         #expect(adapter.commit() == nil)
+    }
+
+    @Test("Only an active transition request supplies an explicit placement anchor")
+    func tabOverviewScrollAdapterUsesTransitionOnlyPlacementAnchor() {
+        let adapter = BrowserTabOverviewScrollPosition(persistedPosition: first)
+        adapter.updateFullyVisibleTargetIDs([first])
+        #expect(adapter.transitionScrollAnchor == nil)
+
+        let transitionToken = 86
+        #expect(adapter.requestTransitionTarget(
+            second,
+            transitionToken: transitionToken,
+        ) == .requested)
+        #expect(adapter.transitionScrollAnchor == .top)
+
+        adapter.invalidateTransitionRequest(for: transitionToken)
+        #expect(adapter.transitionScrollAnchor == nil)
     }
 
     @Test("Transition repositioning waits for the overview's first visibility report")

@@ -172,10 +172,26 @@ public struct VaultCredentialView: View {
 @MainActor
 public struct VaultShellView: View {
     private let store: StoreOf<VaultShellFeature>
+    private let sessionSettings: VaultSessionSettings
+    private let onLock: () -> Void
+    private let onEmergencyLockGesture: @MainActor @Sendable (VaultEmergencyLockGesture, Bool) -> Void
+    private let onSessionSettingsChanged: (VaultSessionSettings) -> Void
+    @Environment(\.scenePhase)
+    private var scenePhase
 
     /// Creates the authenticated shell from its navigation store.
-    public init(store: StoreOf<VaultShellFeature>) {
+    public init(
+        store: StoreOf<VaultShellFeature>,
+        sessionSettings: VaultSessionSettings,
+        onLock: @escaping () -> Void,
+        onEmergencyLockGesture: @escaping @MainActor @Sendable (VaultEmergencyLockGesture, Bool) -> Void,
+        onSessionSettingsChanged: @escaping (VaultSessionSettings) -> Void,
+    ) {
         self.store = store
+        self.sessionSettings = sessionSettings
+        self.onLock = onLock
+        self.onEmergencyLockGesture = onEmergencyLockGesture
+        self.onSessionSettingsChanged = onSessionSettingsChanged
     }
 
     /// Renders the three top-level destinations and navigation-presented settings.
@@ -196,7 +212,10 @@ public struct VaultShellView: View {
             .navigationTitle(title(for: store.selectedTab))
             .toolbar {
                 if store.selectedTab != .browser {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button("Lock", systemImage: "lock.fill", action: onLock)
+                            .accessibilityHint("Locks the vault and returns to the calculator.")
+                            .accessibilityIdentifier("vault.lock")
                         Button("Settings", systemImage: "gearshape") {
                             store.send(.settingsTapped)
                         }
@@ -208,6 +227,11 @@ public struct VaultShellView: View {
                 for: .navigationBar,
             )
             .background { browserKeyboardShortcutHost }
+            .modifier(EmergencyLockGestureObserver(
+                gesture: sessionSettings.emergencyLockGesture,
+                isForeground: scenePhase == .active,
+                onRecognized: onEmergencyLockGesture,
+            ))
             .sheet(
                 isPresented: Binding(
                     get: { store.settingsPresented },
@@ -218,7 +242,12 @@ public struct VaultShellView: View {
                     },
                 ),
             ) {
-                AuthenticatedSettingsView(browserStore: store.scope(state: \.browser, action: \.browser))
+                AuthenticatedSettingsView(
+                    browserStore: store.scope(state: \.browser, action: \.browser),
+                    sessionSettings: sessionSettings,
+                    onLock: onLock,
+                    onSessionSettingsChanged: onSessionSettingsChanged,
+                )
             }
         }
     }
@@ -267,17 +296,81 @@ public struct VaultShellView: View {
 
 private struct AuthenticatedSettingsView: View {
     let browserStore: StoreOf<BrowserFeature>
+    let sessionSettings: VaultSessionSettings
+    let onLock: () -> Void
+    let onSessionSettingsChanged: (VaultSessionSettings) -> Void
 
     var body: some View {
         NavigationStack {
             List {
+                Section("Auto-Lock") {
+                    Picker("When the app is backgrounded", selection: autoLockTimeout) {
+                        Text("Immediately").tag(VaultAutoLockTimeout.immediately)
+                        Text("30 seconds").tag(VaultAutoLockTimeout.seconds30)
+                        Text("1 minute").tag(VaultAutoLockTimeout.minute1)
+                        Text("5 minutes").tag(VaultAutoLockTimeout.minutes5)
+                        Text("15 minutes").tag(VaultAutoLockTimeout.minutes15)
+                    }
+                    .pickerStyle(.menu)
+                    Text("The timer starts only after all app windows leave the foreground.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Emergency Lock Gesture") {
+                    Picker("Gesture", selection: emergencyLockGesture) {
+                        Text("Off").tag(VaultEmergencyLockGesture.off)
+                        Text("Shake").tag(VaultEmergencyLockGesture.shake)
+                        Text("Four taps").tag(VaultEmergencyLockGesture.quadrupleTap)
+                    }
+                    .pickerStyle(.menu)
+                    Text("The selected gesture locks the vault. Gestures never unlock it.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 NavigationLink {
                     BrowserSettingsView(store: browserStore)
+                        .toolbar { lockToolbar }
                 } label: {
                     Label("Browser", systemImage: "safari")
                 }
             }
             .navigationTitle("Settings")
+            .toolbar {
+                lockToolbar
+            }
         }
+    }
+
+    @ToolbarContentBuilder
+    private var lockToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Lock", systemImage: "lock.fill", action: onLock)
+                .accessibilityHint("Locks vault and returns to calculator.")
+                .accessibilityIdentifier("vault.lock")
+        }
+    }
+
+    private var autoLockTimeout: Binding<VaultAutoLockTimeout> {
+        Binding(
+            get: { sessionSettings.autoLockTimeout },
+            set: { timeout in
+                var settings = sessionSettings
+                settings.autoLockTimeout = timeout
+                onSessionSettingsChanged(settings)
+            },
+        )
+    }
+
+    private var emergencyLockGesture: Binding<VaultEmergencyLockGesture> {
+        Binding(
+            get: { sessionSettings.emergencyLockGesture },
+            set: { gesture in
+                var settings = sessionSettings
+                settings.emergencyLockGesture = gesture
+                onSessionSettingsChanged(settings)
+            },
+        )
     }
 }

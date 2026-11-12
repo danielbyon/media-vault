@@ -123,6 +123,16 @@ final class BrowserTabOverviewScrollPosition: ObservableObject {
         return request.position
     }
 
+    /// Keeps a transition-requested card fully inside the mounted viewport.
+    ///
+    /// SwiftUI's minimal visibility correction can land a card on a fractional
+    /// grid boundary just outside strict containment. Transition ownership is
+    /// the only state that needs an explicit anchor; restored and user-driven
+    /// scrolling keep SwiftUI's default anchor.
+    var transitionScrollAnchor: UnitPoint? {
+        transitionDrivenPosition == nil ? nil : .top
+    }
+
     /// Reports whether the mounted overview confirms this card is fully visible and settled.
     func isDestinationUsable(_ position: BrowserTabID) -> Bool {
         scrollPhase == .idle && fullyVisibleTargetIDs.contains(position)
@@ -584,7 +594,10 @@ struct BrowserTabOverviewView: View {
             }
             .scrollTargetLayout()
         }
-        .scrollPosition(id: tabOverviewScrollPositionBinding)
+        .scrollPosition(
+            id: tabOverviewScrollPositionBinding,
+            anchor: scrollPosition.transitionScrollAnchor,
+        )
         .accessibilityIdentifier("browser.tab-overview.scroll-view")
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .global)

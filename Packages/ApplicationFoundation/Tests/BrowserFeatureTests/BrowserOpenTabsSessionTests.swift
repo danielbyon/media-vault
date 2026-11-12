@@ -5,10 +5,13 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+// swiftformat:options --test-case-name-format standard-identifiers
+
 import ConcurrencyExtras
 import Dispatch
 import Foundation
 import Testing
+import XCTest
 @testable import BrowserFeature
 
 @Suite("Browser open-tabs session projection and persistence")
@@ -120,95 +123,226 @@ struct BrowserOpenTabsSessionTests {
 
     @Test("Revision reservations stay responsive during storage mutations")
     func revisionReservationDoesNotWaitForMutation() async {
+        let waitTimeout: TimeInterval = 10
+        let cleanupTimeout: TimeInterval = 5
         let gate = BrowserPersistenceRevisionGate()
-        let operationStarted = DispatchSemaphore(value: 0)
-        let releaseOperation = DispatchSemaphore(value: 0)
-        let operationFinished = LockIsolated(false)
-        let mutationAccepted = LockIsolated<Bool?>(nil)
-        let mutationFinished = DispatchSemaphore(value: 0)
-
-        // The mutation intentionally stays blocked while it is in flight, so it
-        // runs on a dedicated dispatch queue. Cooperative-pool tasks must not be
-        // blocked this way: that starves the pool and can delay this very
-        // mutation from starting, which is unrelated to the revision gate.
-        let mutationQueue = DispatchQueue(label: "BrowserPersistenceRevisionGateTests.mutation")
-        mutationQueue.async {
-            let accepted = gate.perform(revision: 1) {
-                operationStarted.signal()
-                // This test releases the wait after reserving against the
-                // in-flight mutation. The bound only keeps a failing run from
-                // hanging forever; a passing run signals well before it elapses.
-                _ = releaseOperation.wait(timeout: .now() + 30)
-                operationFinished.setValue(true)
+        let mutationWorkerScheduled = XCTestExpectation(description: "mutation worker scheduled")
+        let mutationWorkerEntered = XCTestExpectation(description: "mutation worker entered")
+        let mutationEntered = XCTestExpectation(description: "storage mutation entered")
+        let mutationReleased = XCTestExpectation(description: "storage mutation released")
+        let mutationWorkerCompleted = XCTestExpectation(description: "mutation worker completed")
+        let reservationWorkerScheduled = XCTestExpectation(description: "reservation worker scheduled")
+        let reservationWorkerEntered = XCTestExpectation(description: "reservation worker entered")
+        let reservationAttemptStarted = XCTestExpectation(description: "revision reservation attempt started")
+        let reservationCompleted = XCTestExpectation(description: "revision reservation completed")
+        let reservationWorkerCompleted = XCTestExpectation(description: "reservation worker completed")
+        let mutationQueue = DispatchQueue(label: "BrowserOpenTabsSessionTests.mutation", qos: .userInitiated)
+        let reservationQueue = DispatchQueue(label: "BrowserOpenTabsSessionTests.reservation", qos: .userInitiated)
+        let releaseMutation = DispatchSemaphore(value: 0)
+        let allowReservation = DispatchSemaphore(value: 0)
+        let mutationIsActive = LockIsolated(false)
+        let mutationWasAccepted = LockIsolated(false)
+        let mutationReleaseSucceeded = LockIsolated(false)
+        let reservation = LockIsolated<(revision: UInt64, occurredDuringMutation: Bool)?>(nil)
+        var mutationWasScheduled = false
+        var reservationWasScheduled = false
+        var mutationScheduledResult: XCTWaiter.Result?
+        var mutationWorkerEntryResult: XCTWaiter.Result?
+        var mutationEntryResult: XCTWaiter.Result?
+        var reservationScheduledResult: XCTWaiter.Result?
+        var reservationWorkerEntryResult: XCTWaiter.Result?
+        var reservationAttemptResult: XCTWaiter.Result?
+        var reservationCompletionResult: XCTWaiter.Result?
+        var mutationReleaseResult: XCTWaiter.Result?
+        var mutationCompletionResult: XCTWaiter.Result?
+        var reservationCompletionCleanupResult: XCTWaiter.Result?
+        await withTaskCancellationHandler {
+            // Blocking work stays on dedicated GCD workers, outside Swift's cooperative task executor.
+            mutationQueue.async {
+                mutationWorkerEntered.fulfill()
+                mutationWasAccepted.setValue(gate.perform(revision: 1) {
+                    mutationIsActive.setValue(true)
+                    mutationEntered.fulfill()
+                    mutationReleaseSucceeded.setValue(releaseMutation.wait(timeout: .now() + 30) == .success)
+                    mutationIsActive.setValue(false)
+                    mutationReleased.fulfill()
+                })
+                mutationWorkerCompleted.fulfill()
             }
-            mutationAccepted.setValue(accepted)
-            mutationFinished.signal()
-        }
+            mutationWasScheduled = true
+            mutationWorkerScheduled.fulfill()
+            mutationScheduledResult = await XCTWaiter.fulfillment(of: [mutationWorkerScheduled], timeout: waitTimeout)
+            if mutationScheduledResult == .completed {
+                mutationWorkerEntryResult = await XCTWaiter.fulfillment(
+                    of: [mutationWorkerEntered],
+                    timeout: waitTimeout,
+                )
+            }
+            if mutationWorkerEntryResult == .completed {
+                mutationEntryResult = await XCTWaiter.fulfillment(of: [mutationEntered], timeout: waitTimeout)
+            }
+            if mutationEntryResult == .completed, !Task.isCancelled {
+                reservationQueue.async {
+                    defer { reservationWorkerCompleted.fulfill() }
+                    reservationWorkerEntered.fulfill()
+                    guard allowReservation.wait(timeout: .now() + 30) == .success else {
+                        return
+                    }
 
-        // The start, reservation, in-flight check, and release run on their own
-        // dispatch queue, so the sequence does not depend on when the cooperative
-        // pool resumes this test task. Only the assertions below run back on the
-        // test task.
-        let observationQueue = DispatchQueue(label: "BrowserPersistenceRevisionGateTests.observation")
-        let observation: RevisionReservationObservation = await withCheckedContinuation { continuation in
-            observationQueue.async {
-                let didStart = Self.waitForSignal(operationStarted, timeout: 30)
-                guard didStart else {
-                    releaseOperation.signal()
-                    _ = Self.waitForSignal(mutationFinished, timeout: 30)
-                    continuation.resume(returning: RevisionReservationObservation(
-                        didStart: false,
-                        revision: nil,
-                        reservedDuringMutation: nil,
-                        mutationAccepted: nil,
-                        didFinish: false,
-                    ))
-                    return
+                    reservationAttemptStarted.fulfill()
+                    let revision = gate.reserve(after: 1)
+                    reservation.setValue((revision, mutationIsActive.value))
+                    reservationCompleted.fulfill()
+                }
+                reservationWasScheduled = true
+                reservationWorkerScheduled.fulfill()
+                reservationScheduledResult = await XCTWaiter.fulfillment(
+                    of: [reservationWorkerScheduled],
+                    timeout: waitTimeout,
+                )
+                if reservationScheduledResult == .completed {
+                    reservationWorkerEntryResult = await XCTWaiter.fulfillment(
+                        of: [reservationWorkerEntered],
+                        timeout: waitTimeout,
+                    )
+                }
+                if reservationWorkerEntryResult == .completed {
+                    allowReservation.signal()
+                    reservationAttemptResult = await XCTWaiter.fulfillment(
+                        of: [reservationAttemptStarted],
+                        timeout: waitTimeout,
+                    )
+                }
+                if reservationAttemptResult == .completed {
+                    reservationCompletionResult = await XCTWaiter.fulfillment(
+                        of: [reservationCompleted],
+                        timeout: waitTimeout,
+                    )
+                }
+            }
+            let cleanupResults = await waitForRevisionReservationWorkerCleanup(
+                mutationWasEntered: mutationEntryResult == .completed,
+                mutationWasScheduled: mutationWasScheduled,
+                reservationWasScheduled: reservationWasScheduled,
+                mutationRelease: releaseMutation,
+                allowReservation: allowReservation,
+                mutationReleased: mutationReleased,
+                mutationWorkerCompleted: mutationWorkerCompleted,
+                reservationWorkerCompleted: reservationWorkerCompleted,
+                timeout: cleanupTimeout,
+            )
+            mutationReleaseResult = cleanupResults.mutationRelease
+            mutationCompletionResult = cleanupResults.mutationCompletion
+            reservationCompletionCleanupResult = cleanupResults.reservationCompletion
+            if Task.isCancelled {
+                return
+            }
+
+            #expect(mutationScheduledResult == .completed)
+            #expect(mutationWorkerEntryResult == .completed)
+            #expect(mutationEntryResult == .completed)
+            #expect(reservationScheduledResult == .completed)
+            #expect(reservationWorkerEntryResult == .completed)
+            #expect(reservationAttemptResult == .completed)
+            #expect(reservationCompletionResult == .completed)
+            #expect(mutationReleaseResult == .completed)
+            #expect(mutationCompletionResult == .completed)
+            #expect(reservationCompletionCleanupResult == .completed)
+            #expect(mutationWasAccepted.value)
+            #expect(mutationReleaseSucceeded.value)
+            if reservationCompletionResult == .completed {
+                #expect(reservation.value?.occurredDuringMutation == true)
+                #expect(reservation.value?.revision == 2)
+            }
+
+        } onCancel: {
+            releaseRevisionReservationWorkers(mutation: releaseMutation, reservation: allowReservation)
+        }
+    }
+
+    @Test("Cancellation releases revision reservation and mutation workers")
+    func cancellationReleasesRevisionReservationWorkers() async {
+        let waitTimeout: TimeInterval = 10
+        let cleanupTimeout: TimeInterval = 5
+        let gate = BrowserPersistenceRevisionGate()
+        let mutationEntered = XCTestExpectation(description: "cancellation-test mutation entered")
+        let reservationWorkerEntered = XCTestExpectation(description: "cancellation-test reservation worker entered")
+        let reservationAttemptStarted = XCTestExpectation(description: "cancellation-test reservation attempt started")
+        let mutationWorkerCompleted = XCTestExpectation(description: "cancellation-test mutation worker completed")
+        let reservationWorkerCompleted =
+            XCTestExpectation(description: "cancellation-test reservation worker completed")
+        let mutationQueue = DispatchQueue(
+            label: "BrowserOpenTabsSessionTests.cancellation-mutation",
+            qos: .userInitiated,
+        )
+        let reservationQueue = DispatchQueue(
+            label: "BrowserOpenTabsSessionTests.cancellation-reservation",
+            qos: .userInitiated,
+        )
+        let releaseMutation = DispatchSemaphore(value: 0)
+        let allowReservation = DispatchSemaphore(value: 0)
+        let cancellationHandlerRan = LockIsolated(false)
+        let cancellationWaitInstalled = XCTestExpectation(description: "cancellation handler wait installed")
+        let cancellationWait = OneShotCheckedContinuation()
+        let mutationWorkerDidComplete = LockIsolated(false)
+        let reservationWorkerDidComplete = LockIsolated(false)
+        let cleanupWaitResult = LockIsolated<Int?>(nil)
+
+        let coordinatingTask = Task {
+            await withTaskCancellationHandler {
+                mutationQueue.async {
+                    _ = gate.perform(revision: 1) {
+                        mutationEntered.fulfill()
+                        reservationQueue.async {
+                            defer {
+                                reservationWorkerDidComplete.setValue(true)
+                                reservationWorkerCompleted.fulfill()
+                            }
+                            reservationWorkerEntered.fulfill()
+                            guard allowReservation.wait(timeout: .now() + 30) == .success else {
+                                return
+                            }
+
+                            reservationAttemptStarted.fulfill()
+                            _ = gate.reserve(after: 1)
+                        }
+                        releaseMutation.wait(timeout: .now() + 30)
+                    }
+                    mutationWorkerDidComplete.setValue(true)
+                    mutationWorkerCompleted.fulfill()
                 }
 
-                // The mutation cannot finish before this sequence signals the
-                // release semaphore, so a reservation that returns while the
-                // mutation is still blocked provably did not wait for it.
-                let revision = gate.reserve(after: 1)
-                let reservedDuringMutation = operationFinished.value == false
-                releaseOperation.signal()
-                let didFinish = Self.waitForSignal(mutationFinished, timeout: 30)
-                continuation.resume(returning: RevisionReservationObservation(
-                    didStart: true,
-                    revision: revision,
-                    reservedDuringMutation: reservedDuringMutation,
-                    mutationAccepted: mutationAccepted.value,
-                    didFinish: didFinish,
-                ))
+                await withCheckedContinuation { continuation in
+                    cancellationWait.install(continuation)
+                    cancellationWaitInstalled.fulfill()
+                }
+
+                let result = await waitForExpectationsIgnoringCancellation(
+                    of: [reservationAttemptStarted, mutationWorkerCompleted, reservationWorkerCompleted],
+                    timeout: cleanupTimeout,
+                )
+                cleanupWaitResult.setValue(result.rawValue)
+            } onCancel: {
+                cancellationHandlerRan.setValue(true)
+                releaseRevisionReservationWorkers(mutation: releaseMutation, reservation: allowReservation)
+                cancellationWait.resume()
             }
         }
+        defer { coordinatingTask.cancel() }
 
-        #expect(observation.didStart)
-        #expect(observation.didFinish)
-        #expect(observation.reservedDuringMutation == true)
-        #expect(observation.mutationAccepted == true)
-        #expect(observation.revision == 2)
-    }
+        let cancellationWaitResult = await XCTWaiter.fulfillment(of: [cancellationWaitInstalled], timeout: waitTimeout)
+        let reservationEntryResult = await XCTWaiter.fulfillment(of: [reservationWorkerEntered], timeout: waitTimeout)
+        let mutationEntryResult = await XCTWaiter.fulfillment(of: [mutationEntered], timeout: waitTimeout)
+        coordinatingTask.cancel()
+        await coordinatingTask.value
 
-    /// Values observed while the mutation was in flight, evaluated by the test
-    /// task after the dispatch-queue sequence completes.
-    private struct RevisionReservationObservation: Sendable {
-        let didStart: Bool
-        let revision: UInt64?
-        let reservedDuringMutation: Bool?
-        let mutationAccepted: Bool?
-        let didFinish: Bool
-    }
-
-    /// Waits for a signal without occupying a cooperative-pool thread.
-    ///
-    /// Callers run on a dispatch queue, where blocking does not starve the
-    /// cooperative executor that runs Swift tasks.
-    private static func waitForSignal(
-        _ semaphore: DispatchSemaphore,
-        timeout: TimeInterval = 1,
-    ) -> Bool {
-        semaphore.wait(timeout: .now() + timeout) == .success
+        #expect(cancellationWaitResult == .completed)
+        #expect(reservationEntryResult == .completed)
+        #expect(mutationEntryResult == .completed)
+        #expect(cancellationHandlerRan.value)
+        #expect(mutationWorkerDidComplete.value)
+        #expect(reservationWorkerDidComplete.value)
+        #expect(cleanupWaitResult.value == XCTWaiter.Result.completed.rawValue)
     }
 
     @Test("Newer save and purge revisions reject older asynchronous work")
@@ -674,4 +808,99 @@ struct BrowserOpenTabsSessionTests {
         try mutableURL.setResourceValues(values)
         return try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true
     }
+}
+
+private func releaseRevisionReservationWorkers(mutation: DispatchSemaphore, reservation: DispatchSemaphore) {
+    mutation.signal()
+    reservation.signal()
+}
+
+private final class OneShotCheckedContinuation: @unchecked Sendable {
+    private typealias State = (
+        continuation: CheckedContinuation<Void, Never>?,
+        cancellationRequested: Bool,
+    )
+
+    private let state = LockIsolated<State>((continuation: nil, cancellationRequested: false))
+
+    func install(_ continuation: CheckedContinuation<Void, Never>) {
+        let resumeImmediately = state.withValue { state -> Bool in
+            guard !state.cancellationRequested else {
+                return true
+            }
+
+            state.continuation = continuation
+            return false
+        }
+        if resumeImmediately {
+            continuation.resume()
+        }
+    }
+
+    func resume() {
+        let continuation = state.withValue { state -> CheckedContinuation<Void, Never>? in
+            guard !state.cancellationRequested else {
+                return nil
+            }
+
+            state.cancellationRequested = true
+            defer { state.continuation = nil }
+            return state.continuation
+        }
+        continuation?.resume()
+    }
+}
+
+private func waitForRevisionReservationWorkerCleanup(
+    mutationWasEntered: Bool,
+    mutationWasScheduled: Bool,
+    reservationWasScheduled: Bool,
+    mutationRelease: DispatchSemaphore,
+    allowReservation: DispatchSemaphore,
+    mutationReleased: XCTestExpectation,
+    mutationWorkerCompleted: XCTestExpectation,
+    reservationWorkerCompleted: XCTestExpectation,
+    timeout: TimeInterval,
+) async -> (
+    mutationRelease: XCTWaiter.Result?,
+    mutationCompletion: XCTWaiter.Result?,
+    reservationCompletion: XCTWaiter.Result?,
+) {
+    releaseRevisionReservationWorkers(mutation: mutationRelease, reservation: allowReservation)
+
+    var mutationReleaseResult: XCTWaiter.Result?
+    var mutationCompletionResult: XCTWaiter.Result?
+    var reservationCompletionResult: XCTWaiter.Result?
+
+    if mutationWasEntered {
+        mutationReleaseResult = await waitForExpectationsIgnoringCancellation(
+            of: [mutationReleased],
+            timeout: timeout,
+        )
+    }
+    if mutationWasScheduled {
+        mutationCompletionResult = await waitForExpectationsIgnoringCancellation(
+            of: [mutationWorkerCompleted],
+            timeout: timeout,
+        )
+    }
+    if reservationWasScheduled {
+        reservationCompletionResult = await waitForExpectationsIgnoringCancellation(
+            of: [reservationWorkerCompleted],
+            timeout: timeout,
+        )
+    }
+
+    return (mutationReleaseResult, mutationCompletionResult, reservationCompletionResult)
+}
+
+private func waitForExpectationsIgnoringCancellation(
+    of expectations: [XCTestExpectation],
+    timeout: TimeInterval,
+) async -> XCTWaiter.Result {
+    // Keep bounded worker cleanup alive if the coordinating test task is canceled.
+    let waiter = Task.detached {
+        await XCTWaiter.fulfillment(of: expectations, timeout: timeout)
+    }
+    return await waiter.value
 }

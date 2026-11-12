@@ -20,15 +20,45 @@ enum BrowserWebKitAttachmentEvent: Equatable {
     case detached(BrowserTabID)
 }
 
+/// Serializes profile generation advances with adapter profile mutations.
+final class BrowserWebKitProfileConfigurationFence: Sendable {
+    static let live = BrowserWebKitProfileConfigurationFence()
+
+    private let generation = Mutex<UInt64>(0)
+
+    func advance(to generation: UInt64) {
+        self.generation.withLock { currentGeneration in
+            currentGeneration = max(currentGeneration, generation)
+        }
+    }
+
+    @MainActor
+    func configureIfCurrent(_ generation: UInt64, configure: () -> Void) -> Bool {
+        self.generation.withLock { currentGeneration in
+            guard generation >= currentGeneration else {
+                return false
+            }
+
+            currentGeneration = generation
+            configure()
+            return true
+        }
+    }
+}
+
 /// Main-actor registry that exclusively owns live WebKit contexts keyed by logical tab IDs.
 @MainActor
 final class BrowserWebKitAdapter: NSObject {
-    static let shared = BrowserWebKitAdapter(requiresProfileConfiguration: true)
+    static let shared = BrowserWebKitAdapter(
+        requiresProfileConfiguration: true,
+        profileConfigurationFence: .live,
+    )
 
     private var contexts: [BrowserTabID: Context] = [:]
     /// Logical IDs retired by a profile boundary cannot be recreated by delayed adapter work.
     private var retiredTabIDs: Set<BrowserTabID> = []
     private var browsingProfile: BrowserBrowsingProfile = .persistentPrivate
+    private let profileConfigurationFence: BrowserWebKitProfileConfigurationFence
     private var ephemeralWebsiteDataStore: WKWebsiteDataStore?
     private var hasConfiguredProfile: Bool
     /// Internal fixture witnesses expose configuration and native error codes without URLs.
@@ -59,6 +89,7 @@ final class BrowserWebKitAdapter: NSObject {
     init(
         requiresProfileConfiguration: Bool = false,
         downloadOwner: BrowserDownloadOwner? = nil,
+        profileConfigurationFence: BrowserWebKitProfileConfigurationFence = .init(),
         makeTabID: @escaping () -> BrowserTabID = BrowserTabID.init,
         makeWebView: @escaping @MainActor (CGRect, WKWebViewConfiguration) -> WKWebView = {
             frame,
@@ -74,6 +105,7 @@ final class BrowserWebKitAdapter: NSObject {
     ) {
         hasConfiguredProfile = !requiresProfileConfiguration
         self.downloadOwner = downloadOwner ?? .shared
+        self.profileConfigurationFence = profileConfigurationFence
         self.makeTabID = makeTabID
         self.makeWebView = makeWebView
         self.snapshotter = snapshotter
@@ -198,6 +230,16 @@ final class BrowserWebKitAdapter: NSObject {
         switch command {
         case let .configureProfile(profile, retiringTabIDs):
             configureProfile(profile, retiringTabIDs: retiringTabIDs)
+        case let .configureProfileForGeneration(profile, retiringTabIDs, generation):
+            guard !Task.isCancelled else {
+                return
+            }
+
+            _ = profileConfigurationFence.configureIfCurrent(generation) {
+                configureProfile(profile, retiringTabIDs: retiringTabIDs)
+            }
+        case let .invalidateProfileConfiguration(generation):
+            profileConfigurationFence.advance(to: generation)
         case let .ensureContext(id):
             guard hasConfiguredProfile,
                   !retiredTabIDs.contains(id)

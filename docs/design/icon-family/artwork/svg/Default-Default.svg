@@ -1,0 +1,273 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Folaro Default — Default appearance; review candidate</title>
+  <desc>Approved geometry unchanged. Translucent ribbon feathered; white seam and rim widths doubled; edges blended with soft light halos. Material treatment pending owner approval.</desc>
+  <defs>
+    <radialGradient id="bg" cx=".14" cy=".02" r="1.12">
+      <stop stop-color="#243b56" />
+      <stop offset=".35" stop-color="#112331" />
+      <stop offset=".69" stop-color="#06131d" />
+      <stop offset="1" stop-color="#020910" />
+    </radialGradient>
+    <radialGradient id="cyan" cx=".55" cy=".38" r=".72">
+      <stop stop-color="#0261bf" />
+      <stop offset=".32" stop-color="#00b7e5" />
+      <stop offset=".55" stop-color="#8cffff" />
+      <stop offset=".72" stop-color="#03b6ee" />
+      <stop offset=".91" stop-color="#035bd0" />
+      <stop offset="1" stop-color="#002391" />
+    </radialGradient>
+    <radialGradient id="ul" gradientUnits="userSpaceOnUse" cx="350" cy="175" r="360">
+      <stop stop-color="#0020a7" />
+      <stop offset=".3" stop-color="#0025e8" />
+      <stop offset=".56" stop-color="#0043ff" />
+      <stop offset=".76" stop-color="#0088f4" />
+      <stop offset=".9" stop-color="#16deff" />
+      <stop offset="1" stop-color="#9cffff" />
+    </radialGradient>
+    <radialGradient id="ur" gradientUnits="userSpaceOnUse" cx="694" cy="303" r="315" gradientTransform="translate(694 303) scale(1 .91) translate(-694 -303)">
+      <stop stop-color="#13518d" />
+      <stop offset=".27" stop-color="#296aa5" />
+      <stop offset=".51" stop-color="#6996c8" />
+      <stop offset=".74" stop-color="#b5d3f3" />
+      <stop offset=".91" stop-color="#eaf7ff" />
+      <stop offset="1" stop-color="#a1c7ff" />
+    </radialGradient>
+    <radialGradient id="ll" gradientUnits="userSpaceOnUse" cx="245" cy="437" r="325" gradientTransform="translate(245 437) scale(1.15 .88) translate(-245 -437)">
+      <stop stop-color="#2a4268" />
+      <stop offset=".24" stop-color="#496689" />
+      <stop offset=".45" stop-color="#839dbd" />
+      <stop offset=".65" stop-color="#d2e3f9" />
+      <stop offset=".79" stop-color="#f9ffff" />
+      <stop offset=".91" stop-color="#badbfa" />
+      <stop offset="1" stop-color="#79b6ff" />
+    </radialGradient>
+    <radialGradient id="lr" gradientUnits="userSpaceOnUse" cx="512" cy="602" r="320" gradientTransform="translate(512 602) rotate(-28) scale(.78 1.18) translate(-512 -602)">
+      <stop stop-color="#001384" />
+      <stop offset=".32" stop-color="#0021ce" />
+      <stop offset=".57" stop-color="#003cff" />
+      <stop offset=".76" stop-color="#0078fa" />
+      <stop offset=".9" stop-color="#00d4ff" />
+      <stop offset="1" stop-color="#a1ffff" />
+    </radialGradient>
+    <radialGradient id="blue-volume" cx=".5" cy=".5" r=".5">
+      <stop stop-color="#0018a0" stop-opacity=".85" />
+      <stop offset=".55" stop-color="#003bf0" stop-opacity=".2" />
+      <stop offset="1" stop-color="#00cfff" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="silver-volume" cx=".5" cy=".5" r=".5">
+      <stop stop-color="#0b2d55" stop-opacity=".8" />
+      <stop offset=".56" stop-color="#41729e" stop-opacity=".5" />
+      <stop offset="1" stop-color="#c2e9ff" stop-opacity="0" />
+    </radialGradient>
+    <clipPath id="circular-silhouette">
+      <circle cx="512" cy="512" r="384" />
+    </clipPath>
+    <mask id="circular-opening">
+      <rect width="1024" height="1024" fill="white" />
+      <circle cx="514" cy="520" r="140" fill="black" />
+    </mask>
+    <radialGradient id="glow">
+      <stop stop-color="#efffff" stop-opacity=".92" />
+      <stop offset=".3" stop-color="#b9eeff" stop-opacity=".5" />
+      <stop offset="1" stop-color="#96dcff" stop-opacity="0" />
+    </radialGradient>
+    <path id="upper-left-body-treatment" d="M120 160 C202 64 314 14 430 18 C548 47 610 187 608 350 C590 360 580 390 570 415 C540 350 480 280 430 280 C360 280 300 330 300 408 C300 460 330 500 354 518 C380 540 402 555 421 553 C238.654613 512.710281 104.439791 341.173237 120 160 Z" />
+    <path id="upper-right-body-treatment" d="M430 18 C603 8 757 100 802 260 C816 343 776 413 703 462 C672 418 640 379 608 350 C610 187 548 47 430 18 Z" />
+    <path id="blade-upper-left" d="M120 160 C202 64 314 14 430 18 C548 47 610 187 608 350 C612 390 596 426 574 448 L550 415 C540 350 480 280 430 280 C360 280 300 330 300 408 C300 460 330 500 354 518 C380 540 402 555 421 553 C238.654613 512.710281 104.439791 341.173237 120 160 Z" />
+    <clipPath id="clip-upper-left">
+      <use xlink:href="#blade-upper-left" />
+    </clipPath>
+    <path id="blade-upper-right" d="M430 18 C603 8 757 100 802 260 C816 343 776 413 703 462 C650 510 580 525 500 518 L480 400 L525 317 C550 318 580 328 608 350 C610 187 548 47 430 18 Z" />
+    <clipPath id="clip-upper-right">
+      <use xlink:href="#blade-upper-right" />
+    </clipPath>
+    <path id="blade-lower-left" d="M120 160 C104.439791 341.173237 238.654613 512.710281 421 553 C449 549 490 530 540 505 C530 525 515 540 500 548 C399 626 266 723 130 686 C40 606 16 503 26 398 C29 301 65 226 120 160 Z" />
+    <clipPath id="clip-lower-left">
+      <use xlink:href="#blade-lower-left" />
+    </clipPath>
+    <path id="blade-lower-right" d="M608 350 C640 379 672 418 703 462 C750 528 772 582 763 620 C690 733 551 791 430 782 C394 746 387 649 500 548 C515 540 530 525 540 505 C550 480 554 450 550 415 C567 389 586 365 608 350 Z" />
+    <clipPath id="clip-lower-right">
+      <use xlink:href="#blade-lower-right" />
+    </clipPath>
+    <path id="outer" d="M430 18 C603 8 757 100 802 260 C852 398 832 526 763 620 C690 733 551 791 430 782 C304 784 204 748 130 686 C40 606 16 503 26 398 C29 301 65 226 120 160 C202 64 314 14 430 18 Z" />
+    <mask id="aperture" maskUnits="userSpaceOnUse" x="0" y="0" width="856" height="808">
+      <rect width="856" height="808" fill="white" />
+      <path d="M430 264 C510 264 571 328 571 408 C571 485 508 552 430 552 C347 552 282 488 282 408 C282 326 347 264 430 264 Z" fill="black" />
+    </mask>
+    <filter id="glass-soft" x="-.5" y="-.5" width="2" height="2" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="10" />
+    </filter>
+    <filter id="glass-fine" x="-.5" y="-.5" width="2" height="2" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="4" />
+    </filter>
+    <radialGradient id="spot">
+      <stop stop-color="#ffffff" stop-opacity="1" />
+      <stop offset=".22" stop-color="#ecfaff" stop-opacity=".8" />
+      <stop offset=".6" stop-color="#72bfff" stop-opacity=".2" />
+      <stop offset="1" stop-color="#3b9fff" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="caustic" gradientUnits="userSpaceOnUse" x1="285" y1="398" x2="550" y2="110">
+      <stop stop-color="#e8ffff" stop-opacity=".8" />
+      <stop offset=".38" stop-color="#13efff" />
+      <stop offset=".75" stop-color="#35e5ff" stop-opacity=".6" />
+      <stop offset="1" stop-color="#76daff" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="silver-rim" gradientUnits="userSpaceOnUse" x1="120" y1="160" x2="421" y2="553">
+      <stop stop-color="#9cf5ff" stop-opacity=".15" />
+      <stop offset=".25" stop-color="#ffffff" stop-opacity=".7" />
+      <stop offset=".66" stop-color="#f7ffff" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".6" />
+    </linearGradient>
+    <linearGradient id="overlap-glass" gradientUnits="userSpaceOnUse" x1="580" y1="325" x2="637" y2="514">
+      <stop stop-color="#91ffff" stop-opacity=".52" />
+      <stop offset=".3" stop-color="#0b9ce6" stop-opacity=".12" />
+      <stop offset=".72" stop-color="#052397" stop-opacity=".28" />
+      <stop offset="1" stop-color="#59f6ff" stop-opacity=".38" />
+    </linearGradient>
+    <linearGradient id="rim-luminance" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#e4ffff" />
+      <stop offset=".3" stop-color="#b2d6ff" />
+      <stop offset=".5" stop-color="#4feaff" />
+      <stop offset=".72" stop-color="#f4ffff" />
+      <stop offset="1" stop-color="#35cfff" />
+    </linearGradient>
+    <radialGradient id="silver-transmission" gradientUnits="userSpaceOnUse" cx="245" cy="450" r="1" gradientTransform="translate(245 450) scale(310 240) translate(-245 -450)">
+      <stop stop-color="white" stop-opacity="0.56" />
+      <stop offset=".42" stop-color="white" stop-opacity="0.64" />
+      <stop offset=".83" stop-color="white" stop-opacity=".94" />
+      <stop offset="1" stop-color="white" />
+    </radialGradient>
+    <mask id="silver-glass-window" maskUnits="userSpaceOnUse" x="0" y="0" width="856" height="808">
+      <rect width="856" height="808" fill="url(#silver-transmission)" />
+    </mask>
+    <radialGradient id="pearl-transmission" gradientUnits="userSpaceOnUse" cx="680" cy="270" r="1" gradientTransform="translate(680 270) scale(240 270) translate(-680 -270)">
+      <stop stop-color="white" stop-opacity="0.59" />
+      <stop offset=".42" stop-color="white" stop-opacity="0.6699999999999999" />
+      <stop offset=".83" stop-color="white" stop-opacity=".94" />
+      <stop offset="1" stop-color="white" />
+    </radialGradient>
+    <mask id="pearl-glass-window" maskUnits="userSpaceOnUse" x="0" y="0" width="856" height="808">
+      <rect width="856" height="808" fill="url(#pearl-transmission)" />
+    </mask>
+    <radialGradient id="blue-transmission" gradientUnits="userSpaceOnUse" cx="365" cy="240" r="1" gradientTransform="translate(365 240) scale(260 300) translate(-365 -240)">
+      <stop stop-color="white" stop-opacity="0.82" />
+      <stop offset=".42" stop-color="white" stop-opacity="0.8999999999999999" />
+      <stop offset=".83" stop-color="white" stop-opacity=".94" />
+      <stop offset="1" stop-color="white" />
+    </radialGradient>
+    <mask id="blue-glass-window" maskUnits="userSpaceOnUse" x="0" y="0" width="856" height="808">
+      <rect width="856" height="808" fill="url(#blue-transmission)" />
+    </mask>
+    <linearGradient id="clear-ribbon" gradientUnits="userSpaceOnUse" x1="260" y1="330" x2="570" y2="190">
+      <stop stop-color="#00299c" stop-opacity=".08" />
+      <stop offset=".52" stop-color="#36faff" stop-opacity=".18" />
+      <stop offset="1" stop-color="#9effff" stop-opacity=".32" />
+    </linearGradient>
+    <filter id="ribbon-feather" x="-.5" y="-.5" width="2" height="2" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="16" />
+    </filter>
+    <filter id="seam-blend" x="-.5" y="-.5" width="2" height="2" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="0.85" />
+    </filter>
+    <filter id="edge-bloom" x="-.5" y="-.5" width="2" height="2" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2.4" />
+    </filter>
+    <filter id="surface-blend" x="-.5" y="-.5" width="2" height="2" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="0.8" />
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)" />
+  <g clip-path="url(#circular-silhouette)" mask="url(#circular-opening)">
+    <circle cx="512" cy="512" r="384" fill="url(#cyan)" />
+    <g transform="translate(103.26 110) scale(.955 1.005)">
+      <g id="underlayer-refraction" pointer-events="none">
+        <path d="M130 686 C232 741 345 762 430 782" fill="none" stroke="#bcffff" stroke-width="62" opacity=".86" filter="url(#glass-soft)" />
+        <path d="M141 704 C257 782 355 780 418 787" fill="none" stroke="#0bd4ff" stroke-width="23" opacity=".85" filter="url(#glass-fine)" />
+        <path d="M810 290 C857 435 819 551 763 620" fill="none" stroke="#0070f1" stroke-width="88" opacity=".92" filter="url(#glass-soft)" />
+        <path d="M827 351 C843 457 812 556 777 603" fill="none" stroke="#27eeff" stroke-width="24" opacity=".82" filter="url(#glass-soft)" />
+      </g>
+      <g id="transmitted-underpaint" pointer-events="none">
+        <g clip-path="url(#clip-lower-left)">
+          <path d="M120 160 C104.439791 341.173237 238.654613 512.710281 421 553" fill="none" stroke="#0031b0" stroke-width="165" opacity=".64" filter="url(#glass-soft)" />
+          <path d="M130 686 C266 723 399 626 500 548" fill="none" stroke="#84ffff" stroke-width="80" opacity=".65" filter="url(#glass-soft)" />
+        </g>
+        <g clip-path="url(#clip-upper-right)">
+          <path d="M430 18 C548 47 610 187 608 350 C640 379 672 418 703 462" fill="none" stroke="#003be5" stroke-width="140" opacity=".65" filter="url(#glass-soft)" />
+          <path d="M802 260 C816 343 776 413 703 462" fill="none" stroke="#12deff" stroke-width="90" opacity=".8" filter="url(#glass-soft)" />
+        </g>
+      </g>
+      <g id="surface-upper-left" filter="url(#surface-blend)">
+        <use id="upper-left-translucent-layer" xlink:href="#blade-upper-left" fill="url(#ul)" opacity=".55" />
+        <use xlink:href="#upper-left-body-treatment" fill="url(#ul)" mask="url(#blue-glass-window)" />
+      </g>
+      <g id="surface-lower-left" filter="url(#surface-blend)">
+        <use xlink:href="#blade-lower-left" fill="url(#ll)" mask="url(#silver-glass-window)" />
+      </g>
+      <g id="surface-lower-right" filter="url(#surface-blend)">
+        <use xlink:href="#blade-lower-right" fill="url(#lr)" />
+      </g>
+      <g id="surface-upper-right" filter="url(#surface-blend)">
+        <use id="upper-right-translucent-layer" xlink:href="#blade-upper-right" fill="url(#overlap-glass)" opacity=".66" />
+        <use xlink:href="#upper-right-body-treatment" fill="url(#ur)" mask="url(#pearl-glass-window)" />
+      </g>
+      <g id="default-glass-lighting" pointer-events="none">
+        <g id="glass-transmission-ribbons" pointer-events="none">
+          <g clip-path="url(#clip-upper-left)">
+            <path d="M110 350 C265 258 423 174 573 177 L608 350 C540 280 488 252 430 264 C351 259 284 318 282 400 Z" fill="url(#clear-ribbon)" filter="url(#ribbon-feather)" opacity=".86" />
+          </g>
+          <g clip-path="url(#clip-lower-right)" filter="url(#edge-bloom)">
+            <use xlink:href="#blade-upper-right" fill="url(#overlap-glass)" opacity=".4" />
+          </g>
+        </g>
+        <g clip-path="url(#clip-upper-left)">
+          <path d="M142 180 C169 88 310 29 441 27" fill="none" stroke="#63faff" stroke-width="32" opacity=".8" filter="url(#glass-soft)" />
+          <path d="M155 192 C191 114 283 67 366 64" fill="none" stroke="#15aaff" stroke-width="62" opacity=".55" filter="url(#glass-soft)" />
+          <path d="M551 110 C437 160 307 253 282 400" fill="none" stroke="url(#caustic)" stroke-width="37" opacity=".86" filter="url(#glass-soft)" />
+          <ellipse cx="443" cy="140" rx="110" ry="47" transform="rotate(-30 443 140)" fill="url(#spot)" opacity="0.296" />
+          <path d="M182 321 C295 246 430 190 570 180" fill="none" stroke="#2bdfff" stroke-width="37" opacity=".3" filter="url(#glass-soft)" />
+          <path d="M260 88 C175 195 204 335 271 405" fill="none" stroke="#0025bc" stroke-width="43" opacity=".35" filter="url(#glass-soft)" />
+        </g>
+        <g clip-path="url(#clip-upper-right)">
+          <ellipse cx="595" cy="111" rx="151" ry="83" transform="rotate(31 595 111)" fill="url(#spot)" opacity="0.741" />
+          <ellipse cx="624" cy="139" rx="81" ry="45" transform="rotate(30 624 139)" fill="url(#spot)" opacity="0.601" />
+          <path d="M457 30 C545 68 604 188 607 345" fill="none" stroke="#eefcff" stroke-width="15" opacity=".7" filter="url(#glass-fine)" />
+          <path d="M611 346 C650 383 680 424 703 462" fill="none" stroke="#34eaff" stroke-width="41" opacity=".65" filter="url(#glass-soft)" />
+          <path d="M790 287 C787 369 749 425 699 464 C647 510 580 525 500 518" fill="none" stroke="#69faff" stroke-width="19" opacity=".58" filter="url(#glass-soft)" />
+        </g>
+        <g clip-path="url(#clip-lower-left)">
+          <path d="M120 160 C104.439791 341.173237 238.654613 512.710281 421 553" fill="none" stroke="url(#silver-rim)" stroke-width="27" opacity=".86" filter="url(#glass-soft)" />
+          <path d="M130 686 C266 723 399 626 500 548" fill="none" stroke="#f7ffff" stroke-width="34" opacity=".75" filter="url(#glass-soft)" />
+          <ellipse cx="202" cy="620" rx="158" ry="61" transform="rotate(22 202 620)" fill="url(#spot)" opacity="0.562" />
+          <path d="M64 335 C93 383 147 412 176 418" fill="none" stroke="#c9e3ff" stroke-width="27" opacity=".5" filter="url(#glass-soft)" />
+        </g>
+        <g clip-path="url(#clip-lower-right)">
+          <path d="M584 412 C600 539 535 610 451 676" fill="none" stroke="#001a79" stroke-width="56" opacity=".67" filter="url(#glass-soft)" />
+          <path d="M746 553 C706 663 596 759 463 777" fill="none" stroke="#13eaff" stroke-width="28" opacity=".85" filter="url(#glass-soft)" />
+          <path d="M726 566 C694 664 580 736 508 754" fill="none" stroke="#0074ff" stroke-width="31" opacity=".8" filter="url(#glass-soft)" />
+          <path d="M608 350 C640 379 672 418 703 462 C750 528 772 582 763 620" fill="none" stroke="#7cffff" stroke-width="16" opacity=".6" filter="url(#glass-soft)" />
+        </g>
+      </g>
+      <g fill="none" stroke="url(#rim-luminance)" stroke-width="6" opacity=".28" filter="url(#edge-bloom)" stroke-linejoin="round" stroke-linecap="round" id="seam-bloom">
+        <path d="M120 160 C104.439791 341.173237 238.654613 512.710281 421 553" />
+        <path d="M430 18 C548 47 610 187 608 350 C640 379 672 418 703 462 C750 528 772 582 763 620" />
+        <path d="M130 686 C266 723 399 626 500 548" />
+        <path d="M802 260 C816 343 776 413 703 462 C650 510 580 525 500 518" />
+        <path d="M608 350 C612 390 596 426 574 448" />
+        <path d="M608 350 C580 328 550 318 525 317" />
+      </g>
+      <g id="traced-seam-highlights" fill="none" stroke="url(#rim-luminance)" stroke-width="3" opacity=".9" filter="url(#seam-blend)" stroke-linejoin="round" stroke-linecap="round">
+        <path id="repositioned-left-blade-edge" d="M120 160 C104.439791 341.173237 238.654613 512.710281 421 553" />
+        <path d="M430 18 C548 47 610 187 608 350 C640 379 672 418 703 462 C750 528 772 582 763 620" />
+        <path d="M130 686 C266 723 399 626 500 548" />
+        <path id="extended-lower-blade-edge" d="M802 260 C816 343 776 413 703 462 C650 510 580 525 500 518" />
+        <path id="extended-right-blade-edge" d="M608 350 C612 390 596 426 574 448" />
+        <path id="extended-upper-blade-edge" d="M608 350 C580 328 550 318 525 317" />
+      </g>
+      <path d="M550.097683242 109.317669842 C437.649686229 160.457975303 307.768008117 252.606993571 282.000000000 400.000000000" fill="none" stroke="#a4eaff" stroke-width="7.2" opacity=".28" filter="url(#edge-bloom)" stroke-linecap="round" id="diagonal-bloom" />
+      <path id="upper-diagonal-blade-edge" d="M550.097683242 109.317669842 C437.649686229 160.457975303 307.768008117 252.606993571 282.000000000 400.000000000" fill="none" stroke="#a4eaff" stroke-width="3.6" opacity=".74" filter="url(#seam-blend)" stroke-linecap="round" />
+    </g>
+    <circle id="aperture-refraction" cx="514" cy="520" r="142" fill="none" stroke="url(#rim-luminance)" stroke-width="10" opacity=".24" filter="url(#glass-fine)" />
+    <circle cx="512" cy="512" r="383.2" fill="none" stroke="#b5e9ff" stroke-width="3.2" opacity=".65" filter="url(#seam-blend)" />
+  </g>
+</svg>

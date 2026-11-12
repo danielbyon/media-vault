@@ -6,6 +6,7 @@
 //
 
 import CalculatorFeature
+import Combine
 import ComposableArchitecture
 import ConcurrencyExtras
 import CoreFoundation
@@ -14,6 +15,7 @@ import Dependencies
 import Foundation
 import QuartzCore
 import QuickLook
+import MediaLibrary
 import Sharing
 import SnapshotTesting
 import SwiftUI
@@ -141,6 +143,99 @@ extension AppHostedUITests {
             browserWindow.isHidden = true
             browserWindow.rootViewController = nil
         }
+
+        @Test("The Library reloads cleared resources when authentication remounts its view")
+        @MainActor
+        func libraryResourcesReloadAfterAuthenticationRemount() async throws {
+            let suiteName = "RootFeatureTests.LibraryUnlock.\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suiteName))
+            defaults.removePersistentDomain(forName: suiteName)
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+
+            let resource = MediaResource(
+                id: UUID(),
+                role: .original,
+                relativePath: "library/original.jpg",
+                sourceFilename: "original.jpg",
+                sourceUTI: "public.jpeg",
+                byteCount: 1,
+                sha256: String(repeating: "a", count: 64),
+            )
+            let asset = MediaAsset(
+                id: UUID(),
+                kind: .stillImage,
+                importedAt: Date(timeIntervalSince1970: 1),
+                resources: [resource],
+            )
+            let loadCount = LockIsolated(0)
+            let resourceReadCount = LockIsolated(0)
+            let (libraryTaskStarted, libraryTaskStartedContinuation) = AsyncStream.makeStream(of: Int.self)
+            var vault = VaultFeature.State(phase: .authenticated, configuredKind: .password)
+            vault.shell.library = MediaLibraryFeature.State()
+
+            let store = compositionStore(
+                vault: vault,
+                defaults: defaults,
+                libraryLoadAssets: {
+                    let loadNumber = loadCount.withValue { count in
+                        count += 1
+                        return count
+                    }
+                    libraryTaskStartedContinuation.yield(loadNumber)
+                    return [asset]
+                },
+                libraryResourceData: { _ in
+                    let readNumber = resourceReadCount.withValue { count in
+                        count += 1
+                        return count
+                    }
+                    return Data([readNumber == 1 ? 0x42 : 0x43])
+                },
+                credentialVerify: { _ in .succeeded },
+            )
+            let (controller, window) = mountRootView(store)
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            _ = try await waitForStreamValue(
+                libraryTaskStarted,
+                description: "initial Library view task",
+                timeout: .seconds(10),
+                matching: { $0 == 1 },
+            )
+            try await waitForLibraryResourceReload(
+                store,
+                resourceID: resource.id,
+                expectedData: Data([0x42]),
+                timeout: .seconds(10),
+            )
+            store.send(.vault(.lock))
+            #expect(store.state.vault.phase == .locked)
+            #expect(store.state.vault.shell.library.isSessionLocked)
+            #expect(store.state.vault.shell.library.resourceData.isEmpty)
+
+            store.send(.vault(.beginAuthentication))
+            store.send(.vault(.authenticationCredentialChanged("valid credential")))
+            store.send(.vault(.submitAuthentication))
+            _ = try await waitForStreamValue(
+                libraryTaskStarted,
+                description: "remounted Library view task",
+                timeout: .seconds(10),
+                matching: { $0 == 2 },
+            )
+            try await waitForLibraryResourceReload(
+                store,
+                resourceID: resource.id,
+                expectedData: Data([0x43]),
+                timeout: .seconds(10),
+            )
+            #expect(store.state.vault.phase == .authenticated)
+            #expect(store.state.vault.shell.library.resourceData[resource.id] == Data([0x43]))
+            #expect(loadCount.value == 2)
+            #expect(resourceReadCount.value == 2)
+        }
     }
 }
 
@@ -150,11 +245,17 @@ private func compositionStore(
     defaults: UserDefaults,
     sessionLoad: @escaping @Sendable () async -> BrowserOpenTabsSessionLoadOutcome = { .missing },
     webKitExecute: @escaping @Sendable (BrowserWebKitCommand) -> Void = { _ in },
+    libraryLoadAssets: @escaping @Sendable () async throws -> [MediaAsset] = { [] },
+    libraryResourceData: @escaping @Sendable (MediaResource) async throws -> Data = { _ in Data() },
+    credentialVerify: @escaping @Sendable (String) async -> VaultCredentialVerificationResult = { _ in
+        .succeeded
+    },
 ) -> StoreOf<RootFeature> {
     withDependencies {
         $0.defaultAppStorage = defaults
         $0.uuid = .incrementing
         $0.vaultCredential.loadConfiguration = { nil }
+        $0.vaultCredential.verify = credentialVerify
         $0.calculatorPersistence.load = { nil }
         $0.calculatorPersistence.save = { _ in }
         $0.browserOpenTabsSession.load = sessionLoad
@@ -162,6 +263,8 @@ private func compositionStore(
         $0.browserLibrary.loadBookmarks = { [] }
         $0.browserLibrary.loadHistory = { [] }
         $0.browserClipboard.readHTTPURL = { nil }
+        $0.mediaLibrary.loadAssets = libraryLoadAssets
+        $0.mediaLibrary.resourceData = libraryResourceData
         $0.browserWebKit = BrowserWebKitClient(
             execute: { command in webKitExecute(command) },
             events: { AsyncStream { $0.finish() } },
@@ -172,9 +275,20 @@ private func compositionStore(
 }
 
 @MainActor
-private func mountRootView(_ store: StoreOf<RootFeature>) -> (UIHostingController<RootView>, UIWindow) {
-    let controller = UIHostingController(rootView: RootView(store: store))
-    let window = UIKitTestSupport.makeWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+private func mountRootView(
+    _ store: StoreOf<RootFeature>,
+    frame: CGRect = CGRect(x: 0, y: 0, width: 390, height: 844),
+    horizontalSizeClass: UIUserInterfaceSizeClass = .compact,
+    verticalSizeClass: UIUserInterfaceSizeClass = .regular,
+) -> (UIHostingController<AnyView>, UIWindow) {
+    // A directly created test window has no scene lifecycle to mark it foreground.
+    _ = store.send(.applicationPhaseChanged(.active))
+    let rootView = RootView(store: store)
+    let foregroundRootView = rootView.environment(\.scenePhase, ScenePhase.active)
+    let controller = UIHostingController(rootView: AnyView(foregroundRootView))
+    controller.traitOverrides.horizontalSizeClass = horizontalSizeClass
+    controller.traitOverrides.verticalSizeClass = verticalSizeClass
+    let window = UIKitTestSupport.makeWindow(frame: frame)
     window.rootViewController = controller
     window.makeKeyAndVisible()
     controller.view.frame = window.bounds
@@ -195,14 +309,119 @@ private func settleUntilBrowserEntryCompletes(
     _ store: StoreOf<RootFeature>,
     _ controller: UIViewController,
 ) async {
-    for _ in 0 ..< 100 {
+    await settleUntil(controller, "completed Browser entry") {
+        store.state.vault.shell.browser.openTabsEntryLifecycle == .completed
+    }
+}
+
+private enum StreamWaitOutcome<Value: Sendable>: Sendable {
+    case value(Value)
+    case timedOut
+    case cancelled
+    case streamEnded
+    case timerFailed
+}
+
+private struct HostedTestSynchronizationError: Error, Sendable, CustomStringConvertible {
+    let description: String
+}
+
+private func waitForStreamValue<Value: Sendable>(
+    _ stream: AsyncStream<Value>,
+    description: String,
+    timeout: Duration,
+    matching predicate: @escaping @Sendable (Value) -> Bool,
+) async throws -> Value {
+    try Task.checkCancellation()
+    let outcome = await withTaskGroup(of: StreamWaitOutcome<Value>.self) { group in
+        group.addTask {
+            for await value in stream {
+                guard !Task.isCancelled else {
+                    return .cancelled
+                }
+
+                if predicate(value) {
+                    return .value(value)
+                }
+            }
+            return Task.isCancelled ? .cancelled : .streamEnded
+        }
+        group.addTask {
+            do {
+                try await Task.sleep(for: timeout)
+                return .timedOut
+            } catch is CancellationError {
+                return .cancelled
+            } catch {
+                return .timerFailed
+            }
+        }
+
+        let winner = await group.next() ?? .streamEnded
+        let wasCancelled = Task.isCancelled
+        group.cancelAll()
+        return wasCancelled ? .cancelled : winner
+    }
+
+    try Task.checkCancellation()
+    switch outcome {
+    case let .value(value):
+        return value
+    case .timedOut:
+        throw HostedTestSynchronizationError(description: "Timed out waiting for \(description)")
+    case .cancelled:
+        throw CancellationError()
+    case .streamEnded:
+        throw HostedTestSynchronizationError(description: "Event stream ended before \(description)")
+    case .timerFailed:
+        throw HostedTestSynchronizationError(description: "Timeout timer failed while waiting for \(description)")
+    }
+}
+
+@MainActor
+private func waitForLibraryResourceReload(
+    _ store: StoreOf<RootFeature>,
+    resourceID: UUID,
+    expectedData: Data,
+    timeout: Duration,
+) async throws {
+    let updates = AsyncStream.makeStream(of: RootFeature.State.self)
+    let observation = store.publisher.sink { state in
+        updates.continuation.yield(state)
+    }
+    defer {
+        observation.cancel()
+        updates.continuation.finish()
+    }
+
+    try Task.checkCancellation()
+    guard store.state.vault.shell.library.resourceData[resourceID] != expectedData else {
+        return
+    }
+
+    _ = try await waitForStreamValue(
+        updates.stream,
+        description: "Library resource reload state",
+        timeout: timeout,
+        matching: { $0.vault.shell.library.resourceData[resourceID] == expectedData },
+    )
+}
+
+@MainActor
+private func settleUntil(
+    _ controller: UIViewController,
+    _ description: String,
+    timeoutIterations: Int = 1_000,
+    condition: () -> Bool,
+) async {
+    for _ in 0 ..< timeoutIterations {
         await Task.yield()
         controller.view.layoutIfNeeded()
-        if store.state.vault.shell.browser.openTabsEntryLifecycle == .completed {
+        if condition() {
             return
         }
-        try? await Task.sleep(for: .milliseconds(10))
     }
+    Issue.record("Timed out waiting for \(description) after \(timeoutIterations) yields")
 }
 
 @MainActor

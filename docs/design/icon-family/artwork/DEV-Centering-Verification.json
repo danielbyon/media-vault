@@ -1,0 +1,19 @@
+{
+  "horizontal_padding": [
+    63.46600000000001,
+    63.466999999999985
+  ],
+  "vertical_padding": [
+    36.02499999999998,
+    36.02499999999998
+  ],
+  "unchanged_other_svg_and_png_files": 48,
+  "changed_appearance_files": [
+    "folaro-icon-family/svg/Folaro-Dev-Default.svg",
+    "folaro-icon-family/svg/Folaro-Dev-Tinted.svg",
+    "folaro-icon-family/svg/Folaro-Dev-Dark.svg",
+    "folaro-icon-family/png/Folaro-Dev-Dark.png",
+    "folaro-icon-family/png/Folaro-Dev-Tinted.png",
+    "folaro-icon-family/png/Folaro-Dev-Default.png"
+  ]
+}

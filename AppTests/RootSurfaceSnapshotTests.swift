@@ -76,6 +76,7 @@ struct RootSurfaceSnapshotTests {
         let store = makeRootStore()
 
         return RootView(store: store)
+            .environment(\.scenePhase, .active)
             .environment(\.colorScheme, .light)
             .environment(\.horizontalSizeClass, horizontalSizeClass)
     }

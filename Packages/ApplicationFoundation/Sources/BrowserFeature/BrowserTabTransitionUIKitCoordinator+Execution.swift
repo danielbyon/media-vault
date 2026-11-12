@@ -170,10 +170,6 @@ extension BrowserTabTransitionUIKitCoordinator {
             return
         }
 
-        if !session.missingDestinationWasRecorded {
-            record(.missingDestination)
-            session.missingDestinationWasRecorded = true
-        }
         if retryMissingDestination
             || session.destinationReadiness.mountedSurfaceWaitPolicy == .retryUntilUsable {
             if prepareDestination {

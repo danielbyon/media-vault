@@ -1,0 +1,134 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Folaro Instrument — Dark appearance; review candidate</title>
+  <defs>
+    <radialGradient id="bg" cx=".15" cy=".04" r="1.1">
+      <stop stop-color="#223448" />
+      <stop offset=".5" stop-color="#0e1823" />
+      <stop offset="1" stop-color="#04090f" />
+    </radialGradient>
+    <linearGradient id="metal" x1=".12" y1="0" x2=".85" y2="1">
+      <stop stop-color="#c3dbfd" />
+      <stop offset=".16" stop-color="#97b2db" />
+      <stop offset=".36" stop-color="#374f6a" />
+      <stop offset=".54" stop-color="#1c2c3e" />
+      <stop offset=".75" stop-color="#9eb2d6" />
+      <stop offset=".91" stop-color="#bddafd" />
+      <stop offset="1" stop-color="#4a5e77" />
+    </linearGradient>
+    <linearGradient id="blue" x1=".05" y1=".15" x2=".8" y2=".9">
+      <stop stop-color="#76fbfb" />
+      <stop offset=".15" stop-color="#05a5c2" />
+      <stop offset=".38" stop-color="#0562c2" />
+      <stop offset=".64" stop-color="#042c94" />
+      <stop offset=".85" stop-color="#0781bb" />
+      <stop offset="1" stop-color="#71fbfb" />
+    </linearGradient>
+    <radialGradient id="face" cx=".25" cy=".15" r=".95">
+      <stop stop-color="#415368" />
+      <stop offset=".35" stop-color="#213044" />
+      <stop offset=".8" stop-color="#09121d" />
+      <stop offset="1" stop-color="#03080f" />
+    </radialGradient>
+    <linearGradient id="knob" x1=".05" y1="0" x2=".85" y2="1">
+      <stop stop-color="#abc6de" />
+      <stop offset=".18" stop-color="#4c5b6c" />
+      <stop offset=".42" stop-color="#212c37" />
+      <stop offset=".62" stop-color="#0b131a" />
+      <stop offset=".9" stop-color="#1d2c3b" />
+      <stop offset="1" stop-color="#4d6075" />
+    </linearGradient>
+    <radialGradient id="tile-blue" cx=".25" cy=".15" r="1">
+      <stop stop-color="#8fd4fc" />
+      <stop offset=".15" stop-color="#406888" />
+      <stop offset=".5" stop-color="#183e5d" />
+      <stop offset=".8" stop-color="#0f2942" />
+      <stop offset="1" stop-color="#4a85be" />
+    </radialGradient>
+    <linearGradient id="tile-silver" x1=".1" y1="0" x2=".8" y2="1">
+      <stop stop-color="#c4e3fd" />
+      <stop offset=".24" stop-color="#97b7db" />
+      <stop offset=".52" stop-color="#5979a2" />
+      <stop offset=".8" stop-color="#b2d2fd" />
+      <stop offset="1" stop-color="#e6e6e6" />
+    </linearGradient>
+    <radialGradient id="tile-electric" cx=".2" cy=".12" r="1.1">
+      <stop stop-color="#92fcfc" />
+      <stop offset=".18" stop-color="#0577d3" />
+      <stop offset=".46" stop-color="#0535c2" />
+      <stop offset=".7" stop-color="#0555b2" />
+      <stop offset=".9" stop-color="#05a1c2" />
+      <stop offset="1" stop-color="#83fcfc" />
+    </radialGradient>
+    <radialGradient id="tile-dark" cx=".2" cy=".1" r="1">
+      <stop stop-color="#9bb3cd" />
+      <stop offset=".2" stop-color="#42556a" />
+      <stop offset=".5" stop-color="#1a2433" />
+      <stop offset=".8" stop-color="#0f1723" />
+      <stop offset="1" stop-color="#58708f" />
+    </radialGradient>
+    <radialGradient id="button" cx=".3" cy="0" r="1.1">
+      <stop stop-color="#4f5a66" />
+      <stop offset=".5" stop-color="#2d353e" />
+      <stop offset="1" stop-color="#111720" />
+    </radialGradient>
+    <radialGradient id="orange" cx=".3" cy=".1" r="1">
+      <stop stop-color="#fcd182" />
+      <stop offset=".2" stop-color="#f08d06" />
+      <stop offset=".6" stop-color="#c25f05" />
+      <stop offset="1" stop-color="#8f3504" />
+    </radialGradient>
+    <radialGradient id="glass-blue" cx=".28" cy=".17" r=".85">
+      <stop stop-color="#8adafc" stop-opacity=".8" />
+      <stop offset=".23" stop-color="#44709a" stop-opacity=".72" />
+      <stop offset=".6" stop-color="#183e69" stop-opacity=".6" />
+      <stop offset="1" stop-color="#62a8ed" stop-opacity=".83" />
+    </radialGradient>
+    <radialGradient id="specular">
+      <stop stop-color="#e6e6e6" stop-opacity=".65" />
+      <stop offset=".4" stop-color="#9ad4fc" stop-opacity=".2" />
+      <stop offset="1" stop-color="#7bcafc" stop-opacity="0" />
+    </radialGradient>
+    <filter id="shadow" x="-.4" y="-.4" width="1.8" height="1.8">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14" result="blur" />
+      <feOffset in="blur" dx="0" dy="15" result="offset" />
+      <feComponentTransfer in="offset" result="shadow-alpha">
+        <feFuncA type="linear" slope=".6" />
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode in="shadow-alpha" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="soft">
+      <feGaussianBlur stdDeviation="5" />
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)" />
+  <circle cx="512" cy="512" r="382" fill="url(#metal)" stroke="#adcffd" stroke-width="2" filter="url(#shadow)" />
+  <circle cx="512" cy="512" r="314" fill="url(#face)" stroke="#0b121b" stroke-width="9" />
+  <circle cx="512" cy="512" r="308" fill="none" stroke="#556b84" stroke-width="2" />
+  <path d="M203 735 A382 382 0 0 1 563 133 L553 201 A314 314 0 0 0 258 695 Z" fill="url(#blue)" stroke="#71f0fb" stroke-width="2" />
+  <path d="M512.000 259.000 L512.000 221.000" stroke="#b2cdec" stroke-width="7" opacity=".86" />
+  <path d="M595.126 256.166 L601.924 235.243" stroke="#b2cdec" stroke-width="4" opacity=".86" />
+  <path d="M670.114 294.374 L683.046 276.576" stroke="#b2cdec" stroke-width="4" opacity=".86" />
+  <path d="M729.626 353.886 L747.424 340.954" stroke="#b2cdec" stroke-width="4" opacity=".86" />
+  <path d="M767.834 428.874 L788.757 422.076" stroke="#b2cdec" stroke-width="4" opacity=".86" />
+  <path d="M765.000 512.000 L803.000 512.000" stroke="#b2cdec" stroke-width="7" opacity=".86" />
+  <path d="M767.834 595.126 L788.757 601.924" stroke="#b2cdec" stroke-width="4" opacity=".86" />
+  <path d="M729.626 670.114 L747.424 683.046" stroke="#b2cdec" stroke-width="4" opacity=".86" />
+  <path d="M670.114 729.626 L683.046 747.424" stroke="#b2cdec" stroke-width="4" opacity=".86" />
+  <path d="M595.126 767.834 L601.924 788.757" stroke="#b2cdec" stroke-width="4" opacity=".86" />
+  <path d="M512.000 765.000 L512.000 803.000" stroke="#b2cdec" stroke-width="7" opacity=".86" />
+  <path d="M428.874 767.834 L422.076 788.757" stroke="#52c1fb" stroke-width="4" opacity=".86" />
+  <path d="M353.886 729.626 L340.954 747.424" stroke="#52c1fb" stroke-width="4" opacity=".86" />
+  <path d="M294.374 670.114 L276.576 683.046" stroke="#52c1fb" stroke-width="4" opacity=".86" />
+  <path d="M256.166 595.126 L235.243 601.924" stroke="#52c1fb" stroke-width="4" opacity=".86" />
+  <path d="M259.000 512.000 L221.000 512.000" stroke="#52c1fb" stroke-width="7" opacity=".86" />
+  <path d="M256.166 428.874 L235.243 422.076" stroke="#52c1fb" stroke-width="4" opacity=".86" />
+  <path d="M294.374 353.886 L276.576 340.954" stroke="#52c1fb" stroke-width="4" opacity=".86" />
+  <path d="M353.886 294.374 L340.954 276.576" stroke="#52c1fb" stroke-width="4" opacity=".86" />
+  <path d="M428.874 256.166 L422.076 235.243" stroke="#52c1fb" stroke-width="4" opacity=".86" />
+  <circle cx="512" cy="512" r="177" fill="url(#knob)" stroke="#9fb4cc" stroke-width="5" filter="url(#shadow)" />
+  <ellipse cx="466" cy="423" rx="105" ry="47" transform="rotate(-35 466 423)" fill="url(#specular)" />
+</svg>

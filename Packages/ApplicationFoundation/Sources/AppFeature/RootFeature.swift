@@ -10,8 +10,26 @@ import Combine
 import ComposableArchitecture
 import CoreFoundation
 import DecoySupport
+import Dependencies
+import MediaLibrary
+import PresentationSupport
 import SwiftUI
 import VaultFeature
+
+/// The application-wide lifecycle phase used to start and evaluate an auto-lock grace period.
+public enum VaultApplicationScenePhase: Equatable, Sendable {
+    /// The application is foregrounded and can reveal its authenticated scenes.
+    case active
+
+    /// The application is temporarily inactive; no background grace period starts.
+    case inactive
+
+    /// The application has entered the background and may begin the shared grace period.
+    case background
+
+    /// The platform phase could not be interpreted, so configured vaults fail closed.
+    case unknown
+}
 
 /// The application composition root for a registered decoy and the vault lifecycle.
 @Reducer
@@ -25,6 +43,18 @@ public struct RootFeature {
         /// The attempt currently waiting for hidden-credential evaluation.
         public var pendingHiddenAttemptID: DecoyHiddenEntryAttempt.ID?
 
+        /// The vault session generation that owns the pending hidden-entry attempt.
+        public var pendingHiddenSessionGeneration: UInt64?
+
+        /// The monotonic instant when the whole application entered the background.
+        public var autoLockBackgroundStartedAt: ContinuousClock.Instant?
+
+        /// The timeout selected when the current background grace period began.
+        public var autoLockTimeoutAtBackground: Duration?
+
+        /// Keeps scene privacy covers in place until the application-wide active return is evaluated.
+        public var applicationReturnPending: Bool
+
         /// The long-lived decoy surface associated with this root store.
         @ObservationStateIgnored
         public var decoySession: AnyDecoySession
@@ -37,12 +67,20 @@ public struct RootFeature {
             self.vault = vault
             self.decoySession = decoySession
             pendingHiddenAttemptID = nil
+            pendingHiddenSessionGeneration = nil
+            autoLockBackgroundStartedAt = nil
+            autoLockTimeoutAtBackground = nil
+            applicationReturnPending = false
         }
 
         /// Compares lifecycle and attempt state while ignoring the retained UI session reference.
         public static func == (lhs: Self, rhs: Self) -> Bool {
             lhs.vault == rhs.vault
                 && lhs.pendingHiddenAttemptID == rhs.pendingHiddenAttemptID
+                && lhs.pendingHiddenSessionGeneration == rhs.pendingHiddenSessionGeneration
+                && lhs.autoLockBackgroundStartedAt == rhs.autoLockBackgroundStartedAt
+                && lhs.autoLockTimeoutAtBackground == rhs.autoLockTimeoutAtBackground
+                && lhs.applicationReturnPending == rhs.applicationReturnPending
         }
     }
 
@@ -51,12 +89,33 @@ public struct RootFeature {
         /// Starts root-owned lifecycle work.
         case task
 
+        /// Applies the application-wide scene phase to the shared session lifecycle.
+        case applicationPhaseChanged(VaultApplicationScenePhase)
+
+        /// Reports local scene activation without changing the application-wide grace period.
+        case sceneBecameActive
+
+        /// Applies the selected emergency gesture for one foreground scene.
+        case emergencyLockGestureRecognized(
+            gesture: VaultEmergencyLockGesture,
+            isForeground: Bool,
+        )
+
         /// Receives a normalized attempt emitted by the active decoy session.
         case decoyAttempt(DecoyHiddenEntryAttempt)
 
         /// Forwards vault lifecycle and shell actions.
         case vault(VaultFeature.Action)
     }
+
+    @Dependency(\.vaultSessionClock)
+    var sessionClock
+
+    @Dependency(\.mediaLibrary)
+    var mediaLibrary
+
+    @Dependency(\.browserProfileConfigurationFence)
+    var browserProfileConfigurationFence
 
     private let definition: DecoyDefinition
 
@@ -75,16 +134,156 @@ public struct RootFeature {
         Reduce { state, action in
             switch action {
             case .task:
-                .merge(
+                return .merge(
                     updateTriggerConfiguration(state: state),
                     .send(.vault(.task)),
                 )
+            case let .applicationPhaseChanged(phase):
+                return handleApplicationPhase(phase, state: &state)
+            case .sceneBecameActive:
+                return .none
+            case let .emergencyLockGestureRecognized(gesture, isForeground):
+                guard gesture != .off,
+                      isForeground,
+                      state.vault.phase == .authenticated,
+                      state.vault.sessionSettings.emergencyLockGesture == gesture
+                else {
+                    return .none
+                }
+
+                return lockApplication(state: &state)
             case let .decoyAttempt(attempt):
-                handle(attempt, state: &state)
+                return handle(attempt, state: &state)
             case let .vault(vaultAction):
-                handleVaultAction(vaultAction, state: &state)
+                return handleVaultAction(vaultAction, state: &state)
             }
         }
+    }
+
+    private func handleApplicationPhase(
+        _ phase: VaultApplicationScenePhase,
+        state: inout State,
+    ) -> Effect<Action> {
+        switch phase {
+        case .inactive:
+            return .none
+        case .unknown:
+            state.applicationReturnPending = true
+            guard state.vault.configuredKind != nil || state.vault.phase == .authenticated else {
+                return .none
+            }
+
+            return lockApplication(state: &state)
+        case .background:
+            return handleApplicationBackground(state: &state)
+        case .active:
+            return handleApplicationActive(state: &state)
+        }
+    }
+
+    private func handleApplicationBackground(state: inout State) -> Effect<Action> {
+        state.applicationReturnPending = true
+        guard state.vault.phase == .authenticated else {
+            state.autoLockBackgroundStartedAt = nil
+            state.autoLockTimeoutAtBackground = nil
+            return .none
+        }
+        guard state.autoLockBackgroundStartedAt == nil else {
+            return .none
+        }
+        guard let instant = sessionClock.now() else {
+            return lockApplication(state: &state)
+        }
+
+        let timeout = state.vault.sessionSettings.autoLockTimeout.duration ?? .zero
+        guard timeout > .zero else {
+            return lockApplication(state: &state)
+        }
+
+        state.autoLockBackgroundStartedAt = instant
+        state.autoLockTimeoutAtBackground = timeout
+        return .none
+    }
+
+    private func handleApplicationActive(state: inout State) -> Effect<Action> {
+        guard state.applicationReturnPending
+            || state.autoLockBackgroundStartedAt != nil
+        else {
+            return .none
+        }
+
+        let backgroundStart = state.autoLockBackgroundStartedAt
+        let originalTimeout = state.autoLockTimeoutAtBackground ?? .zero
+        state.autoLockBackgroundStartedAt = nil
+        state.autoLockTimeoutAtBackground = nil
+        guard let backgroundStart else {
+            let authorizationIsInFlight = state.vault.isWorking
+                && (state.vault.phase == .authentication
+                    || state.vault.pendingHiddenVerificationID != nil)
+            guard state.vault.phase == .authenticated || authorizationIsInFlight else {
+                state.applicationReturnPending = false
+                return .none
+            }
+
+            let effect = lockApplication(state: &state)
+            state.applicationReturnPending = false
+            return effect
+        }
+        guard state.vault.phase == .authenticated else {
+            state.applicationReturnPending = false
+            return .none
+        }
+        guard let now = sessionClock.now() else {
+            let effect = lockApplication(state: &state)
+            state.applicationReturnPending = false
+            return effect
+        }
+
+        let elapsed = backgroundStart.duration(to: now)
+        guard elapsed >= .zero else {
+            let effect = lockApplication(state: &state)
+            state.applicationReturnPending = false
+            return effect
+        }
+
+        let currentTimeout = state.vault.sessionSettings.autoLockTimeout.duration ?? .zero
+        guard elapsed < min(originalTimeout, currentTimeout) else {
+            let effect = lockApplication(state: &state)
+            state.applicationReturnPending = false
+            return effect
+        }
+
+        state.applicationReturnPending = false
+        return .none
+    }
+
+    private func lockApplication(state: inout State) -> Effect<Action> {
+        state.autoLockBackgroundStartedAt = nil
+        state.autoLockTimeoutAtBackground = nil
+        let pendingAttemptID = state.pendingHiddenAttemptID
+        state.pendingHiddenAttemptID = nil
+        state.pendingHiddenSessionGeneration = nil
+
+        let lock = state.vault
+            .commitGlobalLock(
+                advanceResourceLoadGeneration: mediaLibrary.advanceResourceLoadGeneration,
+                advanceBrowserProfileConfigurationGeneration: browserProfileConfigurationFence.advance,
+            )
+            .map(Action.vault)
+        let update = updateTriggerConfiguration(state: state)
+        guard let pendingAttemptID else {
+            return .merge(lock, update)
+        }
+
+        return .merge(
+            lock,
+            update,
+            deliver(
+                attemptID: pendingAttemptID,
+                result: .failure(.evaluationFailed),
+                to: state.decoySession,
+            ),
+        )
     }
 
     private func handle(
@@ -122,6 +321,7 @@ public struct RootFeature {
 
             let supersededAttemptID = state.pendingHiddenAttemptID
             state.pendingHiddenAttemptID = nil
+            state.pendingHiddenSessionGeneration = nil
             if let supersededAttemptID {
                 return .concatenate(
                     .send(.vault(nextPhase)),
@@ -147,6 +347,7 @@ public struct RootFeature {
             }
 
             state.pendingHiddenAttemptID = attempt.id
+            state.pendingHiddenSessionGeneration = state.vault.sessionGeneration
             return .send(.vault(.verifyHidden(attemptID: attempt.id, candidate: candidate)))
         }
     }
@@ -157,15 +358,37 @@ public struct RootFeature {
     ) -> Effect<Action> {
         var completion: DecoyHiddenEntryCompletion?
         switch action {
-        case let .hiddenVerificationCompleted(attemptID, result):
-            guard state.pendingHiddenAttemptID == attemptID else {
+        case let .hiddenVerificationCompleted(
+            sessionGeneration,
+            requestGeneration,
+            attemptID,
+            result,
+        ):
+            guard state.pendingHiddenAttemptID == attemptID,
+                  state.pendingHiddenSessionGeneration == sessionGeneration,
+                  state.vault.sessionGeneration == sessionGeneration,
+                  state.vault.hiddenVerificationRequestGeneration == requestGeneration
+            else {
                 return .none
             }
 
             state.pendingHiddenAttemptID = nil
+            state.pendingHiddenSessionGeneration = nil
             completion = DecoyHiddenEntryCompletion(attemptID: attemptID, result: result)
         case .beginAuthentication,
              .beginSetup:
+            state.pendingHiddenSessionGeneration = nil
+            if let attemptID = state.pendingHiddenAttemptID {
+                state.pendingHiddenAttemptID = nil
+                completion = DecoyHiddenEntryCompletion(
+                    attemptID: attemptID,
+                    result: .failure(.evaluationFailed),
+                )
+            }
+        case .lock:
+            state.autoLockBackgroundStartedAt = nil
+            state.autoLockTimeoutAtBackground = nil
+            state.pendingHiddenSessionGeneration = nil
             if let attemptID = state.pendingHiddenAttemptID {
                 state.pendingHiddenAttemptID = nil
                 completion = DecoyHiddenEntryCompletion(
@@ -282,6 +505,8 @@ public struct RootView: View {
     private let downloadHost: @MainActor (BrowserDownloadHost) -> BrowserDownloadHost
     @State
     private var downloadPrivacyGeneration: UInt64 = 0
+    @Environment(\.scenePhase)
+    private var scenePhase
 
     /// Creates the root view from the application's single root store.
     ///
@@ -318,6 +543,37 @@ public struct RootView: View {
         )
         return ZStack {
             surface
+                .padding(
+                    .top,
+                    RootSurfaceLayout.browserTopInset(
+                        vaultPhase: store.vault.phase,
+                        selectedTab: store.vault.shell.selectedTab,
+                    ),
+                )
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if store.vault.phase == .authenticated,
+                       store.vault.shell.selectedTab == .browser,
+                       !privacyCoverIsVisible {
+                        HStack {
+                            lockButton
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 4)
+                        .background(.bar)
+                    }
+                }
+                .accessibilityHidden(privacyCoverIsVisible)
+                .allowsHitTesting(!privacyCoverIsVisible)
+            if privacyCoverIsVisible {
+                Color.black
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(true)
+            }
+        }
+        .background {
+            ScenePrivacyCover(isCovered: privacyCoverIsVisible)
         }
         .background {
             downloadHost(BrowserDownloadHost(
@@ -373,6 +629,29 @@ public struct RootView: View {
         }
     }
 
+    private var privacyCoverIsVisible: Bool {
+        scenePhase != .active || store.applicationReturnPending
+    }
+
+    private var lockButton: some View {
+        Button {
+            store.send(.vault(.lock))
+        } label: {
+            Label("Lock", systemImage: "lock.fill")
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("Lock")
+        .accessibilityHint("Locks the vault and returns to the calculator.")
+        .accessibilityIdentifier("vault.lock")
+        .accessibilityHidden(privacyCoverIsVisible)
+        .allowsHitTesting(!privacyCoverIsVisible)
+    }
+
+    /// Routes an observer callback through the root's current gesture and vault-phase checks.
+    func routeEmergencyLockGesture(_ gesture: VaultEmergencyLockGesture, isForeground: Bool) {
+        _ = store.send(.emergencyLockGestureRecognized(gesture: gesture, isForeground: isForeground))
+    }
+
     @ViewBuilder
     private var surface: some View {
         switch store.vault.phase {
@@ -380,7 +659,17 @@ public struct RootView: View {
              .authentication:
             VaultCredentialView(store: store.scope(state: \.vault, action: \.vault))
         case .authenticated:
-            VaultShellView(store: store.scope(state: \.vault.shell, action: \.vault.shell))
+            VaultShellView(
+                store: store.scope(state: \.vault.shell, action: \.vault.shell),
+                sessionSettings: store.vault.sessionSettings,
+                onLock: { store.send(.vault(.lock)) },
+                onEmergencyLockGesture: { gesture, isForeground in
+                    routeEmergencyLockGesture(gesture, isForeground: isForeground)
+                },
+                onSessionSettingsChanged: {
+                    store.send(.vault(.sessionSettingsChanged($0)))
+                },
+            )
         case .unavailable:
             decoySurface
                 .safeAreaInset(edge: .bottom) {
@@ -414,5 +703,23 @@ public struct RootView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
         .background(.thinMaterial)
+    }
+}
+
+/// Layout decisions shared by the root surface and its focused tests.
+enum RootSurfaceLayout {
+    /// Space reserved above an authenticated Browser surface for its lock bar.
+    static let authenticatedBrowserTopInset: CGFloat = 24
+
+    /// Returns the top inset for the surface currently represented by vault state.
+    static func browserTopInset(
+        vaultPhase: VaultFeaturePhase,
+        selectedTab: VaultShellTab,
+    ) -> CGFloat {
+        if vaultPhase == .authenticated, selectedTab == .browser {
+            authenticatedBrowserTopInset
+        } else {
+            0
+        }
     }
 }
