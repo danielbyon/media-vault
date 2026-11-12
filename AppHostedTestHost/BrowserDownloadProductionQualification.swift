@@ -27,8 +27,13 @@ import WebKit
 enum BrowserDownloadProductionQualification {
     static let argument = "--browser-download-production-qualification"
     static let passiveSceneCensusArgument = "--browser-download-passive-scene-census"
+    static let operatorArrangementArgument = "--browser-download-operator-arrangement"
     static var passiveSceneCensusEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(passiveSceneCensusArgument)
+    }
+
+    static var operatorArrangementRequired: Bool {
+        ProcessInfo.processInfo.arguments.contains(operatorArrangementArgument)
     }
 
     #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION && targetEnvironment(simulator)
@@ -73,8 +78,23 @@ private final class BrowserDownloadProductionQualificationProcess {
         inspectFixtureNavigation()
     }
 
+    /// Publishes the redacted event copy when passive scene sampling is enabled.
+    func refreshPassiveObservations() {
+        guard BrowserDownloadProductionQualification.passiveSceneCensusEnabled else {
+            return
+        }
+
+        observationsJSON = evidence.observationsJSON
+        inspectFixtureNavigation()
+    }
+
     /// Captures current UIKit window scenes separately from the latest coordinator callbacks.
     func refreshSceneCensus() {
+        // Bracket the synchronous owner read so the test can place it relative to scene activation.
+        let ownerSampleStartedAt = evidence.currentMonotonicSeconds
+        let ownerSnapshot = owner.snapshot
+        let ownerSampleCompletedAt = evidence.currentMonotonicSeconds
+        let capturedMonotonicSeconds = evidence.currentMonotonicSeconds
         let connectedWindowScenes = UIApplication.shared
             .connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -82,9 +102,20 @@ private final class BrowserDownloadProductionQualificationProcess {
             .sorted { ($0["sessionID"] as? String ?? "") < ($1["sessionID"] as? String ?? "") }
         let distinctSessionIDs = Set(connectedWindowScenes.compactMap { $0["sessionID"] as? String }).count
         let census: [String: Any] = [
-            "capturedMonotonicSeconds": evidence.currentMonotonicSeconds,
+            "capturedMonotonicSeconds": capturedMonotonicSeconds,
             "distinctSessionIDs": distinctSessionIDs,
-            "ownerGeneration": String(owner.snapshot.generation),
+            "ownerGeneration": String(ownerSnapshot.generation),
+            "ownerSnapshot": [
+                "generation": String(ownerSnapshot.generation),
+                "available": String(ownerSnapshot.isAvailable),
+                "cleanupRetry": String(ownerSnapshot.cleanupNeedsRetry),
+                "retained": String(owner.retainedCount),
+                "active": String(owner.activeCount),
+                "presentation": ownerSnapshot.presentation.map(\.requestID.uuidString) ?? "none",
+                "operations": ownerSnapshot.records.map(\.id.rawValue.uuidString).joined(separator: ","),
+                "sampleStartedMonotonicSeconds": ownerSampleStartedAt,
+                "sampleCompletedMonotonicSeconds": ownerSampleCompletedAt,
+            ],
             "rootLayoutObservations": evidence.rootLayoutObservations,
             "connectedWindowScenes": connectedWindowScenes,
             "latestCoordinatorObservations": evidence.latestCoordinatorObservations,
@@ -96,6 +127,7 @@ private final class BrowserDownloadProductionQualificationProcess {
 
         sceneCensusJSON = String(decoding: data, as: UTF8.self)
         evidence.record("sceneCensusCaptured", ["census": sceneCensusJSON])
+        refreshPassiveObservations()
     }
 
     /// Samples actual native geometry without loading views, assigning frames or granting admission.
@@ -352,6 +384,7 @@ private final class BrowserDownloadProductionQualificationProcess {
                     inspected.insert(record.id)
                     inspect(record.id)
                 }
+                refreshPassiveObservations()
             }
         }
         do {
@@ -380,6 +413,7 @@ private final class BrowserDownloadProductionQualificationProcess {
         }
         store.send(.vault(.shell(.browser(.navigate(url)))))
         evidence.record("fixtureNavigationRequested", ["fixtureRoute": route, "fixtureRequest": requestID])
+        refreshPassiveObservations()
     }
 
     /// Checks the selected production tab and its actual document, without replaying a request.
@@ -442,13 +476,15 @@ private final class BrowserDownloadProductionQualificationProcess {
         let request = UISceneSessionActivationRequest(role: .windowApplication)
         evidence.record("sceneRequested", [:])
         refreshSceneRequestEvidence()
+        refreshPassiveObservations()
         UIApplication.shared.activateSceneSession(for: request) { [weak self] error in
             MainActor.assumeIsolated {
                 self?.evidence.record("sceneRequestFailed", ["code": String((error as NSError).code)])
                 self?.refreshSceneRequestEvidence()
+                self?.refreshPassiveObservations()
             }
         }
-        if BrowserDownloadProductionQualification.passiveSceneCensusEnabled {
+        if BrowserDownloadProductionQualification.operatorArrangementRequired {
             status = "Scene requested. Arrange the original window fully in the background; keep this new window active."
         }
     }
@@ -471,6 +507,7 @@ private final class BrowserDownloadProductionQualificationProcess {
               invoking.session.persistentIdentifier != target.session.persistentIdentifier
         else {
             evidence.record("sceneReactivationUnavailable", ["backgroundCandidates": String(background.count)])
+            refreshPassiveObservations()
             return
         }
 
@@ -480,6 +517,7 @@ private final class BrowserDownloadProductionQualificationProcess {
             "priorActivation": activationLabel(target.activationState),
             "invokingSession": invoking.session.persistentIdentifier,
         ])
+        refreshPassiveObservations()
         let request = UISceneSessionActivationRequest(session: target.session, userActivity: nil, options: nil)
         UIApplication.shared.activateSceneSession(for: request) { [weak self] error in
             MainActor.assumeIsolated {
@@ -487,6 +525,7 @@ private final class BrowserDownloadProductionQualificationProcess {
                     "requestedSession": targetID,
                     "code": String((error as NSError).code),
                 ])
+                self?.refreshPassiveObservations()
             }
         }
     }
@@ -599,7 +638,7 @@ private struct BrowserDownloadProductionQualificationRoot: View {
             VStack(alignment: .leading) {
                 Text("Production qualification — fixture-seeded auth").font(.caption)
                 Text(process.status).font(.caption)
-                if BrowserDownloadProductionQualification.passiveSceneCensusEnabled {
+                if BrowserDownloadProductionQualification.operatorArrangementRequired {
                     Text(
                         "Operator: minimize the original window to the Stage Manager shelf without closing it. "
                             + "Keep this new window active; the test continues automatically within 120 seconds.",
@@ -674,6 +713,14 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                 await Task.yield()
                 process.refreshSceneCensus()
             }
+        }
+        // Recheck the fixture document after WebKit finishes loading the selected tab.
+        .onChange(of: process.store.vault.shell.browser.selectedTab?.metadata.isLoading) { _, isLoading in
+            guard isLoading == false else {
+                return
+            }
+
+            process.refreshPassiveObservations()
         }
     }
 }

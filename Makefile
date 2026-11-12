@@ -31,6 +31,8 @@ PACKAGE_SNAPSHOT_SUITES := \
 # invocation writes a bundle below its temporary test root; the bundle is
 # copied here before the temporary root is removed.
 TEST_RESULTS_DIRECTORY ?=
+# Temporary Xcode build and test roots; use task-specific storage when needed.
+XCODE_BUILD_ROOT ?= $(CURDIR)/.build
 # Xcode generates this aggregate scheme and its test action from Package.swift.
 PACKAGE_WORKSPACE := Packages/ApplicationFoundation/.swiftpm/xcode/package.xcworkspace
 PACKAGE_SCHEME := ApplicationFoundation-Package
@@ -59,8 +61,8 @@ format: tools
 # a killed run is preserved for inspection and is not inferred to be Make-owned.
 build:
 	@set -euo pipefail; \
-	mkdir -p "$(CURDIR)/.build"; \
-	derived_data=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-build.XXXXXX"); \
+	mkdir -p "$(CURDIR)/.build" "$(XCODE_BUILD_ROOT)"; \
+	derived_data=$$(mktemp -d "$(XCODE_BUILD_ROOT)/xcodebuild-build.XXXXXX"); \
 	trap 'rm -rf -- "$$derived_data"' EXIT; \
 	trap 'exit 143' TERM INT; \
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" build; \
@@ -71,8 +73,8 @@ test:
 	@set -euo pipefail; \
 	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
 	ipad_simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' '$(VERIFIED_IPAD_SIMULATOR_UDID)' | tail -n 1); \
-	mkdir -p "$(CURDIR)/.build"; \
-	test_root=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-test.XXXXXX"); \
+	mkdir -p "$(CURDIR)/.build" "$(XCODE_BUILD_ROOT)"; \
+	test_root=$$(mktemp -d "$(XCODE_BUILD_ROOT)/xcodebuild-test.XXXXXX"); \
 	test_results=""; \
 	if [[ -n "$(TEST_RESULTS_DIRECTORY)" ]]; then \
 		mkdir -p "$(TEST_RESULTS_DIRECTORY)"; \
@@ -131,8 +133,8 @@ test:
 test-snapshots:
 	@set -euo pipefail; \
 	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
-	mkdir -p "$(CURDIR)/.build"; \
-	test_root=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-snapshot-test.XXXXXX"); \
+	mkdir -p "$(CURDIR)/.build" "$(XCODE_BUILD_ROOT)"; \
+	test_root=$$(mktemp -d "$(XCODE_BUILD_ROOT)/xcodebuild-snapshot-test.XXXXXX"); \
 	test_results=""; \
 	if [[ -n "$(TEST_RESULTS_DIRECTORY)" ]]; then \
 		mkdir -p "$(TEST_RESULTS_DIRECTORY)"; \

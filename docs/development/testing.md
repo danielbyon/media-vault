@@ -298,6 +298,12 @@ comparison evidence.
 directory before the temporary root is removed. When unset, result bundles stay
 inside the temporary root and are deleted with the rest of the build artifacts.
 
+`XCODE_BUILD_ROOT` selects where `make build`, `make test`, and
+`make test-snapshots` create temporary DerivedData and result bundles. It
+defaults to the repository's `.build` directory. Set it to task-specific
+scratch storage when the repository volume cannot hold a full test run; use
+`TEST_RESULTS_DIRECTORY` separately to keep the result bundles.
+
 After each `xcodebuild test` invocation, the Makefile reads that scheme's own
 bundle with `xcresulttool get test-results summary --path <bundle> --compact`.
 A missing or unreadable bundle, a summary without `totalTestCount`, and a zero

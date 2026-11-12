@@ -35,6 +35,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         let rootLayoutObservations: [Observation]
         let connectedWindowScenes: [WindowScene]
         let latestCoordinatorObservations: [Observation]
+        var ownerSnapshot: Observation? = nil
     }
 
     /// One connected UIKit window scene as recorded by the qualification host census.
@@ -109,19 +110,22 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
     /// A real system-created scene backgrounds the original scene; shared downloads must revoke.
     func testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable() throws {
         let requiresOperatorArrangement = physicalOperatorArrangementEnabled
-        let app = try launchFixture(passiveSceneCensus: requiresOperatorArrangement)
+        let app = try launchFixture(
+            passiveSceneCensus: true,
+            operatorArrangement: requiresOperatorArrangement,
+        )
         defer { app.terminate() }
         let baseline = try freshBaselineCensus(in: app)
         XCTAssertEqual(baseline.connectedWindowScenes.count, 1, "This fixture requires a fresh single hosting scene.")
         let originalScene = try XCTUnwrap(baseline.connectedWindowScenes.first)
         XCTAssertEqual(originalScene.activation, "foregroundActive")
         let proof = try completedDownload(in: app)
-        let request = try requestSecondScene(in: app, passively: requiresOperatorArrangement)
+        let request = try requestSecondScene(in: app, passively: true)
         let runID = try XCTUnwrap(request["runID"])
         let requestedAt = try XCTUnwrap(request["monotonicSeconds"].flatMap { Double($0) })
         let census: SceneCensus
         if requiresOperatorArrangement {
-            let mountedCensus = try awaitPhysicalMountedScene(
+            let mountedCensus = try awaitMountedForegroundScene(
                 in: app,
                 baselineSessionIDs: [originalScene.sessionID],
                 runID: runID,
@@ -139,7 +143,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
                 after: mountedCensus,
             )
         } else {
-            census = try freshCensusWithNewMountedScene(
+            census = try awaitMountedForegroundScene(
                 in: app,
                 baselineSessionIDs: [originalScene.sessionID],
                 runID: runID,
@@ -154,7 +158,9 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         let activeScene = try XCTUnwrap(census.connectedWindowScenes.first {
             $0.sessionID != originalScene.sessionID && $0.activation == "foregroundActive"
         })
+        // The census may follow the safe-root callback immediately; its coordinator data carries that proof.
         let backgroundCensusAt = try XCTUnwrap(Double(census.capturedMonotonicSeconds))
+        XCTAssertGreaterThanOrEqual(backgroundCensusAt, requestedAt)
         let activeSceneRegistrations: Set<String> = Set(
             census.latestCoordinatorObservations.compactMap { observation -> String? in
                 guard observation["runID"] == runID,
@@ -171,36 +177,67 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             activeSceneRegistrations.isEmpty,
             "Expected a registered coordinator Root for the active scene.",
         )
-        var postRequest: [Observation] = []
-        try wait(app, milestone: "global revocation and safe active-scene Root") {
-            guard let events = try? self.observations(app) else {
-                return false
+        let safeCensusRegistrations = Set(census.latestCoordinatorObservations.compactMap { observation -> String? in
+            guard observation["runID"] == runID,
+                  observation["sceneSession"] == activeScene.sessionID,
+                  observation["rootProof"] == "true",
+                  observation["coverVisible"] == "false",
+                  observation["nativeBarrier"] == "false",
+                  let registration = observation["registration"], !registration.isEmpty
+            else {
+                return nil
             }
 
-            postRequest = events.filter {
-                $0["runID"] == runID && ($0["monotonicSeconds"].flatMap { Double($0) } ?? -1) >= requestedAt
+            return registration
+        })
+        XCTAssertEqual(safeCensusRegistrations, activeSceneRegistrations)
+        attach(census, named: "actual UIKit scene census before global revocation wait")
+        var postRequest: [Observation] = []
+        var postRequestStatus: [String: String] = [:]
+        do {
+            try wait(app, milestone: "global revocation and safe active-scene Root") {
+                guard let events = try? self.observations(app) else {
+                    return false
+                }
+
+                postRequest = events.filter {
+                    $0["runID"] == runID && ($0["monotonicSeconds"].flatMap { Double($0) } ?? -1) >= requestedAt
+                }
+                let removed = postRequest.contains {
+                    $0["event"] == "cleanupRemoval" && $0["operation"] == proof["allocation"]
+                        && $0["absence"] == "true"
+                }
+                let denied = postRequest.last { $0["event"] == "ownerSnapshot" }.map {
+                    $0["available"] == "false" && $0["operations"] == "" && $0["active"] == "0"
+                        && $0["retained"] == "0"
+                } ?? false
+                let safeRoot = self.latestFreshSafeRoots(
+                    in: postRequest,
+                    sceneID: activeScene.sessionID,
+                    registrations: activeSceneRegistrations,
+                    runID: runID,
+                    atOrAfter: requestedAt,
+                ) != nil
+                postRequestStatus = [
+                    "eventCount": String(postRequest.count),
+                    "latestEvent": postRequest.last?["event"] ?? "none",
+                    "cleanupRemoved": String(removed),
+                    "ownerDenied": String(denied),
+                    "activeSceneSafeRoot": String(safeRoot),
+                ]
+                return removed && denied && safeRoot
             }
-            let removed = postRequest.contains {
-                $0["event"] == "cleanupRemoval" && $0["operation"] == proof["allocation"] && $0["absence"] == "true"
-            }
-            let denied = postRequest.last { $0["event"] == "ownerSnapshot" }.map {
-                $0["available"] == "false" && $0["operations"] == "" && $0["active"] == "0" && $0["retained"] == "0"
-            } ?? false
-            let safeRoot = self.latestFreshSafeRoots(
-                in: postRequest,
-                sceneID: activeScene.sessionID,
-                registrations: activeSceneRegistrations,
-                runID: runID,
-                atOrAfter: backgroundCensusAt,
-            ) != nil
-            return removed && denied && safeRoot
+        } catch {
+            attach(postRequestStatus, named: "global revocation and active-root assertion status")
+            attach(postRequest, named: "last observed post-request event set")
+            throw error
         }
         let freshSafeRoots = try XCTUnwrap(latestFreshSafeRoots(
             in: postRequest,
             sceneID: activeScene.sessionID,
             registrations: activeSceneRegistrations,
             runID: runID,
-            atOrAfter: backgroundCensusAt,
+            atOrAfter: requestedAt,
         ))
         var freshSafeRootAtByRegistration: [String: Double] = [:]
         for freshSafeRoot in freshSafeRoots {
@@ -208,7 +245,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             let freshSafeRootAt: Double = try XCTUnwrap(
                 freshSafeRoot["monotonicSeconds"].flatMap { Double($0) },
             )
-            XCTAssertGreaterThanOrEqual(freshSafeRootAt, backgroundCensusAt)
+            XCTAssertGreaterThanOrEqual(freshSafeRootAt, requestedAt)
             XCTAssertEqual(freshSafeRoot["rootProof"], "true")
             XCTAssertEqual(freshSafeRoot["coverVisible"], "false")
             XCTAssertEqual(freshSafeRoot["nativeBarrier"], "false")
@@ -238,7 +275,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             self.hittableButton("downloadQualificationOpenFixturePage", in: app) != nil
         }
         try XCTUnwrap(hittableButton("downloadQualificationOpenFixturePage", in: app)).tap()
-        try assertFreshNavigation(in: app, runID: runID)
+        try assertFreshNavigation(in: app, expectedRunID: runID)
         try assertReactivation(
             in: app,
             originalSceneID: originalScene.sessionID,
@@ -1784,15 +1821,23 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         return nil
     }
 
-    private func assertFreshNavigation(in app: XCUIApplication, runID: String) throws {
-        let requested = try XCTUnwrap(try observations(app).last {
-            $0["runID"] == runID && $0["event"] == "fixtureNavigationRequested" && $0["fixtureRoute"] == "first"
-        })
+    private func assertFreshNavigation(in app: XCUIApplication, expectedRunID: String? = nil) throws {
+        var requestObservation: Observation?
+        try wait(app, milestone: "fixture navigation request evidence") {
+            requestObservation = (try? self.observations(app))?.last {
+                $0["event"] == "fixtureNavigationRequested" && $0["fixtureRoute"] == "first"
+                    && (expectedRunID == nil || $0["runID"] == expectedRunID)
+            }
+            return requestObservation != nil
+        }
+        let requested = try XCTUnwrap(requestObservation)
+        let runID = try XCTUnwrap(requested["runID"])
         let token = try XCTUnwrap(requested["fixtureRequest"])
         try wait(app, milestone: "fresh B committed metadata and actual ready document") {
             (try? self.observations(app))?.contains {
                 $0["runID"] == runID && $0["event"] == "fixtureNavigationCommitted" && $0["fixtureRequest"] == token
-                    && $0["metadataMatches"] == "true" && $0["documentMatches"] == "true" && $0["readyState"] == "complete"
+                    && $0["metadataMatches"] == "true" && $0["documentMatches"] == "true"
+                    && $0["webViewAttached"] == "true" && $0["readyState"] == "complete"
             } == true
         }
     }
@@ -1804,9 +1849,14 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         oldOperation: String?,
     ) throws {
         try XCTUnwrap(hittableButton("downloadQualificationReactivateBackgroundScene", in: app)).tap()
-        let requested = try XCTUnwrap(try observations(app).last {
-            $0["runID"] == runID && $0["event"] == "sceneReactivationRequested"
-        })
+        var requestObservation: Observation?
+        try wait(app, milestone: "scene reactivation request evidence") {
+            requestObservation = (try? self.observations(app))?.last {
+                $0["runID"] == runID && $0["event"] == "sceneReactivationRequested"
+            }
+            return requestObservation != nil
+        }
+        let requested = try XCTUnwrap(requestObservation)
         XCTAssertEqual(requested["requestedSession"], originalSceneID)
         XCTAssertEqual(requested["priorActivation"], "background")
         let requestedAt = try XCTUnwrap(requested["monotonicSeconds"].flatMap { Double($0) })
@@ -1833,55 +1883,30 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             runID: runID,
             atOrAfter: requestedAt,
         ))
-        var events: [Observation] = []
-        var sceneActivation: Observation?
-        var ownerSnapshot: Observation?
-        try wait(app, milestone: "owner snapshot at or after final original-scene activation") {
-            guard let currentEvents = try? self.observations(app) else {
-                return false
-            }
-            guard let activation = self.finalSceneActivation(
-                in: currentEvents,
-                originalSceneID: originalSceneID,
-                runID: runID,
-                after: requestedAt,
-            ), let activationObservedAt = activation["monotonicSeconds"].flatMap({ Double($0) })
-            else {
-                return false
-            }
-
-            events = currentEvents
-            sceneActivation = activation
-            ownerSnapshot = self.latestOwnerSnapshot(
-                in: currentEvents,
-                runID: runID,
-                atOrAfter: activationObservedAt,
-                atOrBefore: censusCapturedAt,
-                generation: finalSafeRootGeneration,
-            )
-            return ownerSnapshot != nil
-        }
-        XCTAssertFalse(events.contains { $0["runID"] == runID && $0["event"] == "sceneReactivationFailed" })
-        let activation = try XCTUnwrap(sceneActivation)
-        let owner = try XCTUnwrap(ownerSnapshot)
-        let activationObservedAt = try XCTUnwrap(activation["monotonicSeconds"].flatMap { Double($0) })
-        let ownerObservedAt = try XCTUnwrap(owner["monotonicSeconds"].flatMap { Double($0) })
-        XCTAssertTrue(activationObservedAt.isFinite)
+        let owner = try XCTUnwrap(census.ownerSnapshot)
+        let currentObservations = try observations(app)
+        let activation = try XCTUnwrap(finalSceneActivation(
+            in: currentObservations,
+            originalSceneID: originalSceneID,
+            runID: runID,
+            after: requestedAt,
+        ))
+        let activationAt = try XCTUnwrap(activation["monotonicSeconds"].flatMap(Double.init))
+        let ownerSampleStartedAt = try XCTUnwrap(owner["sampleStartedMonotonicSeconds"].flatMap(Double.init))
+        let ownerSampleCompletedAt = try XCTUnwrap(owner["sampleCompletedMonotonicSeconds"].flatMap(Double.init))
         XCTAssertTrue(censusCapturedAt.isFinite)
-        XCTAssertTrue(ownerObservedAt.isFinite)
-        XCTAssertGreaterThan(activationObservedAt, requestedAt)
-        XCTAssertLessThanOrEqual(activationObservedAt, censusCapturedAt)
-        XCTAssertGreaterThanOrEqual(ownerObservedAt, activationObservedAt)
-        XCTAssertLessThanOrEqual(ownerObservedAt, censusCapturedAt)
-        XCTAssertEqual(owner["runID"], runID)
+        XCTAssertGreaterThan(censusCapturedAt, requestedAt)
+        XCTAssertGreaterThanOrEqual(ownerSampleStartedAt, activationAt)
+        XCTAssertGreaterThanOrEqual(ownerSampleCompletedAt, ownerSampleStartedAt)
+        XCTAssertLessThanOrEqual(ownerSampleCompletedAt, censusCapturedAt)
         XCTAssertEqual(owner["generation"], finalSafeRootGeneration)
+        XCTAssertEqual(owner["available"], "false")
+        XCTAssertEqual(owner["cleanupRetry"], "false")
+        XCTAssertEqual(owner["presentation"], "none")
         XCTAssertEqual(owner["operations"], "")
         XCTAssertEqual(owner["active"], "0")
         XCTAssertEqual(owner["retained"], "0")
-        attach(
-            [activation, owner],
-            named: "final original-scene activation and matching owner generation",
-        )
+        attach(owner, named: "owner authorization sampled with final original-scene census")
         let registeredSessions = Set(census.latestCoordinatorObservations.compactMap { observation -> String? in
             guard observation["runID"] == runID,
                   observation["registration"]?.isEmpty == false
@@ -1923,11 +1948,26 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         try wait(app, milestone: "loopback readiness before scene request") {
             app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
         }
+        try XCTUnwrap(hittableButton("downloadQualificationOpenFixturePage", in: app)).tap()
+        try assertFreshNavigation(in: app)
         try XCTUnwrap(hittableButton("downloadQualificationDownloadAttachment", in: app)).tap()
         var proof: Observation?
-        try wait(app, milestone: "originating WebKit completed PDF before scene request") {
-            proof = (try? self.observations(app))?.last { $0["event"] == "completedFileProof" }
-            return proof != nil
+        var passivePayloads = ""
+        do {
+            try wait(app, milestone: "originating WebKit completed PDF before scene request") {
+                passivePayloads = self.passiveObservationPayloads(in: app).joined(separator: "\n---\n")
+                proof = (try? self.observations(app))?.last { $0["event"] == "completedFileProof" }
+                return proof != nil
+            }
+        } catch {
+            if !passivePayloads.isEmpty {
+                let attachment = XCTAttachment(string: passivePayloads)
+                attachment.name = "passive observations at download completion timeout"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+
+            throw error
         }
         let completed = try XCTUnwrap(proof)
         // The attachment route serves BrowserDownloadLoopbackServer.fixturePDF (608 bytes).
@@ -2023,7 +2063,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
 
     /// Waits until the requested session is mounted and foreground active, using passive
     /// accessibility snapshots so the test does not change scene activation while observing it.
-    private func awaitPhysicalMountedScene(
+    private func awaitMountedForegroundScene(
         in app: XCUIApplication,
         baselineSessionIDs: Set<String>,
         runID: String,
@@ -2201,13 +2241,19 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         #endif
     }
 
-    private func launchFixture(passiveSceneCensus: Bool = false) throws -> XCUIApplication {
+    private func launchFixture(
+        passiveSceneCensus: Bool = false,
+        operatorArrangement: Bool = false,
+    ) throws -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
         app.launchArguments = [
             "--browser-download-production-qualification",
         ]
         if passiveSceneCensus {
             app.launchArguments.append("--browser-download-passive-scene-census")
+        }
+        if operatorArrangement {
+            app.launchArguments.append("--browser-download-operator-arrangement")
         }
         #if targetEnvironment(simulator)
         app.launchArguments.append("--browser-download-simulated-protection-readback")
@@ -2299,6 +2345,14 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
     ///
     /// Reusing the scope found by the wait avoids a second accessibility query across a scene transition.
     private func observations(_ app: XCUIApplication) throws -> [Observation] {
+        if app.launchArguments.contains("--browser-download-passive-scene-census") {
+            guard let observations = latestPassiveObservations(in: app) else {
+                throw QualificationError.missingObservation
+            }
+
+            return observations
+        }
+
         var reachableScope: ControlScope?
         try wait(app, milestone: "qualification observation refresh control") {
             guard let scope = self.hittableScope("downloadQualificationRefreshObservations", in: app) else {
@@ -2315,6 +2369,42 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         }
 
         return try JSONDecoder().decode([Observation].self, from: Data(value.utf8))
+    }
+
+    private func latestPassiveObservations(in app: XCUIApplication) -> [Observation]? {
+        let snapshots = passiveObservationPayloads(in: app)
+            .compactMap { value in
+                try? JSONDecoder().decode([Observation].self, from: Data(value.utf8))
+            }
+        let timedSnapshots = snapshots.compactMap { observations -> (Double, [Observation])? in
+            guard let timestamp = observations.last?["monotonicSeconds"].flatMap(Double.init), timestamp.isFinite else {
+                return nil
+            }
+
+            return (timestamp, observations)
+        }
+        guard let latestTimestamp = timedSnapshots.map(\.0).max() else {
+            return nil
+        }
+
+        let latestSnapshots = timedSnapshots.filter { $0.0 == latestTimestamp }.map(\.1)
+        guard let first = latestSnapshots.first, latestSnapshots.allSatisfy({ $0 == first }) else {
+            return nil
+        }
+
+        return first
+    }
+
+    private func passiveObservationPayloads(in app: XCUIApplication) -> [String] {
+        app.staticTexts
+            .matching(identifier: "downloadQualificationObservations")
+            .allElementsBoundByIndex
+            .compactMap { $0.value as? String }
+            .reduce(into: [String]()) { values, value in
+                if !values.contains(value) {
+                    values.append(value)
+                }
+            }
     }
 
     /// Returns the latest owner snapshot for the run and generation whose finite timestamp lies
