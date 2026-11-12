@@ -552,7 +552,20 @@ public actor MediaLibraryImporter {
         try Task.checkCancellation()
 
         let existingAssets = try await store.loadAssets()
-        let blockedIDs = try await reconcile(using: existingAssets)
+        let snapshot: MediaIngestionJournalSnapshot
+        do {
+            snapshot = try await store.ingestionJournal.snapshot()
+        } catch {
+            // Journal read failures do not invalidate already committed assets.
+            return try await store.loadAssets()
+        }
+
+        guard !snapshot.hasUnidentifiedAssetRows else {
+            // Unknown rows prevent recovery and admission, but do not hide valid committed assets.
+            return existingAssets.filter { !snapshot.unreadableAssetIDs.contains($0.id) }
+        }
+
+        let blockedIDs = await reconcile(snapshot: snapshot, using: existingAssets)
         return try await store.loadAssets().filter { !blockedIDs.contains($0.id) }
     }
 

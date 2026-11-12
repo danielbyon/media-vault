@@ -276,8 +276,8 @@ struct MediaLibraryImportTests {
         #expect(environment.resources.stagedResourceIDs() == [damagedResourceID])
     }
 
-    @Test("A journal row without an asset UUID blocks recovery without losing its resource")
-    func journalRowWithoutAssetUUIDRemainsBlockingAndPreserved() async throws {
+    @Test("A journal row without an asset UUID blocks admission but leaves reads available")
+    func journalRowWithoutAssetUUIDBlocksAdmissionButLeavesReadsAvailable() async throws {
         let environment = try makeEnvironment()
         _ = try await environment.store.ingestionJournal.snapshot()
         let damagedResourceID = requiredUUID("00000000-0000-0000-0000-000000000181")
@@ -306,9 +306,7 @@ struct MediaLibraryImportTests {
         await #expect(throws: MediaImportError.persistenceFailed) {
             try await environment.importer.importFile(at: environment.sourceURL)
         }
-        await #expect(throws: MediaLibraryStoreError.corrupt) {
-            try await environment.importer.loadAssets()
-        }
+        #expect(try await environment.importer.loadAssets().isEmpty)
 
         let rowCount = try await environment.database.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM media_ingestion_journal") ?? 0
@@ -317,6 +315,124 @@ struct MediaLibraryImportTests {
         #expect(try await environment.store.logicalAssetCount() == 0)
         #expect(try Data(contentsOf: stagingURL) == damagedBytes)
         #expect(environment.resources.stagedResourceIDs().contains(damagedResourceID))
+    }
+
+    @Test("Unidentified journal evidence preserves committed reads and blocks admission after reopen")
+    func unidentifiedJournalRowPreservesCommittedReadsAndBlocksAdmissionAfterReopen() async throws {
+        let root = FileManager.default
+            .temporaryDirectory
+            .appendingPathComponent("unidentified-journal-library-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let databaseURL = root.appendingPathComponent("library.sqlite")
+        let resourceRoot = root.appendingPathComponent("resources", isDirectory: true)
+        let committedSourceURL = root.appendingPathComponent("committed.png")
+        try TestFixtures.pngData.write(to: committedSourceURL)
+
+        let database = try PersistenceStore.makePersistent(at: databaseURL)
+        let store = SQLiteMediaLibraryStore(database: database)
+        let resources = try FileMediaResourceRepository(rootURL: resourceRoot)
+        let committedAssetID = requiredUUID("00000000-0000-0000-0000-000000000190")
+        let committedResourceID = requiredUUID("00000000-0000-0000-0000-000000000191")
+        let importer = makeImporter(
+            store: store,
+            resources: resources,
+            identifiers: [committedAssetID, committedResourceID],
+        )
+        let committedAsset = try await importer.importFile(at: committedSourceURL)
+        let committedResource = try #require(committedAsset.resources.first)
+
+        let unidentifiedResourceID = requiredUUID("00000000-0000-0000-0000-000000000192")
+        let protectedBytes = Data("unidentified-journal-staging".utf8)
+        let stagingURL = resources.stagingURL(for: unidentifiedResourceID)
+        try protectedBytes.write(to: stagingURL)
+        try resources.protectStaging(for: unidentifiedResourceID)
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO media_ingestion_journal (
+                  id, resource_id, state, source_filename, imported_at,
+                  source_uti, byte_count, sha256, captured_at
+                ) VALUES ('not-an-asset-uuid', ?, 'received', 'unidentified.png', ?, NULL, NULL, NULL, NULL)
+                """,
+                arguments: [
+                    unidentifiedResourceID.uuidString,
+                    TestFixtures.importedAt.timeIntervalSince1970,
+                ],
+            )
+        }
+
+        let beforeReopen = try await store.ingestionJournal.snapshot()
+        #expect(beforeReopen.entries.isEmpty)
+        #expect(beforeReopen.unreadableAssetIDs.isEmpty)
+        #expect(beforeReopen.hasUnidentifiedAssetRows)
+        #expect(beforeReopen.knownResourceIDs == [unidentifiedResourceID])
+
+        let loadedAssets = try await importer.loadAssets()
+        #expect(loadedAssets == [committedAsset])
+        #expect(try resources.data(for: committedResource) == TestFixtures.pngData)
+
+        let rejectedSourceURL = root.appendingPathComponent("rejected.png")
+        try TestFixtures.pngData.write(to: rejectedSourceURL)
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await importer.importFile(at: rejectedSourceURL)
+        }
+
+        let reopenedDatabase = try PersistenceStore.makePersistent(at: databaseURL)
+        let reopenedStore = SQLiteMediaLibraryStore(database: reopenedDatabase)
+        let reopenedResources = try FileMediaResourceRepository(rootURL: resourceRoot)
+        let reopenedImporter = makeImporter(
+            store: reopenedStore,
+            resources: reopenedResources,
+            identifiers: [
+                requiredUUID("00000000-0000-0000-0000-000000000193"),
+                requiredUUID("00000000-0000-0000-0000-000000000194"),
+            ],
+        )
+
+        #expect(try await reopenedImporter.loadAssets() == [committedAsset])
+        #expect(try reopenedResources.data(for: committedResource) == TestFixtures.pngData)
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await reopenedImporter.importFile(at: rejectedSourceURL)
+        }
+
+        let afterReopen = try await reopenedStore.ingestionJournal.snapshot()
+        #expect(afterReopen.entries.isEmpty)
+        #expect(afterReopen.unreadableAssetIDs.isEmpty)
+        #expect(afterReopen.hasUnidentifiedAssetRows)
+        #expect(afterReopen.knownResourceIDs == [unidentifiedResourceID])
+        let preservedRow = try await reopenedDatabase.read { db in
+            try String.fetchOne(
+                db,
+                sql: """
+                SELECT id || '|' || resource_id || '|' || state || '|' || source_filename || '|'
+                  || CAST(imported_at AS TEXT) || '|' || COALESCE(source_uti, '<null>') || '|'
+                  || COALESCE(CAST(byte_count AS TEXT), '<null>') || '|' || COALESCE(sha256, '<null>') || '|'
+                  || COALESCE(CAST(captured_at AS TEXT), '<null>')
+                FROM media_ingestion_journal
+                """,
+            )
+        }
+        let expectedRow = [
+            "not-an-asset-uuid",
+            unidentifiedResourceID.uuidString,
+            "received",
+            "unidentified.png",
+            String(TestFixtures.importedAt.timeIntervalSince1970),
+            "<null>",
+            "<null>",
+            "<null>",
+            "<null>",
+        ].joined(separator: "|")
+        #expect(
+            preservedRow == expectedRow,
+            "Preserved row \(String(reflecting: preservedRow)) did not match \(expectedRow)",
+        )
+        #expect(try await reopenedStore.loadAssets() == [committedAsset])
+        #expect(try await reopenedStore.logicalAssetCount() == 1)
+        #expect(try Data(contentsOf: stagingURL) == protectedBytes)
+        #expect(reopenedResources.stagedResourceIDs() == [unidentifiedResourceID])
     }
 
     @Test("An awaiting decision remains untouched when a fresh import is attempted")
