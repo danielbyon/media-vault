@@ -109,12 +109,15 @@ final class BrowserProfileWebKitFixture {
     }
 
     func execute(_ command: BrowserWebKitCommand) async {
-        if case let .configureProfile(profile, _) = command {
+        switch command {
+        case let .configureProfile(profile, _),
+             let .configureProfileForGeneration(profile, _, _):
             await gate.pause(profile)
             adapter.execute(command)
-        } else if case .load = command {
+        case .load:
             // Keep the test at the context-creation boundary without issuing a network request.
-        } else {
+            return
+        default:
             adapter.execute(command)
         }
     }

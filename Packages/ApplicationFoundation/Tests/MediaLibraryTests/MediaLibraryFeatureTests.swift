@@ -35,16 +35,71 @@ struct MediaLibraryFeatureTests {
             $0.isPickerPresented = false
             $0.isImporting = true
         }
-        await store.receive(.importCompleted(.success(asset))) {
+        await store.receive(.importCompleted(generation: 0, result: .success(asset))) {
             $0.isImporting = false
             $0.assets = [asset]
         }
-        await store.receive(.resourceLoaded(
-            FeatureFixtures.resourceID,
-            .success(FeatureFixtures.imageData),
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: 0,
+            result: .success(FeatureFixtures.imageData),
         )) {
             $0.resourceData[FeatureFixtures.resourceID] = FeatureFixtures.imageData
         }
+    }
+
+    @Test("Import completion does not duplicate an asset already present in a fresh snapshot")
+    @MainActor
+    func importCompletionReconcilesWithFreshAssetSnapshot() async {
+        let asset = FeatureFixtures.importedAsset
+        let (importStream, importContinuation) = AsyncStream.makeStream(of: MediaAsset.self)
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [asset] },
+                importFile: { _ in
+                    for await committedAsset in importStream {
+                        return committedAsset
+                    }
+                    throw MediaImportError.persistenceFailed
+                },
+                resourceData: { _ in FeatureFixtures.imageData },
+            )
+        }
+
+        await store.send(.fileSelected(URL(fileURLWithPath: "/provider/imported.jpg"))) {
+            $0.isImporting = true
+        }
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.assetsLoadCompleted(generation: 0, result: .success([asset]))) {
+            $0.isLoading = false
+            $0.assets = [asset]
+        }
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.importedResourceID,
+            generation: 0,
+            result: .success(FeatureFixtures.imageData),
+        )) {
+            $0.resourceData[FeatureFixtures.importedResourceID] = FeatureFixtures.imageData
+        }
+
+        importContinuation.yield(asset)
+        importContinuation.finish()
+        await store.receive(.importCompleted(generation: 0, result: .success(asset))) {
+            $0.isImporting = false
+        }
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.importedResourceID,
+            generation: 0,
+            result: .success(FeatureFixtures.imageData),
+        ))
+
+        #expect(store.state.assets == [asset])
+        #expect(!store.state.isImporting)
+        #expect(store.state.resourceData[FeatureFixtures.importedResourceID] == FeatureFixtures.imageData)
     }
 
     @Test("Unsupported selection reports an error without adding an asset")
@@ -61,7 +116,7 @@ struct MediaLibraryFeatureTests {
         await store.send(.fileSelected(URL(fileURLWithPath: "/provider/animated.gif"))) {
             $0.isImporting = true
         }
-        await store.receive(.importCompleted(.failure(.unsupportedMedia))) {
+        await store.receive(.importCompleted(generation: 0, result: .failure(.unsupportedMedia))) {
             $0.isImporting = false
             $0.error = .unsupportedMedia
         }
@@ -86,18 +141,296 @@ struct MediaLibraryFeatureTests {
         await store.send(.task) {
             $0.isLoading = true
         }
-        await store.receive(.assetsLoaded(.success([asset]))) {
+        await store.receive(.assetsLoadCompleted(generation: 0, result: .success([asset]))) {
             $0.isLoading = false
             $0.assets = [asset]
         }
-        await store.receive(.resourceLoaded(
-            FeatureFixtures.resourceID,
-            .success(FeatureFixtures.imageData),
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: 0,
+            result: .success(FeatureFixtures.imageData),
         )) {
             $0.resourceData[FeatureFixtures.resourceID] = FeatureFixtures.imageData
         }
         await store.send(.task)
         #expect(await loadCalls.value == 1)
+    }
+
+    @Test("Assets loaded while locked reload their resources after unlock")
+    @MainActor
+    func lockedAssetCompletionReloadsResourcesAfterUnlock() async throws {
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+        )
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
+        mediaLibrary.advanceResourceLoadGeneration()
+        var lockedState = MediaLibraryFeature.State()
+        lockedState.isSessionLocked = true
+        let lockedStore = TestStore(initialState: lockedState) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        lockedStore.exhaustivity = .off
+
+        await lockedStore.send(.assetsLoadCompleted(
+            generation: staleGeneration,
+            result: .success([FeatureFixtures.asset]),
+        ))
+        await lockedStore.send(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: staleGeneration,
+            result: .success(FeatureFixtures.imageData),
+        ))
+        #expect(lockedStore.state.assets == [FeatureFixtures.asset])
+        #expect(lockedStore.state.resourceData.isEmpty)
+
+        var unlockedState = lockedStore.state
+        unlockedState.isSessionLocked = false
+        let loadCalls = CallCounter()
+        let resourceCalls = CallCounter()
+        var resumedMediaLibrary = mediaLibrary
+        resumedMediaLibrary.loadAssets = {
+            await loadCalls.increment()
+            return [FeatureFixtures.asset]
+        }
+        resumedMediaLibrary.resourceData = { _ in
+            await resourceCalls.increment()
+            return FeatureFixtures.imageData
+        }
+        let resumedStore = TestStore(initialState: unlockedState) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = resumedMediaLibrary
+        }
+        resumedStore.exhaustivity = .off
+
+        await resumedStore.send(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: staleGeneration,
+            result: .success(FeatureFixtures.imageData),
+        ))
+        await resumedStore.send(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: staleGeneration,
+            result: .failure(.unavailable),
+        ))
+        #expect(resumedStore.state.resourceData.isEmpty)
+        #expect(resumedStore.state.error == nil)
+
+        await resumedStore.send(.task)
+        #expect(resumedStore.state.isLoading)
+        try #require(resumedStore.state.isLoading)
+
+        await resumedStore.receive(.assetsLoadCompleted(
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success([FeatureFixtures.asset]),
+        )) {
+            $0.isLoading = false
+            $0.assets = [FeatureFixtures.asset]
+        }
+        await resumedStore.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success(FeatureFixtures.imageData),
+        )) {
+            $0.resourceData[FeatureFixtures.resourceID] = FeatureFixtures.imageData
+        }
+        await resumedStore.finish()
+
+        #expect(await loadCalls.value == 1)
+        #expect(await resourceCalls.value == 1)
+        #expect(resumedStore.state.resourceData[FeatureFixtures.resourceID] == FeatureFixtures.imageData)
+    }
+
+    @Test("A resource read that completes after a session-generation change returns no bytes")
+    @MainActor
+    func resourceReadCompletingAfterLockIsDiscarded() async throws {
+        let (readStarted, readStartedContinuation) = AsyncStream.makeStream(of: Void.self)
+        let (readRelease, readReleaseContinuation) = AsyncStream.makeStream(of: Data.self)
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in
+                readStartedContinuation.yield(())
+                for await data in readRelease {
+                    return data
+                }
+                throw MediaLibraryStoreError.unavailable
+            },
+        )
+        let generation = mediaLibrary.currentResourceLoadGeneration
+        let read = Task {
+            try await mediaLibrary.resourceDataIfCurrent(
+                FeatureFixtures.resource,
+                generation: generation,
+            )
+        }
+
+        for await _ in readStarted {
+            break
+        }
+        mediaLibrary.advanceResourceLoadGeneration()
+        readReleaseContinuation.yield(FeatureFixtures.imageData)
+        readReleaseContinuation.finish()
+
+        #expect(try await read.value == nil)
+    }
+
+    @Test("An import completed while locked remains committed and reloads its resource after unlock")
+    @MainActor
+    func lockedImportCompletionPreservesAssetAndReloadsResourceAfterUnlock() async throws {
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+        )
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
+        mediaLibrary.advanceResourceLoadGeneration()
+        var lockedState = MediaLibraryFeature.State()
+        lockedState.isSessionLocked = true
+        lockedState.isImporting = true
+        let lockedStore = TestStore(initialState: lockedState) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        lockedStore.exhaustivity = .off
+
+        await lockedStore.send(.importCompleted(
+            generation: staleGeneration,
+            result: .success(FeatureFixtures.importedAsset),
+        ))
+        await lockedStore.send(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.importedResourceID,
+            generation: staleGeneration,
+            result: .success(FeatureFixtures.imageData),
+        ))
+        #expect(!lockedStore.state.isImporting)
+        #expect(lockedStore.state.assets == [FeatureFixtures.importedAsset])
+        #expect(lockedStore.state.resourceData.isEmpty)
+
+        var unlockedState = lockedStore.state
+        unlockedState.isSessionLocked = false
+        let loadCalls = CallCounter()
+        let resourceCalls = CallCounter()
+        var resumedMediaLibrary = mediaLibrary
+        resumedMediaLibrary.loadAssets = {
+            await loadCalls.increment()
+            return [FeatureFixtures.importedAsset]
+        }
+        resumedMediaLibrary.resourceData = { _ in
+            await resourceCalls.increment()
+            return FeatureFixtures.imageData
+        }
+        let resumedStore = TestStore(initialState: unlockedState) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = resumedMediaLibrary
+        }
+        resumedStore.exhaustivity = .off
+
+        await resumedStore.send(.task)
+        #expect(resumedStore.state.isLoading)
+        try #require(resumedStore.state.isLoading)
+
+        await resumedStore.receive(.assetsLoadCompleted(
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success([FeatureFixtures.importedAsset]),
+        )) {
+            $0.isLoading = false
+            $0.assets = [FeatureFixtures.importedAsset]
+        }
+        await resumedStore.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.importedResourceID,
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success(FeatureFixtures.imageData),
+        )) {
+            $0.resourceData[FeatureFixtures.importedResourceID] = FeatureFixtures.imageData
+        }
+        await resumedStore.finish()
+
+        #expect(await loadCalls.value == 1)
+        #expect(await resourceCalls.value == 1)
+        #expect(resumedStore.state.assets == [FeatureFixtures.importedAsset])
+        #expect(resumedStore.state.resourceData[FeatureFixtures.importedResourceID] == FeatureFixtures.imageData)
+    }
+
+    @Test("Import completion before the resumed task preserves the full Library reload")
+    @MainActor
+    func importCompletionBeforeResumedTaskPreservesFullReload() async {
+        let existingAsset = FeatureFixtures.asset
+        let importedAsset = FeatureFixtures.importedAsset
+        let loadCalls = CallCounter()
+        let (existingResourceRelease, existingResourceReleaseContinuation) =
+            AsyncStream.makeStream(of: Void.self)
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: {
+                await loadCalls.increment()
+                return [existingAsset, importedAsset]
+            },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { resource in
+                if resource.id == FeatureFixtures.resourceID {
+                    for await _ in existingResourceRelease {
+                        break
+                    }
+                }
+                return FeatureFixtures.imageData
+            },
+        )
+        mediaLibrary.advanceResourceLoadGeneration()
+
+        var lockedState = MediaLibraryFeature.State(assets: [existingAsset])
+        lockedState.resourceData[FeatureFixtures.resourceID] = FeatureFixtures.imageData
+        lockedState.isImporting = true
+        _ = lockedState.commitSessionLock()
+        #expect(lockedState.isSessionLocked)
+        #expect(lockedState.resourceData.isEmpty)
+
+        var unlockedState = lockedState
+        unlockedState.isSessionLocked = false
+        let store = TestStore(initialState: unlockedState) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+
+        await store.send(.importCompleted(generation: 0, result: .success(importedAsset)))
+        await store.receive(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.assetsLoadCompleted(
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success([existingAsset, importedAsset]),
+        )) {
+            $0.isLoading = false
+            $0.assets = [existingAsset, importedAsset]
+        }
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.importedResourceID,
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success(FeatureFixtures.imageData),
+        )) {
+            $0.resourceData[FeatureFixtures.importedResourceID] = FeatureFixtures.imageData
+        }
+        existingResourceReleaseContinuation.yield(())
+        existingResourceReleaseContinuation.finish()
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success(FeatureFixtures.imageData),
+        )) {
+            $0.resourceData[FeatureFixtures.resourceID] = FeatureFixtures.imageData
+        }
+        await store.finish()
+
+        #expect(await loadCalls.value == 1)
+        #expect(store.state.assets == [existingAsset, importedAsset])
+        #expect(store.state.resourceData[FeatureFixtures.resourceID] == FeatureFixtures.imageData)
+        #expect(store.state.resourceData[FeatureFixtures.importedResourceID] == FeatureFixtures.imageData)
     }
 
     @Test("Picker cancellation leaves the Library unchanged")
@@ -142,7 +475,7 @@ struct MediaLibraryFeatureTests {
         await store.send(.task) {
             $0.isLoading = true
         }
-        await store.receive(.assetsLoaded(.success([]))) {
+        await store.receive(.assetsLoadCompleted(generation: 0, result: .success([]))) {
             $0.isLoading = false
         }
 
@@ -167,25 +500,218 @@ struct MediaLibraryFeatureTests {
         await store.send(.fileSelected(URL(fileURLWithPath: "/provider/new-photo.png"))) {
             $0.isImporting = true
         }
-        await store.receive(.importCompleted(.failure(.assetLimitReached))) {
+        await store.receive(.importCompleted(generation: 0, result: .failure(.assetLimitReached))) {
             $0.isImporting = false
             $0.error = .assetLimitReached
             $0.entitlementStatus = .available
         }
         await store.receive(
-            .assetsRefreshedAfterQuotaDenial(.success([existingAsset, recoveredAsset])),
+            .assetsRefreshedAfterQuotaDenial(
+                generation: 0,
+                result: .success([existingAsset, recoveredAsset]),
+            ),
         ) {
             $0.assets.append(recoveredAsset)
         }
-        await store.receive(.resourceLoaded(
-            FeatureFixtures.recoveredResourceID,
-            .success(FeatureFixtures.imageData),
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.recoveredResourceID,
+            generation: 0,
+            result: .success(FeatureFixtures.imageData),
         )) {
             $0.resourceData[FeatureFixtures.recoveredResourceID] = FeatureFixtures.imageData
         }
 
         #expect(store.state.assets == [existingAsset, recoveredAsset])
         #expect(store.state.error == .assetLimitReached)
+    }
+
+    @Test("A quota refresh from a prior lock generation cannot update the resumed Library")
+    @MainActor
+    func staleQuotaRefreshDoesNotUpdateResumedLibrary() async {
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [FeatureFixtures.asset] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+        )
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
+        mediaLibrary.advanceResourceLoadGeneration()
+        var state = FeatureFixtures.quotaLimitedState
+        _ = state.commitSessionLock()
+        state.isSessionLocked = false
+        let store = TestStore(initialState: state) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        store.exhaustivity = .off
+
+        let staleAsset = MediaAsset(
+            id: FeatureFixtures.recoveredAssetID,
+            kind: .stillImage,
+            importedAt: Date(timeIntervalSince1970: 1_725_000_002),
+            resources: [],
+        )
+        await store.send(.assetsRefreshedAfterQuotaDenial(
+            generation: staleGeneration,
+            result: .success([FeatureFixtures.asset, staleAsset]),
+        ))
+        await store.receive(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.assetsLoadCompleted(
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success([FeatureFixtures.asset]),
+        )) {
+            $0.isLoading = false
+            $0.assets = [FeatureFixtures.asset]
+        }
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success(FeatureFixtures.imageData),
+        )) {
+            $0.resourceData[FeatureFixtures.resourceID] = FeatureFixtures.imageData
+        }
+        await store.finish()
+
+        #expect(mediaLibrary.currentResourceLoadGeneration != staleGeneration)
+        #expect(store.state.assets == [FeatureFixtures.asset])
+        #expect(store.state.error == .assetLimitReached)
+    }
+
+    @Test("A late quota denial from a prior session cannot clear a newer import")
+    @MainActor
+    func staleImportCompletionPreservesNewSessionImportState() async {
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [FeatureFixtures.asset] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+        )
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
+        mediaLibrary.advanceResourceLoadGeneration()
+        var state = FeatureFixtures.quotaLimitedState
+        _ = state.commitSessionLock()
+        state.isSessionLocked = false
+        state.isLoading = true
+        state.isImporting = true
+        state.error = nil
+
+        let store = TestStore(initialState: state) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+
+        await store.send(.importCompleted(
+            generation: staleGeneration,
+            result: .failure(.assetLimitReached),
+        ))
+        await store.receive(.task)
+
+        #expect(store.state.isImporting)
+        #expect(store.state.error == nil)
+        #expect(store.state.entitlementStatus == .available)
+        #expect(mediaLibrary.currentResourceLoadGeneration != staleGeneration)
+    }
+
+    @Test("A late import failure cannot reset new session entitlement progress")
+    @MainActor
+    func staleImportFailurePreservesEntitlementProgress() async {
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [FeatureFixtures.asset] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+        )
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
+        mediaLibrary.advanceResourceLoadGeneration()
+        var state = FeatureFixtures.quotaLimitedState
+        _ = state.commitSessionLock()
+        state.isSessionLocked = false
+        state.isLoading = true
+        state.entitlementStatus = .restoring
+
+        let store = TestStore(initialState: state) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+
+        await store.send(.importCompleted(
+            generation: staleGeneration,
+            result: .failure(.persistenceFailed),
+        ))
+
+        #expect(store.state.entitlementStatus == .restoring)
+        #expect(mediaLibrary.currentResourceLoadGeneration != staleGeneration)
+    }
+
+    @Test("Purchase and restore results from a prior lock generation cannot activate Pro")
+    @MainActor
+    func stalePurchaseAndRestoreResultsAreIgnored() async {
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+        )
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
+        mediaLibrary.advanceResourceLoadGeneration()
+        let entitlementReads = CallCounter()
+
+        for result in [
+            MediaLibraryFeature.Action.purchaseResult(generation: staleGeneration, result: .purchased),
+            .restoreResult(generation: staleGeneration, result: .restored),
+        ] {
+            var state = FeatureFixtures.quotaLimitedState
+            _ = state.commitSessionLock()
+            state.isSessionLocked = false
+            let store = TestStore(initialState: state) {
+                MediaLibraryFeature()
+            } withDependencies: {
+                $0.mediaLibrary = mediaLibrary
+                $0.entitlement.currentState = {
+                    await entitlementReads.increment()
+                    return .entitled
+                }
+            }
+            store.exhaustivity = .off
+
+            await store.send(result)
+            await store.finish()
+
+            #expect(store.state.entitlementStatus == .available)
+        }
+
+        #expect(mediaLibrary.currentResourceLoadGeneration != staleGeneration)
+        #expect(await entitlementReads.value == 0)
+    }
+
+    @Test("An entitlement state from a prior lock generation cannot activate Pro")
+    @MainActor
+    func staleEntitlementStateCannotActivatePro() async {
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+        )
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
+        mediaLibrary.advanceResourceLoadGeneration()
+        var state = FeatureFixtures.quotaLimitedState
+        _ = state.commitSessionLock()
+        state.isSessionLocked = false
+        let store = TestStore(initialState: state) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        store.exhaustivity = .off
+
+        await store.send(.entitlementStateLoaded(
+            generation: staleGeneration,
+            result: .success(.entitled),
+        ))
+
+        #expect(mediaLibrary.currentResourceLoadGeneration != staleGeneration)
+        #expect(store.state.entitlementStatus == .available)
     }
 
     @Test("Import taps preserve pending entitlement flow state", arguments: [
@@ -225,7 +751,7 @@ struct MediaLibraryFeatureTests {
         await store.send(.purchaseTapped) {
             $0.entitlementStatus = .purchasing
         }
-        await store.receive(.purchaseResult(.cancelled)) {
+        await store.receive(.purchaseResult(generation: 0, result: .cancelled)) {
             $0.entitlementStatus = .cancelled
         }
 
@@ -249,7 +775,7 @@ struct MediaLibraryFeatureTests {
         await store.send(.restoreTapped) {
             $0.entitlementStatus = .restoring
         }
-        await store.receive(.restoreResult(.cancelled)) {
+        await store.receive(.restoreResult(generation: 0, result: .cancelled)) {
             $0.entitlementStatus = .cancelled
         }
 
@@ -317,7 +843,7 @@ struct MediaLibraryFeatureTests {
         await store.send(.purchaseTapped) {
             $0.entitlementStatus = .purchasing
         }
-        await store.receive(.purchaseResult(.cancelled)) {
+        await store.receive(.purchaseResult(generation: 0, result: .cancelled)) {
             $0.entitlementStatus = .cancelled
         }
     }
@@ -337,10 +863,10 @@ struct MediaLibraryFeatureTests {
         await store.send(.restoreTapped) {
             $0.entitlementStatus = .restoring
         }
-        await store.receive(.restoreResult(.restored)) {
+        await store.receive(.restoreResult(generation: 0, result: .restored)) {
             $0.entitlementStatus = .refreshing
         }
-        await store.receive(.entitlementStateLoaded(.success(.entitled))) {
+        await store.receive(.entitlementStateLoaded(generation: 0, result: .success(.entitled))) {
             $0.entitlementStatus = .activated
         }
     }
@@ -359,7 +885,7 @@ struct MediaLibraryFeatureTests {
         await store.send(.purchaseStatusCheckTapped) {
             $0.entitlementStatus = .refreshing
         }
-        await store.receive(.entitlementStateLoaded(.success(.entitled))) {
+        await store.receive(.entitlementStateLoaded(generation: 0, result: .success(.entitled))) {
             $0.entitlementStatus = .activated
         }
     }
@@ -399,14 +925,14 @@ struct MediaLibraryFeatureTests {
         }
 
         if testCase.intermediateStatus == .available {
-            await store.send(.purchaseResult(testCase.result))
+            await store.send(.purchaseResult(generation: 0, result: testCase.result))
         } else {
-            await store.send(.purchaseResult(testCase.result)) {
+            await store.send(.purchaseResult(generation: 0, result: testCase.result)) {
                 $0.entitlementStatus = testCase.intermediateStatus
             }
         }
         if testCase.refreshesState {
-            await store.receive(.entitlementStateLoaded(.success(.entitled))) {
+            await store.receive(.entitlementStateLoaded(generation: 0, result: .success(.entitled))) {
                 $0.entitlementStatus = .activated
             }
         }
@@ -423,10 +949,10 @@ struct MediaLibraryFeatureTests {
             $0.entitlement.currentState = { .notEntitled }
         }
 
-        await store.send(.restoreResult(.restored)) {
+        await store.send(.restoreResult(generation: 0, result: .restored)) {
             $0.entitlementStatus = .refreshing
         }
-        await store.receive(.entitlementStateLoaded(.success(.notEntitled))) {
+        await store.receive(.entitlementStateLoaded(generation: 0, result: .success(.notEntitled))) {
             $0.entitlementStatus = .notVerified
         }
     }
@@ -455,10 +981,13 @@ struct MediaLibraryFeatureTests {
             $0.entitlement.currentState = { throw EntitlementError.verificationFailed }
         }
 
-        await store.send(.purchaseResult(.purchased)) {
+        await store.send(.purchaseResult(generation: 0, result: .purchased)) {
             $0.entitlementStatus = .refreshing
         }
-        await store.receive(.entitlementStateLoaded(.failure(.verificationFailed))) {
+        await store.receive(.entitlementStateLoaded(
+            generation: 0,
+            result: .failure(.verificationFailed),
+        )) {
             $0.entitlementStatus = .failed(.verificationFailed)
         }
         await store.send(.retryTapped) {
@@ -499,7 +1028,7 @@ struct MediaLibraryFeatureTests {
             $0.isPickerPresented = false
             $0.isImporting = true
         }
-        await store.receive(.importCompleted(.failure(.sourceAccessFailed))) {
+        await store.receive(.importCompleted(generation: 0, result: .failure(.sourceAccessFailed))) {
             $0.isImporting = false
             $0.error = .importFailed
         }
@@ -531,15 +1060,15 @@ struct MediaLibraryFeatureTests {
             $0.isImporting = true
             $0.error = nil
         }
-        await store.receive(.importCompleted(.failure(.assetLimitReached))) {
+        await store.receive(.importCompleted(generation: 0, result: .failure(.assetLimitReached))) {
             $0.isImporting = false
             $0.error = .assetLimitReached
         }
-        await store.receive(.assetsRefreshedAfterQuotaDenial(.success([])))
-        await store.send(.purchaseResult(.alreadyEntitled)) {
+        await store.receive(.assetsRefreshedAfterQuotaDenial(generation: 0, result: .success([])))
+        await store.send(.purchaseResult(generation: 0, result: .alreadyEntitled)) {
             $0.entitlementStatus = .refreshing
         }
-        await store.receive(.entitlementStateLoaded(.success(.entitled))) {
+        await store.receive(.entitlementStateLoaded(generation: 0, result: .success(.entitled))) {
             $0.entitlementStatus = .activated
         }
         await store.send(.retryTapped) {
@@ -554,14 +1083,14 @@ struct MediaLibraryFeatureTests {
             $0.isImporting = true
             $0.entitlementStatus = .available
         }
-        await store.receive(.importCompleted(.success(FeatureFixtures.asset))) {
+        await store.receive(.importCompleted(generation: 0, result: .success(FeatureFixtures.asset))) {
             $0.isImporting = false
             $0.entitlementStatus = .available
-            $0.assets.append(FeatureFixtures.asset)
         }
-        await store.receive(.resourceLoaded(
-            FeatureFixtures.resourceID,
-            .success(FeatureFixtures.imageData),
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: 0,
+            result: .success(FeatureFixtures.imageData),
         )) {
             $0.resourceData[FeatureFixtures.resourceID] = FeatureFixtures.imageData
         }
@@ -586,6 +1115,23 @@ private enum FeatureFixtures {
         sourceUTI: "public.png",
         byteCount: Int64(imageData.count),
         sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+    )
+    static let importedAssetID = requiredUUID("00000000-0000-0000-0000-000000000022")
+    static let importedResourceID = requiredUUID("00000000-0000-0000-0000-000000000023")
+    static let importedResource = MediaResource(
+        id: importedResourceID,
+        role: .original,
+        relativePath: importedResourceID.uuidString.lowercased(),
+        sourceFilename: "imported-photo.png",
+        sourceUTI: "public.png",
+        byteCount: Int64(imageData.count),
+        sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+    )
+    static let importedAsset = MediaAsset(
+        id: importedAssetID,
+        kind: .stillImage,
+        importedAt: Date(timeIntervalSince1970: 1_725_000_001),
+        resources: [importedResource],
     )
     static let asset = MediaAsset(
         id: assetID,

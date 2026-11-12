@@ -5,13 +5,18 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import AppFeature
 import CalculatorFeature
 import Combine
 import ComposableArchitecture
 import CoreFoundation
+import Dependencies
+import Entitlement
 import Foundation
+import MediaLibrary
 import SwiftUI
 import UIKit
+import VaultFeature
 @testable import BrowserFeature
 
 @main
@@ -21,6 +26,12 @@ struct BrowserTabOverviewUITestHost: App {
             if ProcessInfo.processInfo.arguments.contains("--calculator-basic") {
                 CalculatorUITestHostView()
                     .environment(\.horizontalSizeClass, .regular)
+            } else if ProcessInfo.processInfo.arguments.contains("--library-quota-review") {
+                LibraryQuotaReviewUITestHostView()
+                    .environment(\.horizontalSizeClass, .compact)
+            } else if ProcessInfo.processInfo.arguments.contains("--vault-lock-control") {
+                VaultLockControlUITestHostView()
+                    .environment(\.horizontalSizeClass, .compact)
             } else if let configuration = ShowTabsPlacementConfiguration.current {
                 ShowTabsPlacementHostView(configuration: configuration)
                     .environment(\.horizontalSizeClass, configuration.sizeClass.value)
@@ -29,6 +40,153 @@ struct BrowserTabOverviewUITestHost: App {
                     .environment(\.horizontalSizeClass, .compact)
             }
         }
+    }
+}
+
+/// Shows the production Library quota notice in a controlled UI-test state.
+@MainActor
+private struct LibraryQuotaReviewUITestHostView: View {
+    private let store: StoreOf<MediaLibraryFeature>
+
+    init() {
+        let assets = Self.quotaAssets
+        let isRevoked = ProcessInfo.processInfo.arguments.contains("--library-revoked")
+        var state = MediaLibraryFeature.State(assets: assets)
+        state.error = .assetLimitReached
+        state.entitlementStatus = isRevoked ? .refreshing : .available
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { assets },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in throw MediaLibraryStoreError.unavailable },
+        )
+        store = withDependencies {
+            $0.mediaLibrary = mediaLibrary
+        } operation: {
+            Store(initialState: state) {
+                MediaLibraryFeature()
+            }
+        }
+        if isRevoked {
+            store.send(.entitlementStateLoaded(generation: 0, result: .success(.revoked)))
+        }
+    }
+
+    var body: some View {
+        MediaLibraryView(store: store)
+    }
+
+    private static var quotaAssets: [MediaAsset] {
+        (0 ..< MediaLibraryQuota.freeLogicalAssetLimit).map { index in
+            let assetID = requiredUUID(100 + index * 2)
+            let resourceID = requiredUUID(101 + index * 2)
+            let resource = MediaResource(
+                id: resourceID,
+                role: .original,
+                relativePath: resourceID.uuidString.lowercased(),
+                sourceFilename: "quota-item-\(index + 1).png",
+                sourceUTI: "public.png",
+                byteCount: 1,
+                sha256: String(repeating: "0", count: 64),
+            )
+            return MediaAsset(
+                id: assetID,
+                kind: .stillImage,
+                importedAt: Date(timeIntervalSince1970: 1_725_000_000 + Double(index)),
+                resources: [resource],
+            )
+        }
+    }
+
+    private static func requiredUUID(_ suffix: Int) -> UUID {
+        guard let id = UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", suffix)) else {
+            preconditionFailure("Invalid deterministic quota fixture identifier")
+        }
+
+        return id
+    }
+}
+
+/// Hosts the production authenticated root with isolated, inert Browser dependencies.
+@MainActor
+private struct VaultLockControlUITestHostView: View {
+    @State
+    private var store: StoreOf<RootFeature>
+    @Environment(\.scenePhase)
+    private var scenePhase
+
+    init() {
+        let destinationArgument = ProcessInfo.processInfo
+            .arguments
+            .first(where: { $0.hasPrefix("--vault-lock-destination=") })?
+            .replacing("--vault-lock-destination=", with: "")
+        var initialVaultState = VaultFeature.State(phase: .authenticated)
+        switch destinationArgument {
+        case "collections":
+            initialVaultState.shell.selectedTab = .collections
+        case "browser-start":
+            initialVaultState.shell.selectedTab = .browser
+            let selectedTabID = initialVaultState.shell.browser.selectedTabID
+            initialVaultState.shell.browser.tabs = [.startPage(id: selectedTabID)]
+            initialVaultState.shell.browser.presentation = .browsing
+        case "browser-navigation":
+            initialVaultState.shell.selectedTab = .browser
+            let selectedTabID = initialVaultState.shell.browser.selectedTabID
+            if let url = URL(string: "https://example.com") {
+                var webTab = BrowserTab.web(id: selectedTabID, url: url)
+                webTab.metadata.committedURL = url
+                initialVaultState.shell.browser.tabs = [webTab]
+            }
+            initialVaultState.shell.browser.presentation = .browsing
+        case "tab-overview":
+            initialVaultState.shell.selectedTab = .browser
+            initialVaultState.shell.browser.presentation = .tabOverview
+        default:
+            initialVaultState.shell.selectedTab = .library
+        }
+
+        let vaultState = initialVaultState
+        let rootStore = withDependencies {
+            $0.vaultSessionSettings.load = { .init() }
+            $0.vaultSessionSettings.save = { _ in }
+            $0.vaultCredential.loadConfiguration = { nil }
+            $0.calculatorPersistence.load = { nil }
+            $0.calculatorPersistence.save = { _ in }
+            $0.browserOpenTabsSession.load = { .missing }
+            $0.browserSettings.load = { .init() }
+            $0.browserLibrary.loadBookmarks = { [] }
+            $0.browserLibrary.loadHistory = { [] }
+            $0.browserClipboard.readHTTPURL = { nil }
+            $0.browserWebKit = BrowserWebKitClient(
+                execute: { _ in },
+                events: { AsyncStream { $0.finish() } },
+            )
+        } operation: {
+            RootComposition.makeStore(vault: vaultState)
+        }
+        _store = State(initialValue: rootStore)
+    }
+
+    var body: some View {
+        RootView(store: store)
+            .overlay(alignment: .topLeading) {
+                Text(verbatim: "vault-phase:\(store.vault.phase)")
+                    .font(.system(size: 1))
+                    .accessibilityIdentifier("vault-lock-control.fixture-phase")
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+            }
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                switch phase {
+                case .active:
+                    store.send(.applicationPhaseChanged(.active))
+                case .inactive:
+                    store.send(.applicationPhaseChanged(.inactive))
+                case .background:
+                    store.send(.applicationPhaseChanged(.background))
+                @unknown default:
+                    store.send(.applicationPhaseChanged(.unknown))
+                }
+            }
     }
 }
 

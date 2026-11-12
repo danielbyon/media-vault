@@ -20,6 +20,8 @@ jobs:
     name: iOS tests
     runs-on: xcode-27
     timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
 
     steps:
       - name: Check out repository
@@ -27,17 +29,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify toolchain and simulator
+        id: toolchain
+        run: make verify-test-destination
+
+      - name: Test destination resolver
+        run: make destination-test
       - name: Test clean target
         run: make clean-test
-
-      - name: Show toolchain
-        id: toolchain
-        run: |
-          xcodebuild -version
-          swift --version
-          toolchain_id=$( { xcodebuild -version; swift --version | sed -n '1p'; } | shasum -a 256 | cut -c 1-16 )
-          echo "Toolchain cache id: $toolchain_id"
-          echo "id=$toolchain_id" >> "$GITHUB_OUTPUT"
 
       # Swift tooling bootstraps Mint packages under .tools/mint. Keep compiled
       # tools isolated by runner OS/architecture, exact Xcode/Swift toolchain,
@@ -61,7 +60,7 @@ jobs:
             swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-
 
       - name: Run tests
-        run: make test TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
+        run: make test VERIFIED_SIMULATOR_UDID="${{ steps.toolchain.outputs.simulator_udid }}" TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
 
       # Preserve both iPhone result bundles for diagnosis. The upload is
       # advisory: a missing bundle is a warning and an upload failure must not
@@ -86,6 +85,8 @@ jobs:
     name: Snapshot qualification (2x iPad)
     runs-on: xcode-27
     timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
 
     steps:
       - name: Check out repository
@@ -95,6 +96,10 @@ jobs:
 
       # Reuse the Swift package checkout cache so this job does not clone
       # dependencies from scratch when it runs alongside the iPhone test job.
+      - name: Verify toolchain and simulator
+        id: destination
+        run: make verify-snapshot-destination
+
       - name: Cache Swift package checkouts
         uses: actions/cache@v6
         with:
@@ -108,7 +113,7 @@ jobs:
       - name: Run 2x iPad snapshot tests
         id: snapshot_tests
         timeout-minutes: 45
-        run: make test-snapshots TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
+        run: make test-snapshots VERIFIED_SIMULATOR_UDID="${{ steps.destination.outputs.simulator_udid }}" TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
 
       - name: Upload 2x iPad snapshot evidence
         id: upload_evidence
@@ -185,7 +190,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Qualification status | $qualification_status |"
             echo '| Command | `make test-snapshots` |'
-            echo '| Destination | iPad Pro 11-inch (M5), iOS 27.0 (2x) |'
+            echo '| Destination | iPad Pro 11-inch (M5), iOS 27.2 (2x) |'
             echo "| Snapshot step outcome | $snapshot_outcome |"
             echo "| Artifact upload step outcome | $upload_outcome |"
             echo "| Blocking | Yes. A failed snapshot command fails this job and the Tests workflow. |"

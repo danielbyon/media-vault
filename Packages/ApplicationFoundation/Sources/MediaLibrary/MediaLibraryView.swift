@@ -211,7 +211,8 @@ public struct MediaLibraryView: View {
             .buttonStyle(.borderedProminent)
         case .notVerified:
             Text(
-                "StoreKit reported success, but Pro is not verified yet. Restore again or choose the image to retry admission.",
+                "Pro is not active or could not be verified for this Apple Account. " +
+                    "Restore purchases or choose the image to retry admission.",
             )
             .font(.subheadline)
             entitlementActionButtons

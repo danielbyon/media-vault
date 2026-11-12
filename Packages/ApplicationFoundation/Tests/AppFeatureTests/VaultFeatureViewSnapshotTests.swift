@@ -6,9 +6,11 @@
 //
 
 import AppFeature
+import BrowserFeature
 import CalculatorFeature
 import ComposableArchitecture
 import Dependencies
+import Foundation
 import FoundationTestSupport
 import SnapshotTesting
 import SwiftUI
@@ -77,6 +79,30 @@ struct VaultFeatureViewSnapshotTests {
         )
     }
 
+    @Test("The browser Tab Overview retains the accessible lock control")
+    func authenticatedShellBrowserOverviewRegularWidthIPad() {
+        var state = authenticatedShellState(selectedTab: .browser)
+        let selectedTabID = BrowserTabID(
+            UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)),
+        )
+        let otherTabID = BrowserTabID(
+            UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2)),
+        )
+        state.shell.browser = BrowserFeature.State(
+            tabs: [
+                .startPage(id: selectedTabID),
+                .startPage(id: otherTabID),
+            ],
+            selectedTabID: selectedTabID,
+            presentation: .tabOverview,
+        )
+
+        assertSnapshot(
+            of: rootView(vault: state),
+            as: .image(layout: .device(config: DeterministicTestSupport.regularWidthIPad)),
+        )
+    }
+
     private func credentialView(state: VaultFeature.State) -> some View {
         let store = Store(initialState: state) {
             VaultFeature()
@@ -104,6 +130,7 @@ struct VaultFeatureViewSnapshotTests {
             RootComposition.makeStore(vault: vault)
         }
         return RootView(store: store)
+            .environment(\.scenePhase, .active)
             .environment(\.colorScheme, .light)
     }
 }

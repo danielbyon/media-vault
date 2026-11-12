@@ -308,9 +308,31 @@ public actor MediaLibraryImporter {
     private let resources: FileMediaResourceRepository
     private let source: MediaSourceClient
     private let entitlement: EntitlementClient
+    private let sessionIsCurrent: @Sendable (UInt64) -> Bool
+    private let sessionAdmission: @Sendable (UInt64) -> MediaLibraryImportAdmission?
     private let id: @Sendable () -> UUID
     private let now: @Sendable () -> Date
+    private var journalAcceptance: @Sendable (@Sendable () async throws -> Void) async throws -> Void = { operation in
+        try await operation()
+    }
+
+    private var beforeJournalAcceptanceForTesting: @Sendable () async -> Void = {}
+
+    /// Lets import tests suspend journal acceptance at a deterministic point.
+    func setJournalAcceptanceForTesting(
+        _ journalAcceptance: @escaping @Sendable (@Sendable () async throws -> Void) async throws -> Void,
+    ) {
+        self.journalAcceptance = journalAcceptance
+    }
+
+    func setBeforeJournalAcceptanceForTesting(_ operation: @escaping @Sendable () async -> Void) {
+        beforeJournalAcceptanceForTesting = operation
+    }
+
     /// Creates an importer with explicit storage and source-access seams.
+    ///
+    /// The session check runs before fresh staging. Work already accepted in the journal can still
+    /// finish recovery after the session changes.
     public init(
         store: SQLiteMediaLibraryStore,
         resources: FileMediaResourceRepository,
@@ -318,11 +340,36 @@ public actor MediaLibraryImporter {
         entitlement: EntitlementClient = .testValue,
         id: @escaping @Sendable () -> UUID = UUID.init,
         now: @escaping @Sendable () -> Date = Date.init,
+        sessionIsCurrent: @escaping @Sendable (UInt64) -> Bool = { _ in true },
+    ) {
+        self.init(
+            store: store,
+            resources: resources,
+            source: source,
+            entitlement: entitlement,
+            id: id,
+            now: now,
+            sessionIsCurrent: sessionIsCurrent,
+            sessionAdmission: { _ in nil },
+        )
+    }
+
+    init(
+        store: SQLiteMediaLibraryStore,
+        resources: FileMediaResourceRepository,
+        source: MediaSourceClient = .live,
+        entitlement: EntitlementClient = .testValue,
+        id: @escaping @Sendable () -> UUID = UUID.init,
+        now: @escaping @Sendable () -> Date = Date.init,
+        sessionIsCurrent: @escaping @Sendable (UInt64) -> Bool = { _ in true },
+        sessionAdmission: @escaping @Sendable (UInt64) -> MediaLibraryImportAdmission?,
     ) {
         self.store = store
         self.resources = resources
         self.source = source
         self.entitlement = entitlement
+        self.sessionIsCurrent = sessionIsCurrent
+        self.sessionAdmission = sessionAdmission
         self.id = id
         self.now = now
     }
@@ -330,15 +377,29 @@ public actor MediaLibraryImporter {
     /// Recovers accepted imports before admitting and durably committing a new still image.
     public func importFile(at sourceURL: URL) async throws -> MediaAsset {
         try await store.withDurableOperation {
-            try await importFileWhileGated(at: sourceURL)
+            try await importFileWhileGated(at: sourceURL, sessionGeneration: nil)
         }
     }
 
-    private func importFileWhileGated(at sourceURL: URL) async throws -> MediaAsset {
+    func importFile(at sourceURL: URL, sessionGeneration: UInt64) async throws -> MediaAsset {
+        try await store.withDurableOperation {
+            try await importFileWhileGated(at: sourceURL, sessionGeneration: sessionGeneration)
+        }
+    }
+
+    private func importFileWhileGated(
+        at sourceURL: URL,
+        sessionGeneration: UInt64?,
+    ) async throws -> MediaAsset {
         try Task.checkCancellation()
 
         try await recoverAcceptedImportsBeforeAdmission()
+        try Task.checkCancellation()
+        try requireCurrentSession(sessionGeneration)
+
         try await requireAdmissionForNewImport()
+        try Task.checkCancellation()
+        try requireCurrentSession(sessionGeneration)
 
         let assetID = id()
         let resourceID = id()
@@ -355,6 +416,11 @@ public actor MediaLibraryImporter {
         }
         do {
             try resources.protectStaging(for: resourceID)
+            try Task.checkCancellation()
+            try requireCurrentSession(sessionGeneration)
+        } catch is CancellationError {
+            resources.removeStagingIfPresent(at: stagingFileURL)
+            throw CancellationError()
         } catch {
             resources.removeStagingIfPresent(at: stagingFileURL)
             throw error
@@ -369,10 +435,35 @@ public actor MediaLibraryImporter {
         )
 
         do {
-            try await store.ingestionJournal.accept(entry)
+            await beforeJournalAcceptanceForTesting()
+            let admission: MediaLibraryImportAdmission
+            if let sessionGeneration {
+                guard let currentAdmission = sessionAdmission(sessionGeneration) else {
+                    throw CancellationError()
+                }
+
+                admission = currentAdmission
+            } else {
+                admission = .unscoped
+            }
+
+            try await journalAcceptance {
+                try Task.checkCancellation()
+                try await store.ingestionJournal.accept(
+                    entry,
+                    admittedBy: admission,
+                    sessionGeneration: sessionGeneration,
+                )
+            }
+        } catch is CancellationError {
+            resources.removeStagingIfPresent(at: stagingFileURL)
+            throw CancellationError()
         } catch {
             throw MediaImportError.persistenceFailed
         }
+
+        try Task.checkCancellation()
+        try requireCurrentSession(sessionGeneration)
 
         do {
             return try await resume(entry)
@@ -383,7 +474,17 @@ public actor MediaLibraryImporter {
         }
     }
 
+    private func requireCurrentSession(_ generation: UInt64?) throws {
+        guard let generation else {
+            return
+        }
+        guard sessionIsCurrent(generation) else {
+            throw CancellationError()
+        }
+    }
+
     private func requireAdmissionForNewImport() async throws {
+        try Task.checkCancellation()
         let committedAssetCount: Int
         do {
             committedAssetCount = try await store.logicalAssetCount()
@@ -396,12 +497,16 @@ public actor MediaLibraryImporter {
             return
         }
 
+        try Task.checkCancellation()
         let entitlementState: ProEntitlementState
         do {
             entitlementState = try await entitlement.currentState()
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw MediaImportError.entitlementUnavailable
         }
+        try Task.checkCancellation()
         guard MediaLibraryQuota.admitsNewImport(
             committedAssetCount: committedAssetCount,
             entitlementState: entitlementState,
@@ -426,6 +531,10 @@ public actor MediaLibraryImporter {
             throw MediaImportError.persistenceFailed
         }
 
+        guard !snapshot.hasUnidentifiedAssetRows else {
+            throw MediaImportError.persistenceFailed
+        }
+
         let blockedIDs = await reconcile(snapshot: snapshot, using: existingAssets)
         guard blockedIDs.isEmpty else {
             throw MediaImportError.persistenceFailed
@@ -443,7 +552,7 @@ public actor MediaLibraryImporter {
         try Task.checkCancellation()
 
         let existingAssets = try await store.loadAssets()
-        let blockedIDs = await reconcile(using: existingAssets)
+        let blockedIDs = try await reconcile(using: existingAssets)
         return try await store.loadAssets().filter { !blockedIDs.contains($0.id) }
     }
 
@@ -452,7 +561,7 @@ public actor MediaLibraryImporter {
         try await store.withDurableOperation {
             try Task.checkCancellation()
             let existingAssets = try await store.loadAssets()
-            _ = await reconcile(using: existingAssets)
+            _ = try await reconcile(using: existingAssets)
         }
     }
 
@@ -466,13 +575,17 @@ public actor MediaLibraryImporter {
         await store.durableOperationGateStateForTesting()
     }
 
-    private func reconcile(using existingAssets: [MediaAsset]) async -> Set<UUID> {
+    private func reconcile(using existingAssets: [MediaAsset]) async throws -> Set<UUID> {
         let snapshot: MediaIngestionJournalSnapshot
         do {
             snapshot = try await store.ingestionJournal.snapshot()
         } catch {
             // A journal read failure cannot invalidate already committed canonical rows.
             return []
+        }
+
+        guard !snapshot.hasUnidentifiedAssetRows else {
+            throw MediaLibraryStoreError.corrupt
         }
 
         return await reconcile(snapshot: snapshot, using: existingAssets)
@@ -505,6 +618,11 @@ public actor MediaLibraryImporter {
             )
         }
         for entry in snapshot.entries {
+            // Rejected and cancelled entries are durable history, not pending recovery work.
+            if entry.state == .failed || entry.state == .cancelled {
+                continue
+            }
+
             do {
                 _ = try await resume(entry)
             } catch {

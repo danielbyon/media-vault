@@ -73,6 +73,11 @@ public enum MediaLibraryEntitlementStatus: Equatable, Sendable {
 /// The TCA feature that owns committed Library state and the Files import flow.
 @Reducer
 public struct MediaLibraryFeature {
+    private enum CancelID {
+        case resourceLoads
+        case importOperations
+    }
+
     /// State rendered by the authenticated Library destination.
     @ObservableState
     public struct State: Equatable, Sendable {
@@ -91,6 +96,9 @@ public struct MediaLibraryFeature {
         /// Whether a selected source is being imported.
         public var isImporting: Bool
 
+        /// Whether user-initiated Library operations are blocked by a vault lock.
+        public var isSessionLocked: Bool
+
         /// The latest user-visible media error.
         public var error: MediaLibraryFeatureError?
 
@@ -106,9 +114,37 @@ public struct MediaLibraryFeature {
             isLoading = false
             isPickerPresented = false
             isImporting = false
+            isSessionLocked = false
             error = nil
             entitlementStatus = .available
             hasLoaded = !assets.isEmpty
+        }
+
+        /// Clears cached preview bytes and marks durable resources for reload after authentication.
+        public mutating func commitSessionLock() -> Effect<Action> {
+            isSessionLocked = true
+            isLoading = false
+            isPickerPresented = false
+            isImporting = false
+            resourceData.removeAll()
+            hasLoaded = false
+            switch entitlementStatus {
+            case .purchasing,
+                 .restoring,
+                 .refreshing:
+                entitlementStatus = .available
+            case .available,
+                 .pending,
+                 .cancelled,
+                 .activated,
+                 .notVerified,
+                 .failed:
+                break
+            }
+            return .merge(
+                .cancel(id: MediaLibraryFeature.CancelID.resourceLoads),
+                .cancel(id: MediaLibraryFeature.CancelID.importOperations),
+            )
         }
 
         /// Compares the rendered Library state while ignoring the private load cache.
@@ -118,6 +154,7 @@ public struct MediaLibraryFeature {
                 && lhs.isLoading == rhs.isLoading
                 && lhs.isPickerPresented == rhs.isPickerPresented
                 && lhs.isImporting == rhs.isImporting
+                && lhs.isSessionLocked == rhs.isSessionLocked
                 && lhs.error == rhs.error
                 && lhs.entitlementStatus == rhs.entitlementStatus
         }
@@ -137,17 +174,30 @@ public struct MediaLibraryFeature {
         /// Reports that the native picker was cancelled.
         case pickerCancelled
 
-        /// Delivers a durable Library load result.
-        case assetsLoaded(Result<[MediaAsset], MediaLibraryStoreError>)
+        /// Delivers a durable asset result correlated with the authenticated load generation.
+        case assetsLoadCompleted(
+            generation: UInt64,
+            result: Result<[MediaAsset], MediaLibraryStoreError>,
+        )
 
         /// Delivers a canonical asset refresh after quota denial.
-        case assetsRefreshedAfterQuotaDenial(Result<[MediaAsset], MediaLibraryStoreError>)
+        case assetsRefreshedAfterQuotaDenial(
+            generation: UInt64,
+            result: Result<[MediaAsset], MediaLibraryStoreError>,
+        )
 
         /// Delivers an import result after canonical commit.
-        case importCompleted(Result<MediaAsset, MediaImportError>)
+        case importCompleted(
+            generation: UInt64,
+            result: Result<MediaAsset, MediaImportError>,
+        )
 
-        /// Delivers bytes for one committed resource.
-        case resourceLoaded(UUID, Result<Data, MediaLibraryStoreError>)
+        /// Delivers a resource result correlated with the authenticated read generation.
+        case resourceLoadCompleted(
+            resourceID: UUID,
+            generation: UInt64,
+            result: Result<Data, MediaLibraryStoreError>,
+        )
 
         /// Starts an explicit Pro purchase requested from the Library quota notice.
         case purchaseTapped
@@ -159,13 +209,16 @@ public struct MediaLibraryFeature {
         case purchaseStatusCheckTapped
 
         /// Delivers the result of an explicit purchase operation.
-        case purchaseResult(EntitlementOperationResult)
+        case purchaseResult(generation: UInt64, result: EntitlementOperationResult)
 
         /// Delivers the result of an explicit restore operation.
-        case restoreResult(EntitlementOperationResult)
+        case restoreResult(generation: UInt64, result: EntitlementOperationResult)
 
         /// Delivers authoritative entitlement state after a successful store operation.
-        case entitlementStateLoaded(Result<ProEntitlementState, EntitlementError>)
+        case entitlementStateLoaded(
+            generation: UInt64,
+            result: Result<ProEntitlementState, EntitlementError>,
+        )
 
         /// Clears the error and reopens Files or reloads Library state as appropriate.
         case retryTapped
@@ -188,37 +241,83 @@ public struct MediaLibraryFeature {
     }
 
     private func reduceLibrary(into state: inout State, action: Action) -> Effect<Action> {
+        if state.isSessionLocked {
+            switch action {
+            case let .assetsLoadCompleted(_, .success(assets)):
+                _ = handleAssetsLoaded(.success(assets), state: &state)
+                state.resourceData.removeAll()
+                state.hasLoaded = false
+                return .none
+            case let .importCompleted(generation, result):
+                _ = handleImportCompleted(
+                    result,
+                    generation: generation,
+                    state: &state,
+                    shouldLoadResources: false,
+                )
+                state.resourceData.removeAll()
+                state.hasLoaded = false
+                return .none
+            default:
+                return .none
+            }
+        }
+
         switch action {
         case .task:
-            handleTask(state: &state)
+            return handleTask(state: &state)
         case .importTapped:
-            handleImportTapped(state: &state)
+            return handleImportTapped(state: &state)
         case let .fileSelected(url):
-            handleFileSelected(url: url, state: &state)
+            return handleFileSelected(url: url, state: &state)
         case .pickerCancelled:
-            handlePickerCancelled(state: &state)
-        case let .assetsLoaded(result):
-            handleAssetsLoaded(result, state: &state)
-        case let .assetsRefreshedAfterQuotaDenial(result):
-            handleAssetsRefreshedAfterQuotaDenial(result, state: &state)
-        case let .importCompleted(result):
-            handleImportCompleted(result, state: &state)
-        case let .resourceLoaded(resourceID, result):
-            handleResourceLoaded(resourceID: resourceID, result: result, state: &state)
+            return handlePickerCancelled(state: &state)
+        case let .assetsLoadCompleted(generation, result):
+            guard mediaLibrary.currentResourceLoadGeneration == generation else {
+                return .none
+            }
+
+            return handleAssetsLoaded(result, state: &state)
+        case let .assetsRefreshedAfterQuotaDenial(generation, result):
+            return handleAssetsRefreshedAfterQuotaDenial(
+                result,
+                generation: generation,
+                state: &state,
+            )
+        case let .importCompleted(generation, result):
+            return handleImportCompleted(result, generation: generation, state: &state)
+        case let .resourceLoadCompleted(resourceID, generation, result):
+            guard mediaLibrary.currentResourceLoadGeneration == generation else {
+                return .none
+            }
+
+            return handleResourceLoaded(resourceID: resourceID, result: result, state: &state)
         case .purchaseTapped:
-            handlePurchaseTapped(state: &state)
+            return handlePurchaseTapped(state: &state)
         case .restoreTapped:
-            handleRestoreTapped(state: &state)
+            return handleRestoreTapped(state: &state)
         case .purchaseStatusCheckTapped:
-            handlePurchaseStatusCheckTapped(state: &state)
-        case let .purchaseResult(result):
-            handleEntitlementOperationResult(result, state: &state)
-        case let .restoreResult(result):
-            handleEntitlementOperationResult(result, state: &state)
-        case let .entitlementStateLoaded(result):
-            handleEntitlementStateLoaded(result, state: &state)
+            return handlePurchaseStatusCheckTapped(state: &state)
+        case let .purchaseResult(generation, result):
+            guard mediaLibrary.currentResourceLoadGeneration == generation else {
+                return .none
+            }
+
+            return handleEntitlementOperationResult(result, generation: generation, state: &state)
+        case let .restoreResult(generation, result):
+            guard mediaLibrary.currentResourceLoadGeneration == generation else {
+                return .none
+            }
+
+            return handleEntitlementOperationResult(result, generation: generation, state: &state)
+        case let .entitlementStateLoaded(generation, result):
+            guard mediaLibrary.currentResourceLoadGeneration == generation else {
+                return .none
+            }
+
+            return handleEntitlementStateLoaded(result, state: &state)
         case .retryTapped:
-            handleRetry(state: &state)
+            return handleRetry(state: &state)
         }
     }
 
@@ -228,14 +327,16 @@ public struct MediaLibraryFeature {
         }
 
         state.isLoading = true
+        let loadGeneration = mediaLibrary.currentResourceLoadGeneration
         let loadAssets = mediaLibrary.loadAssets
         return .run { send in
             do {
-                try await send(.assetsLoaded(.success(loadAssets())))
+                let assets = try await loadAssets()
+                await send(.assetsLoadCompleted(generation: loadGeneration, result: .success(assets)))
             } catch let error as MediaLibraryStoreError {
-                await send(.assetsLoaded(.failure(error)))
+                await send(.assetsLoadCompleted(generation: loadGeneration, result: .failure(error)))
             } catch {
-                await send(.assetsLoaded(.failure(.unavailable)))
+                await send(.assetsLoadCompleted(generation: loadGeneration, result: .failure(.unavailable)))
             }
         }
     }
@@ -263,16 +364,21 @@ public struct MediaLibraryFeature {
         state.isImporting = true
         state.error = nil
         state.entitlementStatus = .available
-        let importFile = mediaLibrary.importFile
+        let generation = mediaLibrary.currentResourceLoadGeneration
+        let importFile = mediaLibrary.importFileIfCurrent
         return .run { send in
             do {
-                try await send(.importCompleted(.success(importFile(url))))
+                let asset = try await importFile(url, generation)
+                await send(.importCompleted(generation: generation, result: .success(asset)))
             } catch let error as MediaImportError {
-                await send(.importCompleted(.failure(error)))
+                await send(.importCompleted(generation: generation, result: .failure(error)))
+            } catch is CancellationError {
+                return
             } catch {
-                await send(.importCompleted(.failure(.persistenceFailed)))
+                await send(.importCompleted(generation: generation, result: .failure(.persistenceFailed)))
             }
         }
+        .cancellable(id: CancelID.importOperations)
     }
 
     private func handlePickerCancelled(state: inout State) -> Effect<Action> {
@@ -288,7 +394,9 @@ public struct MediaLibraryFeature {
         case let .success(assets):
             state.isLoading = false
             state.hasLoaded = true
-            state.error = nil
+            if state.error != .assetLimitReached {
+                state.error = nil
+            }
             state.assets = assets
             return loadResourceEffects(for: assets)
         case .failure:
@@ -298,17 +406,44 @@ public struct MediaLibraryFeature {
         }
     }
 
+    /// Results from an earlier session can refresh committed assets.
+    /// They must leave the current session's import and entitlement state unchanged.
     private func handleImportCompleted(
         _ result: Result<MediaAsset, MediaImportError>,
+        generation: UInt64,
         state: inout State,
+        shouldLoadResources: Bool = true,
     ) -> Effect<Action> {
+        if !state.isSessionLocked,
+           generation != mediaLibrary.currentResourceLoadGeneration {
+            state.hasLoaded = false
+            switch result {
+            case .success:
+                return .send(.task)
+            case let .failure(error):
+                guard case .assetLimitReached = error else {
+                    return .none
+                }
+
+                return .send(.task)
+            }
+        }
+
         switch result {
         case let .success(asset):
             state.isImporting = false
-            state.hasLoaded = true
+            // Keep a pending full snapshot eligible when an import finishes after authentication.
             state.error = nil
             state.entitlementStatus = .available
-            state.assets.append(asset)
+            if let existingIndex = state.assets.firstIndex(where: { $0.id == asset.id }) {
+                state.assets[existingIndex] = asset
+            } else {
+                state.assets.append(asset)
+            }
+            guard shouldLoadResources, !state.isSessionLocked else {
+                return .none
+            }
+
             return loadResourceEffects(for: [asset])
         case let .failure(error):
             state.isImporting = false
@@ -317,15 +452,27 @@ public struct MediaLibraryFeature {
             guard case .assetLimitReached = error else {
                 return .none
             }
+            guard shouldLoadResources, !state.isSessionLocked else {
+                return .none
+            }
 
             let loadAssets = mediaLibrary.loadAssets
             return .run { send in
                 do {
-                    try await send(.assetsRefreshedAfterQuotaDenial(.success(loadAssets())))
+                    try await send(.assetsRefreshedAfterQuotaDenial(
+                        generation: generation,
+                        result: .success(loadAssets()),
+                    ))
                 } catch let error as MediaLibraryStoreError {
-                    await send(.assetsRefreshedAfterQuotaDenial(.failure(error)))
+                    await send(.assetsRefreshedAfterQuotaDenial(
+                        generation: generation,
+                        result: .failure(error),
+                    ))
                 } catch {
-                    await send(.assetsRefreshedAfterQuotaDenial(.failure(.unavailable)))
+                    await send(.assetsRefreshedAfterQuotaDenial(
+                        generation: generation,
+                        result: .failure(.unavailable),
+                    ))
                 }
             }
         }
@@ -333,8 +480,17 @@ public struct MediaLibraryFeature {
 
     private func handleAssetsRefreshedAfterQuotaDenial(
         _ result: Result<[MediaAsset], MediaLibraryStoreError>,
+        generation: UInt64,
         state: inout State,
     ) -> Effect<Action> {
+        guard !state.isSessionLocked else {
+            state.hasLoaded = false
+            return .none
+        }
+        guard mediaLibrary.currentResourceLoadGeneration == generation else {
+            state.hasLoaded = false
+            return .send(.task)
+        }
         guard case let .success(canonicalAssets) = result else {
             return .none
         }
@@ -370,9 +526,10 @@ public struct MediaLibraryFeature {
         }
 
         state.entitlementStatus = .purchasing
+        let generation = mediaLibrary.currentResourceLoadGeneration
         let purchase = entitlement.purchase
         return .run { send in
-            await send(.purchaseResult(purchase()))
+            await send(.purchaseResult(generation: generation, result: purchase()))
         }
     }
 
@@ -385,9 +542,10 @@ public struct MediaLibraryFeature {
         }
 
         state.entitlementStatus = .restoring
+        let generation = mediaLibrary.currentResourceLoadGeneration
         let restore = entitlement.restore
         return .run { send in
-            await send(.restoreResult(restore()))
+            await send(.restoreResult(generation: generation, result: restore()))
         }
     }
 
@@ -399,11 +557,12 @@ public struct MediaLibraryFeature {
         }
 
         state.entitlementStatus = .refreshing
-        return refreshEntitlementState()
+        return refreshEntitlementState(generation: mediaLibrary.currentResourceLoadGeneration)
     }
 
     private func handleEntitlementOperationResult(
         _ result: EntitlementOperationResult,
+        generation: UInt64,
         state: inout State,
     ) -> Effect<Action> {
         switch result {
@@ -411,7 +570,7 @@ public struct MediaLibraryFeature {
              .restored,
              .alreadyEntitled:
             state.entitlementStatus = .refreshing
-            return refreshEntitlementState()
+            return refreshEntitlementState(generation: generation)
         case .pending:
             state.entitlementStatus = .pending
             return .none
@@ -424,15 +583,21 @@ public struct MediaLibraryFeature {
         }
     }
 
-    private func refreshEntitlementState() -> Effect<Action> {
+    private func refreshEntitlementState(generation: UInt64) -> Effect<Action> {
         let currentState = entitlement.currentState
         return .run { send in
             do {
-                try await send(.entitlementStateLoaded(.success(currentState())))
+                try await send(.entitlementStateLoaded(
+                    generation: generation,
+                    result: .success(currentState()),
+                ))
             } catch let error as EntitlementError {
-                await send(.entitlementStateLoaded(.failure(error)))
+                await send(.entitlementStateLoaded(generation: generation, result: .failure(error)))
             } catch {
-                await send(.entitlementStateLoaded(.failure(.storeFailure)))
+                await send(.entitlementStateLoaded(
+                    generation: generation,
+                    result: .failure(.storeFailure),
+                ))
             }
         }
     }
@@ -500,21 +665,57 @@ public struct MediaLibraryFeature {
     }
 
     private func loadResourceEffects(for assets: [MediaAsset]) -> Effect<Action> {
-        let resourceData = mediaLibrary.resourceData
+        let resourceReadGeneration = mediaLibrary.currentResourceLoadGeneration
+        let mediaLibraryClient = mediaLibrary
         let resources = assets.flatMap(\.resources)
         return .merge(
             resources.map { resource in
                 .run { send in
+                    guard !Task.isCancelled else {
+                        return
+                    }
+
                     do {
-                        try await send(.resourceLoaded(resource.id, .success(resourceData(resource))))
+                        guard let data = try await mediaLibraryClient.resourceDataIfCurrent(
+                            resource,
+                            generation: resourceReadGeneration,
+                        ) else {
+                            return
+                        }
+                        guard !Task.isCancelled else {
+                            return
+                        }
+
+                        await send(.resourceLoadCompleted(
+                            resourceID: resource.id,
+                            generation: resourceReadGeneration,
+                            result: .success(data),
+                        ))
                     } catch let error as MediaLibraryStoreError {
-                        await send(.resourceLoaded(resource.id, .failure(error)))
+                        guard !Task.isCancelled else {
+                            return
+                        }
+
+                        await send(.resourceLoadCompleted(
+                            resourceID: resource.id,
+                            generation: resourceReadGeneration,
+                            result: .failure(error),
+                        ))
                     } catch {
-                        await send(.resourceLoaded(resource.id, .failure(.unavailable)))
+                        guard !Task.isCancelled else {
+                            return
+                        }
+
+                        await send(.resourceLoadCompleted(
+                            resourceID: resource.id,
+                            generation: resourceReadGeneration,
+                            result: .failure(.unavailable),
+                        ))
                     }
                 }
             },
         )
+        .cancellable(id: CancelID.resourceLoads)
     }
 
     private func featureError(for error: MediaImportError) -> MediaLibraryFeatureError {

@@ -14,6 +14,8 @@ import SwiftUI
 @MainActor
 struct Application: SwiftUI.App {
     private let store: StoreOf<RootFeature>
+    @Environment(\.scenePhase)
+    private var scenePhase
 
     /// Creates the one root store used by the application scene.
     init() {
@@ -24,6 +26,22 @@ struct Application: SwiftUI.App {
     var body: some Scene {
         WindowGroup {
             RootView(store: store)
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            store.send(.applicationPhaseChanged(applicationPhase(for: phase)))
+        }
+    }
+
+    private func applicationPhase(for phase: ScenePhase) -> VaultApplicationScenePhase {
+        switch phase {
+        case .active:
+            .active
+        case .inactive:
+            .inactive
+        case .background:
+            .background
+        @unknown default:
+            .unknown
         }
     }
 }

@@ -89,6 +89,323 @@ struct MediaLibraryImportTests {
         #expect(finalResourceURLs(in: environment.resources).isEmpty)
     }
 
+    @Test("A rejected animated image does not block a later valid import")
+    func animatedImageRejectionDoesNotBlockLaterImport() async throws {
+        let environment = try makeEnvironment()
+        let failedAssetID = requiredUUID("00000000-0000-0000-0000-000000000100")
+        let failedResourceID = requiredUUID("00000000-0000-0000-0000-000000000101")
+        let validAssetID = requiredUUID("00000000-0000-0000-0000-000000000102")
+        let validResourceID = requiredUUID("00000000-0000-0000-0000-000000000103")
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            identifiers: [failedAssetID, failedResourceID, validAssetID, validResourceID],
+        )
+        let animatedURL = environment.root.appendingPathComponent("rejected.gif")
+        try makeAnimatedGIF(at: animatedURL, using: environment.sourceBytes)
+
+        await #expect(throws: MediaImportError.unsupportedMedia) {
+            try await importer.importFile(at: animatedURL)
+        }
+
+        let failedEntry = try #require(try await environment.store.ingestionJournal.snapshot().entries.first)
+        #expect(failedEntry.id == failedAssetID)
+        #expect(failedEntry.resourceID == failedResourceID)
+        #expect(failedEntry.state == .failed)
+        #expect(try await environment.store.loadAssets().isEmpty)
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: failedResourceID)) ==
+            Data(contentsOf: animatedURL))
+
+        let validAsset = try? await importer.importFile(at: environment.sourceURL)
+
+        #expect(validAsset?.id == validAssetID)
+        #expect(try await environment.store.loadAssets().map(\.id) == [validAssetID])
+        #expect(try await environment.store.logicalAssetCount() == 1)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries == [failedEntry])
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: failedResourceID)) ==
+            Data(contentsOf: animatedURL))
+    }
+
+    @Test("Unrenderable bytes do not block a later valid import")
+    func unrenderableImageRejectionDoesNotBlockLaterImport() async throws {
+        let environment = try makeEnvironment()
+        let failedAssetID = requiredUUID("00000000-0000-0000-0000-000000000110")
+        let failedResourceID = requiredUUID("00000000-0000-0000-0000-000000000111")
+        let validAssetID = requiredUUID("00000000-0000-0000-0000-000000000112")
+        let validResourceID = requiredUUID("00000000-0000-0000-0000-000000000113")
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            identifiers: [failedAssetID, failedResourceID, validAssetID, validResourceID],
+        )
+        let invalidURL = environment.root.appendingPathComponent("rejected.png")
+        let invalidBytes = Data([0x00, 0x01, 0x02, 0x03])
+        try invalidBytes.write(to: invalidURL)
+
+        await #expect(throws: MediaImportError.unrenderableMedia) {
+            try await importer.importFile(at: invalidURL)
+        }
+
+        let failedEntry = try #require(try await environment.store.ingestionJournal.snapshot().entries.first)
+        #expect(failedEntry.id == failedAssetID)
+        #expect(failedEntry.resourceID == failedResourceID)
+        #expect(failedEntry.state == .failed)
+        #expect(try await environment.store.loadAssets().isEmpty)
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: failedResourceID)) == invalidBytes)
+
+        let validAsset = try? await importer.importFile(at: environment.sourceURL)
+
+        #expect(validAsset?.id == validAssetID)
+        #expect(try await environment.store.loadAssets().map(\.id) == [validAssetID])
+        #expect(try await environment.store.logicalAssetCount() == 1)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries == [failedEntry])
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: failedResourceID)) == invalidBytes)
+    }
+
+    @Test("A separate importer can continue after a failed journal entry")
+    func separateImporterContinuesAfterFailedJournalEntry() async throws {
+        let environment = try makeEnvironment()
+        let failedAssetID = requiredUUID("00000000-0000-0000-0000-000000000120")
+        let failedResourceID = requiredUUID("00000000-0000-0000-0000-000000000121")
+        let validAssetID = requiredUUID("00000000-0000-0000-0000-000000000122")
+        let validResourceID = requiredUUID("00000000-0000-0000-0000-000000000123")
+        let rejectedURL = environment.root.appendingPathComponent("rejected.png")
+        let rejectedBytes = Data([0x10, 0x20, 0x30, 0x40])
+        try rejectedBytes.write(to: rejectedURL)
+        let firstImporter = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            identifiers: [failedAssetID, failedResourceID],
+        )
+
+        await #expect(throws: MediaImportError.unrenderableMedia) {
+            try await firstImporter.importFile(at: rejectedURL)
+        }
+
+        let failedEntry = try #require(try await environment.store.ingestionJournal.snapshot().entries.first)
+        #expect(failedEntry.state == .failed)
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: failedResourceID)) == rejectedBytes)
+        let nextImporter = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            identifiers: [validAssetID, validResourceID],
+        )
+
+        let validAsset = try? await nextImporter.importFile(at: environment.sourceURL)
+
+        #expect(validAsset?.id == validAssetID)
+        #expect(try await environment.store.loadAssets().map(\.id) == [validAssetID])
+        #expect(try await environment.store.ingestionJournal.snapshot().entries == [failedEntry])
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: failedResourceID)) == rejectedBytes)
+    }
+
+    @Test("Failed and cancelled journal rows remain preserved without blocking admission")
+    func terminalJournalRowsDoNotBlockFreshImport() async throws {
+        let environment = try makeEnvironment()
+        let failedID = TestFixtures.recoveryAssetIDs[6]
+        let failedResourceID = TestFixtures.recoveryResourceIDs[6]
+        let cancelledID = TestFixtures.recoveryAssetIDs[7]
+        let cancelledResourceID = TestFixtures.recoveryResourceIDs[7]
+        let failedBytes = Data([0x51, 0x52])
+        let cancelledBytes = Data([0x61, 0x62])
+        try failedBytes.write(to: environment.resources.stagingURL(for: failedResourceID))
+        try cancelledBytes.write(to: environment.resources.stagingURL(for: cancelledResourceID))
+        try environment.resources.protectStaging(for: failedResourceID)
+        try environment.resources.protectStaging(for: cancelledResourceID)
+        let failedReceived = MediaIngestionJournalEntry(
+            id: failedID,
+            resourceID: failedResourceID,
+            state: .received,
+            sourceFilename: "failed.png",
+            importedAt: TestFixtures.importedAt,
+        )
+        try await environment.store.ingestionJournal.accept(failedReceived)
+        let failedValidating = try await environment.store.ingestionJournal.transition(failedReceived, to: .validating)
+        let failedEntry = try await environment.store.ingestionJournal.transition(failedValidating, to: .failed)
+        let cancelledReceived = MediaIngestionJournalEntry(
+            id: cancelledID,
+            resourceID: cancelledResourceID,
+            state: .received,
+            sourceFilename: "cancelled.png",
+            importedAt: TestFixtures.importedAt,
+        )
+        try await environment.store.ingestionJournal.accept(cancelledReceived)
+        let cancelledEntry = try await environment.store.ingestionJournal.transition(cancelledReceived, to: .cancelled)
+
+        let validAsset = try? await environment.importer.importFile(at: environment.sourceURL)
+
+        #expect(validAsset?.id == TestFixtures.assetID)
+        #expect(try await environment.store.loadAssets().map(\.id) == [TestFixtures.assetID])
+        #expect(try await environment.store.ingestionJournal.snapshot().entries == [failedEntry, cancelledEntry])
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: failedResourceID)) == failedBytes)
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: cancelledResourceID)) == cancelledBytes)
+    }
+
+    @Test("Unreadable journal evidence blocks admission without losing its resource")
+    func unreadableJournalEvidenceRemainsBlockingAndPreserved() async throws {
+        let environment = try makeEnvironment()
+        _ = try await environment.store.ingestionJournal.snapshot()
+        let damagedAssetID = TestFixtures.recoveryAssetIDs[4]
+        let damagedResourceID = TestFixtures.recoveryResourceIDs[4]
+        let damagedBytes = Data([0x81, 0x82, 0x83])
+        let stagingURL = environment.resources.stagingURL(for: damagedResourceID)
+        try damagedBytes.write(to: stagingURL)
+        try environment.resources.protectStaging(for: damagedResourceID)
+        try await environment.database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO media_ingestion_journal (
+                  id, resource_id, state, source_filename, imported_at,
+                  source_uti, byte_count, sha256, captured_at
+                ) VALUES (?, ?, 'received', 'damaged.png', 'not-a-timestamp', NULL, NULL, NULL, NULL)
+                """,
+                arguments: [damagedAssetID.uuidString, damagedResourceID.uuidString],
+            )
+        }
+
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await environment.importer.importFile(at: environment.sourceURL)
+        }
+
+        let snapshot = try await environment.store.ingestionJournal.snapshot()
+        #expect(snapshot.entries.isEmpty)
+        #expect(snapshot.unreadableAssetIDs == [damagedAssetID])
+        #expect(snapshot.knownResourceIDs == [damagedResourceID])
+        #expect(try await environment.store.logicalAssetCount() == 0)
+        #expect(try Data(contentsOf: stagingURL) == damagedBytes)
+        #expect(environment.resources.stagedResourceIDs() == [damagedResourceID])
+    }
+
+    @Test("A journal row without an asset UUID blocks recovery without losing its resource")
+    func journalRowWithoutAssetUUIDRemainsBlockingAndPreserved() async throws {
+        let environment = try makeEnvironment()
+        _ = try await environment.store.ingestionJournal.snapshot()
+        let damagedResourceID = requiredUUID("00000000-0000-0000-0000-000000000181")
+        let damagedBytes = Data([0x91, 0x92, 0x93])
+        let stagingURL = environment.resources.stagingURL(for: damagedResourceID)
+        try damagedBytes.write(to: stagingURL)
+        try environment.resources.protectStaging(for: damagedResourceID)
+        try await environment.database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO media_ingestion_journal (
+                  id, resource_id, state, source_filename, imported_at,
+                  source_uti, byte_count, sha256, captured_at
+                ) VALUES ('not-an-asset-uuid', ?, 'received', 'unidentified.png', 1725000000, NULL, NULL, NULL, NULL)
+                """,
+                arguments: [damagedResourceID.uuidString],
+            )
+        }
+
+        let snapshot = try await environment.store.ingestionJournal.snapshot()
+        #expect(snapshot.entries.isEmpty)
+        #expect(snapshot.unreadableAssetIDs.isEmpty)
+        #expect(snapshot.hasUnidentifiedAssetRows)
+        #expect(snapshot.knownResourceIDs == [damagedResourceID])
+
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await environment.importer.importFile(at: environment.sourceURL)
+        }
+        await #expect(throws: MediaLibraryStoreError.corrupt) {
+            try await environment.importer.loadAssets()
+        }
+
+        let rowCount = try await environment.database.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM media_ingestion_journal") ?? 0
+        }
+        #expect(rowCount == 1)
+        #expect(try await environment.store.logicalAssetCount() == 0)
+        #expect(try Data(contentsOf: stagingURL) == damagedBytes)
+        #expect(environment.resources.stagedResourceIDs().contains(damagedResourceID))
+    }
+
+    @Test("An awaiting decision remains untouched when a fresh import is attempted")
+    func awaitingDecisionRemainsUntouchedDuringAdmission() async throws {
+        let environment = try makeEnvironment()
+        let entry = MediaIngestionJournalEntry(
+            id: TestFixtures.recoveryAssetIDs[5],
+            resourceID: TestFixtures.recoveryResourceIDs[5],
+            state: .received,
+            sourceFilename: "awaiting-decision.png",
+            importedAt: TestFixtures.importedAt,
+        )
+        try environment.sourceBytes.write(to: environment.resources.stagingURL(for: entry.resourceID))
+        try environment.resources.protectStaging(for: entry.resourceID)
+        try await environment.store.ingestionJournal.accept(entry)
+        let validating = try await environment.store.ingestionJournal.transition(entry, to: .validating)
+        let inspection = ImageInspection(
+            uti: "public.png",
+            byteCount: Int64(environment.sourceBytes.count),
+            sha256: SHA256.hash(data: environment.sourceBytes).hexString,
+            capturedAt: nil,
+        )
+        let duplicateCheck = try await environment.store.ingestionJournal.transition(
+            validating,
+            to: .duplicateCheck,
+            inspection: inspection,
+        )
+        let awaitingDecision = try await environment.store.ingestionJournal.transition(
+            duplicateCheck,
+            to: .awaitingUserDecision,
+        )
+
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await environment.importer.importFile(at: environment.sourceURL)
+        }
+
+        #expect(try await environment.store.ingestionJournal.snapshot().entries == [awaitingDecision])
+        #expect(try await environment.store.loadAssets().isEmpty)
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: entry.resourceID)) == environment
+            .sourceBytes)
+    }
+
+    @Test("A failed journal row stays preserved and does not block admission after reopen")
+    func failedJournalRowDoesNotBlockAdmissionAfterPersistentReopen() async throws {
+        let root = FileManager.default
+            .temporaryDirectory
+            .appendingPathComponent("persistent-media-library-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let databaseURL = root.appendingPathComponent("library.sqlite")
+        let resourceRoot = root.appendingPathComponent("resources", isDirectory: true)
+        let invalidURL = root.appendingPathComponent("rejected.png")
+        let invalidBytes = Data([0x71, 0x72, 0x73])
+        try invalidBytes.write(to: invalidURL)
+        let failedAssetID = requiredUUID("00000000-0000-0000-0000-000000000130")
+        let failedResourceID = requiredUUID("00000000-0000-0000-0000-000000000131")
+
+        let failedEntry = try await persistRejectedImport(
+            databaseURL: databaseURL,
+            resourceRoot: resourceRoot,
+            rejectedURL: invalidURL,
+            assetID: failedAssetID,
+            resourceID: failedResourceID,
+        )
+
+        #expect(failedEntry.state == .failed)
+        #expect(try Data(contentsOf: FileMediaResourceRepository(rootURL: resourceRoot)
+                .stagingURL(for: failedResourceID)) == invalidBytes)
+        let reopenedDatabase = try PersistenceStore.makePersistent(at: databaseURL)
+        let reopenedStore = SQLiteMediaLibraryStore(database: reopenedDatabase)
+        let reopenedResources = try FileMediaResourceRepository(rootURL: resourceRoot)
+        let validAssetID = requiredUUID("00000000-0000-0000-0000-000000000132")
+        let importer = makeImporter(
+            store: reopenedStore,
+            resources: reopenedResources,
+            identifiers: [validAssetID, requiredUUID("00000000-0000-0000-0000-000000000133")],
+        )
+        let validSourceURL = root.appendingPathComponent("valid.png")
+        try TestFixtures.pngData.write(to: validSourceURL)
+
+        let validAsset = try? await importer.importFile(at: validSourceURL)
+
+        #expect(validAsset?.id == validAssetID)
+        #expect(try await reopenedStore.loadAssets().map(\.id) == [validAssetID])
+        #expect(try await reopenedStore.ingestionJournal.snapshot().entries == [failedEntry])
+        #expect(try Data(contentsOf: reopenedResources.stagingURL(for: failedResourceID)) == invalidBytes)
+    }
+
     @Test("A temporary accepted-resource read failure remains resumable")
     func temporaryAcceptedResourceReadFailureIsResumable() async throws {
         let readFailure = FirstAcceptedResourceReadFailure()
@@ -1339,6 +1656,244 @@ struct MediaLibraryImportTests {
         try await expectQuotaDenial(for: .revoked)
     }
 
+    @Test("A canceled entitlement lookup cannot stage a new import")
+    func canceledAdmissionDoesNotStageNewImport() async throws {
+        let entitlementLookup = EntitlementStateSuspension()
+        let environment = try makeEnvironment(
+            entitlement: makeEntitlement { await entitlementLookup.read() },
+        )
+        try await seedQuotaAssets(count: MediaLibraryQuota.freeLogicalAssetLimit, into: environment.store)
+
+        let importTask = Task {
+            try await environment.importer.importFile(at: environment.sourceURL)
+        }
+        await entitlementLookup.waitUntilRequested()
+        importTask.cancel()
+        await entitlementLookup.resume(with: .entitled)
+
+        await #expect(throws: CancellationError.self) {
+            try await importTask.value
+        }
+
+        #expect(try await environment.store.logicalAssetCount() == MediaLibraryQuota.freeLogicalAssetLimit)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: TestFixtures.resourceID).path,
+            ),
+        )
+    }
+
+    @Test("A lock during entitlement verification cannot admit a fresh import")
+    func lockDuringEntitlementVerificationPreventsNewImportAdmission() async throws {
+        let entitlementLookup = EntitlementStateSuspension()
+        let entitlement = makeEntitlement { await entitlementLookup.read() }
+        let environment = try makeEnvironment(entitlement: entitlement)
+        try await seedQuotaAssets(count: MediaLibraryQuota.freeLogicalAssetLimit, into: environment.store)
+        let fence = MediaLibraryResourceLoadFence()
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            entitlement: entitlement,
+            sessionIsCurrent: { fence.isCurrent($0) },
+            sessionAdmission: { fence.claimImportAdmission(generation: $0) },
+        )
+
+        let importTask = Task {
+            try await importer.importFile(at: environment.sourceURL, sessionGeneration: 0)
+        }
+        await entitlementLookup.waitUntilRequested()
+        fence.advance()
+        await entitlementLookup.resume(with: .entitled)
+
+        await #expect(throws: CancellationError.self) {
+            try await importTask.value
+        }
+
+        #expect(try await environment.store.logicalAssetCount() == MediaLibraryQuota.freeLogicalAssetLimit)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: TestFixtures.resourceID).path,
+            ),
+        )
+    }
+
+    @Test("A lock before journal acceptance rejects the new import")
+    func lockBeforeJournalAcceptanceRejectsFreshImport() async throws {
+        let acceptanceSuspension = JournalAcceptanceSuspension()
+        let environment = try makeEnvironment()
+        let fence = MediaLibraryResourceLoadFence()
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            identifiers: [
+                requiredUUID("00000000-0000-0000-0000-000001000140"),
+                requiredUUID("00000000-0000-0000-0000-000001000141"),
+            ],
+            sessionIsCurrent: { fence.isCurrent($0) },
+            sessionAdmission: { fence.claimImportAdmission(generation: $0) },
+        )
+        await importer.setBeforeJournalAcceptanceForTesting {
+            await acceptanceSuspension.suspend()
+        }
+
+        let importTask = Task {
+            try await importer.importFile(at: environment.sourceURL, sessionGeneration: 0)
+        }
+        await acceptanceSuspension.waitUntilSuspended()
+        fence.advance()
+        await acceptanceSuspension.resume()
+
+        await #expect(throws: CancellationError.self) {
+            try await importTask.value
+        }
+
+        #expect(try await environment.store.loadAssets().isEmpty)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(environment.resources.stagedResourceIDs().isEmpty)
+        #expect(finalResourceURLs(in: environment.resources).isEmpty)
+    }
+
+    @Test("A lock after the session check but before journal acceptance rejects the import")
+    func lockBetweenSessionCheckAndJournalAcceptanceRejectsFreshImport() async throws {
+        let acceptanceSuspension = JournalAcceptanceSuspension()
+        let environment = try makeEnvironment()
+        let fence = MediaLibraryResourceLoadFence()
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            sessionIsCurrent: { fence.isCurrent($0) },
+            sessionAdmission: { fence.claimImportAdmission(generation: $0) },
+        )
+        await importer.setBeforeJournalAcceptanceForTesting {
+            await acceptanceSuspension.suspend()
+        }
+
+        let importTask = Task {
+            try await importer.importFile(at: environment.sourceURL, sessionGeneration: 0)
+        }
+        await acceptanceSuspension.waitUntilSuspended()
+        fence.advance()
+        await acceptanceSuspension.resume()
+
+        await #expect(throws: CancellationError.self) {
+            try await importTask.value
+        }
+
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(environment.resources.stagedResourceIDs().isEmpty)
+        #expect(finalResourceURLs(in: environment.resources).isEmpty)
+    }
+
+    @Test("Lock during a suspended journal write cancels an unaccepted import")
+    func lockDuringSuspendedJournalWriteCancelsUnacceptedImport() async throws {
+        let acceptanceSuspension = JournalAcceptanceSuspension()
+        let environment = try makeEnvironment()
+        let fence = MediaLibraryResourceLoadFence()
+        let attemptedAssetID = requiredUUID("00000000-0000-0000-0000-000001000160")
+        let attemptedResourceID = requiredUUID("00000000-0000-0000-0000-000001000161")
+        let freshAssetID = requiredUUID("00000000-0000-0000-0000-000001000162")
+        let freshResourceID = requiredUUID("00000000-0000-0000-0000-000001000163")
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            identifiers: [attemptedAssetID, attemptedResourceID, freshAssetID, freshResourceID],
+            sessionIsCurrent: { fence.isCurrent($0) },
+            sessionAdmission: { fence.claimImportAdmission(generation: $0) },
+        )
+        await environment.store.ingestionJournal.setBeforeAcceptanceWriteForTesting {
+            await acceptanceSuspension.suspend()
+        }
+
+        let importTask = Task {
+            try await importer.importFile(at: environment.sourceURL, sessionGeneration: 0)
+        }
+        await acceptanceSuspension.waitUntilSuspended()
+        fence.advance()
+        importTask.cancel()
+        await acceptanceSuspension.resume()
+
+        await #expect(throws: CancellationError.self) {
+            try await importTask.value
+        }
+
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(environment.resources.stagedResourceIDs().isEmpty)
+        #expect(finalResourceURLs(in: environment.resources).isEmpty)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: environment.resources.stagingURL(for: attemptedResourceID).path,
+            ),
+        )
+
+        let freshAsset = try await importer.importFile(at: environment.sourceURL, sessionGeneration: 1)
+
+        #expect(freshAsset.id == freshAssetID)
+        #expect(try await environment.store.logicalAssetCount() == 1)
+        #expect(try await environment.store.loadAssets().map(\.id) == [freshAssetID])
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(environment.resources.stagedResourceIDs().isEmpty)
+        #expect(try Data(contentsOf: environment.resources.url(for: #require(freshAsset.resources.first))) ==
+            environment.sourceBytes)
+    }
+
+    @Test("A durable acceptance suspended across lock is recovered after authentication")
+    func durableAcceptanceSuspendedAcrossLockRecoversBeforeFreshImport() async throws {
+        let acceptanceSuspension = JournalAcceptanceSuspension()
+        let environment = try makeEnvironment()
+        let fence = MediaLibraryResourceLoadFence()
+        let acceptedAssetID = requiredUUID("00000000-0000-0000-0000-000001000150")
+        let acceptedResourceID = requiredUUID("00000000-0000-0000-0000-000001000151")
+        let freshAssetID = requiredUUID("00000000-0000-0000-0000-000001000152")
+        let freshResourceID = requiredUUID("00000000-0000-0000-0000-000001000153")
+        let importer = makeImporter(
+            store: environment.store,
+            resources: environment.resources,
+            identifiers: [acceptedAssetID, acceptedResourceID, freshAssetID, freshResourceID],
+            sessionIsCurrent: { fence.isCurrent($0) },
+            sessionAdmission: { fence.claimImportAdmission(generation: $0) },
+        )
+        await importer.setJournalAcceptanceForTesting { operation in
+            try await operation()
+            await acceptanceSuspension.suspend()
+        }
+
+        let importTask = Task {
+            try await importer.importFile(at: environment.sourceURL, sessionGeneration: 0)
+        }
+        await acceptanceSuspension.waitUntilSuspended()
+        let acceptedEntry = try #require(try await environment.store.ingestionJournal.snapshot().entries.first)
+        #expect(acceptedEntry.id == acceptedAssetID)
+        #expect(acceptedEntry.resourceID == acceptedResourceID)
+        #expect(acceptedEntry.state == .received)
+        #expect(try await environment.store.loadAssets().isEmpty)
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: acceptedResourceID)) == environment
+            .sourceBytes)
+
+        fence.advance()
+        await acceptanceSuspension.resume()
+
+        await #expect(throws: CancellationError.self) {
+            try await importTask.value
+        }
+
+        #expect(try await environment.store.loadAssets().isEmpty)
+        #expect(try await environment.store.ingestionJournal.snapshot().entries == [acceptedEntry])
+        #expect(try Data(contentsOf: environment.resources.stagingURL(for: acceptedResourceID)) == environment
+            .sourceBytes)
+
+        let freshAsset = try await importer.importFile(at: environment.sourceURL, sessionGeneration: 1)
+
+        #expect(freshAsset.id == freshAssetID)
+        #expect(try await environment.store.logicalAssetCount() == 2)
+        #expect(try await Set(environment.store.loadAssets().map(\.id)) == Set([acceptedAssetID, freshAssetID]))
+        #expect(try await environment.store.ingestionJournal.snapshot().entries.isEmpty)
+        #expect(environment.resources.stagedResourceIDs().isEmpty)
+        #expect(try Data(contentsOf: environment.resources.url(for: #require(freshAsset.resources.first))) ==
+            environment.sourceBytes)
+    }
+
     @Test("Entitlement lookup failure remains distinct from store failure")
     func entitlementFailureBlocksBeforeStaging() async throws {
         let environment = try makeEnvironment(
@@ -1791,12 +2346,37 @@ private func makeEnvironment(
     )
 }
 
+private func persistRejectedImport(
+    databaseURL: URL,
+    resourceRoot: URL,
+    rejectedURL: URL,
+    assetID: UUID,
+    resourceID: UUID,
+) async throws -> MediaIngestionJournalEntry {
+    let database = try PersistenceStore.makePersistent(at: databaseURL)
+    let store = SQLiteMediaLibraryStore(database: database)
+    let resources = try FileMediaResourceRepository(rootURL: resourceRoot)
+    let importer = makeImporter(
+        store: store,
+        resources: resources,
+        identifiers: [assetID, resourceID],
+    )
+
+    await #expect(throws: MediaImportError.unrenderableMedia) {
+        try await importer.importFile(at: rejectedURL)
+    }
+
+    return try #require(await store.ingestionJournal.snapshot().entries.first)
+}
+
 private func makeImporter(
     store: SQLiteMediaLibraryStore,
     resources: FileMediaResourceRepository,
     entitlement: EntitlementClient = .testValue,
     source: MediaSourceClient = .localFile,
     identifiers: [UUID] = [TestFixtures.assetID, TestFixtures.resourceID],
+    sessionIsCurrent: @escaping @Sendable (UInt64) -> Bool = { _ in true },
+    sessionAdmission: @escaping @Sendable (UInt64) -> MediaLibraryImportAdmission? = { _ in nil },
 ) -> MediaLibraryImporter {
     let ids = IDSequence(ids: identifiers)
     return MediaLibraryImporter(
@@ -1806,6 +2386,8 @@ private func makeImporter(
         entitlement: entitlement,
         id: { ids.next() },
         now: { TestFixtures.importedAt },
+        sessionIsCurrent: sessionIsCurrent,
+        sessionAdmission: sessionAdmission,
     )
 }
 
@@ -1817,6 +2399,94 @@ private func makeEntitlement(
         purchase: { .failed(.storeFailure) },
         restore: { .failed(.storeFailure) },
     )
+}
+
+private actor JournalAcceptanceSuspension {
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+    private var suspensionWaiters: [CheckedContinuation<Void, Never>] = []
+    private var isSuspended = false
+    private var isReleased = false
+
+    func suspend() async {
+        isSuspended = true
+        let waiters = suspensionWaiters
+        suspensionWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+
+        guard !isReleased else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    func waitUntilSuspended() async {
+        guard !isSuspended else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            suspensionWaiters.append(continuation)
+        }
+    }
+
+    func resume() {
+        isReleased = true
+        guard let releaseContinuation else {
+            return
+        }
+
+        self.releaseContinuation = nil
+        releaseContinuation.resume()
+    }
+}
+
+private actor EntitlementStateSuspension {
+    private var readContinuation: CheckedContinuation<ProEntitlementState, Never>?
+    private var requestContinuations: [CheckedContinuation<Void, Never>] = []
+    private var requested = false
+    private var resumedState: ProEntitlementState?
+
+    func read() async -> ProEntitlementState {
+        requested = true
+        let waiters = requestContinuations
+        requestContinuations.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+
+        if let resumedState {
+            return resumedState
+        }
+
+        return await withCheckedContinuation { continuation in
+            readContinuation = continuation
+        }
+    }
+
+    func waitUntilRequested() async {
+        guard !requested else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            requestContinuations.append(continuation)
+        }
+    }
+
+    func resume(with state: ProEntitlementState) {
+        guard let readContinuation else {
+            resumedState = state
+            return
+        }
+
+        self.readContinuation = nil
+        readContinuation.resume(returning: state)
+    }
 }
 
 private func seedQuotaAssets(
