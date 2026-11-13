@@ -51,8 +51,9 @@ final class BrowserDownloadScratchStore {
             ? root
             : qualificationResource == "destination" ? allocation.destination : allocation.directory
         var fields = [
-            "operation": UUID(uuidString: allocation.directory.lastPathComponent)?
-                .uuidString ?? "unidentifiedAllocation",
+            "operationIdentifierPresent": String(
+                UUID(uuidString: allocation.directory.lastPathComponent) != nil,
+            ),
             "phase": phase,
             "stage": qualificationStage,
             "resource": qualificationResource,
@@ -84,7 +85,121 @@ final class BrowserDownloadScratchStore {
             fields["backupErrorDomain"] = inspectionError.domain
             fields["backupErrorCode"] = String(inspectionError.code)
         }
+        if qualificationStage == "ownership" {
+            fields.merge(
+                Self.ownershipDiagnosticFields(
+                    parent: allocation.directory.deletingLastPathComponent(),
+                    root: root,
+                    operationDirectory: allocation.directory,
+                ),
+            ) { _, diagnosticValue in diagnosticValue }
+        }
         qualificationDiagnostic(fields)
+    }
+
+    /// Captures URL representation and filesystem facts for an ownership rejection.
+    /// The values contain comparisons and classifications only; this check never creates paths.
+    private static func ownershipDiagnosticFields(
+        parent: URL,
+        root: URL,
+        operationDirectory: URL,
+    ) -> [String: String] {
+        let standardizedParent = parent.standardizedFileURL
+        let standardizedRoot = root.standardizedFileURL
+        let parentFacts = ownershipFilesystemFacts(at: standardizedParent)
+        let rootFacts = ownershipFilesystemFacts(at: standardizedRoot)
+        let operationFacts = ownershipFilesystemFacts(at: operationDirectory)
+        let filesystemIdentity: String =
+            if let parentIdentity = parentFacts.identity,
+            let rootIdentity = rootFacts.identity {
+                parentIdentity == rootIdentity ? "same" : "different"
+            } else {
+                "unavailable"
+            }
+        let parentComponents = standardizedParent.pathComponents
+        let rootComponents = standardizedRoot.pathComponents
+
+        return [
+            "parentIsFileURL": String(parent.isFileURL),
+            "rootIsFileURL": String(root.isFileURL),
+            "parentHasDirectoryPath": String(parent.hasDirectoryPath),
+            "rootHasDirectoryPath": String(root.hasDirectoryPath),
+            "parentHasBaseURL": String(parent.baseURL != nil),
+            "rootHasBaseURL": String(root.baseURL != nil),
+            "parentIsAbsolute": String(parent.baseURL == nil),
+            "rootIsAbsolute": String(root.baseURL == nil),
+            "parentStandardizedPathMatchesRoot": String(standardizedParent.path == standardizedRoot.path),
+            "parentStandardizedURLMatchesRoot": String(standardizedParent == standardizedRoot),
+            "parentLogicalComponentsMatchRoot": String(parentComponents == rootComponents),
+            "parentWithinAuthorizedRoot": String(isWithinRoot(parentComponents, rootComponents)),
+            "parentExists": String(parentFacts.exists),
+            "parentType": parentFacts.type,
+            "parentIsDirectory": String(parentFacts.type == "directory"),
+            "parentIsSymbolicLink": parentFacts.isSymbolicLink,
+            "rootExists": String(rootFacts.exists),
+            "rootType": rootFacts.type,
+            "rootIsDirectory": String(rootFacts.type == "directory"),
+            "rootIsSymbolicLink": rootFacts.isSymbolicLink,
+            "operationDirectoryExists": String(operationFacts.exists),
+            "operationDirectoryType": operationFacts.type,
+            "operationDirectoryIsDirectory": String(operationFacts.type == "directory"),
+            "operationDirectoryIsSymbolicLink": operationFacts.isSymbolicLink,
+            "parentRootFilesystemIdentity": filesystemIdentity,
+            "operationDirectoryFilesystemIdentity": operationFacts.identity == nil ? "unavailable" : "available",
+        ]
+    }
+
+    private static func ownershipFilesystemFacts(at url: URL) -> OwnershipFilesystemFacts {
+        guard url.isFileURL else {
+            return .unavailable
+        }
+
+        var metadata = stat()
+        guard url.path.withCString({ lstat($0, &metadata) }) == 0 else {
+            return .unavailable
+        }
+
+        let type =
+            switch metadata.st_mode & S_IFMT {
+            case S_IFDIR:
+                "directory"
+            case S_IFREG:
+                "regularFile"
+            case S_IFLNK:
+                "symbolicLink"
+            default:
+                "other"
+            }
+        return OwnershipFilesystemFacts(
+            exists: true,
+            type: type,
+            isSymbolicLink: String(type == "symbolicLink"),
+            identity: OwnershipFileIdentity(device: UInt64(metadata.st_dev), inode: UInt64(metadata.st_ino)),
+        )
+    }
+
+    private static func isWithinRoot(_ pathComponents: [String], _ rootComponents: [String]) -> Bool {
+        pathComponents.count >= rootComponents.count
+            && pathComponents.prefix(rootComponents.count).elementsEqual(rootComponents)
+    }
+
+    private struct OwnershipFilesystemFacts {
+        static let unavailable = Self(
+            exists: false,
+            type: "unavailable",
+            isSymbolicLink: "unavailable",
+            identity: nil,
+        )
+
+        let exists: Bool
+        let type: String
+        let isSymbolicLink: String
+        let identity: OwnershipFileIdentity?
+    }
+
+    private struct OwnershipFileIdentity: Equatable {
+        let device: UInt64
+        let inode: UInt64
     }
     #endif
 

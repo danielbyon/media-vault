@@ -87,6 +87,118 @@ extension AppHostedUITests {
     }
 }
 
+@Suite("Browser download scratch ownership diagnostics")
+@MainActor
+struct BrowserDownloadScratchOwnershipDiagnosticsTests {
+    /// Checks the existing diagnostic seam without creating the rejected operation directory.
+    @Test("Ownership failure reports path-free root comparison facts")
+    func reportsRootComparisonFactsBeforeCreatingAllocation() throws {
+        let fileManager = FileManager.default
+        let temporaryRoot = fileManager.temporaryDirectory
+            .appendingPathComponent("scratch-ownership-diagnostics-\(UUID().uuidString)", isDirectory: true)
+        let authorizedRoot = temporaryRoot.appendingPathComponent("authorized", isDirectory: true)
+        let outsideDirectory = temporaryRoot.appendingPathComponent("outside", isDirectory: true)
+        try fileManager.createDirectory(at: authorizedRoot, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: temporaryRoot) }
+
+        let store = BrowserDownloadScratchStore(root: authorizedRoot)
+        var diagnostic: [String: String]?
+        store.qualificationDiagnostic = { diagnostic = $0 }
+
+        let generatedAllocation = store.allocation(id: BrowserDownloadID(), suggestedName: "payload.pdf")
+        let rejectedAllocation = BrowserDownloadAllocation(
+            directory: generatedAllocation.directory,
+            destination: outsideDirectory.appendingPathComponent("payload.pdf"),
+        )
+        var rejectionObserved = false
+        do {
+            try store.prepare(rejectedAllocation)
+        } catch {
+            rejectionObserved = true
+            store.reportQualificationFailure(error, phase: "preparation", allocation: rejectedAllocation)
+        }
+
+        let fields = try #require(diagnostic)
+        #expect(rejectionObserved)
+        #expect(fields["parentIsFileURL"] == "true")
+        #expect(fields["rootIsFileURL"] == "true")
+        #expect(fields["parentHasDirectoryPath"] == "true")
+        #expect(fields["rootHasDirectoryPath"] == "true")
+        #expect(fields["parentHasBaseURL"] == "false")
+        #expect(fields["rootHasBaseURL"] == "false")
+        #expect(fields["parentIsAbsolute"] == "true")
+        #expect(fields["rootIsAbsolute"] == "true")
+        #expect(fields["parentStandardizedPathMatchesRoot"] == "true")
+        #expect(fields["parentStandardizedURLMatchesRoot"] == "true")
+        #expect(fields["parentLogicalComponentsMatchRoot"] == "true")
+        #expect(fields["parentWithinAuthorizedRoot"] == "true")
+        #expect(fields["parentExists"] == "true")
+        #expect(fields["parentType"] == "directory")
+        #expect(fields["parentIsDirectory"] == "true")
+        #expect(fields["parentIsSymbolicLink"] == "false")
+        #expect(fields["rootExists"] == "true")
+        #expect(fields["rootType"] == "directory")
+        #expect(fields["rootIsDirectory"] == "true")
+        #expect(fields["rootIsSymbolicLink"] == "false")
+        #expect(fields["parentRootFilesystemIdentity"] == "same")
+        #expect(fields["operationDirectoryExists"] == "false")
+        #expect(fields["operationDirectoryType"] == "unavailable")
+        #expect(fields["operationDirectoryIsSymbolicLink"] == "unavailable")
+        #expect(fields["operationDirectoryFilesystemIdentity"] == "unavailable")
+        #expect(fields["operationIdentifierPresent"] == "true")
+        #expect(fields["operation"] == nil)
+        #expect(fields.values.allSatisfy { !$0.contains("/") })
+        #expect(fields.values.allSatisfy { UUID(uuidString: $0) == nil })
+    }
+
+    @Test("Escaped parent is classified without creating the rejected directory")
+    func reportsEscapedParentWithoutCreatingAllocation() throws {
+        let fileManager = FileManager.default
+        let temporaryRoot = fileManager.temporaryDirectory
+            .appendingPathComponent("scratch-ownership-escape-\(UUID().uuidString)", isDirectory: true)
+        let authorizedRoot = temporaryRoot.appendingPathComponent("authorized", isDirectory: true)
+        let outsideDirectory = temporaryRoot.appendingPathComponent("outside", isDirectory: true)
+        try fileManager.createDirectory(at: authorizedRoot, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: temporaryRoot) }
+
+        let store = BrowserDownloadScratchStore(root: authorizedRoot)
+        var diagnostic: [String: String]?
+        store.qualificationDiagnostic = { diagnostic = $0 }
+
+        let escapedOperationDirectory = outsideDirectory
+            .appendingPathComponent(BrowserDownloadID().rawValue.uuidString, isDirectory: true)
+        let allocation = BrowserDownloadAllocation(
+            directory: escapedOperationDirectory,
+            destination: escapedOperationDirectory.appendingPathComponent("payload.pdf"),
+        )
+        var rejectionObserved = false
+        do {
+            try store.prepare(allocation)
+        } catch {
+            rejectionObserved = true
+            store.reportQualificationFailure(error, phase: "preparation", allocation: allocation)
+        }
+
+        let fields = try #require(diagnostic)
+        #expect(rejectionObserved)
+        #expect(fields["parentStandardizedPathMatchesRoot"] == "false")
+        #expect(fields["parentStandardizedURLMatchesRoot"] == "false")
+        #expect(fields["parentLogicalComponentsMatchRoot"] == "false")
+        #expect(fields["parentWithinAuthorizedRoot"] == "false")
+        #expect(fields["parentExists"] == "false")
+        #expect(fields["parentType"] == "unavailable")
+        #expect(fields["rootExists"] == "true")
+        #expect(fields["rootType"] == "directory")
+        #expect(fields["parentRootFilesystemIdentity"] == "unavailable")
+        #expect(fields["operationDirectoryExists"] == "false")
+        #expect(fields["operationDirectoryFilesystemIdentity"] == "unavailable")
+        #expect(fields["operationIdentifierPresent"] == "true")
+        #expect(fields["operation"] == nil)
+        #expect(fields.values.allSatisfy { !$0.contains("/") })
+        #expect(fields.values.allSatisfy { UUID(uuidString: $0) == nil })
+    }
+}
+
 /// Owns a real Root store and its isolated command/event adapter. It never manually attaches WKView.
 @MainActor
 private final class RootAdapterFixture {

@@ -208,6 +208,245 @@ final class BrowserDownloadSecurityQualificationUITests: XCTestCase {
         }
     }
 
+    /// Checks observation access after a normal background and return without arming the sentinel.
+    func testObservationRefreshRecoversAfterBackgroundAndReturnWithoutSentinel() throws {
+        try requirePhysicalDevice()
+
+        var report = [
+            "testRunner.stateBeforeLaunch": "running",
+            "testRunner.processNameAvailable": String(!ProcessInfo.processInfo.processName.isEmpty),
+            "sentinelPreparationAttempted": "false",
+            "deviceLockRequested": "false",
+        ]
+        defer {
+            let summary = report.keys
+                .sorted()
+                .map { key in
+                    "\(key)=\(report[key] ?? "unavailable")"
+                }
+                .joined(separator: "\n")
+            let attachment = XCTAttachment(string: summary)
+            attachment.name = "sanitized no-lock observation recovery report"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
+        app.launchArguments = [
+            "--browser-download-production-qualification",
+            "--browser-download-passive-scene-census",
+        ]
+
+        func recordFirstFailure(_ stage: String) {
+            if report["firstFailure"] == nil {
+                report["firstFailure"] = stage
+            }
+        }
+
+        func readObservationSnapshot(_ stage: String) -> [Observation]? {
+            let refresh = app.buttons["downloadQualificationRefreshObservations"]
+            report["\(stage).refreshExists"] = String(refresh.exists)
+            report["\(stage).refreshHittable"] = String(refresh.isHittable)
+            guard refresh.exists, refresh.isHittable else {
+                recordFirstFailure("\(stage).refreshUnavailable")
+                return nil
+            }
+
+            report["\(stage).tapCompleted"] = "pending"
+            refresh.tap()
+            report["\(stage).tapCompleted"] = "true"
+
+            let node = app.staticTexts["downloadQualificationObservations"]
+            report["\(stage).observationElementExists"] = String(node.exists)
+            guard node.exists else {
+                report["\(stage).observationValueAvailable"] = "false"
+                recordFirstFailure("\(stage).observationElementMissing")
+                return nil
+            }
+            guard let value = node.value as? String, !value.isEmpty else {
+                report["\(stage).observationValueAvailable"] = "false"
+                recordFirstFailure("\(stage).observationValueMissing")
+                return nil
+            }
+
+            report["\(stage).observationValueAvailable"] = "true"
+
+            guard let events = try? JSONDecoder().decode([Observation].self, from: Data(value.utf8)) else {
+                report["\(stage).jsonDecoded"] = "false"
+                recordFirstFailure("\(stage).jsonDecodeFailed")
+                return nil
+            }
+
+            report["\(stage).jsonDecoded"] = "true"
+            report["\(stage).eventCount"] = String(events.count)
+            return events
+        }
+
+        func waitUntil(_ timeout: TimeInterval, condition: @escaping @MainActor () -> Bool) -> Bool {
+            let predicate = NSPredicate { _, _ in MainActor.assumeIsolated { condition() } }
+            let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+            return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+        }
+
+        func recordSceneCensus(_ stage: String) {
+            let node = app.staticTexts["downloadQualificationSceneCensus"]
+            report["\(stage).sceneCensusElementExists"] = String(node.exists)
+            guard node.exists, let value = node.value as? String,
+                  let census = try? JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any]
+            else {
+                report["\(stage).sceneCensusJSONDecoded"] = "false"
+                recordFirstFailure("\(stage).sceneCensusUnavailable")
+                return
+            }
+
+            let scenes = census["connectedWindowScenes"] as? [[String: Any]] ?? []
+            report["\(stage).sceneCensusJSONDecoded"] = "true"
+            report["\(stage).connectedSceneCount"] = String(scenes.count)
+            report["\(stage).foregroundActiveSceneCount"] = String(
+                scenes.count(where: { $0["activation"] as? String == "foregroundActive" }),
+            )
+            report["\(stage).backgroundSceneCount"] = String(
+                scenes.count(where: { $0["activation"] as? String == "background" }),
+            )
+        }
+
+        func sceneCaptureStatus(_ events: [Observation]) -> (background: Bool, foreground: Bool, correlated: Bool) {
+            let fixtureRunIDs = Set(
+                events.filter { $0["event"] == "fixtureStarted" }.compactMap { $0["runID"] },
+            )
+            let captures = events.filter { $0["event"] == "sceneCensusCaptured" }
+            let correlatedCaptures = captures.filter { fixtureRunIDs.contains($0["runID"] ?? "") }
+            var sawBackground = false
+            var sawForeground = false
+            for capture in correlatedCaptures {
+                guard let value = capture["census"],
+                      let census = try? JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any]
+                else {
+                    continue
+                }
+
+                let scenes = census["connectedWindowScenes"] as? [[String: Any]] ?? []
+                sawBackground = sawBackground || scenes.contains {
+                    $0["activation"] as? String == "background"
+                }
+                sawForeground = sawForeground || scenes.contains {
+                    $0["activation"] as? String == "foregroundActive"
+                }
+            }
+            return (sawBackground, sawForeground, fixtureRunIDs.count == 1 && sawBackground && sawForeground)
+        }
+
+        func currentSceneCaptureStatus() -> (background: Bool, foreground: Bool, correlated: Bool) {
+            let node = app.staticTexts["downloadQualificationObservations"]
+            guard let value = node.value as? String,
+                  let events = try? JSONDecoder().decode([Observation].self, from: Data(value.utf8))
+            else {
+                return (false, false, false)
+            }
+
+            return sceneCaptureStatus(events)
+        }
+
+        app.launch()
+        report["host.stateAfterLaunch"] = String(describing: app.state)
+        report["testRunner.stateAfterLaunch"] = "running"
+        let modeLabel = app.staticTexts["downloadQualificationProtectionQualificationMode"]
+        let modeElementExists = modeLabel.waitForExistence(timeout: 10)
+        report["host.modeElementExists"] = String(modeElementExists)
+        report["host.protectionModeVerified"] = String(
+            modeElementExists && modeLabel.label.contains("Real native .complete verification required"),
+        )
+        let fixtureReady = waitUntil(10) {
+            app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
+        }
+        report["host.fixtureReady"] = String(fixtureReady)
+        guard modeElementExists, fixtureReady else {
+            recordFirstFailure("host.readinessUnavailable")
+            XCTFail("Qualification host readiness surface was unavailable")
+            return
+        }
+        guard app.state == .runningForeground else {
+            report["host.foregroundAfterLaunch"] = "false"
+            recordFirstFailure("host.notForegroundAfterLaunch")
+            XCTFail("Qualification host did not reach the foreground")
+            return
+        }
+
+        report["host.foregroundAfterLaunch"] = "true"
+
+        let initialEvents = try XCTUnwrap(
+            readObservationSnapshot("beforeHome"),
+            "Baseline Refresh observation surface was unavailable",
+        )
+
+        let initialRunIDs = Set(
+            initialEvents.filter { $0["event"] == "fixtureStarted" }.compactMap { $0["runID"] },
+        )
+        report["beforeHome.fixtureStartedObserved"] = String(!initialRunIDs.isEmpty)
+        recordSceneCensus("beforeHome")
+
+        report["testRunner.stateBeforeHome"] = "running"
+        XCUIDevice.shared.press(.home)
+        report["host.stateImmediatelyAfterHome"] = String(describing: app.state)
+        let enteredBackground = waitUntil(15) { app.state == .runningBackground }
+        report["host.enteredBackground"] = String(enteredBackground)
+        report["host.stateAfterHome"] = String(describing: app.state)
+        report["testRunner.stateAfterHome"] = "running"
+        guard enteredBackground else {
+            recordFirstFailure("host.didNotEnterBackground")
+            XCTFail("Qualification host did not enter the background after Home")
+            return
+        }
+
+        app.activate()
+        let returnedToForeground = waitUntil(15) { app.state == .runningForeground }
+        report["host.returnedToForeground"] = String(returnedToForeground)
+        report["host.stateAfterReturn"] = String(describing: app.state)
+        report["testRunner.stateAfterReturn"] = "running"
+        guard returnedToForeground else {
+            recordFirstFailure("host.didNotReturnToForeground")
+            XCTFail("Qualification host did not return to the foreground")
+            return
+        }
+
+        let sceneEventsRecovered = waitUntil(20) {
+            let status = currentSceneCaptureStatus()
+            return status.background && status.foreground && status.correlated
+        }
+        report["scene.lifecycleEventsRecovered"] = String(sceneEventsRecovered)
+        guard sceneEventsRecovered else {
+            recordFirstFailure("scene.lifecycleEventsUnavailable")
+            XCTFail("Current-run background and foreground scene observations were unavailable")
+            return
+        }
+
+        let returnedEvents = try XCTUnwrap(
+            readObservationSnapshot("afterReturn"),
+            "Refresh observation surface was unavailable after returning to the host",
+        )
+
+        let returnedStatus = sceneCaptureStatus(returnedEvents)
+        report["scene.backgroundCaptureObserved"] = String(returnedStatus.background)
+        report["scene.foregroundCaptureObserved"] = String(returnedStatus.foreground)
+        report["scene.sameRunCorrelation"] = String(returnedStatus.correlated)
+        recordSceneCensus("afterReturn")
+
+        XCTAssertTrue(initialEvents.contains { $0["event"] == "fixtureStarted" })
+        XCTAssertTrue(returnedStatus.background)
+        XCTAssertTrue(returnedStatus.foreground)
+        XCTAssertTrue(returnedStatus.correlated)
+        XCTAssertEqual(report["afterReturn.refreshExists"], "true")
+        XCTAssertEqual(report["afterReturn.refreshHittable"], "true")
+        XCTAssertEqual(report["afterReturn.tapCompleted"], "true")
+        XCTAssertEqual(report["afterReturn.observationValueAvailable"], "true")
+        XCTAssertEqual(report["afterReturn.jsonDecoded"], "true")
+        XCTAssertEqual(report["afterReturn.sceneCensusElementExists"], "true")
+        XCTAssertEqual(report["afterReturn.sceneCensusJSONDecoded"], "true")
+        XCTAssertEqual(report["afterReturn.foregroundActiveSceneCount"], "1")
+        XCTAssertEqual(report["sentinelPreparationAttempted"], "false")
+        XCTAssertEqual(report["deviceLockRequested"], "false")
+    }
+
     // MARK: - Slice B: locked protected data
 
     /// Prepares the protected-data sentinel, waits for the operator to lock and unlock the
