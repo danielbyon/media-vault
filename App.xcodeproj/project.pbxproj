@@ -37,9 +37,9 @@
 		A1000000000000000000003E /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
 		A1000000000000000000003F /* AppHostedUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* AppHostedUITests.swift */; };
 		A10000000000000000000040 /* ScenePrivacyCoverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001A /* ScenePrivacyCoverTests.swift */; };
-		A10000000000000000000043 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000004 /* SnapshotTesting */; };
 		A10000000000000000000041 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
 		A10000000000000000000042 /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
+		A10000000000000000000043 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000004 /* SnapshotTesting */; };
 		A10000000000000000000044 /* ScenePrivacyCoverSentinelTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001B /* ScenePrivacyCoverSentinelTestSupport.swift */; };
 		A10000000000000000000045 /* MediaLibrary in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000008 /* MediaLibrary */; };
 		A10000000000000000000046 /* Entitlement in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000009 /* Entitlement */; };
@@ -617,8 +617,6 @@
 		F10000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = HSX7X97PF8;
 				ENABLE_PREVIEWS = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -634,7 +632,6 @@
 		F10000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				ENABLE_PREVIEWS = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -650,7 +647,6 @@
 		F10000000000000000000005 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -669,7 +665,6 @@
 		F10000000000000000000006 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -688,7 +683,6 @@
 		F1000000000000000000000A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -712,7 +706,6 @@
 		F1000000000000000000000B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -734,7 +727,6 @@
 		F1000000000000000000000C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				ONLY_ACTIVE_ARCH = YES;
@@ -751,7 +743,6 @@
 		F1000000000000000000000D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.danielbyon.mediavault.browsertaboverview.uitests;
@@ -767,7 +758,6 @@
 		F10000000000000000000010 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -791,7 +781,6 @@
 		F10000000000000000000011 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -816,7 +805,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
@@ -842,7 +830,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
