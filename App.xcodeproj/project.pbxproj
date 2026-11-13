@@ -37,9 +37,9 @@
 		A1000000000000000000003E /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
 		A1000000000000000000003F /* AppHostedUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* AppHostedUITests.swift */; };
 		A10000000000000000000040 /* ScenePrivacyCoverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001A /* ScenePrivacyCoverTests.swift */; };
-		A10000000000000000000043 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000004 /* SnapshotTesting */; };
 		A10000000000000000000041 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000001 /* AppFeature */; };
 		A10000000000000000000042 /* VaultFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000007 /* VaultFeature */; };
+		A10000000000000000000043 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000004 /* SnapshotTesting */; };
 		A10000000000000000000044 /* ScenePrivacyCoverSentinelTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001B /* ScenePrivacyCoverSentinelTestSupport.swift */; };
 		A10000000000000000000045 /* MediaLibrary in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000008 /* MediaLibrary */; };
 		A10000000000000000000046 /* Entitlement in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000009 /* Entitlement */; };
@@ -618,7 +618,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = HSX7X97PF8;
 				ENABLE_PREVIEWS = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
