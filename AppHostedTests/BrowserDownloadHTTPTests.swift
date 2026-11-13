@@ -11,6 +11,7 @@ import CoreGraphics
 import CryptoKit
 import Dependencies
 import Foundation
+import GRDB
 import ObjectiveC
 import Testing
 import UIKit
@@ -535,6 +536,11 @@ extension AppHostedUITests {
                     #expect(fixture.observations.handoffs.isEmpty)
                     #expect(fixture.observations.conversions == 0)
                 } else {
+                    if row == .attachment {
+                        // Separate request dispatch from the bounded WebKit handoff and
+                        // reducer-conversion check so the latter starts after the exact GET.
+                        try await fixture.waitForDispatchedRequest("attachment", baseline: requestBaseline)
+                    }
                     try await fixture.wait("completed native download and reducer conversion") {
                         fixture.owner.snapshot.records.first?.isReady == true
                             && fixture.observations.conversions == 1
@@ -1444,6 +1450,19 @@ private final class HTTPDownloadFixture {
     /// while the fixture is still alive, so a stalled wait can be classified
     /// from test output alone without changing what the wait asserts.
     private func failureTransportEvidence() -> String {
+        let requests = server.requests
+            .map { request in
+                let route = request.path.hasPrefix(server.cookiePath)
+                    ? request.path
+                        .dropFirst(server.cookiePath.count)
+                        .split(separator: "?", maxSplits: 1)
+                        .first
+                        .map(String.init)
+                        ?? ""
+                    : "<outside-fixture>"
+                return "\(request.method):\(route)"
+            }
+            .joined(separator: ",")
         let connections =
             if let data = try? JSONSerialization.data(
                 withJSONObject: server.connectionEvidence,
@@ -1457,7 +1476,7 @@ private final class HTTPDownloadFixture {
             observations.events,
             commands: observations.commands,
         )
-        return "connectionEvidence=\(connections)"
+        return "requestDetails=[\(requests)] connectionEvidence=\(connections)"
             + " adapterCommitted=\(adapter.hasCommittedDocument(for: tabID))"
             + "\n\(events)"
     }
