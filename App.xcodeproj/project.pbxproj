@@ -46,9 +46,9 @@
 		A20000000000000000000042 /* BrowserFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000005 /* BrowserFeature */; };
 		A20000000000000000000043 /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 120000000000000000000002 /* ComposableArchitecture */; };
 		A20000000000000000000044 /* BrowserDownloadLoopbackServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000044 /* BrowserDownloadLoopbackServer.swift */; };
-		A10000000000000000000045 /* BrowserDownloadHTTPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000045 /* BrowserDownloadHTTPTests.swift */; };
+		F2504C168EA8442580F56683 /* BrowserDownloadHTTPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000045 /* BrowserDownloadHTTPTests.swift */; };
 		42000000000000000000000A /* BrowserDownloadNoticeQualification.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* BrowserDownloadNoticeQualification.swift */; };
-		A10000000000000000000046 /* BrowserDownloadLoopbackServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000046 /* BrowserDownloadLoopbackServerTests.swift */; };
+		AD5033A37BC548B498BD04EB /* BrowserDownloadLoopbackServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000046 /* BrowserDownloadLoopbackServerTests.swift */; };
 		420000000000000000000010 /* BrowserDownloadQualificationRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000049 /* BrowserDownloadQualificationRootView.swift */; };
 		A1000000000000000000004A /* AppHostedTestHostRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000004A /* AppHostedTestHostRootView.swift */; };
 		420000000000000000000011 /* BrowserDownloadQualificationApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000004B /* BrowserDownloadQualificationApp.swift */; };
@@ -687,8 +687,8 @@
 				A10000000000000000000051 /* BrowserDownloadPersistenceFixture.swift in Sources */,
 				A10000000000000000000071 /* DownloadSeparationTestSupport.swift in Sources */,
 				A10000000000000000000053 /* BrowserDownloadPersistenceFixture+RootHosting.swift in Sources */,
-				A10000000000000000000046 /* BrowserDownloadLoopbackServerTests.swift in Sources */,
-				A10000000000000000000045 /* BrowserDownloadHTTPTests.swift in Sources */,
+				AD5033A37BC548B498BD04EB /* BrowserDownloadLoopbackServerTests.swift in Sources */,
+				F2504C168EA8442580F56683 /* BrowserDownloadHTTPTests.swift in Sources */,
 				A20000000000000000000044 /* BrowserDownloadLoopbackServer.swift in Sources */,
                 A10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift in Sources */,
 			);
