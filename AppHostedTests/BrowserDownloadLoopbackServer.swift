@@ -46,6 +46,7 @@ final class BrowserDownloadLoopbackServer {
     private(set) var stopped = false
     /// Bounded transport milestones contain identifiers and counters, never request bytes or URLs.
     private(set) var connectionEvidence: [[String: String]] = []
+    var qualificationEvidenceDidChange: (() -> Void)?
 
     private func recordConnection(_ id: UUID, fields: [String: String]) {
         var evidence = fields
@@ -56,6 +57,82 @@ final class BrowserDownloadLoopbackServer {
         } else if connectionEvidence.count < 64 {
             connectionEvidence.append(evidence)
         }
+        qualificationEvidenceDidChange?()
+    }
+
+    func fixtureRequestIdentity(for url: URL) -> (route: String, requestID: UUID)? {
+        guard url.scheme == "http", url.host == "127.0.0.1",
+              url.port == listener.port.map({ Int($0.rawValue) }),
+              url.path.hasPrefix("/\(namespace)/")
+        else {
+            return nil
+        }
+
+        let route = String(url.path.dropFirst(namespace.count + 2))
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let requestItems = items.filter { $0.name == "qualificationRequest" }
+        guard requestItems.count == 1, let value = requestItems[0].value,
+              let requestID = UUID(uuidString: value)
+        else {
+            return nil
+        }
+
+        return (route, requestID)
+    }
+
+    func slowKnownEvidence(for requestID: UUID) -> [String: String] {
+        let requestCount = requests.count(where: {
+            fixtureRoute(for: $0) == "slow-known" && qualificationID(for: $0) == requestID
+        })
+        let matchedConnections = connectionEvidence.filter {
+            $0["qualificationRoute"] == "slow-known"
+                && $0["qualificationRequestID"] == requestID.uuidString
+        }
+        var result = [
+            "requestCount": String(requestCount),
+            "connectionCount": String(matchedConnections.count),
+        ]
+        guard matchedConnections.count == 1, let connection = matchedConnections.first else {
+            return result
+        }
+
+        for key in [
+            "connectionID",
+            "requestParsed",
+            "responseComplete",
+            "closed",
+            "closeReason",
+            "closedAtUptime",
+            "deadlineElapsedMilliseconds",
+            "expectedBytes",
+            "prefixBytes",
+            "sendStackState",
+        ] {
+            result[key] = connection[key]
+        }
+        result["route"] = "slow-known"
+        return result
+    }
+
+    private func fixtureRoute(for request: Request) -> String {
+        request.path
+            .dropFirst(cookiePath.count)
+            .split(separator: "?", maxSplits: 1)
+            .first
+            .map(String.init) ?? ""
+    }
+
+    private func qualificationID(for request: Request) -> UUID? {
+        guard let components = URLComponents(string: "http://127.0.0.1\(request.path)") else {
+            return nil
+        }
+
+        let items = (components.queryItems ?? []).filter { $0.name == "qualificationRequest" }
+        guard items.count == 1, let value = items[0].value else {
+            return nil
+        }
+
+        return UUID(uuidString: value)
     }
 
     var connectionCount: Int {
@@ -171,6 +248,10 @@ final class BrowserDownloadLoopbackServer {
             .split(separator: "?", maxSplits: 1)
             .first
             .map(String.init) ?? ""
+        connection.setQualificationRequest(
+            route: route,
+            requestID: route == "slow-known" ? qualificationID(for: request) : nil,
+        )
         switch route {
         case "first",
              "committed":
@@ -393,6 +474,8 @@ final class BrowserDownloadLoopbackServer {
         private weak var server: BrowserDownloadLoopbackServer?
         private var buffer = Data()
         private var deadline: Task<Void, Never>?
+        private var deadlineStartedAtUptime: TimeInterval?
+        private var closedAtUptime: TimeInterval?
         private var responded = false
         private(set) var closed = false
         private var receiveCallbacks = 0
@@ -413,6 +496,20 @@ final class BrowserDownloadLoopbackServer {
         /// sending. It is not peer delivery acknowledgement and not a WebKit commit signal.
         private var sendStackState = "none"
         private var sendStackBytes = 0
+        private var qualificationRoute = "none"
+        private var qualificationRequestID: String?
+        private var slowExpectedBytes: Int?
+        private var slowPrefixBytes = 0
+
+        func setQualificationRequest(route: String, requestID: UUID?) {
+            guard route == "slow-known", let requestID else {
+                return
+            }
+
+            qualificationRoute = route
+            qualificationRequestID = requestID.uuidString
+            recordEvidence()
+        }
 
         private func recordEvidence() {
             server?.recordConnection(id, fields: [
@@ -432,14 +529,21 @@ final class BrowserDownloadLoopbackServer {
                 "transportState": transportState,
                 "closed": String(closed),
                 "closeReason": closeReason,
+                "closedAtUptime": closedAtUptime.map { String($0) } ?? "unavailable",
+                "deadlineElapsedMilliseconds": deadlineElapsedMilliseconds.map { String($0) } ?? "unavailable",
                 "sendStackState": sendStackState,
                 "sendStackBytes": String(sendStackBytes),
+                "qualificationRoute": qualificationRoute,
+                "qualificationRequestID": qualificationRequestID ?? "none",
+                "expectedBytes": slowExpectedBytes.map(String.init) ?? "unknown",
+                "prefixBytes": String(slowPrefixBytes),
             ])
         }
 
         init(native: NWConnection, server: BrowserDownloadLoopbackServer) {
             self.native = native
             self.server = server
+            deadlineStartedAtUptime = ProcessInfo.processInfo.systemUptime
         }
 
         func start() {
@@ -491,6 +595,7 @@ final class BrowserDownloadLoopbackServer {
 
             closed = true
             closeReason = reason
+            closedAtUptime = ProcessInfo.processInfo.systemUptime
             recordEvidence()
             deadline?.cancel()
             deadline = nil
@@ -588,6 +693,14 @@ final class BrowserDownloadLoopbackServer {
             } else {
                 receive()
             }
+        }
+
+        private var deadlineElapsedMilliseconds: Int? {
+            guard let deadlineStartedAtUptime, let closedAtUptime else {
+                return nil
+            }
+
+            return Int((closedAtUptime - deadlineStartedAtUptime) * 1_000)
         }
 
         /// Only typed error domain/code are retained; localized descriptions can contain endpoints.
@@ -730,6 +843,8 @@ final class BrowserDownloadLoopbackServer {
             if !knownLength {
                 data.append(Data("\r\n".utf8))
             }
+            slowExpectedBytes = knownLength ? body.count : nil
+            slowPrefixBytes = prefix.count
             sendStackBytes = data.count
             sendStackState = "pending"
             recordEvidence()

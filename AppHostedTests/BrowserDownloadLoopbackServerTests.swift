@@ -58,6 +58,111 @@ extension AppHostedUITests {
             server.stop()
         }
 
+        @Test("Qualification request identity is scoped to its loopback fixture")
+        func qualificationRequestIdentityIsScopedToLoopbackFixture() async throws {
+            let server = try BrowserDownloadLoopbackServer()
+            try await server.start()
+            defer { server.stop() }
+
+            let requestID = UUID()
+            let fixtureURL = try server.url("slow-known")
+            var components = try #require(URLComponents(url: fixtureURL, resolvingAgainstBaseURL: false))
+            components.queryItems = [
+                URLQueryItem(name: "qualificationRequest", value: requestID.uuidString),
+            ]
+            let requestURL = try #require(components.url)
+            let identity = try #require(server.fixtureRequestIdentity(for: requestURL))
+            #expect(identity.route == "slow-known")
+            #expect(identity.requestID == requestID)
+
+            var unrelatedHost = components
+            unrelatedHost.host = "example.invalid"
+            let unrelatedURL = try #require(unrelatedHost.url)
+            #expect(server.fixtureRequestIdentity(for: unrelatedURL) == nil)
+
+            let missingIdentityURL = try server.url("slow-known")
+            #expect(server.fixtureRequestIdentity(for: missingIdentityURL) == nil)
+        }
+
+        @Test("Slow-known evidence reports the parsed request and fixture length")
+        func slowKnownEvidenceReportsParsedRequestAndFixtureLength() throws {
+            let server = try BrowserDownloadLoopbackServer()
+            defer { server.stop() }
+
+            let requestID = UUID()
+            let connection = try #require(
+                server.accept(NWConnection(host: "127.0.0.1", port: .https, using: .tcp)),
+            )
+            let request = Data(
+                (
+                    "GET \(server.cookiePath)slow-known?qualificationRequest=\(requestID.uuidString) HTTP/1.1\r\n"
+                        + "Host: 127.0.0.1\r\n\r\n"
+                ).utf8,
+            )
+            connection.didReceive(request, complete: false, failed: false)
+
+            let evidence = server.slowKnownEvidence(for: requestID)
+            #expect(evidence["requestCount"] == "1")
+            #expect(evidence["connectionCount"] == "1")
+            #expect(evidence["route"] == "slow-known")
+            #expect(evidence["requestParsed"] == "true")
+            #expect(evidence["expectedBytes"] == String(BrowserDownloadLoopbackServer.slowPayload.count))
+        }
+
+        @Test("Peer EOF during a slow response records pre-deadline closure")
+        func peerEOFDuringSlowResponseRecordsClosure() throws {
+            let server = try BrowserDownloadLoopbackServer()
+            let (connection, requestID) = try slowKnownConnection(server: server)
+
+            connection.didReceive(nil, complete: true, failed: false)
+
+            let evidence = server.slowKnownEvidence(for: requestID)
+            #expect(connection.closed)
+            #expect(evidence["closeReason"] == "peerClosedDuringResponse")
+            #expect(evidence["responseComplete"] == "false")
+            #expect(evidence["closedAtUptime"].flatMap(Double.init) != nil)
+            let elapsed = try #require(evidence["deadlineElapsedMilliseconds"].flatMap(Int.init))
+            #expect((0 ..< 15_000).contains(elapsed))
+
+            connection.close()
+            server.stop()
+        }
+
+        @Test("Peer receive failure during a slow response records pre-deadline closure")
+        func peerReceiveFailureDuringSlowResponseRecordsClosure() throws {
+            let server = try BrowserDownloadLoopbackServer()
+            let (connection, requestID) = try slowKnownConnection(server: server)
+
+            connection.didReceive(nil, complete: false, failed: true)
+
+            let evidence = server.slowKnownEvidence(for: requestID)
+            #expect(connection.closed)
+            #expect(evidence["closeReason"] == "peerReceiveFailedDuringResponse")
+            #expect(evidence["responseComplete"] == "false")
+            #expect(evidence["closedAtUptime"].flatMap(Double.init) != nil)
+            let elapsed = try #require(evidence["deadlineElapsedMilliseconds"].flatMap(Int.init))
+            #expect((0 ..< 15_000).contains(elapsed))
+
+            connection.close()
+            server.stop()
+        }
+
+        private func slowKnownConnection(
+            server: BrowserDownloadLoopbackServer,
+        ) throws -> (BrowserDownloadLoopbackServer.Connection, UUID) {
+            let requestID = UUID()
+            let native = NWConnection(host: "127.0.0.1", port: .https, using: .tcp)
+            let connection = try #require(server.accept(native))
+            let request = Data(
+                (
+                    "GET \(server.cookiePath)slow-known?qualificationRequest=\(requestID.uuidString) HTTP/1.1\r\n"
+                        + "Host: 127.0.0.1\r\n\r\n"
+                ).utf8,
+            )
+            connection.didReceive(request, complete: false, failed: false)
+            return (connection, requestID)
+        }
+
         @Test("A connection parses only its first pipelined request")
         func pipelinedBytesDoNotCreateSecondRequest() throws {
             let server = try BrowserDownloadLoopbackServer()

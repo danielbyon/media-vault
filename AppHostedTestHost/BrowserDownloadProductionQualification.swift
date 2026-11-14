@@ -27,6 +27,7 @@ import WebKit
 enum BrowserDownloadProductionQualification {
     static let argument = "--browser-download-production-qualification"
     static let passiveSceneCensusArgument = "--browser-download-passive-scene-census"
+    static let activeDownloadHomeArgument = "--browser-download-active-download-home"
     static let operatorArrangementArgument = "--browser-download-operator-arrangement"
     static var passiveSceneCensusEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(passiveSceneCensusArgument)
@@ -34,6 +35,11 @@ enum BrowserDownloadProductionQualification {
 
     static var operatorArrangementRequired: Bool {
         ProcessInfo.processInfo.arguments.contains(operatorArrangementArgument)
+    }
+
+    /// Enables real scene-phase forwarding and Immediate Auto-Lock for this qualification only.
+    static var activeDownloadHomeEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(activeDownloadHomeArgument)
     }
 
     #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION && targetEnvironment(simulator)
@@ -52,8 +58,23 @@ enum BrowserDownloadProductionQualification {
 }
 
 #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
+private struct BrowserDownloadSlowKnownRun {
+    let requestID: UUID
+    let initialGeneration: UInt64
+    let startedAt: TimeInterval
+    var operationID: String?
+    var operationGeneration: UInt64?
+    var handoffObserved = false
+    var serverPrefixProcessed = false
+    var progressObserved = false
+    var readinessRecorded = false
+    var terminalAcknowledged = false
+    var connectionClosureRecorded = false
+    var failed = false
+}
+
 /// Every WindowGroup surface shares this process-owned real Root store and download lifetime.
-/// Only unrelated persistence and credentials are deterministic; WebKit and protection remain live.
+/// Credential verification and session settings are deterministic only in active-download mode; WebKit and protection remain live.
 @Observable
 @MainActor
 private final class BrowserDownloadProductionQualificationProcess {
@@ -71,9 +92,15 @@ private final class BrowserDownloadProductionQualificationProcess {
     var observationsJSON = "[]"
     var sceneCensusJSON = "{}"
     var sceneRequestJSON = "{}"
+    private var slowKnownRun: BrowserDownloadSlowKnownRun?
+
+    var slowKnownDownloadStarted: Bool {
+        slowKnownRun != nil
+    }
 
     /// Copy redacted observations only on explicit fixture input, avoiding a Root-layout feedback loop.
     func refreshObservations() {
+        refreshSlowKnownReadiness()
         observationsJSON = evidence.observationsJSON
         inspectFixtureNavigation()
     }
@@ -84,6 +111,7 @@ private final class BrowserDownloadProductionQualificationProcess {
             return
         }
 
+        refreshSlowKnownReadiness()
         observationsJSON = evidence.observationsJSON
         inspectFixtureNavigation()
     }
@@ -303,13 +331,22 @@ private final class BrowserDownloadProductionQualificationProcess {
         let nativeCoordinator = BrowserDownloadNativeCoordinator(owner: downloadOwner)
         coordinator = nativeCoordinator
         var vault = VaultFeature.State(phase: .authenticated, configuredKind: .pin)
+        let activeDownloadHome = BrowserDownloadProductionQualification.activeDownloadHomeEnabled
+        if activeDownloadHome {
+            vault.sessionSettings.autoLockTimeout = .immediately
+        }
         vault.shell.selectedTab = .browser
         let defaults = UserDefaults(suiteName: "BrowserDownloadQualification-\(UUID().uuidString)") ?? UserDefaults()
         store = withDependencies {
             $0.defaultAppStorage = defaults
             $0.calculatorPersistence.load = { nil }
             $0.calculatorPersistence.save = { _ in }
-            $0.vaultCredential = .testValue
+            if activeDownloadHome {
+                $0.vaultCredential = .testValue
+                $0.vaultCredential.verify = { _ in .succeeded }
+                $0.vaultSessionSettings.load = { .init(autoLockTimeout: .immediately) }
+                $0.vaultSessionSettings.save = { _ in }
+            }
             $0.browserSettings.load = {
                 var settings = BrowserSettings()
                 settings.preserveOpenTabs = false
@@ -345,11 +382,12 @@ private final class BrowserDownloadProductionQualificationProcess {
             RootComposition.makeStore(vault: vault)
         }
         nativeCoordinator.qualificationObservation = { event, fields in recorder.record(event, fields) }
-        webKitAdapter.downloadHandoffObserver = { [weak webKitAdapter] download, tabID in
-            recorder.record("nativeDownloadHandoff", [
-                "tab": String(describing: tabID),
-                "sameOrigin": String(download.webView === webKitAdapter?.webView(for: tabID)),
-            ])
+        webKitAdapter.downloadHandoffObserver = { [weak self, weak webKitAdapter] download, tabID in
+            guard let self, let webKitAdapter else {
+                return
+            }
+
+            recordNativeHandoff(download, tabID: tabID, adapter: webKitAdapter)
         }
         recorder.record("fixtureStarted", [
             "authentication": "seeded",
@@ -380,6 +418,7 @@ private final class BrowserDownloadProductionQualificationProcess {
                     "presentation": snapshot.presentation.map(\.requestID.uuidString) ?? "none",
                     "operations": snapshot.records.map(\.id.rawValue.uuidString).joined(separator: ","),
                 ])
+                refreshSlowKnownReadiness(snapshot: snapshot)
                 for record in snapshot.records where record.isReady && !inspected.contains(record.id) {
                     inspected.insert(record.id)
                     inspect(record.id)
@@ -390,6 +429,9 @@ private final class BrowserDownloadProductionQualificationProcess {
         do {
             let loopback = try BrowserDownloadLoopbackServer()
             server = loopback
+            loopback.qualificationEvidenceDidChange = { [weak self] in
+                self?.refreshSlowKnownReadiness()
+            }
             try await loopback.start()
             status = "Loopback ready. Open fixture page, then download attachment PDF."
             evidence.record("loopbackReady", [:])
@@ -414,6 +456,365 @@ private final class BrowserDownloadProductionQualificationProcess {
         store.send(.vault(.shell(.browser(.navigate(url)))))
         evidence.record("fixtureNavigationRequested", ["fixtureRoute": route, "fixtureRequest": requestID])
         refreshPassiveObservations()
+    }
+
+    /// Starts one bounded, real navigation through the mounted production WebView.
+    func startSlowKnownDownload() {
+        guard slowKnownRun == nil, let server,
+              let url = try? server.url("slow-known")
+        else {
+            return
+        }
+
+        let requestID = UUID()
+        slowKnownRun = BrowserDownloadSlowKnownRun(
+            requestID: requestID,
+            initialGeneration: owner.snapshot.generation,
+            startedAt: ProcessInfo.processInfo.systemUptime,
+        )
+        let requestURL = url.appending(queryItems: [
+            URLQueryItem(name: "qualificationRequest", value: requestID.uuidString),
+        ])
+        evidence.record("fixtureNavigationRequested", [
+            "fixtureRoute": "slow-known",
+            "fixtureRequest": requestID.uuidString,
+        ])
+        store.send(.vault(.shell(.browser(.navigate(requestURL)))))
+        status = "Slow-known WKDownload started; waiting for the live readiness witness."
+        refreshSlowKnownReadiness()
+        refreshPassiveObservations()
+    }
+
+    func applyQualificationScenePhase(
+        _ phase: String,
+        applicationPhase: VaultApplicationScenePhase,
+    ) {
+        let generationBefore = owner.snapshot.generation
+        store.send(.applicationPhaseChanged(applicationPhase))
+        let snapshot = owner.snapshot
+        guard let run = slowKnownRun else {
+            return
+        }
+
+        evidence.record("qualificationScenePhaseChanged", [
+            "fixtureRequest": run.requestID.uuidString,
+            "operation": run.operationID ?? "none",
+            "phase": phase,
+            "applicationState": applicationStateLabel,
+            "generationBefore": String(generationBefore),
+            "generation": String(snapshot.generation),
+            "authorizationRevokedSynchronously": String(
+                phase == "background" && snapshot.generation != generationBefore,
+            ),
+            "activeWriterCount": String(owner.activeCount),
+        ])
+        observationsJSON = evidence.observationsJSON
+    }
+
+    private var applicationStateLabel: String {
+        switch UIApplication.shared.applicationState {
+        case .active:
+            return "active"
+        case .inactive:
+            return "inactive"
+        case .background:
+            return "background"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    private var isVaultAuthenticated: Bool {
+        if case .authenticated = store.vault.phase {
+            return true
+        }
+        return false
+    }
+
+    private func recordNativeHandoff(
+        _ download: WKDownload,
+        tabID: BrowserTabID,
+        adapter: BrowserWebKitAdapter,
+    ) {
+        let identity = download.originalRequest?.url.flatMap { server?.fixtureRequestIdentity(for: $0) }
+        let sameOrigin = download.webView === adapter.webView(for: tabID)
+        var fields = [
+            "tab": String(describing: tabID),
+            "sameOrigin": String(sameOrigin),
+            "fixtureOrigin": String(identity != nil),
+        ]
+        if let identity {
+            fields["fixtureRoute"] = identity.route
+            fields["fixtureRequest"] = identity.requestID.uuidString
+        }
+        evidence.record("nativeDownloadHandoff", fields)
+
+        guard var run = slowKnownRun, let identity,
+              identity.route == "slow-known", identity.requestID == run.requestID,
+              sameOrigin
+        else {
+            observationsJSON = evidence.observationsJSON
+            return
+        }
+
+        run.handoffObserved = true
+        slowKnownRun = run
+        refreshSlowKnownReadiness()
+    }
+
+    private func refreshSlowKnownReadiness(snapshot: BrowserDownloadSnapshot? = nil) {
+        guard var run = slowKnownRun, let server else {
+            return
+        }
+
+        let current = snapshot ?? owner.snapshot
+        let requestID = run.requestID.uuidString
+        let serverEvidence = server.slowKnownEvidence(for: run.requestID)
+        recordSlowKnownServerPrefix(&run, requestID: requestID, evidence: serverEvidence)
+        associateSlowKnownOperation(&run, snapshot: current)
+
+        if !run.readinessRecorded, let operationID = run.operationID {
+            let record = current.records.first { $0.id.rawValue.uuidString == operationID }
+            recordSlowKnownStateFailure(&run, requestID: requestID, snapshot: current, record: record)
+            recordSlowKnownProgress(&run, requestID: requestID, snapshot: current, record: record)
+            recordSlowKnownReadiness(
+                &run,
+                requestID: requestID,
+                snapshot: current,
+                record: record,
+                serverEvidence: serverEvidence,
+            )
+        }
+
+        if run.readinessRecorded, !run.terminalAcknowledged,
+           owner.activeCount == 0, owner.retainedCount == 0,
+           !owner.privacyCleanupPending, !current.cleanupNeedsRetry {
+            evidence.record("slowKnownWriterTerminalAcknowledged", [
+                "fixtureRequest": requestID,
+                "operation": run.operationID ?? "unavailable",
+                "connectionID": serverEvidence["connectionID"] ?? "unavailable",
+                "generation": String(current.generation),
+                "activeWriterCount": "0",
+                "retainedRecordCount": "0",
+                "cleanupPending": "false",
+            ])
+            run.terminalAcknowledged = true
+        }
+
+        if !run.connectionClosureRecorded, let operationID = run.operationID,
+           serverEvidence["closed"] == "true",
+           let closedAtUptime = serverEvidence["closedAtUptime"].flatMap(Double.init),
+           let deadlineElapsed = serverEvidence["deadlineElapsedMilliseconds"] {
+            evidence.record("slowKnownConnectionClosed", [
+                "fixtureRequest": requestID,
+                "operation": operationID,
+                "connectionID": serverEvidence["connectionID"] ?? "unavailable",
+                "connectionClosed": "true",
+                "closeReason": serverEvidence["closeReason"] ?? "unavailable",
+                "responseComplete": serverEvidence["responseComplete"] ?? "unavailable",
+                "deadlineElapsedMilliseconds": deadlineElapsed,
+                "connectionClosedMonotonicSeconds": evidence.monotonicSeconds(forUptime: closedAtUptime),
+            ])
+            run.connectionClosureRecorded = true
+        }
+
+        slowKnownRun = run
+        observationsJSON = evidence.observationsJSON
+    }
+
+    private func recordSlowKnownServerPrefix(
+        _ run: inout BrowserDownloadSlowKnownRun,
+        requestID: String,
+        evidence serverEvidence: [String: String],
+    ) {
+        let requestCount = Int(serverEvidence["requestCount"] ?? "0") ?? 0
+        let connectionCount = Int(serverEvidence["connectionCount"] ?? "0") ?? 0
+        if requestCount > 1 || connectionCount > 1 {
+            recordSlowKnownFailure(
+                requestCount > 1 ? "duplicateRequest" : "multipleConnections",
+                requestID: requestID,
+                run: &run,
+            )
+        }
+
+        guard !run.serverPrefixProcessed,
+              requestCount == 1, connectionCount == 1,
+              serverEvidence["route"] == "slow-known",
+              serverEvidence["requestParsed"] == "true",
+              serverEvidence["sendStackState"] == "stackPrefixProcessed",
+              let connectionID = serverEvidence["connectionID"],
+              let expectedBytes = serverEvidence["expectedBytes"],
+              let prefixBytes = serverEvidence["prefixBytes"]
+        else {
+            return
+        }
+
+        evidence.record("slowKnownServerPrefixProcessed", [
+            "fixtureRequest": requestID,
+            "route": "slow-known",
+            "requestParsed": "true",
+            "requestCount": "1",
+            "connectionCount": "1",
+            "connectionID": connectionID,
+            "expectedBytes": expectedBytes,
+            "prefixBytes": prefixBytes,
+            "sendStackState": "stackPrefixProcessed",
+            "responseComplete": serverEvidence["responseComplete"] ?? "unknown",
+            "connectionClosed": serverEvidence["closed"] ?? "unknown",
+        ])
+        run.serverPrefixProcessed = true
+    }
+
+    private func associateSlowKnownOperation(
+        _ run: inout BrowserDownloadSlowKnownRun,
+        snapshot: BrowserDownloadSnapshot,
+    ) {
+        guard run.handoffObserved, run.operationID == nil,
+              snapshot.generation == run.initialGeneration,
+              snapshot.records.count == 1, owner.activeCount == 1,
+              let record = snapshot.records.first
+        else {
+            return
+        }
+
+        run.operationID = record.id.rawValue.uuidString
+        run.operationGeneration = snapshot.generation
+    }
+
+    private func recordSlowKnownStateFailure(
+        _ run: inout BrowserDownloadSlowKnownRun,
+        requestID: String,
+        snapshot: BrowserDownloadSnapshot,
+        record: BrowserDownloadRecord?,
+    ) {
+        if snapshot.generation != run.initialGeneration {
+            recordSlowKnownFailure("generationChanged", requestID: requestID, run: &run)
+        } else if snapshot.cleanupNeedsRetry || owner.privacyCleanupPending {
+            recordSlowKnownFailure("cleanupPending", requestID: requestID, run: &run)
+        } else if !snapshot.isAvailable || !isVaultAuthenticated {
+            recordSlowKnownFailure("authorizationUnavailable", requestID: requestID, run: &run)
+        } else if snapshot.presentation != nil {
+            recordSlowKnownFailure("presentationAppeared", requestID: requestID, run: &run)
+        } else if owner.activeCount != 1 || snapshot.records.count != 1 {
+            recordSlowKnownFailure("writerNotSoleActiveRecord", requestID: requestID, run: &run)
+        } else if record?.isReady == true {
+            recordSlowKnownFailure("writerCompletedBeforeReadiness", requestID: requestID, run: &run)
+        } else if record == nil {
+            recordSlowKnownFailure("writerTerminatedBeforeReadiness", requestID: requestID, run: &run)
+        }
+    }
+
+    private func recordSlowKnownProgress(
+        _ run: inout BrowserDownloadSlowKnownRun,
+        requestID: String,
+        snapshot: BrowserDownloadSnapshot,
+        record: BrowserDownloadRecord?,
+    ) {
+        guard !run.progressObserved, let operationID = run.operationID,
+              let record, let expectedBytes = record.expectedBytes,
+              record.receivedBytes > 0
+        else {
+            return
+        }
+
+        let authorizationValid = snapshot.isAvailable && isVaultAuthenticated
+        evidence.record("slowKnownProgress", [
+            "fixtureRequest": requestID,
+            "operation": operationID,
+            "generation": String(snapshot.generation),
+            "operationGeneration": String(run.operationGeneration ?? snapshot.generation),
+            "expectedBytes": String(expectedBytes),
+            "receivedBytes": String(record.receivedBytes),
+            "activeWriterCount": String(owner.activeCount),
+            "recordCount": String(snapshot.records.count),
+            "available": String(snapshot.isAvailable),
+            "authorizationValid": String(authorizationValid),
+            "isReady": String(record.isReady),
+            "presentation": snapshot.presentation?.requestID.uuidString ?? "none",
+            "privacyCleanupPending": String(owner.privacyCleanupPending),
+        ])
+        run.progressObserved = true
+    }
+
+    private func recordSlowKnownReadiness(
+        _ run: inout BrowserDownloadSlowKnownRun,
+        requestID: String,
+        snapshot: BrowserDownloadSnapshot,
+        record: BrowserDownloadRecord?,
+        serverEvidence: [String: String],
+    ) {
+        guard !run.failed, run.handoffObserved, run.serverPrefixProcessed,
+              run.progressObserved, let operationID = run.operationID,
+              let record, let expectedBytes = record.expectedBytes,
+              let serverExpectedBytes = serverEvidence["expectedBytes"],
+              String(expectedBytes) == serverExpectedBytes,
+              slowKnownOwnerIsActive(run, snapshot: snapshot, record: record, expectedBytes: expectedBytes),
+              slowKnownServerIsPartial(serverEvidence)
+        else {
+            return
+        }
+
+        evidence.record("slowKnownReadiness", [
+            "fixtureRequest": requestID,
+            "operation": operationID,
+            "operationGeneration": String(run.operationGeneration ?? snapshot.generation),
+            "initialGeneration": String(run.initialGeneration),
+            "generation": String(snapshot.generation),
+            "expectedBytes": String(expectedBytes),
+            "serverExpectedBytes": serverExpectedBytes,
+            "receivedBytes": String(record.receivedBytes),
+            "activeWriterCount": String(owner.activeCount),
+            "recordCount": String(snapshot.records.count),
+            "available": String(snapshot.isAvailable),
+            "authorizationValid": "true",
+            "isReady": "false",
+            "presentation": "none",
+            "privacyCleanupPending": "false",
+            "connectionID": serverEvidence["connectionID"] ?? "unavailable",
+            "responseComplete": "false",
+            "connectionClosed": "false",
+            "elapsedMilliseconds": String(Int((ProcessInfo.processInfo.systemUptime - run.startedAt) * 1_000)),
+        ])
+        run.readinessRecorded = true
+    }
+
+    private func slowKnownOwnerIsActive(
+        _ run: BrowserDownloadSlowKnownRun,
+        snapshot: BrowserDownloadSnapshot,
+        record: BrowserDownloadRecord,
+        expectedBytes: Int64,
+    ) -> Bool {
+        snapshot.generation == run.initialGeneration
+            && run.operationGeneration == snapshot.generation
+            && snapshot.records.count == 1 && owner.activeCount == 1
+            && snapshot.isAvailable && isVaultAuthenticated
+            && snapshot.presentation == nil && !snapshot.cleanupNeedsRetry
+            && !owner.privacyCleanupPending
+            && record.receivedBytes > 0 && record.receivedBytes < expectedBytes
+            && !record.isReady
+    }
+
+    private func slowKnownServerIsPartial(_ serverEvidence: [String: String]) -> Bool {
+        serverEvidence["requestCount"] == "1"
+            && serverEvidence["connectionCount"] == "1"
+            && serverEvidence["responseComplete"] == "false"
+            && serverEvidence["closed"] == "false"
+    }
+
+    private func recordSlowKnownFailure(
+        _ reason: String,
+        requestID: String,
+        run: inout BrowserDownloadSlowKnownRun,
+    ) {
+        guard !run.failed else {
+            return
+        }
+
+        evidence.record("slowKnownReadinessFailure", [
+            "fixtureRequest": requestID,
+            "reason": reason,
+        ])
+        run.failed = true
     }
 
     /// Checks the selected production tab and its actual document, without replaying a request.
@@ -655,6 +1056,9 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                             .accessibilityIdentifier("downloadQualificationOpenFixturePage")
                         Button("Download attachment PDF") { process.navigate("attachment") }
                             .accessibilityIdentifier("downloadQualificationDownloadAttachment")
+                        Button("Start slow-known download") { process.startSlowKnownDownload() }
+                            .accessibilityIdentifier("downloadQualificationStartSlowKnown")
+                            .disabled(process.slowKnownDownloadStarted)
                         Button("Remove authentication") { process.loseAuthentication() }
                             .accessibilityIdentifier("downloadQualificationRemoveAuthentication")
                         Button("Arm one removal failure") {
@@ -704,7 +1108,27 @@ private struct BrowserDownloadProductionQualificationRoot: View {
         }
         .task { await process.start() }
         .onAppear { process.refreshSceneCensus() }
-        .onChange(of: scenePhase) { _, _ in
+        .onChange(of: scenePhase, initial: true) { _, newPhase in
+            let phase: String
+            let applicationPhase: VaultApplicationScenePhase
+            switch newPhase {
+            case .active:
+                phase = "active"
+                applicationPhase = .active
+            case .inactive:
+                phase = "inactive"
+                applicationPhase = .inactive
+            case .background:
+                phase = "background"
+                applicationPhase = .background
+            @unknown default:
+                phase = "unknown"
+                applicationPhase = .unknown
+            }
+            if BrowserDownloadProductionQualification.activeDownloadHomeEnabled {
+                process.applyQualificationScenePhase(phase, applicationPhase: applicationPhase)
+            }
+
             guard BrowserDownloadProductionQualification.passiveSceneCensusEnabled else {
                 return
             }
@@ -786,7 +1210,12 @@ private final class BrowserDownloadProductionEvidence {
 
     /// Current timestamp on the same monotonic clock used by qualification events.
     var currentMonotonicSeconds: String {
-        String(ProcessInfo.processInfo.systemUptime - origin)
+        monotonicSeconds(forUptime: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// Converts a server uptime sample onto the event recorder's monotonic timeline.
+    func monotonicSeconds(forUptime uptime: TimeInterval) -> String {
+        String(uptime - origin)
     }
 
     private let runID = UUID().uuidString
