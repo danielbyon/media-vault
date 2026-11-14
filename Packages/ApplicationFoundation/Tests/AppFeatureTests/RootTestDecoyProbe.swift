@@ -6,6 +6,7 @@
 //
 
 import AppFeature
+import BrowserFeature
 import ComposableArchitecture
 import DecoySupport
 import MediaLibrary
@@ -115,6 +116,9 @@ func makeRootStore(
     now: @escaping @Sendable () -> ContinuousClock.Instant? = { ContinuousClock().now },
     applicationReturnPending: Bool = false,
     mediaLibrary: MediaLibraryClient? = nil,
+    browserDownloadAuthorizationInvalidation: @escaping @Sendable () -> BrowserDownloadSnapshot = {
+        BrowserDownloadSnapshot()
+    },
 ) -> TestStoreOf<RootFeature> {
     let fixture = decoy ?? makeRootTestDecoy()
     var initialState = RootFeature.State(decoySession: fixture.session, vault: vault)
@@ -129,6 +133,7 @@ func makeRootStore(
         $0.vaultSessionClock.now = now
         $0.vaultSessionSettings.load = { .init() }
         $0.vaultSessionSettings.save = { _ in }
+        $0.browserDownloads.invalidateAuthorization = browserDownloadAuthorizationInvalidation
         if let mediaLibrary {
             $0.mediaLibrary = mediaLibrary
         }

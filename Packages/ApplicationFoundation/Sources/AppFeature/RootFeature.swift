@@ -6,6 +6,7 @@
 //
 
 import BrowserFeature
+import Combine
 import ComposableArchitecture
 import CoreFoundation
 import DecoySupport
@@ -115,6 +116,9 @@ public struct RootFeature {
 
     @Dependency(\.browserProfileConfigurationFence)
     var browserProfileConfigurationFence
+
+    @Dependency(\.browserDownloads)
+    var browserDownloads
 
     private let definition: DecoyDefinition
 
@@ -267,6 +271,7 @@ public struct RootFeature {
             .commitGlobalLock(
                 advanceResourceLoadGeneration: mediaLibrary.advanceResourceLoadGeneration,
                 advanceBrowserProfileConfigurationGeneration: browserProfileConfigurationFence.advance,
+                invalidateBrowserDownloadAuthorization: browserDownloads.invalidateAuthorization,
             )
             .map(Action.vault)
         let update = updateTriggerConfiguration(state: state)
@@ -499,6 +504,11 @@ private final class DecoyAttemptRelay {
 @MainActor
 public struct RootView: View {
     private let store: StoreOf<RootFeature>
+    private let downloads: BrowserDownloadClient
+    private let privacyGeneration: @MainActor () -> UInt64
+    private let downloadHost: @MainActor (BrowserDownloadHost) -> BrowserDownloadHost
+    @State
+    private var downloadPrivacyGeneration: UInt64 = 0
     @Environment(\.scenePhase)
     private var scenePhase
 
@@ -506,12 +516,36 @@ public struct RootView: View {
     ///
     /// - Parameter store: The store that owns the root composition.
     public init(store: StoreOf<RootFeature>) {
+        self.init(
+            store: store,
+            downloads: .liveValue,
+            privacyGeneration: { BrowserDownloadPrivacy.generation },
+            downloadHost: { $0 },
+        )
+    }
+
+    /// Internal test composition owns the download client/coordinator without replacing live root
+    /// authentication or the body-to-layout render-token protocol.
+    init(
+        store: StoreOf<RootFeature>,
+        downloads: BrowserDownloadClient,
+        privacyGeneration: @escaping @MainActor () -> UInt64,
+        downloadHost: @escaping @MainActor (BrowserDownloadHost) -> BrowserDownloadHost,
+    ) {
         self.store = store
+        self.downloads = downloads
+        self.privacyGeneration = privacyGeneration
+        self.downloadHost = downloadHost
     }
 
     /// Renders the decoy session, credential surface, or authenticated shell.
     public var body: some View {
-        ZStack {
+        let renderToken = BrowserDownloadRootRenderToken(
+            surfaceID: rootSurfaceIdentity,
+            authenticated: store.vault.phase == .authenticated,
+            privacyGeneration: downloadPrivacyGeneration,
+        )
+        return ZStack {
             surface
                 .padding(
                     .top,
@@ -545,8 +579,57 @@ public struct RootView: View {
         .background {
             ScenePrivacyCover(isCovered: privacyCoverIsVisible)
         }
+        .background {
+            downloadHost(BrowserDownloadHost(
+                renderToken: renderToken,
+                currentRenderToken: {
+                    .init(
+                        surfaceID: rootSurfaceIdentity,
+                        authenticated: store.vault.phase == .authenticated,
+                        privacyGeneration: privacyGeneration(),
+                    )
+                },
+                authenticated: { store.vault.phase == .authenticated },
+                observeAuthentication: { changed in
+                    // Store.publisher delivers synchronously on UIScheduler when the store is
+                    // mutated on MainActor. Admission also reads the live phase, never this projection.
+                    let observation = store.publisher
+                        .map { $0.vault.phase == .authenticated }
+                        .removeDuplicates()
+                        .sink { _ in MainActor.assumeIsolated { changed() } }
+                    return { observation.cancel() }
+                },
+            ))
+            .frame(width: 0, height: 0)
+        }
+        .task {
+            // This projection forces a new body/token after privacy revocation even while Browser
+            // is unmounted. Live admission continues to read the store and native registry directly.
+            for await snapshot in await downloads.events() {
+                downloadPrivacyGeneration = snapshot.generation
+            }
+        }
         .task {
             await store.send(.task).finish()
+        }
+    }
+
+    private var rootSurfaceIdentity: String {
+        switch store.vault.phase {
+        case .setup:
+            "setup"
+        case .authentication:
+            "authentication"
+        case .authenticated:
+            "authenticated"
+        case .unavailable:
+            "unavailable"
+        case .loading:
+            "loading"
+        case .unconfigured:
+            "unconfigured"
+        case .locked:
+            "locked"
         }
     }
 

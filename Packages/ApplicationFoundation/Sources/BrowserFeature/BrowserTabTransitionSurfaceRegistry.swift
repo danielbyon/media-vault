@@ -363,6 +363,13 @@ enum BrowserTabTransitionEvent: Equatable {
 }
 
 struct BrowserTabTransitionDiagnostics {
+    #if DEBUG
+    /// Opt-in, path-free transition evidence for a standalone qualification host. The default
+    /// observer is nil; this does not participate in presentation, readiness or restoration.
+    @MainActor
+    static var qualificationObserver: (@MainActor (String, [String: String]) -> Void)?
+    #endif
+
     var onExecution: ((BrowserTabTransitionExecution) -> Void)?
     var onAnimatorCreated: ((UIViewPropertyAnimator) -> Void)?
     var onEvent: ((BrowserTabTransitionEvent) -> Void)?

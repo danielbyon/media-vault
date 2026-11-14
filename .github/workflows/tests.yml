@@ -19,7 +19,7 @@ jobs:
   test:
     name: iOS tests
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
 
@@ -60,18 +60,18 @@ jobs:
             swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-
 
       - name: Run tests
-        run: make test VERIFIED_SIMULATOR_UDID="${{ steps.toolchain.outputs.simulator_udid }}" TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
+        run: make test VERIFIED_SIMULATOR_UDID="${{ steps.toolchain.outputs.simulator_udid }}" VERIFIED_IPAD_SIMULATOR_UDID="${{ steps.toolchain.outputs.ipad_simulator_udid }}" TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
 
-      # Preserve both iPhone result bundles for diagnosis. The upload is
+      # Preserve the iPhone and iPad result bundles for diagnosis. The upload is
       # advisory: a missing bundle is a warning and an upload failure must not
       # change the test step outcome or the blocking gate.
-      - name: Upload iPhone test evidence
-        id: upload_iphone_evidence
+      - name: Upload iOS test evidence
+        id: upload_ios_evidence
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: iphone-test-evidence
+          name: ios-test-evidence
           path: .build/TestResults
           if-no-files-found: warn
 

@@ -596,6 +596,7 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
         #expect(advancedGenerations.value == [1])
@@ -615,6 +616,7 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
 
@@ -645,6 +647,7 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
 
@@ -665,6 +668,7 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
 
@@ -688,6 +692,7 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
 
@@ -733,6 +738,7 @@ struct RootFeatureTests {
                         _ = $0.vault.commitGlobalLock(
                             advanceResourceLoadGeneration: {},
                             advanceBrowserProfileConfigurationGeneration: { _ in },
+                            invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
                         )
                     }
                 }
@@ -754,6 +760,7 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
         #expect(store.state.vault.phase == .locked)
@@ -841,6 +848,7 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
 
@@ -879,6 +887,7 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
 
@@ -912,11 +921,61 @@ struct RootFeatureTests {
             _ = $0.vault.commitGlobalLock(
                 advanceResourceLoadGeneration: {},
                 advanceBrowserProfileConfigurationGeneration: { _ in },
+                invalidateBrowserDownloadAuthorization: { BrowserDownloadSnapshot() },
             )
         }
         #expect(store.state.vault.phase == .locked)
         #expect(mediaLibrary.currentResourceLoadGeneration == 1)
         await store.finish()
+    }
+
+    @Test("Ordinary, Settings, emergency, and lifecycle locks revoke downloads in the reducer turn")
+    @MainActor
+    func globalLockRoutesRevokeBrowserDownloadsSynchronously() async {
+        let invalidations = LockIsolated(0)
+        let invalidateDownloads: @Sendable () -> BrowserDownloadSnapshot = {
+            invalidations.withValue { $0 += 1 }
+            return BrowserDownloadSnapshot()
+        }
+
+        let ordinaryLock = makeRootStore(
+            vault: VaultFeature.State(phase: .authenticated),
+            browserDownloadAuthorizationInvalidation: invalidateDownloads,
+        )
+        await ordinaryLock.send(.vault(.lock))
+        #expect(invalidations.value == 1)
+        await ordinaryLock.finish()
+
+        var settingsVault = VaultFeature.State(phase: .authenticated)
+        settingsVault.shell.settingsPresented = true
+        let settingsLock = makeRootStore(
+            vault: settingsVault,
+            browserDownloadAuthorizationInvalidation: invalidateDownloads,
+        )
+        await settingsLock.send(.vault(.lock))
+        #expect(invalidations.value == 2)
+        #expect(!settingsLock.state.vault.shell.settingsPresented)
+        await settingsLock.finish()
+
+        var emergencyVault = VaultFeature.State(phase: .authenticated)
+        emergencyVault.sessionSettings.emergencyLockGesture = .shake
+        let emergencyLock = makeRootStore(
+            vault: emergencyVault,
+            browserDownloadAuthorizationInvalidation: invalidateDownloads,
+        )
+        await emergencyLock.send(.emergencyLockGestureRecognized(gesture: .shake, isForeground: true))
+        #expect(invalidations.value == 3)
+        await emergencyLock.finish()
+
+        var expiringVault = VaultFeature.State(phase: .authenticated)
+        expiringVault.sessionSettings.autoLockTimeout = .immediately
+        let lifecycleExpiry = makeRootStore(
+            vault: expiringVault,
+            browserDownloadAuthorizationInvalidation: invalidateDownloads,
+        )
+        await lifecycleExpiry.send(.applicationPhaseChanged(.background))
+        #expect(invalidations.value == 4)
+        await lifecycleExpiry.finish()
     }
 
     @Test("Late emergency gesture callbacks respect current policy and vault phase")

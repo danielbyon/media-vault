@@ -16,6 +16,27 @@ import UIKit
 public struct BrowserView: View {
     private let store: StoreOf<BrowserFeature>
     private let reduceMotionOverride: Bool?
+    #if DEBUG
+    @Environment(\.qualificationBrowserHostingContext)
+    private var qualificationHostingContext
+    #endif
+
+    private var hostingWebKitAdapter: BrowserWebKitAdapter {
+        #if DEBUG
+        qualificationHostingContext?.adapter ?? .shared
+        #else
+        .shared
+        #endif
+    }
+
+    private var hostingReadinessCoordinator: BrowserWebKitReadinessCoordinator {
+        #if DEBUG
+        qualificationHostingContext?.readinessCoordinator ?? webKitReadinessCoordinator
+        #else
+        webKitReadinessCoordinator
+        #endif
+    }
+
     @Environment(\.horizontalSizeClass)
     private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion)
@@ -112,6 +133,86 @@ public struct BrowserView: View {
 
     /// Renders the selected browser endpoint or the app-owned tab overview.
     public var body: some View {
+        browserLifecycleContent
+            .sheet(isPresented: Binding(
+                get: { store.downloadsArePresented },
+                set: { store.send(.downloadsPresented($0)) },
+            )) {
+                BrowserDownloadsView(store: store)
+            }
+            .sheet(isPresented: libraryPresentationBinding) { BrowserLibraryView(store: store) }
+            .sheet(isPresented: bookmarkEditorPresentationBinding) {
+                BrowserBookmarkEditorView(store: store)
+            }
+            .sheet(isPresented: sharePresentationBinding) {
+                if let url = store.shareURL {
+                    BrowserShareSheet(url: url)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if !store.downloadsArePresented, let notice = store.downloads.notice {
+                    Text(notice.message)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(.regularMaterial)
+                        .accessibilityIdentifier("browserDownloadNotice")
+                }
+            }
+            .safeAreaInset(edge: .top) {
+                if store.findDraft != nil {
+                    BrowserFindBar(store: store)
+                }
+            }
+            .confirmationDialog(destructiveTitle, isPresented: Binding(
+                get: { store.destructiveConfirmation != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        store.send(.destructiveConfirmationDismissed)
+                    }
+                },
+            ), titleVisibility: .visible) {
+                Button("Confirm", role: .destructive) { store.send(.destructiveActionConfirmed) }
+            }
+            .confirmationDialog(backForwardTitle, isPresented: Binding(
+                get: { store.backForwardList != nil },
+                set: {
+                    if !$0 {
+                        store.send(.backForwardListDismissed)
+                    }
+                },
+            ), titleVisibility: .visible) {
+                ForEach(store.backForwardList?.entries ?? []) { entry in
+                    Button(entry.title ?? entry.url.host ?? entry.url.absoluteString) {
+                        store.send(.backForwardEntrySelected(entry.token))
+                    }
+                }
+            }
+            .confirmationDialog(newTabDispositionTitle, isPresented: Binding(
+                get: { store.pendingNewTab != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        store.send(.newTabDispositionDismissed)
+                    }
+                },
+            ), titleVisibility: .visible) {
+                Button("In Foreground") {
+                    store.send(.newTabDispositionSelected(.foreground))
+                }
+                Button("In Background") {
+                    store.send(.newTabDispositionSelected(.background))
+                }
+                Button("Cancel", role: .cancel) {
+                    store.send(.newTabDispositionDismissed)
+                }
+            }
+    }
+
+    /// Keep transition/geometry observation in its original order, with a separate opaque view type
+    /// so the compiler does not infer every lifecycle, sheet, and dialog modifier in one expression.
+    private var observedBrowserContent: some View {
         ZStack {
             selectedContentWithChrome
 
@@ -236,74 +337,23 @@ public struct BrowserView: View {
         .onPreferenceChange(BrowserChromeHeightPreferenceKey.self) { height in
             chromeLayoutHeight = height
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
-            cancelTabTransition()
-            store.send(.previewCacheEvicted)
-        }
-        .task { initializeBrowserLifecycle() }
-        .task { await store.send(.task).finish() }
-        .onDisappear {
-            cancelTabTransition()
-            if store.presentation == .tabOverview {
-                commitTabOverviewScrollPosition(tabOverviewScrollPosition.commit())
+    }
+
+    private var browserLifecycleContent: some View {
+        observedBrowserContent
+            .onReceive(NotificationCenter.default
+                .publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+                    cancelTabTransition()
+                    store.send(.previewCacheEvicted)
             }
-        }
-        .sheet(isPresented: libraryPresentationBinding) { BrowserLibraryView(store: store) }
-        .sheet(isPresented: bookmarkEditorPresentationBinding) {
-            BrowserBookmarkEditorView(store: store)
-        }
-        .sheet(isPresented: sharePresentationBinding) {
-            if let url = store.shareURL {
-                BrowserShareSheet(url: url)
-            }
-        }
-        .safeAreaInset(edge: .top) {
-            if store.findDraft != nil {
-                BrowserFindBar(store: store)
-            }
-        }
-        .confirmationDialog(destructiveTitle, isPresented: Binding(
-            get: { store.destructiveConfirmation != nil },
-            set: { isPresented in
-                if !isPresented {
-                    store.send(.destructiveConfirmationDismissed)
-                }
-            },
-        ), titleVisibility: .visible) {
-            Button("Confirm", role: .destructive) { store.send(.destructiveActionConfirmed) }
-        }
-        .confirmationDialog(backForwardTitle, isPresented: Binding(
-            get: { store.backForwardList != nil },
-            set: {
-                if !$0 {
-                    store.send(.backForwardListDismissed)
-                }
-            },
-        ), titleVisibility: .visible) {
-            ForEach(store.backForwardList?.entries ?? []) { entry in
-                Button(entry.title ?? entry.url.host ?? entry.url.absoluteString) {
-                    store.send(.backForwardEntrySelected(entry.token))
+            .task { initializeBrowserLifecycle() }
+            .task { await store.send(.task).finish() }
+            .onDisappear {
+                cancelTabTransition()
+                if store.presentation == .tabOverview {
+                    commitTabOverviewScrollPosition(tabOverviewScrollPosition.commit())
                 }
             }
-        }
-        .confirmationDialog(newTabDispositionTitle, isPresented: Binding(
-            get: { store.pendingNewTab != nil },
-            set: { isPresented in
-                if !isPresented {
-                    store.send(.newTabDispositionDismissed)
-                }
-            },
-        ), titleVisibility: .visible) {
-            Button("In Foreground") {
-                store.send(.newTabDispositionSelected(.foreground))
-            }
-            Button("In Background") {
-                store.send(.newTabDispositionSelected(.background))
-            }
-            Button("Cancel", role: .cancel) {
-                store.send(.newTabDispositionDismissed)
-            }
-        }
     }
 }
 
@@ -439,9 +489,10 @@ extension BrowserView {
                     tabID: tab.id,
                     onRefresh: { store.send(.pullToRefresh) },
                     transitionRegistry: tabTransitionUIKitCoordinator.surfaceRegistry,
+                    adapter: hostingWebKitAdapter,
                     isProfileConfigurationReady: store.canCreateWebKitContext,
                     readinessContext: webKitReadinessContext(for: tab),
-                    readinessCoordinator: webKitReadinessCoordinator,
+                    readinessCoordinator: hostingReadinessCoordinator,
                     refreshGestureArbitrator: refreshGestureArbitrator,
                     softwareKeyboardPresence: softwareKeyboardPresence,
                 )
@@ -504,7 +555,7 @@ extension BrowserView {
     /// Supplies lifecycle state for the current reducer transition.
     private func webKitReadinessContext(for tab: BrowserTab) -> BrowserWebKitReadinessContext {
         let navigationOperationID = store.previewState.operation(for: tab.id)
-        return webKitReadinessCoordinator.context(
+        return hostingReadinessCoordinator.context(
             navigationOperationID: navigationOperationID,
         )
     }
@@ -649,6 +700,14 @@ extension BrowserView {
         action: @escaping () -> Void,
     ) {
         let transitionToken = tabTransitionUIKitCoordinator.nextTransitionToken()
+        #if DEBUG
+        recordQualificationBrowserState(
+            "transitionRequested",
+            tabID: tabID,
+            token: transitionToken,
+            direction: direction,
+        )
+        #endif
         let destinationPreparation: (() -> BrowserTabTransitionDestinationPreparation)? =
             if direction == .toOverview {
                 {
@@ -677,8 +736,26 @@ extension BrowserView {
 
                 tabOverviewScrollPosition.invalidateTransitionRequest(for: token)
             },
-            onPresentationChange: action,
+            onPresentationChange: {
+                action()
+                #if DEBUG
+                recordQualificationBrowserState(
+                    "transitionPresentationChanged",
+                    tabID: tabID,
+                    token: transitionToken,
+                    direction: direction,
+                )
+                #endif
+            },
             onPresentationUnavailable: {
+                #if DEBUG
+                recordQualificationBrowserState(
+                    "transitionPresentationUnavailable",
+                    tabID: tabID,
+                    token: transitionToken,
+                    direction: direction,
+                )
+                #endif
                 switch direction {
                 case .toBrowsing:
                     store.send(.showTabOverviewTapped)
@@ -689,8 +766,29 @@ extension BrowserView {
         )
     }
 
+    #if DEBUG
+    private func recordQualificationBrowserState(
+        _ event: String,
+        tabID: BrowserTabID,
+        token: Int,
+        direction: BrowserTabTransitionDirection,
+    ) {
+        tabTransitionUIKitCoordinator.recordQualificationState(event, details: [
+            "requestedToken": String(token),
+            "requestedDirection": String(describing: direction),
+            "selectedTabID": String(describing: store.selectedTabID),
+            "presentation": String(describing: store.presentation),
+            "previewRevision": String(describing: store.previewState.revision(for: tabID)),
+            "overviewVisualMounted": String(tabTransitionState.overviewVisualMounted),
+            "restorationLifecycle": String(describing: store.openTabsEntryLifecycle),
+            "lazyRestoredURLPendingForTarget": String(store.lazyRestoredWebTabURLs[tabID] != nil),
+            "pendingWebAction": String(store.pendingWebAction != nil),
+        ], tabID: tabID)
+    }
+    #endif
+
     private func cancelTabTransition() {
-        webKitReadinessCoordinator.invalidate()
+        hostingReadinessCoordinator.invalidate()
         BrowserTabTransitionPresentationCoordinator.cancel(
             coordinator: tabTransitionUIKitCoordinator,
             isOverviewPresented: store.presentation == .tabOverview,

@@ -161,6 +161,9 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
             }
 
             self.diagnostics.onEvent?(event)
+            #if DEBUG
+            recordQualificationState("transitionRegistryEvent", details: ["registryEvent": String(describing: event)])
+            #endif
             if case let .targetPresentationUnavailable(tabID) = event,
                session?.tabID == tabID {
                 handlePresentationUnavailable()
@@ -194,6 +197,9 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
             materializePresentation()
         }
         session.generation += 1
+        #if DEBUG
+        recordQualificationState("transitionBegin")
+        #endif
         session.destinationWaitProbe?.invalidate()
         session.destinationWaitProbe = nil
         session.destinationWaitTurnsRemaining = 0
@@ -256,7 +262,52 @@ final class BrowserTabTransitionUIKitCoordinator: ObservableObject {
         clearParkedSurfaceAssociation()
     }
 
-    /// Mounts the common overlay coordinate space.
+    // Mounts the common overlay coordinate space.
+    #if DEBUG
+    /// Samples both registered boundaries in the same overlay coordinate space. The evidence
+    /// distinguishes missing registration, detachment and zero geometry without changing guards.
+    func recordQualificationState(
+        _ event: String,
+        details: [String: String] = [:],
+        tabID: BrowserTabID? = nil,
+    ) {
+        guard let observer = BrowserTabTransitionDiagnostics.qualificationObserver else {
+            return
+        }
+
+        let target = tabID ?? session?.tabID
+        let window = overlay?.window
+        var fields = details
+        fields["transitionToken"] = session.map { String($0.token) } ?? "none"
+        fields["transitionGeneration"] = session.map { String($0.generation) } ?? "none"
+        fields["direction"] = session.map { String(describing: $0.direction) } ?? "none"
+        fields["tabID"] = target.map { String(describing: $0) } ?? "none"
+        fields["overlayPresent"] = String(overlay != nil)
+        fields["overlayBounds"] = overlay.map { String(describing: $0.bounds) } ?? "none"
+        fields["windowAttached"] = String(window != nil)
+        fields["windowBounds"] = window.map { String(describing: $0.bounds) } ?? "none"
+        fields["windowFrame"] = window.map { String(describing: $0.frame) } ?? "none"
+        fields["rootBounds"] = window?.rootViewController?.viewIfLoaded.map { String(describing: $0.bounds) } ?? "none"
+        fields["sceneID"] = window?.windowScene?.session.persistentIdentifier ?? "none"
+        fields["sceneActivation"] = window?.windowScene.map { String($0.activationState.rawValue) } ?? "none"
+        if let target {
+            for (name, role) in [("card", BrowserTabTransitionSurfaceRole.card(target)), (
+                "content",
+                .content(target),
+            )] {
+                let view = registry.view(for: role)
+                fields[name + "Present"] = String(view != nil)
+                fields[name + "Attached"] = String(view?.window != nil)
+                fields[name + "Bounds"] = view.map { String(describing: $0.bounds) } ?? "none"
+                fields[name + "Ready"] = String(registry.isReady(for: role))
+                fields[name + "OverlayFrame"] = overlay.flatMap { registry.frame(for: role, in: $0) }
+                    .map { String(describing: $0) } ?? "none"
+            }
+        }
+        observer(event, fields)
+    }
+    #endif
+
     func attach(overlay: BrowserTabTransitionOverlayView) {
         self.overlay = overlay
         surfaceChanged()

@@ -340,6 +340,12 @@ public struct BrowserWebView: UIViewRepresentable {
             isInteractiveDismissalEnabled: context.environment.scrollDismissesKeyboardMode == .interactively,
         )
         let webKitAdapter = context.coordinator.adapter
+        #if DEBUG
+        BrowserTabTransitionDiagnostics.qualificationObserver?("mountedWebKitBridge", [
+            "adapterIdentity": String(describing: ObjectIdentifier(webKitAdapter)),
+            "tabID": tabID.rawValue.uuidString,
+        ])
+        #endif
         if let previous = context.coordinator.tabID, previous != tabID {
             context.coordinator.unobservePanGesture()
             context.coordinator.unbindRefreshControl()
@@ -391,6 +397,14 @@ public struct BrowserWebView: UIViewRepresentable {
             representation: .live,
             isReady: false,
         )
+        #if DEBUG
+        BrowserTabTransitionDiagnostics.qualificationObserver?("mountedWebKitSurface", [
+            "adapterIdentity": String(describing: ObjectIdentifier(webKitAdapter)),
+            "webViewIdentity": String(describing: ObjectIdentifier(webView)),
+            "tabID": tabID.rawValue.uuidString,
+            "registeredExactView": String(transitionRegistry?.view(for: .content(tabID)) === webView),
+        ])
+        #endif
         context.coordinator.scheduleReadinessProbe(
             for: webView,
             tabID: tabID,
@@ -413,3 +427,30 @@ public struct BrowserWebView: UIViewRepresentable {
         }
     }
 }
+
+#if DEBUG
+/// Immutable WebKit ownership for one qualification Browser hosting lifetime.
+/// Each mounted Root owns a separate readiness coordinator, while commands and its native bridge
+/// use the same adapter. An absent context retains the production shared-adapter behavior.
+@MainActor
+final class BrowserQualificationWebKitHostingContext {
+    let adapter: BrowserWebKitAdapter
+    let readinessCoordinator: BrowserWebKitReadinessCoordinator
+
+    init(adapter: BrowserWebKitAdapter) {
+        self.adapter = adapter
+        readinessCoordinator = BrowserWebKitReadinessCoordinator(adapter: adapter)
+    }
+}
+
+private struct BrowserQualificationWebKitHostingContextKey: EnvironmentKey {
+    static let defaultValue: BrowserQualificationWebKitHostingContext? = nil
+}
+
+extension EnvironmentValues {
+    var qualificationBrowserHostingContext: BrowserQualificationWebKitHostingContext? {
+        get { self[BrowserQualificationWebKitHostingContextKey.self] }
+        set { self[BrowserQualificationWebKitHostingContextKey.self] = newValue }
+    }
+}
+#endif
