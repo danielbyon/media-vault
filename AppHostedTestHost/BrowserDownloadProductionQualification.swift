@@ -234,6 +234,8 @@ private final class BrowserDownloadProductionQualificationProcess {
 
     private var pendingFixtureNavigation: (id: String, url: URL)?
     private var navigationInspectionIsPending = false
+    private var queuedFixtureNavigationInspection: (tabID: BrowserTabID, metadata: BrowserTab.Metadata)?
+    private var navigationObservation: Task<Void, Never>?
     private var server: BrowserDownloadLoopbackServer?
     private var started = false
     private var observation: Task<Void, Never>?
@@ -402,6 +404,25 @@ private final class BrowserDownloadProductionQualificationProcess {
         }
 
         started = true
+        if BrowserDownloadProductionQualification.passiveSceneCensusEnabled {
+            navigationObservation = Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                for await event in adapter.makeEventStream() {
+                    guard case let .metadata(tabID, metadata, _) = event,
+                          !metadata.isLoading,
+                          pendingFixtureNavigation?.url == metadata.committedURL
+                    else {
+                        continue
+                    }
+
+                    inspectFixtureNavigation(tabID: tabID, metadata: metadata)
+                }
+            }
+        }
+
         observation = Task { @MainActor [weak self] in
             guard let self else {
                 return
@@ -819,11 +840,25 @@ private final class BrowserDownloadProductionQualificationProcess {
 
     /// Checks the selected production tab and its actual document, without replaying a request.
     private func inspectFixtureNavigation() {
-        guard !navigationInspectionIsPending, let pending = pendingFixtureNavigation,
+        guard let tab = store.vault.shell.browser.selectedTab else {
+            return
+        }
+
+        inspectFixtureNavigation(tabID: tab.id, metadata: tab.metadata)
+    }
+
+    /// Checks the document after the WebKit adapter emits matching committed metadata.
+    private func inspectFixtureNavigation(tabID: BrowserTabID, metadata: BrowserTab.Metadata) {
+        guard let pending = pendingFixtureNavigation,
+              metadata.committedURL == pending.url,
               let tab = store.vault.shell.browser.selectedTab,
-              tab.metadata.committedURL == pending.url,
-              let view = adapter.webView(for: tab.id)
+              tab.id == tabID,
+              let view = adapter.webView(for: tabID)
         else {
+            return
+        }
+        guard !navigationInspectionIsPending else {
+            queuedFixtureNavigationInspection = (tabID, metadata)
             return
         }
 
@@ -834,10 +869,19 @@ private final class BrowserDownloadProductionQualificationProcess {
             }
 
             navigationInspectionIsPending = false
+            let queuedInspection = queuedFixtureNavigationInspection
+            queuedFixtureNavigationInspection = nil
+            if let queuedInspection {
+                inspectFixtureNavigation(tabID: queuedInspection.tabID, metadata: queuedInspection.metadata)
+                return
+            }
+
             guard pendingFixtureNavigation?.id == pending.id,
                   store.vault.shell.browser.selectedTab?.id == tab.id,
                   store.vault.shell.browser.selectedTab?.metadata.committedURL == pending.url,
                   let view, adapter.webView(for: tab.id) === view,
+                  metadata.committedURL == pending.url,
+                  view.url == pending.url,
                   let document = result as? [String], document.count == 2,
                   document[0] == "complete", document[1] == pending.url.absoluteString
             else {
