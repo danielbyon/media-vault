@@ -144,6 +144,20 @@ extension AppHostedUITests {
             }
             #expect(loadedURLs == [selectedURL])
         }
+
+        @Test("Readiness signal survives a delayed poll-boundary wake")
+        func readinessSignalSurvivesDelayedPollBoundaryWake() async {
+            let readiness = BrowserLifecycleReadinessObserver()
+            let didBecomeReady = await readiness.waitUntilReady(
+                timeout: .milliseconds(20),
+                pollSleep: { _ in
+                    try await Task.sleep(for: .milliseconds(80))
+                    readiness.markReady()
+                },
+            )
+
+            #expect(didBecomeReady)
+        }
     }
 }
 
@@ -183,7 +197,12 @@ private final class BrowserLifecycleReadinessObserver {
     private var readinessTimeout: Task<Void, Never>?
     private var dismissalTimeout: Task<Void, Never>?
 
-    func waitUntilReady(timeout: Duration) async -> Bool {
+    /// Waits for the readiness callback while an active poll budget bounds a missing callback.
+    /// The callback resumes the waiter directly; the poller discounts delayed sleep overruns.
+    func waitUntilReady(
+        timeout: Duration,
+        pollSleep: (@MainActor (Duration) async throws -> Void)? = nil,
+    ) async -> Bool {
         guard !isReady else {
             return true
         }
@@ -191,13 +210,10 @@ private final class BrowserLifecycleReadinessObserver {
         return await withCheckedContinuation { continuation in
             readinessContinuation = continuation
             readinessTimeout = Task { @MainActor [weak self] in
-                do {
-                    try await Task.sleep(for: timeout)
-                } catch {
-                    return
+                let didBecomeReady = try? await waitForAppHostedPolling(timeout: timeout, pollSleep: pollSleep) {
+                    self?.isReady ?? false
                 }
-
-                self?.finishReadinessWait(result: false)
+                self?.finishReadinessWait(result: didBecomeReady ?? false)
             }
         }
     }
