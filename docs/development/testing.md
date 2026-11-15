@@ -25,15 +25,19 @@ pixel-perfect full-window images.
 invocations skip root-surface snapshots, hosted presentation snapshots, and
 the five package snapshot suites. A separate App invocation on the canonical
 iPad runs `rootPrivacyCoverSynchronouslyOccludesPrivateSentinel`; on iPad that
-test exercises both the compact and regular fixtures. The same gate runs the
-two `BrowserDownloadMultiSceneUITests` cases through the diagnostic
-`BrowserTabOverviewUITests` scheme on the canonical iPad. It checks the exact
-test identities, device, and pass/fail/skip counts. This host-only coverage
-does not enable multiple scenes in the shipping app or replace physical
-scene/privacy qualification. Shell navigation and Lock-control UI tests remain
-separate. `make test-snapshots` runs Layer C and the repository's other exact
-visual suites. UIKit protection is checked through state, accessibility,
-hit-testing, and synthetic private-pixel occlusion assertions.
+test exercises both the compact and regular fixtures. The same gate runs 30
+simulator-safe `BrowserDownloadMultiSceneUITests` selectors through the
+diagnostic `BrowserTabOverviewUITests` scheme on the canonical iPad. The
+result check requires exact test identities, destination, and pass/fail/skip
+counts. `testSystemResizeChangesActualSceneGeometry` is excluded from this
+unattended simulator suite and remains under its existing separate
+qualification scope.
+This host-only coverage does not enable multiple scenes in the shipping app
+or replace physical scene/privacy qualification. Shell navigation and
+Lock-control UI tests remain separate. `make test-snapshots` runs Layer C and
+the repository's other exact visual suites. UIKit protection is checked
+through state, accessibility, hit-testing, and synthetic private-pixel
+occlusion assertions.
 
 The hosted privacy behavior tests cover compact and regular fixtures in
 `make test`. The remaining shell-control UI tests run in the separate
