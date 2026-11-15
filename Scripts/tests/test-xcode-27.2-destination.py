@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -18,6 +19,38 @@ MAKE = str(Path(subprocess.check_output(
     ["/usr/bin/xcrun", "--find", "make"], text=True).strip()).with_name("gnumake"))
 NAME = "iPhone 17"
 DESTINATION = "platform=iOS Simulator,name=iPhone 17,OS=27.2"
+MULTI_SCENE_TEST_IDENTITIES = (
+    "BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene",
+    "BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable",
+    "BrowserDownloadMultiSceneUITests/testResizeHandleNormalizesMeasuredRotatedFrame",
+    "BrowserDownloadMultiSceneUITests/testResizeHandleRejectsUnrelatedOffscreenFrame",
+    "BrowserDownloadMultiSceneUITests/testResizeHandleUsesScreenSpaceOriginWithOffsetCard",
+    "BrowserDownloadMultiSceneUITests/testResizeGestureDeltaMovesOutwardPerAvailableAxis",
+    "BrowserDownloadMultiSceneUITests/testResizeGestureDeltaShrinksFullScreenCardOnBothAxes",
+    "BrowserDownloadMultiSceneUITests/testResizeWindowSelectionAllowsVisibleNonKeyedAuxiliaryWindow",
+    "BrowserDownloadMultiSceneUITests/testResizeWindowSelectionRejectsVisibleCover",
+    "BrowserDownloadMultiSceneUITests/testResizeWindowSelectionRejectsZeroOrMultipleVisibleKeyedWindows",
+    "BrowserDownloadMultiSceneUITests/testResizeSceneRequiresUniqueNewActiveSession",
+    "BrowserDownloadMultiSceneUITests/testResizeTimeoutDiagnosticsReadOptionalValuesIndependently",
+    "BrowserDownloadMultiSceneUITests/testPassiveSceneCensusSelectsNewestWindowSnapshot",
+    "BrowserDownloadMultiSceneUITests/testPassiveSceneCensusRejectsConflictingSnapshotsAtSameTime",
+    "BrowserDownloadMultiSceneUITests/testLatestFreshSafeRootsRequiresEveryRegistrationAndUsesMonotonicTime",
+    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionAllowsSnapshotBetweenActivationAndCensus",
+    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsSnapshotBeforeActivation",
+    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsWrongRun",
+    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsWrongGeneration",
+    "BrowserDownloadMultiSceneUITests/testFinalCensusGenerationRejectsNewerUnsafeObservation",
+    "BrowserDownloadMultiSceneUITests/testFinalCensusGenerationRejectsNewerObservationWithoutGeneration",
+    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsSnapshotAfterCensus",
+    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionAcceptsInclusiveBoundaries",
+    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsNonFiniteTimestamps",
+    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionUsesLatestObservationWithinInterval",
+    "BrowserDownloadMultiSceneUITests/testReactivationAvailabilityRejectsMismatchWithFinalRegisteredScenes",
+    "BrowserDownloadMultiSceneUITests/testResizeGestureMarkerSelectsExactNewSceneRegistrationAndRun",
+    "BrowserDownloadMultiSceneUITests/testResizeWindowWitnessAcceptsMarkerOnlyLatestObservation",
+    "BrowserDownloadMultiSceneUITests/testResizeWindowWitnessRejectsCoverInCurrentCensus",
+    "BrowserDownloadMultiSceneUITests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy",
+)
 
 # Only process boundaries are replaced. The resolver, shell entry point, and
 # Make recipes run unchanged against these inventories and command recordings.
@@ -45,10 +78,11 @@ elif tool == "xcrun":
     elif args[:4] == ["xcresulttool", "get", "test-results", "summary"]:
         bundle = args[args.index("--path") + 1]
         if bundle.endswith("BrowserDownloadMultiScene.xcresult"):
+            identities = json.loads((root / "multi-scene-test-identities.json").read_text())
             print(json.dumps({
                 "result": "Passed",
-                "totalTestCount": 2,
-                "passedTests": 2,
+                "totalTestCount": len(identities),
+                "passedTests": len(identities),
                 "failedTests": 0,
                 "skippedTests": 0,
                 "expectedFailures": 0,
@@ -62,13 +96,11 @@ elif tool == "xcrun":
         else:
             print('{"totalTestCount": 3}')
     elif args[:4] == ["xcresulttool", "get", "test-results", "tests"]:
+        identities = json.loads((root / "multi-scene-test-identities.json").read_text())
         print(json.dumps({"testNodes": [
-            {"nodeType": "Test Case", "nodeIdentifier":
-             "BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene()",
-             "result": "Passed"},
-            {"nodeType": "Test Case", "nodeIdentifier":
-             "BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable()",
-             "result": "Passed"},
+            {"nodeType": "Test Case", "nodeIdentifier": identity + "()",
+             "result": "Passed"}
+            for identity in identities
         ]}))
     else:
         sys.exit("Unexpected xcrun arguments: " + repr(args))
@@ -124,6 +156,9 @@ class DestinationTests(unittest.TestCase):
         (self.root / "devices.json").write_text(json.dumps(self.devices))
         (self.root / "runtimes.json").write_text(json.dumps(self.runtimes))
         (self.root / "destinations.txt").write_text("\n".join(self.destinations))
+        (self.root / "multi-scene-test-identities.json").write_text(
+            json.dumps(MULTI_SCENE_TEST_IDENTITIES)
+        )
 
     def verify(self, expected="", destination=NAME, execute=False):
         self.write_inventory()
@@ -135,6 +170,27 @@ class DestinationTests(unittest.TestCase):
     def executions(self):
         path = self.root / "executed.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def run_multi_scene_result_check(self, observed_identities):
+        self.write_inventory()
+        (self.root / "multi-scene-test-identities.json").write_text(
+            json.dumps(observed_identities)
+        )
+        command = [
+            sys.executable,
+            str(ROOT / "Scripts/assert-xcresult-tests.py"),
+            "--bundle",
+            str(self.root / "BrowserDownloadMultiScene.xcresult"),
+            "--expected-device-id",
+            OTHER_UDID,
+            "--expected-device-name",
+            "iPad Pro 11-inch (M5)",
+            "--expected-os-version",
+            "27.2",
+        ]
+        for identity in MULTI_SCENE_TEST_IDENTITIES:
+            command.extend(("--expected-test", identity))
+        return subprocess.run(command, cwd=ROOT, env=self.env, text=True, capture_output=True)
 
     def assert_rejected(self, **kwargs):
         result = self.verify(**kwargs)
@@ -260,7 +316,29 @@ class DestinationTests(unittest.TestCase):
         self.assertIn(f"simulator_udid={UDID}", outputs)
         self.assertIn(f"ipad_simulator_udid={OTHER_UDID}", outputs)
 
+    def test_xcresult_assertion_rejects_inexact_multi_scene_test_identities(self):
+        missing_identity = MULTI_SCENE_TEST_IDENTITIES[:-1]
+        unexpected_identity = MULTI_SCENE_TEST_IDENTITIES + (
+            "BrowserDownloadMultiSceneUITests/testUnexpectedFixtureIdentity",
+        )
+        mismatched_identity = (
+            "BrowserDownloadMultiSceneUITests/testMismatchedFixtureIdentity",
+            *MULTI_SCENE_TEST_IDENTITIES[1:],
+        )
+
+        for label, observed in (
+            ("missing", missing_identity),
+            ("unexpected", unexpected_identity),
+            ("mismatched", mismatched_identity),
+        ):
+            with self.subTest(label=label):
+                result = self.run_multi_scene_result_check(observed)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("test identities differ", result.stderr)
+
     def test_make_binds_each_invocation_to_its_expected_destination(self):
+        self.assertEqual(len(MULTI_SCENE_TEST_IDENTITIES), 30)
+        self.assertEqual(len(set(MULTI_SCENE_TEST_IDENTITIES)), 30)
         checkout = self.root / "checkout"
         checkout.mkdir()
         shutil.copy2(ROOT / "Makefile", checkout / "Makefile")
@@ -305,8 +383,8 @@ class DestinationTests(unittest.TestCase):
                         [argument for argument in multi_scene_command
                          if argument.startswith("-only-testing:")],
                         [
-                            "-only-testing:BrowserTabOverviewUITests/BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene",
-                            "-only-testing:BrowserTabOverviewUITests/BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable",
+                            "-only-testing:BrowserTabOverviewUITests/" + identity
+                            for identity in MULTI_SCENE_TEST_IDENTITIES
                         ],
                     )
 
