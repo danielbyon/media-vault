@@ -71,7 +71,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: ios-test-evidence
+          name: ios-test-evidence-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: .build/TestResults
           if-no-files-found: warn
 
@@ -120,7 +120,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: 2x-ipad-snapshot-evidence
+          name: 2x-ipad-snapshot-evidence-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: .build/TestResults
           if-no-files-found: warn
 
@@ -161,7 +161,7 @@ jobs:
 
           case "$upload_outcome" in
             success)
-              evidence_note="Artifact upload step succeeded. Inspect artifact 2x-ipad-snapshot-evidence if it exists; if-no-files-found: warn means the upload step can succeed without producing an artifact."
+              evidence_note="Artifact upload step succeeded. Inspect artifact 2x-ipad-snapshot-evidence-run-${{ github.run_id }}-attempt-${{ github.run_attempt }} if it exists; if-no-files-found: warn means the upload step can succeed without producing an artifact."
               ;;
             unavailable)
               evidence_note="Artifact upload outcome is unavailable, so this summary makes no claim that evidence was uploaded. Inspect the job log for preserved results."
@@ -189,12 +189,12 @@ jobs:
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Qualification status | $qualification_status |"
-            echo '| Command | `make test-snapshots` |'
+            echo "| Command | \`make test-snapshots\` |"
             echo '| Destination | iPad Pro 11-inch (M5), iOS 27.2 (2x) |'
             echo "| Snapshot step outcome | $snapshot_outcome |"
             echo "| Artifact upload step outcome | $upload_outcome |"
             echo "| Blocking | Yes. A failed snapshot command fails this job and the Tests workflow. |"
-            echo '| Evidence | Artifact `2x-ipad-snapshot-evidence`, if the upload step succeeded and result files were found; otherwise inspect the job log. |'
+            echo "| Evidence | Artifact \`2x-ipad-snapshot-evidence-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}\`, if the upload step succeeded and result files were found; otherwise inspect the job log. |"
             echo
             echo "Automated snapshot success confirms the committed 2x reference baseline. Final owner visual approval remains pending."
           } >> "$GITHUB_STEP_SUMMARY"

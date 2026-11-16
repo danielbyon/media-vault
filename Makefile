@@ -84,9 +84,9 @@ PACKAGE_SNAPSHOT_SUITES := \
 	MediaLibraryTests/MediaLibrarySnapshotTests \
 	BrowserFeatureTests/BrowserViewSnapshotTests \
 	PresentationSupportTests/ScenePrivacyCoverCalculatorSnapshotTests
-# Optional external directory for preserving xcresult bundles. Each test
-# invocation writes a bundle below its temporary test root; the bundle is
-# copied here before the temporary root is removed.
+# Optional directory for xcresult bundles. Configured bundles are written here
+# directly so preservation does not depend on an exit-time copy. DerivedData
+# stays in its separate temporary root.
 TEST_RESULTS_DIRECTORY ?=
 # Temporary Xcode build and test roots; use task-specific storage when needed.
 XCODE_BUILD_ROOT ?= $(CURDIR)/.build
@@ -132,24 +132,18 @@ test:
 	ipad_simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' '$(VERIFIED_IPAD_SIMULATOR_UDID)' | tail -n 1); \
 	mkdir -p "$(CURDIR)/.build" "$(XCODE_BUILD_ROOT)"; \
 	test_root=$$(mktemp -d "$(XCODE_BUILD_ROOT)/xcodebuild-test.XXXXXX"); \
-	test_results=""; \
+	result_root="$$test_root"; \
 	if [[ -n "$(TEST_RESULTS_DIRECTORY)" ]]; then \
 		mkdir -p "$(TEST_RESULTS_DIRECTORY)"; \
-		test_results=$$(mktemp -d "$(TEST_RESULTS_DIRECTORY)/xcodebuild-test.XXXXXX"); \
+		result_root=$$(mktemp -d "$(TEST_RESULTS_DIRECTORY)/xcodebuild-test.XXXXXX"); \
 	fi; \
-	preserve_results() { \
+	cleanup_test_build() { \
 		status=$$?; \
-		if [[ -n "$$test_results" ]]; then \
-			for result in "$$test_root"/*.xcresult; do \
-				[[ -d "$$result" ]] || continue; \
-				cp -R "$$result" "$$test_results/" || printf 'failed to preserve %s\n' "$$result" >&2; \
-			done; \
-		fi; \
 		rm -rf -- "$$test_root"; \
 		trap - EXIT; \
 		exit "$$status"; \
 	}; \
-	trap preserve_results EXIT; \
+	trap cleanup_test_build EXIT; \
 	trap 'exit 143' TERM INT; \
 	assert_tests_ran() { \
 		label="$$1"; bundle="$$2"; \
@@ -173,14 +167,14 @@ test:
 		fi; \
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test; \
-	assert_tests_ran App "$$test_root/App.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
-	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$test_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
-	assert_tests_ran App-iPad-privacy "$$test_root/App-iPadPrivacy.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme BrowserTabOverviewUITests -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/BrowserDownloadMultiScene" -resultBundlePath "$$test_root/BrowserDownloadMultiScene.xcresult" -parallel-testing-enabled NO $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),-only-testing:BrowserTabOverviewUITests/$(test)) test; \
-	$(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$test_root/BrowserDownloadMultiScene.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),--expected-test $(test))
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test; \
+	assert_tests_ran App "$$result_root/App.xcresult"; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$result_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
+	assert_tests_ran ApplicationFoundation "$$result_root/ApplicationFoundation.xcresult"; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$result_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
+	assert_tests_ran App-iPad-privacy "$$result_root/App-iPadPrivacy.xcresult"; \
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme BrowserTabOverviewUITests -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/BrowserDownloadMultiScene" -resultBundlePath "$$result_root/BrowserDownloadMultiScene.xcresult" -parallel-testing-enabled NO $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),-only-testing:BrowserTabOverviewUITests/$(test)) test; \
+	$(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/BrowserDownloadMultiScene.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),--expected-test $(test))
 
 # Exercise the native presentation snapshot suites on the canonical 2x iPad.
 # UIKit lifecycle protection remains covered by behavioral tests in `make test`.
@@ -192,24 +186,18 @@ test-snapshots:
 	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
 	mkdir -p "$(CURDIR)/.build" "$(XCODE_BUILD_ROOT)"; \
 	test_root=$$(mktemp -d "$(XCODE_BUILD_ROOT)/xcodebuild-snapshot-test.XXXXXX"); \
-	test_results=""; \
+	result_root="$$test_root"; \
 	if [[ -n "$(TEST_RESULTS_DIRECTORY)" ]]; then \
 		mkdir -p "$(TEST_RESULTS_DIRECTORY)"; \
-		test_results=$$(mktemp -d "$(TEST_RESULTS_DIRECTORY)/xcodebuild-snapshot-test.XXXXXX"); \
+		result_root=$$(mktemp -d "$(TEST_RESULTS_DIRECTORY)/xcodebuild-snapshot-test.XXXXXX"); \
 	fi; \
-	preserve_results() { \
+	cleanup_test_build() { \
 		status=$$?; \
-		if [[ -n "$$test_results" ]]; then \
-			for result in "$$test_root"/*.xcresult; do \
-				[[ -d "$$result" ]] || continue; \
-				cp -R "$$result" "$$test_results/" || printf 'failed to preserve %s\n' "$$result" >&2; \
-			done; \
-		fi; \
 		rm -rf -- "$$test_root"; \
 		trap - EXIT; \
 		exit "$$status"; \
 	}; \
-	trap preserve_results EXIT; \
+	trap cleanup_test_build EXIT; \
 	trap 'exit 143' TERM INT; \
 	status=0; \
 	failure_summary=""; \
@@ -250,15 +238,15 @@ test-snapshots:
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
 	app_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
 	app_count_status=0; \
-	assert_tests_ran App "$$test_root/App.xcresult" || app_count_status=$$?; \
+	assert_tests_ran App "$$result_root/App.xcresult" || app_count_status=$$?; \
 	remember_failure App-xcodebuild "$$app_xcode_status"; \
 	remember_failure App-test-count "$$app_count_status"; \
 	package_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-only-testing:$(suite)) test || package_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$result_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-only-testing:$(suite)) test || package_xcode_status=$$?; \
 	package_count_status=0; \
-	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult" || package_count_status=$$?; \
+	assert_tests_ran ApplicationFoundation "$$result_root/ApplicationFoundation.xcresult" || package_count_status=$$?; \
 	remember_failure ApplicationFoundation-xcodebuild "$$package_xcode_status"; \
 	remember_failure ApplicationFoundation-test-count "$$package_count_status"; \
 	if [[ -n "$$failure_summary" ]]; then \

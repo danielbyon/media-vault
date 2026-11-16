@@ -4,10 +4,14 @@
 import json
 import os
 from pathlib import Path
+import re
+import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 
@@ -107,6 +111,10 @@ elif tool == "xcrun":
             print("iOS 27.2 (27.2 - 24B8117) - com.apple.CoreSimulator.SimRuntime.iOS-27-2")
     elif args[:4] == ["xcresulttool", "get", "test-results", "summary"]:
         bundle = args[args.index("--path") + 1]
+        if (root / "result-plan.json").exists():
+            completed = pathlib.Path(bundle) / "fixture-completed.json"
+            if not completed.exists():
+                sys.exit("Incomplete fixture result bundle")
         if bundle.endswith("BrowserDownloadMultiScene.xcresult"):
             identities = json.loads((root / "multi-scene-test-identities.json").read_text())
             print(json.dumps({
@@ -147,7 +155,31 @@ elif tool == "xcodebuild":
         with (root / "executed.jsonl").open("a") as stream:
             stream.write(json.dumps(args) + "\n")
         if "-resultBundlePath" in args:
-            pathlib.Path(args[args.index("-resultBundlePath") + 1]).mkdir(parents=True)
+            bundle = pathlib.Path(args[args.index("-resultBundlePath") + 1])
+            bundle.mkdir(parents=True)
+            (bundle / "fixture-partial").write_text("result writer started")
+            plan_path = root / "result-plan.json"
+            plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+            phase = len((root / "executed.jsonl").read_text().splitlines())
+            if phase == plan.get("wait_on"):
+                import signal
+                ignore = plan.get("ignore_signals", False)
+                for event in (signal.SIGINT, signal.SIGTERM):
+                    signal.signal(event, signal.SIG_IGN if ignore else
+                                  lambda number, frame: sys.exit(128 + number))
+                # Signal only after the partial result and handlers exist.
+                fd = int(os.environ["FIXTURE_READY_FD"])
+                os.write(fd, (json.dumps({"bundle": str(bundle)}) + "\n").encode())
+                os.close(fd)
+                while True:
+                    signal.pause()
+            if phase != plan.get("partial_on"):
+                (bundle / "fixture-completed.json").write_text(json.dumps({
+                    "phase": phase,
+                    "result": "Failed" if phase == plan.get("fail_on") else "Passed",
+                }))
+            if phase == plan.get("fail_on"):
+                sys.exit(65)
 else:
     sys.exit("Unexpected tool: " + tool)
 '''
@@ -417,6 +449,281 @@ class DestinationTests(unittest.TestCase):
                             for identity in AUTOMATED_DOWNLOAD_TEST_IDENTITIES
                         ],
                     )
+
+
+class ResultRetentionTests(unittest.TestCase):
+    """Run real Make recipes; replace only native process and result-reader boundaries."""
+
+    def setUp(self):
+        self.fixture = DestinationTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.checkout = self.fixture.root / "checkout with spaces"
+        self.checkout.mkdir()
+        shutil.copy2(ROOT / "Makefile", self.checkout / "Makefile")
+        (self.checkout / "Scripts").symlink_to(ROOT / "Scripts", target_is_directory=True)
+        self.build_root = self.fixture.root / "build products"
+        self.results_root = self.fixture.root / "retained results"
+        for directory in (self.build_root, self.results_root, self.checkout / ".build"):
+            directory.mkdir(exist_ok=True)
+            (directory / "unrelated-sentinel").write_text("owner data")
+
+    def command(self, target, plan, retained=True):
+        ipad = "iPad Pro 11-inch (M5)"
+        self.fixture.devices = {"devices": {RUNTIME: [
+            self.fixture.device(name=NAME, udid=UDID),
+            self.fixture.device(name=ipad, udid=OTHER_UDID),
+        ]}}
+        self.fixture.destinations = [
+            self.fixture.destination(name=NAME, udid=UDID),
+            self.fixture.destination(name=ipad, udid=OTHER_UDID),
+        ]
+        self.fixture.write_inventory()
+        (self.fixture.root / "result-plan.json").write_text(json.dumps(plan))
+        (self.fixture.root / "executed.jsonl").unlink(missing_ok=True)
+        return [MAKE, target, f"XCODE_WRAPPER={self.fixture.wrapper}",
+                f"VERIFIED_SIMULATOR_UDID={OTHER_UDID if target == 'test-snapshots' else UDID}",
+                f"VERIFIED_IPAD_SIMULATOR_UDID={OTHER_UDID}",
+                f"XCODE_BUILD_ROOT={self.build_root}",
+                f"TEST_RESULTS_DIRECTORY={self.results_root if retained else ''}",
+                f"PATH={self.fixture.env['PATH']}"]
+
+    def run_make(self, target, plan=None, retained=True):
+        return subprocess.run(self.command(target, plan or {}, retained),
+                              cwd=self.checkout, env=self.fixture.env,
+                              text=True, capture_output=True, timeout=30)
+
+    def bundles(self):
+        return sorted(self.results_root.glob("*/*.xcresult"))
+
+    def assert_owner_data_intact(self):
+        for directory in (self.build_root, self.results_root, self.checkout / ".build"):
+            self.assertEqual((directory / "unrelated-sentinel").read_text(), "owner data")
+
+    def assert_builds_cleaned(self):
+        self.assertEqual(list(self.build_root.glob("xcodebuild-*")), [])
+        self.assert_owner_data_intact()
+
+    def stop_during_phase(self, target, abrupt):
+        """The readiness pipe avoids timing guesses and signals only this fixture session."""
+        read_fd, write_fd = os.pipe()
+        process = None
+        stopped = False
+        try:
+            env = dict(self.fixture.env, FIXTURE_READY_FD=str(write_fd))
+            process = subprocess.Popen(
+                self.command(target, {"wait_on": 2, "ignore_signals": abrupt}),
+                cwd=self.checkout, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True, pass_fds=(write_fd,),
+            )
+            os.close(write_fd)
+            write_fd = None
+            ready, _, _ = select.select([read_fd], [], [], 10)
+            self.assertTrue(ready, "Fixture did not reach its partial-result barrier")
+            message = os.read(read_fd, 4096)
+            self.assertTrue(message, "Fixture exited before its partial-result barrier")
+            partial = Path(json.loads(message)["bundle"])
+            self.assertTrue((partial / "fixture-partial").is_file())
+            os.killpg(process.pid, signal.SIGKILL if abrupt else signal.SIGTERM)
+            output, errors = process.communicate(timeout=10)
+            stopped = True
+            self.assertNotEqual(process.returncode, 0, (output + errors).decode())
+        finally:
+            if write_fd is not None:
+                os.close(write_fd)
+            os.close(read_fd)
+            if process is not None and not stopped:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.communicate(timeout=10)
+
+    def test_success_preserves_all_bundles_at_native_result_paths_with_spaces(self):
+        for target, names in (
+            ("test", ("App.xcresult", "ApplicationFoundation.xcresult",
+                      "App-iPadPrivacy.xcresult", "BrowserDownloadMultiScene.xcresult")),
+            ("test-snapshots", ("App.xcresult", "ApplicationFoundation.xcresult")),
+        ):
+            with self.subTest(target=target):
+                result = self.run_make(target)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                current = [Path(args[args.index("-resultBundlePath") + 1])
+                           for args in self.fixture.executions()]
+                self.assertEqual({bundle.name for bundle in current}, set(names))
+                self.assertEqual(len({bundle.parent for bundle in current}), 1)
+                for bundle in current:
+                    self.assertTrue(bundle.is_relative_to(self.results_root))
+                    self.assertEqual(json.loads((bundle / "fixture-completed.json").read_text())
+                                     ["result"], "Passed")
+                self.assert_builds_cleaned()
+
+    def test_later_failure_retains_earlier_completed_bundle_and_failure_status(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                result = self.run_make(target, {"fail_on": 2})
+                self.assertNotEqual(result.returncode, 0)
+                paths = [Path(args[args.index("-resultBundlePath") + 1])
+                         for args in self.fixture.executions()]
+                self.assertEqual([path.name for path in paths],
+                                 ["App.xcresult", "ApplicationFoundation.xcresult"])
+                for path in paths:
+                    self.assertTrue(path.is_dir(), f"Native result path was removed: {path}")
+                self.assertEqual([json.loads((path / "fixture-completed.json").read_text())
+                                  ["result"] for path in paths], ["Passed", "Failed"])
+                self.assert_builds_cleaned()
+
+    def test_snapshot_app_failure_still_runs_package_and_remains_failed(self):
+        result = self.run_make("test-snapshots", {"fail_on": 1})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.fixture.executions()), 2)
+        self.assertEqual({path.name for path in self.bundles()},
+                         {"App.xcresult", "ApplicationFoundation.xcresult"})
+        self.assert_builds_cleaned()
+
+    def test_graceful_termination_preserves_completed_and_partial_bundles(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                self.stop_during_phase(target, abrupt=False)
+                current = [Path(args[args.index("-resultBundlePath") + 1])
+                           for args in self.fixture.executions()]
+                self.assertEqual(len(current), 2)
+                self.assertTrue((current[0] / "fixture-completed.json").is_file())
+                self.assertTrue((current[1] / "fixture-partial").is_file())
+                self.assertFalse((current[1] / "fixture-completed.json").exists())
+                self.assert_builds_cleaned()
+
+    def test_abrupt_termination_retains_evidence_without_exit_traps(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                self.stop_during_phase(target, abrupt=True)
+                current = [Path(args[args.index("-resultBundlePath") + 1])
+                           for args in self.fixture.executions()]
+                self.assertEqual(len(current), 2)
+                for bundle in current:
+                    self.assertTrue(bundle.is_relative_to(self.results_root))
+                    self.assertTrue((bundle / "fixture-partial").is_file())
+                self.assertTrue((current[0] / "fixture-completed.json").is_file())
+                self.assertFalse((current[1] / "fixture-completed.json").exists())
+                self.assert_owner_data_intact()
+
+    def test_partial_bundle_is_retained_but_never_qualifies_as_complete(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                result = self.run_make(target, {"partial_on": 1})
+                self.assertNotEqual(result.returncode, 0)
+                first = Path(self.fixture.executions()[0][
+                    self.fixture.executions()[0].index("-resultBundlePath") + 1])
+                self.assertTrue((first / "fixture-partial").is_file())
+                self.assertFalse((first / "fixture-completed.json").exists())
+                self.assert_builds_cleaned()
+
+    def test_repeated_invocations_leave_separate_evidence_unchanged(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                result = self.run_make(target)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                old = {path: (path / "fixture-completed.json").read_bytes()
+                       for path in self.bundles()}
+                previous_directories = {path.parent for path in self.bundles()}
+                result = self.run_make(target)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                current = [Path(args[args.index("-resultBundlePath") + 1])
+                           for args in self.fixture.executions()]
+                self.assertFalse(previous_directories.intersection(path.parent for path in current))
+                for path, content in old.items():
+                    self.assertEqual((path / "fixture-completed.json").read_bytes(), content)
+                self.assert_builds_cleaned()
+
+    def test_partial_required_ui_bundle_cannot_pass_the_identity_checker(self):
+        result = self.run_make("test", {"partial_on": 4})
+        self.assertNotEqual(result.returncode, 0)
+        commands = self.fixture.executions()
+        self.assertEqual(len(commands), 4)
+        bundle = Path(commands[-1][commands[-1].index("-resultBundlePath") + 1])
+        self.assertEqual(bundle.name, "BrowserDownloadMultiScene.xcresult")
+        self.assertTrue((bundle / "fixture-partial").is_file())
+        self.assertFalse((bundle / "fixture-completed.json").exists())
+        self.assert_builds_cleaned()
+
+    def test_unconfigured_results_keep_temporary_cleanup_behavior(self):
+        for target in ("test", "test-snapshots"):
+            for failure in (False, True):
+                with self.subTest(target=target, failure=failure):
+                    result = self.run_make(target, {"fail_on": 2} if failure else {},
+                                           retained=False)
+                    self.assertEqual(result.returncode == 0, not failure,
+                                     result.stdout + result.stderr)
+                    self.assertEqual(self.bundles(), [])
+                    for args in self.fixture.executions():
+                        bundle = Path(args[args.index("-resultBundlePath") + 1])
+                        self.assertTrue(bundle.is_relative_to(self.build_root))
+                        self.assertFalse(bundle.exists())
+                    self.assert_builds_cleaned()
+
+
+class WorkflowEvidenceTests(unittest.TestCase):
+    @staticmethod
+    def steps():
+        source = (ROOT / ".github/workflows/tests.yml").read_text()
+        return re.split(r"(?m)^      - name: ", source)[1:]
+
+    @staticmethod
+    def render(source, run_id, attempt):
+        values = {"run_id": run_id, "run_attempt": attempt}
+        return re.sub(r"\$\{\{\s*github\.(run_id|run_attempt)\s*\}\}",
+                      lambda match: values[match[1]], source)
+
+    def test_upload_names_preserve_both_jobs_and_every_run_attempt(self):
+        uploads = [step for step in self.steps() if "uses: actions/upload-artifact@" in step]
+        self.assertEqual(len(uploads), 2)
+        names = []
+        for step in uploads:
+            self.assertRegex(step, r"(?m)^        if: always\(\)$")
+            self.assertNotRegex(step, r"(?m)^          overwrite: true$")
+            match = re.search(r"(?m)^          name: (.+)$", step)
+            self.assertIsNotNone(match)
+            for run_id in ("7001", "7002"):
+                for attempt in ("1", "2"):
+                    name = self.render(match[1], run_id, attempt)
+                    self.assertIn(run_id, name)
+                    self.assertIn(attempt, name.rsplit(run_id, 1)[-1])
+                    self.assertNotIn("${{", name)
+                    names.append(name)
+        self.assertEqual(len(set(names)), 8)
+
+    def test_snapshot_failure_reporting_names_the_attempt_without_claiming_pass(self):
+        report = next(step for step in self.steps()
+                      if step.startswith("Report snapshot qualification status\n"))
+        script = textwrap.dedent(report.split("        run: |\n", 1)[1])
+        artifact_step = next(step for step in self.steps()
+                             if step.startswith("Upload 2x iPad snapshot evidence\n"))
+        artifact = re.search(r"(?m)^          name: (.+)$", artifact_step)[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            executable = directory / "make"
+            executable.write_text('#!/bin/sh\nprintf unexpected > "$FIXTURE_MAKE_MARKER"\nexit 99\n')
+            executable.chmod(0o755)
+            marker = directory / "unexpected-command"
+            for outcome in ("failure", "cancelled"):
+                with self.subTest(outcome=outcome):
+                    summary = Path(temporary) / outcome
+                    result = subprocess.run(
+                        ["bash", "-e", "-o", "pipefail", "-c", self.render(script, "7001", "2")],
+                        env=dict(os.environ, SNAPSHOT_OUTCOME=outcome, UPLOAD_OUTCOME="success",
+                                 GITHUB_STEP_SUMMARY=str(summary), FIXTURE_MAKE_MARKER=str(marker),
+                                 PATH=str(directory) + os.pathsep + os.environ["PATH"]),
+                        cwd=directory, text=True, capture_output=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    text = summary.read_text()
+                    self.assertFalse(marker.exists(), "Markdown command must remain literal")
+                    self.assertIn("| Command | `make test-snapshots` |", text)
+                    self.assertIn(self.render(artifact, "7001", "2"), text)
+                    self.assertIn("| Snapshot step outcome | " + outcome + " |", text)
+                    status = "failed" if outcome == "failure" else "did not complete"
+                    self.assertIn("| Qualification status | " + status + " |", text)
+                    self.assertNotIn("| Qualification status | automated snapshot success", text)
 
 
 if __name__ == "__main__":

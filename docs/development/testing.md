@@ -297,16 +297,23 @@ comparison evidence.
 
 ## 3. Result bundles and failure handling
 
-`TEST_RESULTS_DIRECTORY` is optional. When set, each test invocation writes an
-`xcresult` bundle below the temporary test root and copies it into the external
-directory before the temporary root is removed. When unset, result bundles stay
-inside the temporary root and are deleted with the rest of the build artifacts.
+`TEST_RESULTS_DIRECTORY` is optional. When set, each Make invocation creates a
+unique subdirectory below it and passes those `.xcresult` paths directly to
+`xcodebuild`. Completed and partial bundles stay at those paths during success,
+failure, cancellation, and cleanup. Retention does not depend on an exit-time
+copy. A partial or unreadable bundle is diagnostic evidence, not a passing suite.
 
-`XCODE_BUILD_ROOT` selects where `make build`, `make test`, and
-`make test-snapshots` create temporary DerivedData and result bundles. It
-defaults to the repository's `.build` directory. Set it to task-specific
-scratch storage when the repository volume cannot hold a full test run; use
-`TEST_RESULTS_DIRECTORY` separately to keep the result bundles.
+`XCODE_BUILD_ROOT` selects the temporary DerivedData and build-product storage
+for `make build`, `make test`, and `make test-snapshots`. Cleanup removes the
+invocation's generated build root and leaves the caller's result directory and
+unrelated files intact. When `TEST_RESULTS_DIRECTORY` is unset, bundles remain in
+the temporary root and are removed during normal cleanup, as before.
+
+`make destination-test` exercises these ownership rules with disposable process
+fixtures. It covers completed and partial results, later failures, graceful and
+abrupt termination, repeated invocations, paths with spaces, cleanup boundaries,
+and artifact-name/report consistency. Abrupt-termination tests signal only their
+own mock process groups; they do not launch or terminate Xcode or simulators.
 
 After each `xcodebuild test` invocation, the Makefile reads that scheme's own
 bundle with `xcresulttool get test-results summary --path <bundle> --compact`.
@@ -350,10 +357,12 @@ replaces a tracked reference.
    build failure, simulator failure, or timeout fails the job and the `Tests`
    workflow.
 
-The blocking job passes `TEST_RESULTS_DIRECTORY` so both iPhone bundles survive
-the run, and an `if: always()` step uploads them as the `iphone-test-evidence`
-artifact. A missing bundle is reported as a warning, and an upload failure does
-not change the test step outcome or the blocking gate.
+The blocking job writes its four result bundles in a unique subdirectory of
+`TEST_RESULTS_DIRECTORY`: App, ApplicationFoundation, iPad privacy, and the
+required UI qualification bundle. An `if: always()` step uploads available files
+as `ios-test-evidence-run-<run_id>-attempt-<run_attempt>`. Missing files produce a
+warning; upload success does not establish test success or prove that an artifact
+exists. An upload failure does not replace the test step's outcome.
 
 The two jobs are separate so their time budgets are independent. The snapshot
 job has a 60-minute job timeout and a 45-minute timeout on the test step, so a
@@ -369,13 +378,20 @@ the automated run and that both schemes recorded positive test counts. It does
 not constitute final owner visual approval; that approval is a separate
 acceptance decision.
 
-The snapshot job preserves evidence on failure. The test step passes
-`TEST_RESULTS_DIRECTORY` so each `xcresult` bundle is copied out of the
-temporary test root, and the upload step runs with `if: always()` to publish the
-`2x-ipad-snapshot-evidence` artifact. The step timeout is shorter than the job
-timeout so a hung test run still reaches that upload step. A missing artifact is
-reported as a warning, and a skipped job or missing artifact must not be read as
-snapshot qualification.
+The snapshot job writes its App and ApplicationFoundation result bundles in a
+unique `xcodebuild-snapshot-test.*` subdirectory below `TEST_RESULTS_DIRECTORY`.
+Its `if: always()` upload
+uses `2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Both artifact
+names include GitHub's run ID and attempt number so a retry does not conflict with
+or replace earlier evidence. Existing artifacts remain bound to their original
+IDs and names.
+
+The snapshot step timeout remains shorter than the job timeout so the upload
+step has time to run. A runner loss or forced cancellation can still prevent an
+upload; direct result ownership cannot guarantee delivery after infrastructure
+loss. A skipped job, missing artifact, partial bundle, or successful upload must
+not be read as snapshot qualification. Failure and cancellation remain distinct
+from artifact-upload success.
 
 If the `xcode-27` runner does not have the iPad Pro 11-inch (M5) iOS 27.2
 destination, the snapshot job fails and therefore the `Tests` workflow fails.
