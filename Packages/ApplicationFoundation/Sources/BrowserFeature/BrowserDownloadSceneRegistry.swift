@@ -8,7 +8,8 @@
 import Foundation
 
 /// Shared-browser admission requires every hosting window to be active. A transition in one
-/// window can revoke downloads owned by another; activation never restores revoked operations.
+/// window can revoke content access in another. Activation requires fresh authorization;
+/// previously admitted transfers retain their independent write authority.
 @MainActor
 final class BrowserDownloadSceneRegistry {
     private var registrations: [UUID: Bool] = [:]

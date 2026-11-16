@@ -14,6 +14,7 @@ import WebKit
 @MainActor
 final class BrowserWKDownloadTransfer: NSObject, BrowserDownloadTransfer, WKDownloadDelegate {
     private let download: WKDownload
+    private var originatingWebView: WKWebView?
     private weak var owner: BrowserDownloadOwner?
     private var id: BrowserDownloadID?
     private var observations: [NSKeyValueObservation] = []
@@ -24,6 +25,7 @@ final class BrowserWKDownloadTransfer: NSObject, BrowserDownloadTransfer, WKDown
 
     init(download: WKDownload, owner: BrowserDownloadOwner) {
         self.download = download
+        originatingWebView = download.webView
         self.owner = owner
         super.init()
         download.delegate = self
@@ -47,12 +49,15 @@ final class BrowserWKDownloadTransfer: NSObject, BrowserDownloadTransfer, WKDown
     }
 
     func cancel(completion: @escaping @MainActor () -> Void) {
-        download.cancel { _ in completion() }
+        download.cancel { [weak self] _ in
+            self?.originatingWebView = nil
+            completion()
+        }
     }
 
     func download(
         _: WKDownload,
-        decideDestinationUsing _: URLResponse,
+        decideDestinationUsing response: URLResponse,
         suggestedFilename: String,
         completionHandler: @MainActor (URL?) -> Void,
     ) {
@@ -61,7 +66,11 @@ final class BrowserWKDownloadTransfer: NSObject, BrowserDownloadTransfer, WKDown
             return
         }
 
-        completionHandler(owner?.destination(for: id, suggestedName: suggestedFilename))
+        completionHandler(owner?.destination(
+            for: id,
+            suggestedName: suggestedFilename,
+            expectedLength: response.expectedContentLength > 0 ? response.expectedContentLength : nil,
+        ))
     }
 
     /// Placeholders would create a second, system-managed copy outside the protected scratch root.
@@ -73,6 +82,7 @@ final class BrowserWKDownloadTransfer: NSObject, BrowserDownloadTransfer, WKDown
     }
 
     func downloadDidFinish(_: WKDownload) {
+        originatingWebView = nil
         observations.removeAll()
         if let id {
             owner?.finished(id)
@@ -81,10 +91,11 @@ final class BrowserWKDownloadTransfer: NSObject, BrowserDownloadTransfer, WKDown
         }
     }
 
-    func download(_: WKDownload, didFailWithError _: Error, resumeData _: Data?) {
+    func download(_: WKDownload, didFailWithError error: Error, resumeData _: Data?) {
+        originatingWebView = nil
         observations.removeAll()
         if let id {
-            owner?.failed(id)
+            owner?.failed(id, error: error)
         } else {
             owner?.rejectedTerminated(download)
         }

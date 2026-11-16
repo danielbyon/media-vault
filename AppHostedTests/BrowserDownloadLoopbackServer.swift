@@ -80,12 +80,12 @@ final class BrowserDownloadLoopbackServer {
         return (route, requestID)
     }
 
-    func slowKnownEvidence(for requestID: UUID) -> [String: String] {
+    func slowKnownEvidence(for requestID: UUID, route: String = "slow-known") -> [String: String] {
         let requestCount = requests.count(where: {
-            fixtureRoute(for: $0) == "slow-known" && qualificationID(for: $0) == requestID
+            fixtureRoute(for: $0) == route && qualificationID(for: $0) == requestID
         })
         let matchedConnections = connectionEvidence.filter {
-            $0["qualificationRoute"] == "slow-known"
+            $0["qualificationRoute"] == route
                 && $0["qualificationRequestID"] == requestID.uuidString
         }
         var result = [
@@ -107,11 +107,27 @@ final class BrowserDownloadLoopbackServer {
             "expectedBytes",
             "prefixBytes",
             "sendStackState",
+            "remainderBytes",
+            "releaseUptime",
         ] {
             result[key] = connection[key]
         }
-        result["route"] = "slow-known"
+        result["route"] = route
         return result
+    }
+
+    /// Releases only the selected parsed connection. A duplicate request fails closed.
+    @discardableResult
+    func releaseFiniteResponse(requestID: UUID, connectionID: UUID) -> Bool {
+        let evidence = slowKnownEvidence(for: requestID, route: "finite-continuation")
+        guard !stopped, evidence["requestCount"] == "1", evidence["connectionCount"] == "1",
+              evidence["connectionID"] == connectionID.uuidString,
+              let connection = connections[connectionID]
+        else {
+            return false
+        }
+
+        return connection.releaseFiniteRemainder()
     }
 
     private func fixtureRoute(for request: Request) -> String {
@@ -250,7 +266,7 @@ final class BrowserDownloadLoopbackServer {
             .map(String.init) ?? ""
         connection.setQualificationRequest(
             route: route,
-            requestID: route == "slow-known" ? qualificationID(for: request) : nil,
+            requestID: qualificationID(for: request),
         )
         switch route {
         case "first",
@@ -262,8 +278,16 @@ final class BrowserDownloadLoopbackServer {
             connection.send(Data(), type: "text/plain", status: "302 Found", headers: [
                 "Location": cookiePath + "attachment",
             ])
-        case "image":
-            respondImage(request, on: connection)
+        case "image",
+             "image-as-pdf":
+            respondImage(request, route: route, on: connection)
+        case "pdf-as-image":
+            connection.send(
+                payload,
+                type: "image/png",
+                headers: ["Content-Disposition": "attachment; filename=image.png"],
+                headOnly: request.method == "HEAD",
+            )
         case "protected":
             respondProtected(request, on: connection)
         case "post":
@@ -273,8 +297,11 @@ final class BrowserDownloadLoopbackServer {
              "attribute",
              "blob-bytes":
             sendPDF(request, route: route, on: connection)
-        case "octet":
+        case "delayed-handoff",
+             "octet":
             connection.send(payload, type: "application/octet-stream")
+        case "finite-continuation":
+            connection.sendSlow(Self.slowPayload, knownLength: true, finite: true)
         case "slow-known",
              "slow-unknown":
             connection.sendSlow(Self.slowPayload, knownLength: route == "slow-known")
@@ -289,7 +316,7 @@ final class BrowserDownloadLoopbackServer {
     static let fixturePNG = makePNG()
 
     /// Serves the image fixture route.
-    private func respondImage(_ request: Request, on connection: Connection) {
+    private func respondImage(_ request: Request, route: String, on connection: Connection) {
         guard request.method == "GET" || request.method == "HEAD" else {
             connection.send(Data(), type: "text/plain", status: "405 Method Not Allowed")
             return
@@ -297,8 +324,10 @@ final class BrowserDownloadLoopbackServer {
 
         connection.send(
             imageBytes,
-            type: "image/png",
-            headers: ["Content-Disposition": "attachment; filename=valid-image.png"],
+            type: route == "image" ? "image/png" : "application/pdf",
+            headers: ["Content-Disposition": route == "image"
+                ? "attachment; filename=valid-image.png"
+                : "attachment; filename=document.pdf"],
             headOnly: request.method == "HEAD",
         )
     }
@@ -462,7 +491,7 @@ final class BrowserDownloadLoopbackServer {
     }
 
     /// Each connection parses its first bounded request and records later pipelined bytes.
-    /// Slow-response routes hold the body remainder until the test cancels the native download.
+    /// Slow routes preserve their partial response; the finite route releases its remainder on an event.
     /// Peer draining is bounded by byte, callback, and connection deadlines.
     @MainActor
     final class Connection {
@@ -500,9 +529,12 @@ final class BrowserDownloadLoopbackServer {
         private var qualificationRequestID: String?
         private var slowExpectedBytes: Int?
         private var slowPrefixBytes = 0
+        private var finiteRemainder: Data?
+        private var releaseUptime: TimeInterval?
+        private var remainderBytes = 0
 
         func setQualificationRequest(route: String, requestID: UUID?) {
-            guard route == "slow-known", let requestID else {
+            guard ["slow-known", "finite-continuation", "delayed-handoff"].contains(route), let requestID else {
                 return
             }
 
@@ -537,6 +569,8 @@ final class BrowserDownloadLoopbackServer {
                 "qualificationRequestID": qualificationRequestID ?? "none",
                 "expectedBytes": slowExpectedBytes.map(String.init) ?? "unknown",
                 "prefixBytes": String(slowPrefixBytes),
+                "remainderBytes": String(remainderBytes),
+                "releaseUptime": releaseUptime.map { String($0) } ?? "unavailable",
             ])
         }
 
@@ -593,6 +627,7 @@ final class BrowserDownloadLoopbackServer {
                 return
             }
 
+            finiteRemainder = nil
             closed = true
             closeReason = reason
             closedAtUptime = ProcessInfo.processInfo.systemUptime
@@ -827,12 +862,12 @@ final class BrowserDownloadLoopbackServer {
             recordEvidence()
             if failed {
                 close(reason: "sendStackFailed")
-            } else {
+            } else if releaseUptime == nil {
                 receive()
             }
         }
 
-        func sendSlow(_ body: Data, knownLength: Bool) {
+        func sendSlow(_ body: Data, knownLength: Bool, finite: Bool = false) {
             let headers = knownLength ? ["Content-Length": "\(body.count)"] : ["Transfer-Encoding": "chunked"]
             var data = responseHead(type: "application/octet-stream", status: "200 OK", headers: headers)
             let prefix = body.prefix(262_144)
@@ -845,6 +880,9 @@ final class BrowserDownloadLoopbackServer {
             }
             slowExpectedBytes = knownLength ? body.count : nil
             slowPrefixBytes = prefix.count
+            if finite {
+                finiteRemainder = Data(body.dropFirst(prefix.count))
+            }
             sendStackBytes = data.count
             sendStackState = "pending"
             recordEvidence()
@@ -853,6 +891,34 @@ final class BrowserDownloadLoopbackServer {
                     self?.didSendSlowPrefix(failed: error != nil)
                 }
             })
+        }
+
+        /// Sends the actual remaining bytes once; stack completion is separate from native finish.
+        @discardableResult
+        func releaseFiniteRemainder() -> Bool {
+            guard !closed, server?.stopped == false, qualificationRoute == "finite-continuation",
+                  sendStackState == "stackPrefixProcessed", let remainder = finiteRemainder,
+                  releaseUptime == nil
+            else {
+                return false
+            }
+
+            finiteRemainder = nil
+            releaseUptime = ProcessInfo.processInfo.systemUptime
+            remainderBytes = remainder.count
+            sendStackState = "remainderPending"
+            recordEvidence()
+            native.send(
+                content: remainder,
+                contentContext: .finalMessage,
+                isComplete: true,
+                completion: .contentProcessed { [weak self] error in
+                    MainActor.assumeIsolated {
+                        self?.didFinishResponseSend(failed: error != nil)
+                    }
+                },
+            )
+            return true
         }
 
         /// Ignore queued transport completions after either connection or server teardown.

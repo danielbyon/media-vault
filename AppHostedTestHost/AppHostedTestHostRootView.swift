@@ -9,13 +9,9 @@ import SwiftUI
 
 /// Inert root view for the package-free unit-test host application.
 ///
-/// The host intentionally presents no product interface: the UIKit and
-/// SwiftUI surfaces under test create their own windows inside the host's
-/// process. The standalone qualification host target compiles
-/// `BrowserDownloadQualificationRootView.swift` instead of this file, and both files
-/// declare an `AppHostedTestHostRootView` type. Exactly one variant is a
-/// member of each application target, so the shared AppHostedTestHost scene
-/// body resolves against the variant owned by the target being built.
+/// UIKit and SwiftUI tests create their own windows inside this process, so this root
+/// presents no product interface. The separate browser-download qualification target uses
+/// `BrowserDownloadQualificationApp` and `BrowserDownloadQualificationRootView`.
 struct AppHostedTestHostRootView: View {
     var body: some View {
         Color.clear

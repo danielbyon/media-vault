@@ -10,8 +10,10 @@ import SwiftUI
 #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
 import CalculatorFeature
 import ComposableArchitecture
+import CoreGraphics
 import CryptoKit
 import Dependencies
+import MediaLibrary
 import Observation
 import Sharing
 import UIKit
@@ -26,8 +28,30 @@ import WebKit
 @MainActor
 enum BrowserDownloadProductionQualification {
     static let argument = "--browser-download-production-qualification"
+    static let automaticIngestionArgument = "--browser-download-automatic-ingestion"
+    static var automaticIngestionEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(automaticIngestionArgument)
+    }
+
+    static var requiresFreshAuthentication: Bool {
+        ProcessInfo.processInfo.arguments.contains("--browser-download-recovery-authentication")
+    }
+
+    static var deterministicAuthenticationEnabled: Bool {
+        activeDownloadHomeEnabled || delayedHandoffLockEnabled || automaticIngestionEnabled
+    }
+
+    static var immediateAutoLockEnabled: Bool {
+        activeDownloadHomeEnabled || delayedHandoffLockEnabled
+    }
+
     static let passiveSceneCensusArgument = "--browser-download-passive-scene-census"
     static let activeDownloadHomeArgument = "--browser-download-active-download-home"
+    static let delayedHandoffLockArgument = "--browser-download-delayed-handoff-lock"
+    static var delayedHandoffLockEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(delayedHandoffLockArgument)
+    }
+
     static let operatorArrangementArgument = "--browser-download-operator-arrangement"
     static var passiveSceneCensusEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(passiveSceneCensusArgument)
@@ -60,26 +84,37 @@ enum BrowserDownloadProductionQualification {
 #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
 private struct BrowserDownloadSlowKnownRun {
     let requestID: UUID
+    let route: String
     let initialGeneration: UInt64
     let startedAt: TimeInterval
+    var policyLockApplied = false
+    var capabilityID: String?
     var operationID: String?
     var operationGeneration: UInt64?
     var handoffObserved = false
+    var nativeAdmissionObserved = false
+    var postLockProgressRecorded = false
     var serverPrefixProcessed = false
     var progressObserved = false
     var readinessRecorded = false
-    var terminalAcknowledged = false
+    var releaseRecorded = false
+    var responseCompleted = false
+    var hiddenCompletionRecorded = false
+    var reconciliationRecorded = false
     var connectionClosureRecorded = false
     var failed = false
 }
 
 /// Every WindowGroup surface shares this process-owned real Root store and download lifetime.
-/// Credential verification and session settings are deterministic only in active-download mode; WebKit and protection remain live.
+/// Credential verification is deterministic in active-download and delayed-handoff modes; WebKit and protection remain live.
 @Observable
 @MainActor
 private final class BrowserDownloadProductionQualificationProcess {
     static let shared = BrowserDownloadProductionQualificationProcess()
     let store: StoreOf<RootFeature>
+    let library: MediaLibraryClient
+    private let libraryIdentity: String
+    private let databaseIdentity: String
     let owner: BrowserDownloadOwner
     let adapter: BrowserWebKitAdapter
     let coordinator: BrowserDownloadNativeCoordinator
@@ -89,10 +124,20 @@ private final class BrowserDownloadProductionQualificationProcess {
     let securitySentinel: BrowserDownloadSecuritySentinel
     let simulatedProtectionReadback: Bool
     var status = "Fixture-seeded authentication; qualification controls below."
+    /// Listener state is independent of progress and operator-status messages.
+    var loopbackReady: Bool {
+        server?.ready == true
+    }
+
     var observationsJSON = "[]"
     var sceneCensusJSON = "{}"
     var sceneRequestJSON = "{}"
     private var slowKnownRun: BrowserDownloadSlowKnownRun?
+    private var qualificationProgressObservation: NSKeyValueObservation?
+    private var libraryInspectionPending = false
+    private var lockNextImageHandoff = false
+    @ObservationIgnored
+    private weak var readoutProbe: BrowserDownloadReadoutAccessibilityProbe.ProbeView?
 
     var slowKnownDownloadStarted: Bool {
         slowKnownRun != nil
@@ -103,6 +148,99 @@ private final class BrowserDownloadProductionQualificationProcess {
         refreshSlowKnownReadiness()
         observationsJSON = evidence.observationsJSON
         inspectFixtureNavigation()
+        refreshCanonicalLibraryEvidence()
+    }
+
+    /// Reads the isolated canonical store without driving acceptance or reconciliation.
+    /// Results are discarded if authentication changes while the read is suspended.
+    private func refreshCanonicalLibraryEvidence() {
+        guard BrowserDownloadProductionQualification.automaticIngestionEnabled,
+              !libraryInspectionPending else {
+            return
+        }
+
+        libraryInspectionPending = true
+        let generation = library.currentResourceLoadGeneration
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            defer { libraryInspectionPending = false }
+            if store.vault.phase != .authenticated {
+                do {
+                    let storage = try await library.acceptedDownloadStorage()
+                    guard store.vault.phase != .authenticated else {
+                        return
+                    }
+
+                    let snapshot = owner.snapshot
+                    evidence.record("acceptedLibraryStorage", [
+                        "temporaryCount": String(storage.operationCount),
+                        "temporaryBytes": String(storage.byteCount),
+                        "libraryID": libraryIdentity,
+                        "databaseID": databaseIdentity,
+                        "authenticated": "false",
+                        "contentEmpty": String(snapshot.records.isEmpty && snapshot.presentation == nil),
+                    ])
+                    observationsJSON = evidence.observationsJSON
+                } catch {
+                    evidence.record("acceptedLibraryStorageUnavailable", [:])
+                }
+                return
+            }
+            do {
+                let assets = try await library.loadAssets()
+                let storage = try await library.acceptedDownloadStorage()
+                var bytesMatch = true
+                var hashesMatch = true
+                var resourceCount = 0
+                for resource in assets.flatMap(\.resources) {
+                    guard let data = try await library.resourceDataIfCurrent(resource, generation: generation) else {
+                        return
+                    }
+
+                    resourceCount += 1
+                    bytesMatch = bytesMatch && data == BrowserDownloadLoopbackServer.fixturePNG
+                    let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                    hashesMatch = hashesMatch && digest == resource.sha256
+                }
+                guard store.vault.phase == .authenticated,
+                      library.currentResourceLoadGeneration == generation else {
+                    return
+                }
+
+                let rows = owner.snapshot.records
+                let settled = rows.allSatisfy {
+                    $0.status == .imported || $0.status == .duplicate || $0.status == .unsupported
+                }
+                evidence.record("canonicalLibrarySnapshot", [
+                    "assetCount": String(assets.count),
+                    "libraryID": libraryIdentity,
+                    "databaseID": databaseIdentity,
+                    "canonicalIDs": assets.map(\.id.uuidString).sorted().joined(separator: ","),
+                    "resourceCount": String(resourceCount),
+                    "rowCount": String(rows.count),
+                    "rowIDs": rows.map(\.id.rawValue.uuidString).sorted().joined(separator: ","),
+                    "importedRows": String(rows.count { $0.status == .imported }),
+                    "duplicateRows": String(rows.count { $0.status == .duplicate }),
+                    "temporaryCount": String(storage.operationCount),
+                    "temporaryBytes": String(storage.byteCount),
+                    "originalBytesMatch": String(bytesMatch),
+                    "originalHashMatches": String(hashesMatch),
+                    "settled": String(settled),
+                ])
+                observationsJSON = evidence.observationsJSON
+            } catch {
+                guard store.vault.phase == .authenticated,
+                      library.currentResourceLoadGeneration == generation else {
+                    return
+                }
+
+                evidence.record("canonicalLibraryInspectionFailed", [:])
+                observationsJSON = evidence.observationsJSON
+            }
+        }
     }
 
     /// Publishes the redacted event copy when passive scene sampling is enabled.
@@ -241,9 +379,85 @@ private final class BrowserDownloadProductionQualificationProcess {
     private var observation: Task<Void, Never>?
     private var inspected: Set<BrowserDownloadID> = []
 
+    /// Relaunches reuse only an explicitly supplied opaque fixture identity.
+    /// Legacy qualification launches receive a separate protected library root each time.
+    private static func isolatedLibraryRoot() throws -> URL {
+        let arguments = ProcessInfo.processInfo.arguments
+        let identity: UUID =
+            if let index = arguments.firstIndex(of: "--browser-download-library"),
+            arguments.indices.contains(index + 1),
+            let requestedIdentity = UUID(uuidString: arguments[index + 1]) {
+                requestedIdentity
+            } else {
+                UUID()
+            }
+        let support = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true,
+        )
+        return support
+            .appendingPathComponent("BrowserDownloadQualificationLibraries", isDirectory: true)
+            .appendingPathComponent(identity.uuidString, isDirectory: true)
+    }
+
+    /// The database identifier hashes filesystem identity; paths and file contents stay private.
+    private static func makeIsolatedLibrary() -> (client: MediaLibraryClient, id: String, databaseID: String) {
+        do {
+            let root = try isolatedLibraryRoot()
+            let client = try MediaLibraryClient.live(at: root)
+            let attributes = try FileManager.default.attributesOfItem(
+                atPath: root.appendingPathComponent("library.sqlite").path,
+            )
+            guard let device = attributes[.systemNumber] as? UInt64,
+                  let inode = attributes[.systemFileNumber] as? UInt64 else {
+                fatalError("The isolated qualification database identity is unavailable.")
+            }
+
+            let identity = Data("\(device):\(inode)".utf8)
+            let databaseID = SHA256.hash(data: identity).map { String(format: "%02x", $0) }.joined()
+            if !BrowserDownloadProductionQualification.requiresFreshAuthentication {
+                _ = client.beginAuthenticatedDownloadSession()
+            }
+            client.setDownloadProcessingActive(true)
+            return (client, root.lastPathComponent, databaseID)
+        } catch {
+            fatalError("The isolated qualification Library could not be opened.")
+        }
+    }
+
+    /// Samples durable ownership before a recovery launch can authenticate or reconcile.
+    private func recordLibraryStartup() async {
+        guard BrowserDownloadProductionQualification.automaticIngestionEnabled else {
+            return
+        }
+
+        do {
+            let storage = try await library.acceptedDownloadStorage()
+            evidence.record("libraryStartup", [
+                "libraryID": libraryIdentity,
+                "databaseID": databaseIdentity,
+                "temporaryCount": String(storage.operationCount),
+                "temporaryBytes": String(storage.byteCount),
+                "authenticated": String(store.vault.phase == .authenticated),
+                "rowCount": String(owner.snapshot.records.count),
+                "contentEmpty": String(owner.snapshot.records.isEmpty && owner.snapshot.presentation == nil),
+            ])
+        } catch {
+            evidence.record("libraryStartupInspectionFailed", [:])
+        }
+        observationsJSON = evidence.observationsJSON
+    }
+
     private init() {
         let recorder = BrowserDownloadProductionEvidence()
         evidence = recorder
+        let fixtureLibrary = Self.makeIsolatedLibrary()
+        let isolatedLibrary = fixtureLibrary.client
+        library = isolatedLibrary
+        libraryIdentity = fixtureLibrary.id
+        databaseIdentity = fixtureLibrary.databaseID
         let removalFault = BrowserDownloadQualificationRemovalFault()
         fault = removalFault
         let pendingAllocationState = BrowserDownloadQualificationPendingAllocation()
@@ -320,7 +534,46 @@ private final class BrowserDownloadProductionQualificationProcess {
             recorder.record("scratchFailure", diagnostic)
         }
         scratch.qualificationExpectedPriorOperation = pendingAllocationState.priorOperationID
-        let downloadOwner = BrowserDownloadOwner(store: scratch)
+        let ingestion = BrowserDownloadIngestion(
+            accept: { try await isolatedLibrary.acceptCompletedDownload($0, operationID: $1, originalFilename: $2) },
+            reconcile: { await isolatedLibrary.reconcileAcceptedDownloads(generation: $0) },
+            revoke: { isolatedLibrary.revokeAcceptedDownload(operationID: $0) },
+            discard: { try await isolatedLibrary.discardAcceptedDownload(operationID: $0) },
+            storage: { try await isolatedLibrary.acceptedDownloadStorage() },
+            generation: { isolatedLibrary.currentDownloadIngestionGeneration },
+            presentationURL: { operationID, generation in
+                do {
+                    let url = try await isolatedLibrary.completedDownloadPresentationURL(
+                        operationID: operationID,
+                        generation: generation,
+                    )
+                    recorder.record("ingestionPresentationResolved", [
+                        "operation": operationID.uuidString,
+                        "generation": String(generation),
+                        "urlPresent": String(url != nil),
+                    ])
+                    return url
+                } catch {
+                    recorder.record("ingestionPresentationResolutionFailed", [
+                        "operation": operationID.uuidString,
+                        "generation": String(generation),
+                    ])
+                    throw error
+                }
+            },
+        )
+        #if targetEnvironment(simulator)
+        let downloadOwner = BrowserDownloadOwner(
+            store: scratch,
+            protectedDataAvailable: { simulateReadback || UIApplication.shared.isProtectedDataAvailable },
+            ingestion: BrowserDownloadProductionQualification.automaticIngestionEnabled ? ingestion : nil,
+        )
+        #else
+        let downloadOwner = BrowserDownloadOwner(
+            store: scratch,
+            ingestion: BrowserDownloadProductionQualification.automaticIngestionEnabled ? ingestion : nil,
+        )
+        #endif
         owner = downloadOwner
         let webKitAdapter = BrowserWebKitAdapter(requiresProfileConfiguration: true, downloadOwner: downloadOwner)
         adapter = webKitAdapter
@@ -332,7 +585,10 @@ private final class BrowserDownloadProductionQualificationProcess {
         }
         let nativeCoordinator = BrowserDownloadNativeCoordinator(owner: downloadOwner)
         coordinator = nativeCoordinator
-        var vault = VaultFeature.State(phase: .authenticated, configuredKind: .pin)
+        var vault = VaultFeature.State(
+            phase: BrowserDownloadProductionQualification.requiresFreshAuthentication ? .locked : .authenticated,
+            configuredKind: .pin,
+        )
         let activeDownloadHome = BrowserDownloadProductionQualification.activeDownloadHomeEnabled
         if activeDownloadHome {
             vault.sessionSettings.autoLockTimeout = .immediately
@@ -341,13 +597,16 @@ private final class BrowserDownloadProductionQualificationProcess {
         let defaults = UserDefaults(suiteName: "BrowserDownloadQualification-\(UUID().uuidString)") ?? UserDefaults()
         store = withDependencies {
             $0.defaultAppStorage = defaults
+            $0.mediaLibrary = isolatedLibrary
             $0.calculatorPersistence.load = { nil }
             $0.calculatorPersistence.save = { _ in }
-            if activeDownloadHome {
+            if BrowserDownloadProductionQualification.deterministicAuthenticationEnabled {
                 $0.vaultCredential = .testValue
                 $0.vaultCredential.verify = { _ in .succeeded }
-                $0.vaultSessionSettings.load = { .init(autoLockTimeout: .immediately) }
-                $0.vaultSessionSettings.save = { _ in }
+                if BrowserDownloadProductionQualification.immediateAutoLockEnabled {
+                    $0.vaultSessionSettings.load = { .init(autoLockTimeout: .immediately) }
+                    $0.vaultSessionSettings.save = { _ in }
+                }
             }
             $0.browserSettings.load = {
                 var settings = BrowserSettings()
@@ -383,7 +642,15 @@ private final class BrowserDownloadProductionQualificationProcess {
         } operation: {
             RootComposition.makeStore(vault: vault)
         }
-        nativeCoordinator.qualificationObservation = { event, fields in recorder.record(event, fields) }
+        downloadOwner.qualificationTransferObservation = { [weak self] event, fields in
+            self?.recordTransferObservation(event, fields: fields)
+        }
+        webKitAdapter.downloadPolicyDecisionObserver = { [weak self] _ in
+            self?.handleDownloadPolicyDecision()
+        }
+        nativeCoordinator.qualificationObservation = { [weak self] event, fields in
+            self?.recordNativeQualification(event, fields: fields)
+        }
         webKitAdapter.downloadHandoffObserver = { [weak self, weak webKitAdapter] download, tabID in
             guard let self, let webKitAdapter else {
                 return
@@ -398,12 +665,39 @@ private final class BrowserDownloadProductionQualificationProcess {
         ])
     }
 
+    func registerReadoutProbe(_ probe: BrowserDownloadReadoutAccessibilityProbe.ProbeView) {
+        readoutProbe = probe
+    }
+
+    private func recordNativeQualification(_ event: String, fields: [String: String]) {
+        evidence.record(event, fields)
+        if event == "rootLayoutConfirmed" {
+            readoutProbe?.sample(
+                source: "rootLayoutConfirmed",
+                rootPhase: String(describing: store.vault.phase),
+            )
+        }
+        guard BrowserDownloadProductionQualification.automaticIngestionEnabled,
+              event == "authenticationChanged" || event == "rootLayoutConfirmed" else {
+            return
+        }
+
+        evidence.record("diagnosticRootState", [
+            "source": event,
+            "phase": String(describing: store.vault.phase),
+            "privacyGeneration": String(owner.snapshot.generation),
+            "ingestionGeneration": String(library.currentDownloadIngestionGeneration),
+            "returnPending": String(store.applicationReturnPending),
+        ])
+    }
+
     func start() async {
         guard !started else {
             return
         }
 
         started = true
+        await recordLibraryStartup()
         if BrowserDownloadProductionQualification.passiveSceneCensusEnabled {
             navigationObservation = Task { @MainActor [weak self] in
                 guard let self else {
@@ -440,7 +734,8 @@ private final class BrowserDownloadProductionQualificationProcess {
                     "operations": snapshot.records.map(\.id.rawValue.uuidString).joined(separator: ","),
                 ])
                 refreshSlowKnownReadiness(snapshot: snapshot)
-                for record in snapshot.records where record.isReady && !inspected.contains(record.id) {
+                for record in snapshot.records where !BrowserDownloadProductionQualification.automaticIngestionEnabled
+                    && record.isReady && !inspected.contains(record.id) {
                     inspected.insert(record.id)
                     inspect(record.id)
                 }
@@ -462,6 +757,11 @@ private final class BrowserDownloadProductionQualificationProcess {
         }
     }
 
+    func downloadImageUnderLock() {
+        lockNextImageHandoff = true
+        navigate("image")
+    }
+
     func navigate(_ route: String) {
         guard let server, let baseURL = try? server.url(route) else {
             return
@@ -480,9 +780,21 @@ private final class BrowserDownloadProductionQualificationProcess {
     }
 
     /// Starts one bounded, real navigation through the mounted production WebView.
-    func startSlowKnownDownload() {
+    func startSlowKnownDownload(finite: Bool = false) {
+        startQualificationDownload(route: finite ? "finite-continuation" : "slow-known")
+    }
+
+    func startDelayedHandoffDownload() {
+        guard BrowserDownloadProductionQualification.delayedHandoffLockEnabled else {
+            return
+        }
+
+        startQualificationDownload(route: "delayed-handoff")
+    }
+
+    private func startQualificationDownload(route: String) {
         guard slowKnownRun == nil, let server,
-              let url = try? server.url("slow-known")
+              let url = try? server.url(route)
         else {
             return
         }
@@ -490,6 +802,7 @@ private final class BrowserDownloadProductionQualificationProcess {
         let requestID = UUID()
         slowKnownRun = BrowserDownloadSlowKnownRun(
             requestID: requestID,
+            route: route,
             initialGeneration: owner.snapshot.generation,
             startedAt: ProcessInfo.processInfo.systemUptime,
         )
@@ -497,13 +810,53 @@ private final class BrowserDownloadProductionQualificationProcess {
             URLQueryItem(name: "qualificationRequest", value: requestID.uuidString),
         ])
         evidence.record("fixtureNavigationRequested", [
-            "fixtureRoute": "slow-known",
+            "fixtureRoute": route,
             "fixtureRequest": requestID.uuidString,
         ])
         store.send(.vault(.shell(.browser(.navigate(requestURL)))))
         status = "Slow-known WKDownload started; waiting for the live readiness witness."
         refreshSlowKnownReadiness()
         refreshPassiveObservations()
+    }
+
+    /// Locks through Root while WebKit still holds the accepted policy callback on its stack.
+    private func handleDownloadPolicyDecision() {
+        guard lockNextImageHandoff else {
+            lockAtAcceptedPolicyBoundary()
+            return
+        }
+
+        lockNextImageHandoff = false
+        store.send(.vault(.lock))
+        evidence.record("automaticMediaPolicyLocked", [:])
+        observationsJSON = evidence.observationsJSON
+    }
+
+    private func lockAtAcceptedPolicyBoundary() {
+        guard BrowserDownloadProductionQualification.delayedHandoffLockEnabled,
+              var run = slowKnownRun, run.route == "delayed-handoff", !run.policyLockApplied,
+              let capability = run.capabilityID else {
+            return
+        }
+
+        run.policyLockApplied = true
+        slowKnownRun = run
+        let before = owner.snapshot.generation
+        store.send(.vault(.lock))
+        let snapshot = owner.snapshot
+        evidence.record("pendingPolicyLockApplied", [
+            "fixtureRequest": run.requestID.uuidString,
+            "operation": run.operationID ?? "unavailable",
+            "capability": capability,
+            "connectionID": server?
+                .slowKnownEvidence(for: run.requestID, route: run.route)["connectionID"] ?? "unavailable",
+            "generationBefore": String(before),
+            "generation": String(snapshot.generation),
+            "authenticated": String(isVaultAuthenticated),
+            "available": String(snapshot.isAvailable),
+            "contentEmpty": String(snapshot.records.isEmpty && snapshot.presentation == nil),
+        ])
+        observationsJSON = evidence.observationsJSON
     }
 
     func applyQualificationScenePhase(
@@ -520,6 +873,9 @@ private final class BrowserDownloadProductionQualificationProcess {
         evidence.record("qualificationScenePhaseChanged", [
             "fixtureRequest": run.requestID.uuidString,
             "operation": run.operationID ?? "none",
+            "capability": run.capabilityID ?? "unavailable",
+            "connectionID": server?
+                .slowKnownEvidence(for: run.requestID, route: run.route)["connectionID"] ?? "unavailable",
             "phase": phase,
             "applicationState": applicationStateLabel,
             "generationBefore": String(generationBefore),
@@ -528,7 +884,80 @@ private final class BrowserDownloadProductionQualificationProcess {
                 phase == "background" && snapshot.generation != generationBefore,
             ),
             "activeWriterCount": String(owner.activeCount),
+            "retainedRecordCount": String(owner.retainedCount),
+            "contentEmpty": String(snapshot.records.isEmpty && snapshot.presentation == nil),
+            "available": String(snapshot.isAvailable),
+            "authenticated": String(isVaultAuthenticated),
         ])
+        // Root's real background action must have locked and concealed content before release.
+        if phase == "background", run.route == "finite-continuation", run.readinessRecorded,
+           !run.releaseRecorded, !isVaultAuthenticated, !snapshot.isAvailable,
+           snapshot.records.isEmpty, snapshot.presentation == nil,
+           let connection = server?.slowKnownEvidence(for: run.requestID, route: run.route)["connectionID"],
+           let connectionID = UUID(uuidString: connection) {
+            slowKnownRun?.releaseRecorded = true
+            evidence.record("finiteResponseReleaseRequested", [
+                "fixtureRequest": run.requestID.uuidString,
+                "operation": run.operationID ?? "unavailable",
+                "capability": run.capabilityID ?? "unavailable",
+                "connectionID": connection,
+            ])
+            let released = server?.releaseFiniteResponse(requestID: run.requestID, connectionID: connectionID) == true
+            evidence.record("finiteResponseReleaseResult", [
+                "fixtureRequest": run.requestID.uuidString,
+                "released": String(released),
+            ])
+        }
+        observationsJSON = evidence.observationsJSON
+    }
+
+    /// Owner events describe actual policy admission and native delegate callbacks.
+    private func recordTransferObservation(_ event: String, fields: [String: String]) {
+        var fields = fields
+        if var run = slowKnownRun {
+            if event == "policyDownloadAdmitted", run.capabilityID == nil {
+                run.capabilityID = fields["capability"]
+                run.operationID = fields["operation"]
+            }
+            if event == "transferAdmitted", fields["capability"] == run.capabilityID {
+                run.operationID = fields["operation"]
+                run.nativeAdmissionObserved = true
+                run.operationGeneration = owner.snapshot.generation
+            }
+            if fields["operation"] == run.operationID || fields["capability"] == run.capabilityID {
+                fields["fixtureRequest"] = run.requestID.uuidString
+                fields["capability"] = run.capabilityID
+                fields["connectionID"] = server?.slowKnownEvidence(for: run.requestID, route: run.route)["connectionID"]
+            }
+            slowKnownRun = run
+        }
+        evidence.record(event, fields)
+        if event == "writerFinished", fields["operation"] == slowKnownRun?.operationID {
+            Task { @MainActor [weak self] in
+                // Sample after the native callback has updated the retained entry.
+                await Task.yield()
+                guard let self, var run = slowKnownRun, !run.hiddenCompletionRecorded else {
+                    return
+                }
+
+                let snapshot = owner.snapshot
+                evidence.record("hiddenCompletion", [
+                    "fixtureRequest": run.requestID.uuidString,
+                    "operation": run.operationID ?? "unavailable",
+                    "capability": run.capabilityID ?? "unavailable",
+                    "connectionID": server?
+                        .slowKnownEvidence(for: run.requestID, route: run.route)["connectionID"] ?? "unavailable",
+                    "contentEmpty": String(snapshot.records.isEmpty && snapshot.presentation == nil),
+                    "available": String(snapshot.isAvailable),
+                    "authenticated": String(isVaultAuthenticated),
+                    "activeWriterCount": String(owner.activeCount),
+                    "retainedRecordCount": String(owner.retainedCount),
+                ])
+                run.hiddenCompletionRecorded = true
+                slowKnownRun = run
+                refreshSlowKnownReadiness()
+            }
+        }
         observationsJSON = evidence.observationsJSON
     }
 
@@ -571,7 +1000,7 @@ private final class BrowserDownloadProductionQualificationProcess {
         evidence.record("nativeDownloadHandoff", fields)
 
         guard var run = slowKnownRun, let identity,
-              identity.route == "slow-known", identity.requestID == run.requestID,
+              identity.route == run.route, identity.requestID == run.requestID,
               sameOrigin
         else {
             observationsJSON = evidence.observationsJSON
@@ -580,7 +1009,43 @@ private final class BrowserDownloadProductionQualificationProcess {
 
         run.handoffObserved = true
         slowKnownRun = run
+        qualificationProgressObservation = download.progress.observe(\.completedUnitCount, options: [
+            .initial,
+            .new,
+        ]) { [weak self] progress, _ in
+            let received = progress.completedUnitCount
+            let expected = progress.totalUnitCount
+            let callbackUptime = ProcessInfo.processInfo.systemUptime
+            Task { @MainActor [weak self] in
+                self?.recordPostLockNativeProgress(received: received, expected: expected, uptime: callbackUptime)
+            }
+        }
         refreshSlowKnownReadiness()
+    }
+
+    /// Observes the original WKDownload's Progress even while content snapshots are hidden.
+    private func recordPostLockNativeProgress(received: Int64, expected: Int64, uptime: TimeInterval) {
+        guard var run = slowKnownRun, run.nativeAdmissionObserved, !run.postLockProgressRecorded,
+              (run.releaseRecorded && received > 262_144) || (run.policyLockApplied && received > 0),
+              !isVaultAuthenticated, !owner.snapshot.isAvailable else {
+            return
+        }
+
+        run.postLockProgressRecorded = true
+        slowKnownRun = run
+        evidence.record("nativePostLockProgress", [
+            "fixtureRequest": run.requestID.uuidString,
+            "operation": run.operationID ?? "unavailable",
+            "capability": run.capabilityID ?? "unavailable",
+            "connectionID": server?
+                .slowKnownEvidence(for: run.requestID, route: run.route)["connectionID"] ?? "unavailable",
+            "receivedBytes": String(received),
+            "expectedBytes": String(expected),
+            "callbackMonotonicSeconds": evidence.monotonicSeconds(forUptime: uptime),
+            "authenticated": "false",
+            "available": "false",
+        ])
+        observationsJSON = evidence.observationsJSON
     }
 
     private func refreshSlowKnownReadiness(snapshot: BrowserDownloadSnapshot? = nil) {
@@ -590,11 +1055,13 @@ private final class BrowserDownloadProductionQualificationProcess {
 
         let current = snapshot ?? owner.snapshot
         let requestID = run.requestID.uuidString
-        let serverEvidence = server.slowKnownEvidence(for: run.requestID)
-        recordSlowKnownServerPrefix(&run, requestID: requestID, evidence: serverEvidence)
-        associateSlowKnownOperation(&run, snapshot: current)
+        let serverEvidence = server.slowKnownEvidence(for: run.requestID, route: run.route)
+        if run.route != "delayed-handoff" {
+            recordSlowKnownServerPrefix(&run, requestID: requestID, evidence: serverEvidence)
+        }
 
-        if !run.readinessRecorded, let operationID = run.operationID {
+        if run.route != "delayed-handoff", run.nativeAdmissionObserved, !run.readinessRecorded,
+           let operationID = run.operationID {
             let record = current.records.first { $0.id.rawValue.uuidString == operationID }
             recordSlowKnownStateFailure(&run, requestID: requestID, snapshot: current, record: record)
             recordSlowKnownProgress(&run, requestID: requestID, snapshot: current, record: record)
@@ -607,19 +1074,38 @@ private final class BrowserDownloadProductionQualificationProcess {
             )
         }
 
-        if run.readinessRecorded, !run.terminalAcknowledged,
-           owner.activeCount == 0, owner.retainedCount == 0,
-           !owner.privacyCleanupPending, !current.cleanupNeedsRetry {
-            evidence.record("slowKnownWriterTerminalAcknowledged", [
+        if run.releaseRecorded, !run.responseCompleted,
+           serverEvidence["responseComplete"] == "true" {
+            evidence.record("finiteResponseCompleted", [
                 "fixtureRequest": requestID,
                 "operation": run.operationID ?? "unavailable",
+                "capability": run.capabilityID ?? "unavailable",
+                "connectionID": serverEvidence["connectionID"] ?? "unavailable",
+                "expectedBytes": serverEvidence["expectedBytes"] ?? "unknown",
+                "prefixBytes": serverEvidence["prefixBytes"] ?? "unknown",
+                "remainderBytes": serverEvidence["remainderBytes"] ?? "unknown",
+                "sendStackState": serverEvidence["sendStackState"] ?? "unknown",
+                "releaseMonotonicSeconds": serverEvidence["releaseUptime"]
+                    .flatMap(Double.init)
+                    .map { evidence.monotonicSeconds(forUptime: $0) } ?? "unavailable",
+            ])
+            run.responseCompleted = true
+        }
+        if run.hiddenCompletionRecorded, !run.reconciliationRecorded,
+           current.isAvailable, isVaultAuthenticated,
+           let record = current.records.first(where: { $0.id.rawValue.uuidString == run.operationID }),
+           record.isReady {
+            evidence.record("retainedCompletionReconciled", [
+                "fixtureRequest": requestID,
+                "operation": record.id.rawValue.uuidString,
+                "capability": run.capabilityID ?? "unavailable",
                 "connectionID": serverEvidence["connectionID"] ?? "unavailable",
                 "generation": String(current.generation),
-                "activeWriterCount": "0",
-                "retainedRecordCount": "0",
-                "cleanupPending": "false",
+                "available": "true",
+                "authenticated": "true",
+                "isReady": "true",
             ])
-            run.terminalAcknowledged = true
+            run.reconciliationRecorded = true
         }
 
         if !run.connectionClosureRecorded, let operationID = run.operationID,
@@ -660,7 +1146,7 @@ private final class BrowserDownloadProductionQualificationProcess {
 
         guard !run.serverPrefixProcessed,
               requestCount == 1, connectionCount == 1,
-              serverEvidence["route"] == "slow-known",
+              serverEvidence["route"] == run.route,
               serverEvidence["requestParsed"] == "true",
               serverEvidence["sendStackState"] == "stackPrefixProcessed",
               let connectionID = serverEvidence["connectionID"],
@@ -672,7 +1158,7 @@ private final class BrowserDownloadProductionQualificationProcess {
 
         evidence.record("slowKnownServerPrefixProcessed", [
             "fixtureRequest": requestID,
-            "route": "slow-known",
+            "route": run.route,
             "requestParsed": "true",
             "requestCount": "1",
             "connectionCount": "1",
@@ -684,22 +1170,6 @@ private final class BrowserDownloadProductionQualificationProcess {
             "connectionClosed": serverEvidence["closed"] ?? "unknown",
         ])
         run.serverPrefixProcessed = true
-    }
-
-    private func associateSlowKnownOperation(
-        _ run: inout BrowserDownloadSlowKnownRun,
-        snapshot: BrowserDownloadSnapshot,
-    ) {
-        guard run.handoffObserved, run.operationID == nil,
-              snapshot.generation == run.initialGeneration,
-              snapshot.records.count == 1, owner.activeCount == 1,
-              let record = snapshot.records.first
-        else {
-            return
-        }
-
-        run.operationID = record.id.rawValue.uuidString
-        run.operationGeneration = snapshot.generation
     }
 
     private func recordSlowKnownStateFailure(
@@ -764,7 +1234,7 @@ private final class BrowserDownloadProductionQualificationProcess {
         record: BrowserDownloadRecord?,
         serverEvidence: [String: String],
     ) {
-        guard !run.failed, run.handoffObserved, run.serverPrefixProcessed,
+        guard !run.failed, run.handoffObserved, run.nativeAdmissionObserved, run.serverPrefixProcessed,
               run.progressObserved, let operationID = run.operationID,
               let record, let expectedBytes = record.expectedBytes,
               let serverExpectedBytes = serverEvidence["expectedBytes"],
@@ -995,7 +1465,11 @@ private final class BrowserDownloadProductionQualificationProcess {
                     ? "UNVERIFIED"
                     : (actualProtection == .complete ? "verified" : "notConfirmed"),
                 "backupExcluded": String(values.isExcludedFromBackup == true),
-                "fixtureBytesMatch": String(bytes == BrowserDownloadLoopbackServer.fixturePDF),
+                "fixtureBytesMatch": String(bytes == (
+                    slowKnownRun?.operationID == id.rawValue.uuidString && slowKnownRun?.route == "finite-continuation"
+                        ? BrowserDownloadLoopbackServer.slowPayload
+                        : BrowserDownloadLoopbackServer.fixturePDF
+                )),
             ])
             pendingAllocation.record(operation: id, directory: url.deletingLastPathComponent())
         } catch {
@@ -1083,6 +1557,10 @@ private struct BrowserDownloadProductionQualificationRoot: View {
             VStack(alignment: .leading) {
                 Text("Production qualification — fixture-seeded auth").font(.caption)
                 Text(process.status).font(.caption)
+                Text(process.loopbackReady ? "Loopback listener ready" : "Loopback listener unavailable")
+                    .font(.caption2)
+                    .accessibilityIdentifier("downloadQualificationLoopbackReadiness")
+                    .accessibilityValue(process.loopbackReady ? "ready" : "unavailable")
                 if BrowserDownloadProductionQualification.operatorArrangementRequired {
                     Text(
                         "Operator: minimize the original window to the Stage Manager shelf without closing it. "
@@ -1100,9 +1578,27 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                             .accessibilityIdentifier("downloadQualificationOpenFixturePage")
                         Button("Download attachment PDF") { process.navigate("attachment") }
                             .accessibilityIdentifier("downloadQualificationDownloadAttachment")
+                        if BrowserDownloadProductionQualification.automaticIngestionEnabled {
+                            Button("Download PNG") { process.navigate("image") }
+                                .accessibilityIdentifier("downloadQualificationDownloadImage")
+                            Button("Download PNG with PDF metadata") { process.navigate("image-as-pdf") }
+                                .accessibilityIdentifier("downloadQualificationDownloadMislabelledImage")
+                            Button("Download PNG under Lock") { process.downloadImageUnderLock() }
+                                .accessibilityIdentifier("downloadQualificationDownloadImageUnderLock")
+                            Button("Download PDF with PNG metadata") { process.navigate("pdf-as-image") }
+                                .accessibilityIdentifier("downloadQualificationDownloadMislabelledPDF")
+                        }
                         Button("Start slow-known download") { process.startSlowKnownDownload() }
                             .accessibilityIdentifier("downloadQualificationStartSlowKnown")
                             .disabled(process.slowKnownDownloadStarted)
+                        Button("Start finite continuation") { process.startSlowKnownDownload(finite: true) }
+                            .accessibilityIdentifier("downloadQualificationStartFiniteContinuation")
+                            .disabled(process.slowKnownDownloadStarted)
+                        if BrowserDownloadProductionQualification.delayedHandoffLockEnabled {
+                            Button("Start delayed handoff") { process.startDelayedHandoffDownload() }
+                                .accessibilityIdentifier("downloadQualificationStartDelayedHandoff")
+                                .disabled(process.slowKnownDownloadStarted)
+                        }
                         Button("Remove authentication") { process.loseAuthentication() }
                             .accessibilityIdentifier("downloadQualificationRemoveAuthentication")
                         Button("Arm one removal failure") {
@@ -1149,6 +1645,29 @@ private struct BrowserDownloadProductionQualificationRoot: View {
             }
             .padding(8)
             .background(.regularMaterial)
+            .background {
+                if BrowserDownloadProductionQualification.automaticIngestionEnabled {
+                    BrowserDownloadReadoutAccessibilityProbe(
+                        fields: [
+                            "phase": String(describing: process.store.vault.phase),
+                            "privacyGeneration": String(process.owner.snapshot.generation),
+                            "ingestionGeneration": String(process.library.currentDownloadIngestionGeneration),
+                            "requestedHidden": String(process.store.vault.phase == .authentication),
+                        ],
+                        record: { process.evidence.record("diagnosticReadoutState", $0) },
+                        register: { process.registerReadoutProbe($0) },
+                    )
+                }
+            }
+            // The production credential form lays out independently of this diagnostic inset.
+            // Keep the panel from obscuring or intercepting its genuine secure-field input.
+            .opacity(process.store.vault.phase == .authentication ? 0 : 1)
+            .allowsHitTesting(process.store.vault.phase != .authentication)
+            .accessibilityHidden(process.store.vault.phase == .authentication)
+            // Rebuild the DEBUG diagnostic container across credential visibility changes.
+            // The credential form and production Root keep their existing identities and concealment.
+            .id(BrowserDownloadProductionQualification.automaticIngestionEnabled
+                && process.store.vault.phase == .authentication)
         }
         .task { await process.start() }
         .onAppear { process.refreshSceneCensus() }
@@ -1169,7 +1688,8 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                 phase = "unknown"
                 applicationPhase = .unknown
             }
-            if BrowserDownloadProductionQualification.activeDownloadHomeEnabled {
+            if BrowserDownloadProductionQualification.activeDownloadHomeEnabled
+                || BrowserDownloadProductionQualification.automaticIngestionEnabled {
                 process.applyQualificationScenePhase(phase, applicationPhase: applicationPhase)
             }
 
@@ -1189,6 +1709,74 @@ private struct BrowserDownloadProductionQualificationRoot: View {
             }
 
             process.refreshPassiveObservations()
+        }
+    }
+}
+
+/// Observes the existing diagnostic subtree without adding an accessibility element or changing layout.
+@MainActor
+private struct BrowserDownloadReadoutAccessibilityProbe: UIViewRepresentable {
+    let fields: [String: String]
+    let record: @MainActor ([String: String]) -> Void
+    let register: @MainActor (ProbeView) -> Void
+
+    func makeUIView(context _: Context) -> ProbeView {
+        let view = ProbeView()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        return view
+    }
+
+    func updateUIView(_ view: ProbeView, context _: Context) {
+        view.fields = fields
+        view.record = record
+        register(view)
+        view.sample(source: "viewUpdate")
+    }
+
+    final class ProbeView: UIView {
+        private let mountID = UUID().uuidString
+        private var lastSample: [String: String] = [:]
+        var fields: [String: String] = [:]
+        var record: @MainActor ([String: String]) -> Void = { _ in }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            sample()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            sample()
+        }
+
+        func sample(source: String = "readoutLayout", rootPhase: String? = nil) {
+            var ancestors: [UIView] = []
+            var ancestor: UIView? = self
+            while let current = ancestor {
+                ancestors.append(current)
+                ancestor = current.superview
+            }
+            var state = fields
+            state["sampleSource"] = source
+            state["sourceRootPhase"] = rootPhase
+            state["mountID"] = mountID
+            state["mounted"] = String(window != nil)
+            state["readoutHasBounds"] = String(bounds.width > 0 && bounds.height > 0)
+            state["windowHasBounds"] = String(window.map { $0.bounds.width > 0 && $0.bounds.height > 0 } ?? false)
+            state["windowKey"] = String(window?.isKeyWindow == true)
+            state["windowHidden"] = String(window?.isHidden == true)
+            state["windowAccessibilityHidden"] = String(window?.accessibilityElementsHidden == true)
+            state["ancestorCount"] = String(ancestors.count)
+            state["hiddenAncestorCount"] = String(ancestors.count { $0.isHidden })
+            state["transparentAncestorCount"] = String(ancestors.count { $0.alpha == 0 })
+            state["accessibilityHiddenAncestorCount"] = String(ancestors.count { $0.accessibilityElementsHidden })
+            guard state != lastSample else {
+                return
+            }
+
+            lastSample = state
+            record(state)
         }
     }
 }
@@ -1305,6 +1893,7 @@ private final class BrowserDownloadProductionEvidence {
         var object = fields
         object["event"] = event
         object["runID"] = runID
+        object["processID"] = String(ProcessInfo.processInfo.processIdentifier)
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         object["wallTime"] = formatter.string(from: Date())
@@ -1318,12 +1907,49 @@ private final class BrowserDownloadProductionEvidence {
         }
         observations.append(object)
         if observations.count > 256 {
-            observations.removeFirst(observations.count - 256)
+            // Frequent progress snapshots must not evict this run's admission and Lock witnesses.
+            // The UI copy stays bounded; the JSONL file still receives every observation.
+            if BrowserDownloadProductionQualification.activeDownloadHomeEnabled
+                || BrowserDownloadProductionQualification.delayedHandoffLockEnabled {
+                let milestones: Set = [
+                    "fixtureNavigationRequested",
+                    "policyDownloadAdmitted",
+                    "pendingPolicyLockApplied",
+                    "nativeDownloadHandoff",
+                    "transferAdmitted",
+                    "qualificationScenePhaseChanged",
+                    "finiteResponseReleaseRequested",
+                    "finiteResponseReleaseResult",
+                    "finiteResponseCompleted",
+                    "nativePostLockProgress",
+                    "writerFinished",
+                    "writerFailed",
+                    "hiddenCompletion",
+                    "retainedCompletionReconciled",
+                    "nativeCancellationRequested",
+                    "writerCancellationAcknowledged",
+                    "pendingTransferCancelled",
+                    "cleanupRemoval",
+                    "cleanupInjectedFailure",
+                    "scratchFailure",
+                ]
+                let routine = observations.firstIndex {
+                    let observedEvent = $0["event"] ?? ""
+                    return !milestones.contains(observedEvent) && !observedEvent.hasPrefix("slowKnown")
+                }
+                observations.remove(at: routine ?? 0)
+            } else {
+                observations.removeFirst(observations.count - 256)
+            }
         }
         guard var data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
             return
         }
 
+        if event == "diagnosticReadoutState" || event == "diagnosticRootState" {
+            // Captured stdout preserves this sanitized trace when the app's AX channel is unavailable.
+            print("[BrowserDownloadReadout] " + String(decoding: data, as: UTF8.self))
+        }
         data.append(0x0a)
         do {
             if !FileManager.default.fileExists(atPath: url.path) {

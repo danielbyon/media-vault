@@ -16,9 +16,10 @@ import UniformTypeIdentifiers
 
 /// Provides the protected app-controlled filesystem boundary for canonical resources.
 public struct FileMediaResourceRepository: Sendable {
-    private let rootURL: URL
-    private let stagingURL: URL
-    private let protectionOperation: @Sendable (URL) throws -> Void
+    let rootURL: URL
+    let stagingURL: URL
+    let completedDownloadRootURL: URL
+    let protectionOperation: @Sendable (URL) throws -> Void
     private let acceptedResourceReadOperation: @Sendable (URL) async throws -> Data
 
     /// Creates protected resource and staging directories below the supplied root.
@@ -36,6 +37,9 @@ public struct FileMediaResourceRepository: Sendable {
     public init(
         rootURL: URL,
         protectionOperation: @escaping @Sendable (URL) throws -> Void,
+        completedDownloadRootURL: URL = FileManager.default
+            .temporaryDirectory
+            .appendingPathComponent("BrowserDownloads", isDirectory: true),
         acceptedResourceReadOperation: @escaping @Sendable (URL) async throws -> Data = { url in
             try Data(contentsOf: url, options: [.mappedIfSafe])
         },
@@ -44,6 +48,7 @@ public struct FileMediaResourceRepository: Sendable {
         self.rootURL = normalizedRootURL
         stagingURL = normalizedRootURL.appendingPathComponent(".staging", isDirectory: true)
         self.protectionOperation = protectionOperation
+        self.completedDownloadRootURL = completedDownloadRootURL
         self.acceptedResourceReadOperation = acceptedResourceReadOperation
         let fileManager = FileManager.default
 
@@ -304,14 +309,53 @@ public struct MediaSourceClient: Sendable {
 
 /// Imports one source file into the canonical media model and protected resource store.
 public actor MediaLibraryImporter {
-    private let store: SQLiteMediaLibraryStore
-    private let resources: FileMediaResourceRepository
+    let store: SQLiteMediaLibraryStore
+    let resources: FileMediaResourceRepository
+    var retainedDownloadIDs = Set<UUID>()
+    var downloadLimits = AcceptedDownloadLimits.production
+    var availableDownloadBytesForTesting: (@Sendable () throws -> Int64)?
+    var afterDownloadIntentForTesting: @Sendable () throws -> Void = {}
+    var afterDownloadRenameForTesting: @Sendable () throws -> Void = {}
+    var beforeDownloadCleanupForTesting: @Sendable () throws -> Void = {}
+
+    func setDownloadStorageForTesting(
+        limits: AcceptedDownloadLimits = .production,
+        availableBytes: (@Sendable () throws -> Int64)? = nil,
+    ) {
+        downloadLimits = limits
+        availableDownloadBytesForTesting = availableBytes
+    }
+
+    func setDownloadHandoffHooksForTesting(
+        afterIntent: @escaping @Sendable () throws -> Void = {},
+        afterRename: @escaping @Sendable () throws -> Void = {},
+        beforeCleanup: @escaping @Sendable () throws -> Void = {},
+    ) {
+        afterDownloadIntentForTesting = afterIntent
+        afterDownloadRenameForTesting = afterRename
+        beforeDownloadCleanupForTesting = beforeCleanup
+    }
+
+    var beforeDownloadCommitClaimForTesting: @Sendable () async -> Void = {}
+    var afterDownloadCommitClaimForTesting: @Sendable () async -> Void = {}
+
+    func setDownloadCommitHooksForTesting(
+        before: @escaping @Sendable () async -> Void = {},
+        after: @escaping @Sendable () async -> Void = {},
+    ) {
+        beforeDownloadCommitClaimForTesting = before
+        afterDownloadCommitClaimForTesting = after
+    }
+
     private let source: MediaSourceClient
-    private let entitlement: EntitlementClient
+    let entitlement: EntitlementClient
     private let sessionIsCurrent: @Sendable (UInt64) -> Bool
+    let downloadSessionIsCurrent: @Sendable (UInt64) -> Bool
+    let downloadCommitClaim: @Sendable (UUID, UInt64) -> DownloadCommitClaim?
+    let downloadDiscardRequest: @Sendable (UUID) -> Void
     private let sessionAdmission: @Sendable (UInt64) -> MediaLibraryImportAdmission?
     private let id: @Sendable () -> UUID
-    private let now: @Sendable () -> Date
+    let now: @Sendable () -> Date
     private var journalAcceptance: @Sendable (@Sendable () async throws -> Void) async throws -> Void = { operation in
         try await operation()
     }
@@ -363,6 +407,9 @@ public actor MediaLibraryImporter {
         now: @escaping @Sendable () -> Date = Date.init,
         sessionIsCurrent: @escaping @Sendable (UInt64) -> Bool = { _ in true },
         sessionAdmission: @escaping @Sendable (UInt64) -> MediaLibraryImportAdmission?,
+        downloadSessionIsCurrent: @escaping @Sendable (UInt64) -> Bool = { _ in false },
+        downloadCommitClaim: @escaping @Sendable (UUID, UInt64) -> DownloadCommitClaim? = { _, _ in nil },
+        downloadDiscardRequest: @escaping @Sendable (UUID) -> Void = { _ in },
     ) {
         self.store = store
         self.resources = resources
@@ -370,6 +417,9 @@ public actor MediaLibraryImporter {
         self.entitlement = entitlement
         self.sessionIsCurrent = sessionIsCurrent
         self.sessionAdmission = sessionAdmission
+        self.downloadSessionIsCurrent = downloadSessionIsCurrent
+        self.downloadCommitClaim = downloadCommitClaim
+        self.downloadDiscardRequest = downloadDiscardRequest
         self.id = id
         self.now = now
     }
@@ -396,7 +446,6 @@ public actor MediaLibraryImporter {
         try await recoverAcceptedImportsBeforeAdmission()
         try Task.checkCancellation()
         try requireCurrentSession(sessionGeneration)
-
         try await requireAdmissionForNewImport()
         try Task.checkCancellation()
         try requireCurrentSession(sessionGeneration)
@@ -483,7 +532,7 @@ public actor MediaLibraryImporter {
         }
     }
 
-    private func requireAdmissionForNewImport() async throws {
+    func requireAdmissionForNewImport() async throws {
         try Task.checkCancellation()
         let committedAssetCount: Int
         do {
@@ -630,7 +679,11 @@ public actor MediaLibraryImporter {
                 recordedAt: now(),
             )
         }
-        for entry in snapshot.entries {
+        guard let downloadIDs = try? await store.ingestionJournal.downloadRecords().map(\.operationID) else {
+            return blockedIDs.union(snapshot.entries.map(\.id))
+        }
+
+        for entry in snapshot.entries where !downloadIDs.contains(entry.id) {
             // Rejected and cancelled entries are durable history, not pending recovery work.
             if entry.state == .failed || entry.state == .cancelled {
                 continue
@@ -666,7 +719,6 @@ public actor MediaLibraryImporter {
 
     private func resume(_ initialEntry: MediaIngestionJournalEntry) async throws -> MediaAsset {
         var entry = initialEntry
-
         while true {
             switch entry.state {
             case .received:
@@ -741,7 +793,7 @@ public actor MediaLibraryImporter {
         }
     }
 
-    private func makeAsset(from entry: MediaIngestionJournalEntry) throws -> MediaAsset {
+    func makeAsset(from entry: MediaIngestionJournalEntry) throws -> MediaAsset {
         let resource = resource(for: entry)
         guard resource.byteCount >= 0, resource.sha256.count == 64,
               let sourceUTI = entry.sourceUTI, !sourceUTI.isEmpty
@@ -768,7 +820,7 @@ public actor MediaLibraryImporter {
         )
     }
 
-    private func resource(for entry: MediaIngestionJournalEntry) -> MediaResource {
+    func resource(for entry: MediaIngestionJournalEntry) -> MediaResource {
         MediaResource(
             id: entry.resourceID,
             role: .original,
@@ -796,7 +848,7 @@ public actor MediaLibraryImporter {
         return sha256
     }
 
-    private func inspectStillImage(at url: URL) async throws -> ImageInspection {
+    func inspectStillImage(at url: URL) async throws -> ImageInspection {
         let bytes: Data
         do {
             bytes = try await resources.readAcceptedResource(at: url)

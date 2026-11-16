@@ -461,7 +461,7 @@ extension AppHostedUITests {
                 fixture.store.send(.vault(.retryConfiguration))
                 #expect(!fixture.owner.snapshot.isAvailable)
                 #expect(fixture.owner.snapshot.records.isEmpty)
-                #expect(!FileManager.default.fileExists(atPath: file.url.path))
+                #expect(FileManager.default.fileExists(atPath: file.url.path))
                 let cover = try #require(fixture.coordinator.coverWindow(in: fixture.scene))
                 #expect(!cover.isHidden)
                 #expect(cover.windowLevel > UIWindow.Level.alert)
@@ -514,14 +514,14 @@ extension AppHostedUITests {
                 fixture.deactivate()
                 #expect(!fixture.owner.snapshot.isAvailable)
                 #expect(fixture.coordinator.coverWindow(in: fixture.scene)?.isHidden == false)
-                #expect(!FileManager.default.fileExists(atPath: file.url.path))
+                #expect(FileManager.default.fileExists(atPath: file.url.path))
                 fixture.activate()
                 try await fixture
                     .wait("reactivation dismissal and safe Root") {
                         fixture.coordinator.nativeController == nil && fixture.coverAbsent
                     }
-                #expect(fixture.owner.snapshot.records.isEmpty)
-                #expect(!FileManager.default.fileExists(atPath: file.url.path))
+                #expect(fixture.owner.snapshot.records.first?.id == file.id)
+                #expect(FileManager.default.fileExists(atPath: file.url.path))
                 #expect(fixture.owner.snapshot.isAvailable)
             }
         }
@@ -532,6 +532,7 @@ extension AppHostedUITests {
                 let file = try fixture.completedPDF()
                 try await fixture.present(file.id, .share)
                 fixture.faults.failRemoval = true
+                fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .discard(file.id)))
                 fixture.store.send(.vault(.retryConfiguration))
                 #expect(fixture.owner.snapshot.cleanupNeedsRetry)
                 #expect(fixture.owner.snapshot.records.isEmpty)
@@ -568,6 +569,7 @@ extension AppHostedUITests {
                 let file = try fixture.completedPDF()
                 try await fixture.present(file.id, .share)
                 fixture.faults.failRemoval = true
+                fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .discard(file.id)))
                 fixture.store.send(.vault(.retryConfiguration))
                 let cover = try #require(fixture.coordinator.coverWindow(in: fixture.scene))
                 let view = try #require(cover.rootViewController?.view)
@@ -596,6 +598,7 @@ extension AppHostedUITests {
                 try await fixture.present(file.id, .share)
                 let nativeWindow = try #require(fixture.coordinator.nativeController?.viewIfLoaded?.window)
                 fixture.faults.failRemoval = true
+                fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .discard(file.id)))
                 // This fixture's phase action synchronously exercises the actual mounted coordinator.
                 // It is representative cover rendering, not real system scene-inactivation evidence.
                 fixture.store.send(.vault(.retryConfiguration))
@@ -622,7 +625,7 @@ extension AppHostedUITests {
                     cover.layer.render(in: context.cgContext)
                 }
                 // Approved destinations use separate references for their actual scene geometry.
-                withSnapshotTesting(record: .missing) {
+                withSnapshotTesting(record: .never) {
                     assertSnapshot(
                         of: image,
                         as: .image,
@@ -742,10 +745,11 @@ extension AppHostedUITests {
                 #expect(fixture.owner.snapshot.generation > initialGeneration)
                 #expect(!fixture.owner.snapshot.isAvailable)
                 #expect(fixture.owner.snapshot.records.isEmpty)
-                #expect(!FileManager.default.fileExists(atPath: file.url.path))
+                #expect(FileManager.default.fileExists(atPath: file.url.path))
                 fixture.activate()
-                #expect(fixture.owner.snapshot.records.isEmpty)
-                #expect(!FileManager.default.fileExists(atPath: file.url.path))
+                #expect(fixture.owner.snapshot.records.first?.id == file.id)
+                #expect(fixture.owner.snapshot.presentation == nil)
+                #expect(FileManager.default.fileExists(atPath: file.url.path))
             }
         }
 
@@ -1052,6 +1056,7 @@ private final class MountedDownloadRoot {
     func remove() async {
         faults.failRemoval = false
         owner.invalidateAuthorization()
+        owner.revokeAll()
         coordinator.nativeController?.dismiss(animated: false)
         for _ in 0 ..< 100 where coordinator.nativeController != nil {
             coordinator.confirmAbsence()

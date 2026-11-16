@@ -466,3 +466,84 @@ The correction changed no snapshot references. CI run `42774304680` applies to
 the pre-correction SHA `636bf7687f9fca95fa3dce94b23e874144f4a1b7`; it does not
 qualify this correction. Corrective logs and result bundles are preserved in
 the Qwizlab corrective-review evidence directory.
+
+## Download continuation across privacy lock
+
+Download transfer authority begins at an authenticated WebKit navigation-action or
+navigation-response decision accepting a download. The single-use capability belongs
+to the exact policy association, originating WebView, tab lifetime, and browsing profile.
+An ordinary navigation or user tap does not grant this authority. A matching native
+handoff may arrive after Lock without gaining content-access authority.
+
+Privacy transitions synchronously conceal metadata and native presentations, revoke
+content grants, and deny new admission. Pending and active admitted transfers continue
+within their original authority. Reauthentication can reconcile retained work through
+fresh verified grants; it cannot replay a stale presentation or resurrect a cancelled
+transfer. Explicit cancellation, tab closure, confirmed profile replacement, and genuine
+failures remain terminal boundaries.
+
+Production scratch and ingestion staging retain Complete file protection and backup
+exclusion. Completion verification waits when protected data is unavailable. The
+[owner-approved protection boundary](https://github.com/danielbyon/media-vault/pull/111#issuecomment-6908629367)
+permits durable acceptance while the app is privacy-locked and protected data remains
+available. Actual device-lock protection may prevent native writing, verification, or
+acceptance. Completion and acceptance are not guaranteed during that interval.
+
+Only verified, durably accepted content receives a restart-recovery guarantee. A native
+completion callback retained only in memory, an admission reservation, and a partial file
+do not establish durable acceptance. Recovery must preserve accepted staging and resume
+processing after authentication. A fresh process starts with an empty Downloads list.
+Issue #123 owns any later investigation of Complete Unless Open protection; it is outside
+this contract and is not a merge blocker under the approved protection boundary.
+
+Supported ordinary downloads enter the shared ingestion pipeline automatically. Actual
+content validation, exact-duplicate comparison, quota decisions, and final commit require
+authentication. Duplicate downloads default to the existing canonical asset. Lock and an
+operation-specific final commit claim have one atomic ordering: Lock prevents an unclaimed
+commit, while a transaction claimed before Lock may finish its authorized disk work.
+
+Capacity accounting separates four pending/active/cancelling writers, eight temporary
+operations, and lightweight session Downloads rows. Accepted pending storage is limited to
+2 GiB in total and 512 MiB per item, with a 512 MiB free-space admission floor. Native
+cancellation is best effort, so qualification records any temporary write overshoot.
+Imported rows release temporary-byte capacity and reference the canonical asset; discarding
+such a row must never delete Library content. Cleanup failures never restore access.
+
+Native Preview and Share use a protected temporary export when the accepted resource's
+opaque storage name cannot identify its type. The export retains a suitable filename
+extension, uses Complete protection and backup exclusion, and consumes temporary storage
+capacity. It is created only for a currently authorized presentation. The accepted or
+canonical source stays unchanged; session-row retention does not retain an export copy.
+Lock revokes the presentation URL immediately. An export acquired by UIKit remains private
+until native absence is confirmed, then cleanup releases its capacity. Unacquired exports
+can be removed without waiting for a native controller. Failed cleanup retains ownership
+and capacity for retry.
+
+Qualification must prove actual byte progress or completion after the privacy transition,
+as well as the absence of application-requested cancellation. Deterministic capability
+tests do not qualify physical WebKit execution. Finite UIKit assertions provide limited
+execution time; they do not guarantee completion during suspension or after termination.
+A separate finite-response fixture releases its remaining bytes after the real Root
+background action locks the session. Its oracle correlates the policy capability, native
+transfer, fixture connection, post-lock progress, finish, and hidden retained allocation.
+The existing slow-known fixture keeps its original deadline and behavior.
+
+`make test` selects 26 simulator-safe `BrowserDownloadQualificationUITests` cases
+alongside the 30 multi-scene cases. The strict result checker requires all 56 exact
+identities on the canonical iPad destination with no failures or skips. The physical
+continuation selector and system-resize test are excluded. Simulator delayed-handoff
+coverage uses a real accepted WebKit policy callback to Lock Root before native handoff;
+it qualifies that callback ordering, not physical background execution.
+
+Automatic-ingestion cases cover ordinary PNG completion, duplicate skip with a stable
+canonical identity, PDF exclusion with native presentation, and accepted pending PNG
+recovery after authenticated relaunch. A separate cold-authentication case checks the
+DEBUG diagnostic readout's accessibility lifecycle without a download. Its subtree may
+remount when credential visibility changes; the production Root and credential surfaces
+keep their identities and concealment rules.
+
+The earlier cancellation-based physical failures remain historical failures. Native
+continuation, device-lock behavior, and protected-data recovery require source-bound
+qualification on the revised implementation. A test-only Complete Unless Open experiment
+cannot establish approval for a production protection change. Existing accessibility and
+system-resize qualification dispositions remain separate.

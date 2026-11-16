@@ -9,11 +9,161 @@ import ComposableArchitecture
 import Foundation
 import ObjectiveC
 import Testing
+import UIKit
 @testable import BrowserFeature
 
 @Suite("Browser transient download core")
 @MainActor
 struct BrowserDownloadCoreTests {
+    @Test
+    func explicitPendingCancellationKeepsCapacityUntilNativeAcknowledgement() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let tab = BrowserTabID()
+        let token = try #require(fixture.owner.captureAdmissionToken(for: tab))
+        let pendingID = try #require(fixture.owner.snapshot.records.first?.id)
+        fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .cancel(pendingID)))
+        #expect(fixture.owner.snapshot.records.isEmpty)
+        let other = try (0 ..< 3).map { _ in try #require(fixture.owner.captureAdmissionToken(for: tab)) }
+        #expect(fixture.owner.captureAdmissionToken(for: tab) == nil)
+        let cancelled = DownloadCoreTransfer()
+        #expect(fixture.owner.admit(cancelled, tabID: tab, using: token) == nil)
+        #expect(cancelled.cancelCalls == 1)
+        #expect(fixture.owner.captureAdmissionToken(for: tab) == nil)
+        cancelled.acknowledgeCancellation()
+        #expect(fixture.owner.captureAdmissionToken(for: tab) != nil)
+        for remainingToken in other {
+            fixture.owner.releaseAdmissionReservation(remainingToken)
+        }
+        fixture.owner.revokeAll()
+    }
+
+    @Test
+    func lockedCompletionWaitsForProtectedDataAndFreshAccess() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let started = try fixture.start()
+        try Data([3, 4]).write(to: started.url)
+        fixture.control.authorized = false
+        fixture.owner.invalidateAuthorization()
+        fixture.control.protectedDataAvailable = false
+        fixture.owner.finished(started.id)
+        #expect(started.transfer.cancelCalls == 0)
+        #expect(fixture.owner.snapshot.records.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: started.url.path))
+        fixture.control.protectedDataAvailable = true
+        fixture.control.authorized = true
+        fixture.owner.recheckAuthorization()
+        #expect(fixture.owner.snapshot.records.first?.isReady == true)
+        #expect(fixture.owner.snapshot.records.first?.receivedBytes == 2)
+    }
+
+    @Test
+    func admittedPolicySurvivesLockAndDelayedDestination() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let tab = BrowserTabID()
+        let origin = NSObject()
+        let token = try #require(fixture.owner.captureAdmissionToken(for: tab, originatingWebView: origin))
+        fixture.control.authorized = false
+        fixture.owner.invalidateAuthorization()
+        #expect(fixture.owner.captureAdmissionToken(for: tab, originatingWebView: origin) == nil)
+        let writer = DownloadCoreTransfer()
+        let id = try #require(fixture.owner.admit(
+            writer,
+            tabID: tab,
+            using: token,
+            originatingWebView: origin,
+        ))
+        let destination = try #require(fixture.owner.destination(for: id, suggestedName: "fixture.bin"))
+        fixture.owner.progress(id: id, completed: 1, total: 2)
+        #expect(writer.cancelCalls == 0)
+        #expect(fixture.owner.snapshot.records.isEmpty)
+        try Data([1, 2]).write(to: destination)
+        fixture.owner.finished(id)
+        #expect(fixture.owner.snapshot.records.isEmpty)
+        fixture.control.authorized = true
+        fixture.owner.recheckAuthorization()
+        #expect(fixture.owner.snapshot.records.first?.id == id)
+        #expect(fixture.owner.snapshot.records.first?.isReady == true)
+        #expect(fixture.owner.admit(writer, tabID: tab, using: token, originatingWebView: origin) == id)
+        let reused = DownloadCoreTransfer()
+        #expect(fixture.owner.admit(reused, tabID: tab, using: token, originatingWebView: origin) == nil)
+        #expect(reused.cancelCalls == 1)
+        reused.acknowledgeCancellation()
+    }
+
+    @Test
+    func pendingAdmissionRequiresExactOriginAndReservesCapacity() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let origin = NSObject()
+        let tab = BrowserTabID()
+        let tokens = try (0 ..< 4).map { _ in
+            try #require(fixture.owner.captureAdmissionToken(for: tab, originatingWebView: origin))
+        }
+        #expect(fixture.owner.captureAdmissionToken(for: tab, originatingWebView: origin) == nil)
+        let wrong = DownloadCoreTransfer()
+        #expect(fixture.owner.admit(wrong, tabID: tab, using: tokens[0], originatingWebView: NSObject()) == nil)
+        wrong.acknowledgeCancellation()
+        fixture.owner.releaseAdmissionReservation(tokens[1])
+        let replacement = try #require(fixture.owner.captureAdmissionToken(for: tab, originatingWebView: origin))
+        fixture.owner.revokeTab(tab)
+        let retired = DownloadCoreTransfer()
+        #expect(fixture.owner.admit(retired, tabID: tab, using: replacement, originatingWebView: origin) == nil)
+        retired.acknowledgeCancellation()
+    }
+
+    @Test
+    func policyIdentityAndOwnerCannotBeSubstituted() throws {
+        let fixture = try DownloadCoreFixture()
+        let other = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles()
+            other.removeTestFiles()
+        }
+        let tab = BrowserTabID()
+        let token = try #require(fixture.owner.captureAdmissionToken(for: tab))
+        let policy = NSObject()
+        var registry = BrowserWebKitDownloadAssociationRegistry()
+        let association = BrowserWebKitDownloadAssociation(conversion: nil, admissionToken: token)
+        registry.insert(association, forPolicyObject: policy)
+        let unrelated = registry.take(forPolicyObject: NSObject())
+        #expect(unrelated == nil)
+        #expect(registry.contains(reservationID: association.reservationID))
+        let foreignWriter = DownloadCoreTransfer()
+        #expect(other.owner.admit(foreignWriter, tabID: tab, using: token) == nil)
+        foreignWriter.acknowledgeCancellation()
+        let wrongTabWriter = DownloadCoreTransfer()
+        #expect(fixture.owner.admit(wrongTabWriter, tabID: BrowserTabID(), using: token) == nil)
+        wrongTabWriter.acknowledgeCancellation()
+        let writer = DownloadCoreTransfer()
+        #expect(fixture.owner.admit(writer, tabID: tab, using: token) != nil)
+        fixture.owner.revokeAll()
+        writer.acknowledgeCancellation()
+    }
+
+    @Test
+    func reauthenticationDuringTransferCannotRestoreOldCommands() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let transfer = try fixture.start()
+        let oldCancel = BrowserDownloadCommand(snapshot: fixture.owner.snapshot, action: .cancel(transfer.id))
+        fixture.control.authorized = false
+        fixture.owner.invalidateAuthorization()
+        fixture.owner.progress(id: transfer.id, completed: 1, total: 2)
+        #expect(fixture.owner.snapshot.records.isEmpty)
+        fixture.control.authorized = true
+        fixture.owner.recheckAuthorization()
+        fixture.owner.execute(oldCancel)
+        #expect(transfer.transfer.cancelCalls == 0)
+        #expect(fixture.owner.snapshot.records.first?.receivedBytes == 1)
+        try Data([1, 2]).write(to: transfer.url)
+        fixture.owner.finished(transfer.id)
+        #expect(fixture.owner.snapshot.records.first?.isReady == true)
+        fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .discard(transfer.id)))
+        #expect(!FileManager.default.fileExists(atPath: transfer.url.path))
+    }
+
     @Test
     func admissionRetainsRejectedWritersUntilAck() throws {
         let fixture = try DownloadCoreFixture(authorized: false)
@@ -58,6 +208,7 @@ struct BrowserDownloadCoreTests {
         #expect(token != nil)
 
         fixture.control.authorized = false
+        fixture.owner.revokeTab(tabID)
         fixture.owner.invalidateAuthorization()
         #expect(fixture.owner.snapshot.notice == .unauthorized)
 
@@ -353,7 +504,7 @@ struct BrowserDownloadCoreTests {
         #expect(active ==
             "Download limit reached. Four downloads can transfer at once. Cancel an active download and try again.")
         #expect(retained ==
-            "Download limit reached. Eight downloads are kept in the list. Discard a download and try again.")
+            "Temporary download storage is unavailable or full. Wait for imports or discard a pending download.")
         #expect(active != retained)
     }
 
@@ -420,13 +571,13 @@ struct BrowserDownloadCoreTests {
         #expect(fixture.owner.snapshot.generation > old.generation)
         #expect(fixture.owner.snapshot.presentation == nil)
         #expect(fixture.owner.snapshot.records.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: transfer.url.path))
+        #expect(FileManager.default.fileExists(atPath: transfer.url.path))
         fixture.control.authorized = true
         fixture.owner.recheckAuthorization()
         fixture.owner.execute(.init(snapshot: old, action: .present(transfer.id, .share)))
         fixture.owner.finished(transfer.id)
         #expect(fixture.owner.snapshot.isAvailable)
-        #expect(fixture.owner.snapshot.records.isEmpty)
+        #expect(fixture.owner.snapshot.records.first?.id == transfer.id)
         #expect(fixture.owner.snapshot.presentation == nil)
     }
 
@@ -443,11 +594,12 @@ struct BrowserDownloadCoreTests {
         #expect(fixture.owner.snapshot.records.map(\.id) == [second.id])
         first.transfer.acknowledgeCancellation()
         fixture.owner.invalidateAuthorization()
-        #expect(second.transfer.cancelCalls == 1)
+        #expect(second.transfer.cancelCalls == 0)
         #expect(fixture.owner.snapshot.records.isEmpty)
         fixture.owner.recheckAuthorization()
         fixture.owner.progress(id: second.id, completed: 10, total: 10)
-        #expect(fixture.owner.snapshot.records.isEmpty)
+        #expect(fixture.owner.snapshot.records.first?.id == second.id)
+        fixture.owner.revokeAll()
         second.transfer.acknowledgeCancellation()
         #expect(fixture.owner.retainedCount == 0)
     }
@@ -635,8 +787,8 @@ struct BrowserDownloadCoreTests {
         associations.insert(subframeAssociation, forPolicyObject: policyObject)
 
         let finishedNavigation = correlation.finish(mainNavigation)
-        let completion = try #require(finishedNavigation)
-        associations.releaseReservations(forFinishedNavigation: completion, owner: fixture.owner)
+        _ = try #require(finishedNavigation)
+        _ = associations.releaseAbandonedAssociations(owner: fixture.owner)
         let pendingAssociation = associations.take(forPolicyObject: policyObject)
         let pending = try #require(pendingAssociation)
         #expect(pending.reservationID == subframeAssociation.reservationID)
@@ -648,6 +800,37 @@ struct BrowserDownloadCoreTests {
         let transfer = DownloadCoreTransfer()
         #expect(fixture.owner.admit(transfer, tabID: tabID, using: handoff.admissionToken) != nil)
         #expect(fixture.owner.activeCount == 1)
+        fixture.owner.revokeAll()
+        transfer.acknowledgeCancellation()
+    }
+
+    @Test
+    func completedNavigationPreservesLiveMainFramePolicyAcrossLock() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let tabID = BrowserTabID()
+        let policy = NSObject()
+        let navigation = NSObject()
+        var correlation = BrowserWebKitNavigationCorrelation()
+        let accepted = correlation.acceptExternalNavigation(navigation)
+        #expect(accepted)
+        let token = try #require(fixture.owner.captureAdmissionToken(for: tabID))
+        var registry = BrowserWebKitDownloadAssociationRegistry()
+        registry.insert(
+            .init(conversion: correlation.captureDownloadConversion(), admissionToken: token),
+            forPolicyObject: policy,
+        )
+        let finished = correlation.finish(navigation)
+        #expect(finished == nil)
+        #expect(registry.releaseAbandonedAssociations(owner: fixture.owner).isEmpty)
+        fixture.owner.invalidateAuthorization()
+        let pending = registry.take(forPolicyObject: policy)
+        var association = try #require(pending)
+        let consumed = association.consume(correlation: &correlation)
+        let handoff = try #require(consumed)
+        let transfer = DownloadCoreTransfer()
+        #expect(fixture.owner.admit(transfer, tabID: tabID, using: handoff.admissionToken) != nil)
+        #expect(fixture.owner.snapshot.records.isEmpty)
         fixture.owner.revokeAll()
         transfer.acknowledgeCancellation()
     }
@@ -671,9 +854,8 @@ struct BrowserDownloadCoreTests {
 
         let acceptedCurrentNavigation = correlation.acceptExternalNavigation(currentNavigation)
         #expect(acceptedCurrentNavigation)
-        if let completion = correlation.finish(staleNavigation) {
-            associations.releaseReservations(forFinishedNavigation: completion, owner: fixture.owner)
-        }
+        #expect(correlation.finish(staleNavigation) == nil)
+        _ = associations.releaseAbandonedAssociations(owner: fixture.owner)
         #expect(correlation.isCurrent(currentNavigation))
         #expect(associations.contains(reservationID: association.reservationID))
         let remainingAssociation = associations.take(forPolicyObject: policyObject)
@@ -708,7 +890,7 @@ struct BrowserDownloadCoreTests {
     /// tests exercise lifetime ownership without constructing unsupported native policy objects.
     @Test(
         arguments: ["action-main", "response-main", "action-subframe", "response-subframe"],
-        ["scene", "authentication", "profile", "tabClosure", "tabReplacement"],
+        ["profile", "tabClosure", "tabReplacement"],
     )
     func policyHandoffRejectsRevokedLifetime(
         policy: String,
@@ -729,12 +911,6 @@ struct BrowserDownloadCoreTests {
         let beganNewer = correlation.acceptExternalNavigation(newer)
         #expect(beganNewer)
         switch boundary {
-        case "scene",
-             "authentication":
-            fixture.control.authorized = false
-            fixture.owner.invalidateAuthorization()
-            fixture.control.authorized = true
-            fixture.owner.recheckAuthorization()
         case "profile":
             fixture.owner.revokeAll()
         default:
@@ -751,7 +927,7 @@ struct BrowserDownloadCoreTests {
         #expect(oldAdmission == nil)
         #expect(rejected.cancelCalls == 1)
         #expect(fixture.owner.owns(rejected.identity))
-        #expect(fixture.owner.snapshot.records.isEmpty)
+        #expect(fixture.owner.snapshot.records.count == 1)
         #expect(try fixture.children().isEmpty)
         let duplicate = association.consume(correlation: &correlation)
         #expect(duplicate == nil)
@@ -818,6 +994,7 @@ struct BrowserDownloadCoreTests {
         try Data([1]).write(to: transfer.url)
         fixture.owner.finished(transfer.id)
         fixture.control.failRemoval = true
+        fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .discard(transfer.id)))
         fixture.control.authorized = false
         fixture.owner.invalidateAuthorization()
         #expect(fixture.owner.snapshot.cleanupNeedsRetry)
@@ -838,7 +1015,7 @@ struct BrowserDownloadCoreTests {
         #expect(render.canReleaseCover(sceneActive: true, nativeAdmissionHeld: false))
         #expect(!fixture.owner.snapshot.isAvailable)
         fixture.control.failRemoval = false
-        fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .retryCleanup))
+        fixture.owner.retryCleanup()
         #expect(!fixture.owner.snapshot.cleanupNeedsRetry)
         #expect(!FileManager.default.fileExists(atPath: transfer.url.path))
     }
@@ -1030,6 +1207,7 @@ private final class DownloadCoreFixture {
     final class Control {
         var failRemoval = false
         var failProtection = false
+        var protectedDataAvailable = true
         var authorized = true
     }
 
@@ -1060,7 +1238,11 @@ private final class DownloadCoreFixture {
                 try FileManager.default.removeItem(at: url)
             },
         )
-        owner = BrowserDownloadOwner(store: store)
+        owner = BrowserDownloadOwner(
+            store: store,
+            protectedDataAvailable: { faults.protectedDataAvailable },
+            backgroundExecution: .init(begin: { _ in .invalid }, end: { _ in }),
+        )
         owner.installAuthorization { faults.authorized }
     }
 

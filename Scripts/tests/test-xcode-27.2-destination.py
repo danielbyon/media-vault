@@ -52,6 +52,36 @@ MULTI_SCENE_TEST_IDENTITIES = (
     "BrowserDownloadMultiSceneUITests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy",
 )
 
+QUALIFICATION_TEST_IDENTITIES = (
+    "BrowserDownloadQualificationUITests/testAcceptedPolicyHandoffAfterLockCompletesHiddenUntilFreshAuthentication",
+    "BrowserDownloadQualificationUITests/testDelayedHandoffParserRequiresNativeCallbacksAfterLock",
+    "BrowserDownloadQualificationUITests/testQuickLookHomeRevokesAndFreshDownloadRecovers",
+    "BrowserDownloadQualificationUITests/testShareHomeRevokesAndFreshDownloadRecovers",
+    "BrowserDownloadQualificationUITests/testNormalQualificationModeReturnsToAuthenticatedBrowserAfterHome",
+    "BrowserDownloadQualificationUITests/testActiveDownloadQualificationModeAutoLocksAfterRealHomeTransition",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessAcceptsCorrelatedNativeProgress",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsMissingHandoffOrProgress",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsServerEvidenceAfterReadiness",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsEarlyTerminalAndCleanupFailure",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsPrematureCleanupWithoutFixtureRequest",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessIgnoresPrematureCleanupForAnotherOperation",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessIgnoresPrematureCleanupFromAnotherRun",
+    "BrowserDownloadQualificationUITests/testContinuationAcceptsFiniteResponseAndNativeFinish",
+    "BrowserDownloadQualificationUITests/testContinuationRejectsMissingNativeOrTransportWitness",
+    "BrowserDownloadQualificationUITests/testContinuationRejectsCancellationFailureAndPrematureCleanup",
+    "BrowserDownloadQualificationUITests/testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion",
+    "BrowserDownloadQualificationUITests/testSlowKnownWitnessDiagnosticsAreRedactedAndBounded",
+    "BrowserDownloadQualificationUITests/testSlowKnownDownloadControlIsAccessibleOnMountedBrowser",
+    "BrowserDownloadQualificationUITests/testActiveDiscardFailureRetryAndAuthenticationLoss",
+    "BrowserDownloadQualificationUITests/testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset",
+    "BrowserDownloadQualificationUITests/testRepeatedPNGDownloadSkipsDuplicateAndRetainsCanonicalIdentity",
+    "BrowserDownloadQualificationUITests/testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation",
+    "BrowserDownloadQualificationUITests/testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch",
+    "BrowserDownloadQualificationUITests/testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible",
+)
+AUTOMATED_DOWNLOAD_TEST_IDENTITIES = MULTI_SCENE_TEST_IDENTITIES + QUALIFICATION_TEST_IDENTITIES
+
 # Only process boundaries are replaced. The resolver, shell entry point, and
 # Make recipes run unchanged against these inventories and command recordings.
 TOOL = r'''#!/usr/bin/env python3
@@ -157,7 +187,7 @@ class DestinationTests(unittest.TestCase):
         (self.root / "runtimes.json").write_text(json.dumps(self.runtimes))
         (self.root / "destinations.txt").write_text("\n".join(self.destinations))
         (self.root / "multi-scene-test-identities.json").write_text(
-            json.dumps(MULTI_SCENE_TEST_IDENTITIES)
+            json.dumps(AUTOMATED_DOWNLOAD_TEST_IDENTITIES)
         )
 
     def verify(self, expected="", destination=NAME, execute=False):
@@ -188,7 +218,7 @@ class DestinationTests(unittest.TestCase):
             "--expected-os-version",
             "27.2",
         ]
-        for identity in MULTI_SCENE_TEST_IDENTITIES:
+        for identity in AUTOMATED_DOWNLOAD_TEST_IDENTITIES:
             command.extend(("--expected-test", identity))
         return subprocess.run(command, cwd=ROOT, env=self.env, text=True, capture_output=True)
 
@@ -317,13 +347,13 @@ class DestinationTests(unittest.TestCase):
         self.assertIn(f"ipad_simulator_udid={OTHER_UDID}", outputs)
 
     def test_xcresult_assertion_rejects_inexact_multi_scene_test_identities(self):
-        missing_identity = MULTI_SCENE_TEST_IDENTITIES[:-1]
-        unexpected_identity = MULTI_SCENE_TEST_IDENTITIES + (
+        missing_identity = AUTOMATED_DOWNLOAD_TEST_IDENTITIES[:-1]
+        unexpected_identity = AUTOMATED_DOWNLOAD_TEST_IDENTITIES + (
             "BrowserDownloadMultiSceneUITests/testUnexpectedFixtureIdentity",
         )
         mismatched_identity = (
             "BrowserDownloadMultiSceneUITests/testMismatchedFixtureIdentity",
-            *MULTI_SCENE_TEST_IDENTITIES[1:],
+            *AUTOMATED_DOWNLOAD_TEST_IDENTITIES[1:],
         )
 
         for label, observed in (
@@ -384,7 +414,7 @@ class DestinationTests(unittest.TestCase):
                          if argument.startswith("-only-testing:")],
                         [
                             "-only-testing:BrowserTabOverviewUITests/" + identity
-                            for identity in MULTI_SCENE_TEST_IDENTITIES
+                            for identity in AUTOMATED_DOWNLOAD_TEST_IDENTITIES
                         ],
                     )
 

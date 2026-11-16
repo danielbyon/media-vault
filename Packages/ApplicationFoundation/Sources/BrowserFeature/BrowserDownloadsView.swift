@@ -33,6 +33,9 @@ struct BrowserDownloadsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(record.filename ?? "Downloading")
                             .font(.headline)
+                        if let status = record.status.message {
+                            Text(status).font(.caption).foregroundStyle(.secondary)
+                        }
                         Text(ByteCountFormatter.string(fromByteCount: record.receivedBytes, countStyle: .file))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -49,7 +52,11 @@ struct BrowserDownloadsView: View {
                             } else {
                                 ProgressView().accessibilityLabel("Downloading")
                             }
-                            Button("Cancel", role: .destructive) { send(.cancel(record.id)) }
+                            if record.status == .downloading {
+                                Button("Cancel", role: .destructive) { send(.cancel(record.id)) }
+                            } else {
+                                Button("Discard", role: .destructive) { send(.discard(record.id)) }
+                            }
                         }
                     }
                     .padding(.vertical, 8)
@@ -91,6 +98,25 @@ struct BrowserDownloadsView: View {
     }
 }
 
+extension BrowserDownloadRecord.Status {
+    var message: String? {
+        switch self {
+        case .downloading:
+            nil
+        case .pendingImport:
+            "Waiting for import"
+        case .imported:
+            "Imported to Library"
+        case .duplicate:
+            "Already in Library"
+        case .unsupported:
+            "Not supported by Library"
+        case .failed:
+            "Import could not finish"
+        }
+    }
+}
+
 extension BrowserDownloadSnapshot.Notice {
     /// Redacted explanations never contain request URLs, credentials, filenames, or scratch paths.
     var message: String {
@@ -100,7 +126,7 @@ extension BrowserDownloadSnapshot.Notice {
         case .activeTransferLimitReached:
             "Download limit reached. Four downloads can transfer at once. Cancel an active download and try again."
         case .retainedRecordLimitReached:
-            "Download limit reached. Eight downloads are kept in the list. Discard a download and try again."
+            "Temporary download storage is unavailable or full. Wait for imports or discard a pending download."
         case .previewUnavailable:
             "Preview is unavailable for this file. You can share or discard it."
         case .transferFailed:

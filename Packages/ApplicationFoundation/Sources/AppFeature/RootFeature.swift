@@ -169,8 +169,10 @@ public struct RootFeature {
     ) -> Effect<Action> {
         switch phase {
         case .inactive:
+            mediaLibrary.suspendDownloadIngestion()
             return .none
         case .unknown:
+            mediaLibrary.suspendDownloadIngestion()
             state.applicationReturnPending = true
             guard state.vault.configuredKind != nil || state.vault.phase == .authenticated else {
                 return .none
@@ -178,9 +180,21 @@ public struct RootFeature {
 
             return lockApplication(state: &state)
         case .background:
+            mediaLibrary.suspendDownloadIngestion()
             return handleApplicationBackground(state: &state)
         case .active:
-            return handleApplicationActive(state: &state)
+            let effect = handleApplicationActive(state: &state)
+            // Foreground eligibility does not authenticate the session. Credentials may arrive later.
+            let generation = mediaLibrary.setDownloadProcessingActive(true)
+            guard state.vault.phase == .authenticated, !state.applicationReturnPending else {
+                return effect
+            }
+
+            let library = mediaLibrary
+            Task {
+                _ = await library.reconcileAcceptedDownloads(generation: generation)
+            }
+            return effect
         }
     }
 

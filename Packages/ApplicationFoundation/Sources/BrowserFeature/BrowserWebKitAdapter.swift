@@ -86,6 +86,12 @@ final class BrowserWebKitAdapter: NSObject {
     /// and origin observations; the callback does not admit, cancel or extend writer ownership.
     var downloadHandoffObserver: (@MainActor (WKDownload, BrowserTabID) -> Void)?
 
+    #if DEBUG
+    /// Observes an accepted native policy after capability registration and before handoff.
+    /// Qualification can schedule a real global Lock at this exact WebKit boundary.
+    var downloadPolicyDecisionObserver: (@MainActor (BrowserTabID) -> Void)?
+    #endif
+
     init(
         requiresProfileConfiguration: Bool = false,
         downloadOwner: BrowserDownloadOwner? = nil,
@@ -134,10 +140,39 @@ final class BrowserWebKitAdapter: NSObject {
         }
 
         downloadHandoffObserver?(download, tabID)
-        if let id = downloadOwner.admit(transfer, tabID: tabID, using: association.admissionToken) {
+        if let id = downloadOwner.admit(
+            transfer,
+            tabID: tabID,
+            using: association.admissionToken,
+            originatingWebView: context.webView,
+        ) {
             transfer.registered(id)
         }
     }
+
+    /// Reclaims only dead policy associations across the shared owner's contexts before admission.
+    /// A quiet tab must not hold capacity after its exact policy object has been released.
+    fileprivate func captureDownloadAdmission(
+        for tabID: BrowserTabID,
+        originatingWebView: WKWebView,
+    ) -> BrowserDownloadOwner.AdmissionToken? {
+        for context in contexts.values {
+            context.releaseAbandonedDownloadAssociations()
+        }
+        return downloadOwner.captureAdmissionToken(for: tabID, originatingWebView: originatingWebView)
+    }
+
+    #if DEBUG
+    /// Uses the production admission path with opaque policy objects for abandonment regressions.
+    func reserveDownloadPolicyForTesting(tabID: BrowserTabID, policyObject: AnyObject) -> UUID? {
+        guard let context = contexts[tabID],
+              let token = captureDownloadAdmission(for: tabID, originatingWebView: context.webView) else {
+            return nil
+        }
+
+        return context.reserveDownloadPolicyForTesting(policyObject: policyObject, token: token)
+    }
+    #endif
 
     func hasContext(for tabID: BrowserTabID) -> Bool {
         contexts[tabID] != nil
@@ -556,8 +591,8 @@ struct BrowserWebKitDownloadAssociation {
 }
 
 /// Tracks policy objects without retaining them past WebKit's conversion or cancellation callback.
-/// A dead policy object identifies only its own abandoned reservation; main-navigation completion
-/// is matched separately through the conversion generation.
+/// A dead policy object identifies only its own abandoned reservation. Navigation settlement
+/// cannot revoke a live policy capability: WebKit may still deliver its native handoff.
 @MainActor
 struct BrowserWebKitDownloadAssociationRegistry {
     @MainActor
@@ -590,20 +625,6 @@ struct BrowserWebKitDownloadAssociationRegistry {
         let reservationIDs = entries.compactMap { $0.value.policyObject == nil ? $0.key : nil }
         release(reservationIDs, owner: owner)
         return reservationIDs
-    }
-
-    mutating func releaseReservations(
-        forFinishedNavigation completion: BrowserWebKitNavigationCorrelation.Completion,
-        owner: BrowserDownloadOwner?,
-    ) {
-        releaseReservations(forNavigationGeneration: completion.navigationGeneration, owner: owner)
-    }
-
-    mutating func releaseReservations(forNavigationGeneration generation: Int, owner: BrowserDownloadOwner?) {
-        let reservationIDs = entries.compactMap { entry in
-            entry.value.association.conversion?.navigationGeneration == generation ? entry.key : nil
-        }
-        release(reservationIDs, owner: owner)
     }
 
     mutating func releaseAll(owner: BrowserDownloadOwner?) {
@@ -663,11 +684,6 @@ struct BrowserWebKitNavigationCorrelation {
     private var downloadConversionIsPending = false
     private var downloadConversionIsSettled = false
     private var convertedNavigations: [BrowserWebKitNavigationReference] = []
-
-    /// Returns the generation used to match pending download conversions to navigation callbacks.
-    fileprivate func currentNavigationGeneration() -> Int {
-        navigationGeneration
-    }
 
     var hasActiveNavigation: Bool {
         isAwaitingNavigationRegistration || activeNavigationIdentifier != nil || hasActiveUnidentifiedNavigation
@@ -1130,6 +1146,9 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
 
         downloadAssociations.insert(association, forPolicyObject: navigationAction)
+        #if DEBUG
+        adapter?.downloadPolicyDecisionObserver?(tabID)
+        #endif
         decisionHandler(.download)
     }
 
@@ -1153,6 +1172,9 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
 
         downloadAssociations.insert(association, forPolicyObject: navigationResponse)
+        #if DEBUG
+        adapter?.downloadPolicyDecisionObserver?(tabID)
+        #endif
         decisionHandler(.download)
     }
 
@@ -1181,8 +1203,8 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     private func captureDownloadAssociation(isMainFrame: Bool) -> BrowserWebKitDownloadAssociation? {
         releaseAbandonedDownloadAssociations()
         let admissionToken: BrowserDownloadOwner.AdmissionToken?
-        if let downloadOwner {
-            guard let token = downloadOwner.captureAdmissionToken(for: tabID) else {
+        if downloadOwner != nil {
+            guard let token = adapter?.captureDownloadAdmission(for: tabID, originatingWebView: webView) else {
                 if isMainFrame {
                     _ = consumeDownloadAssociation(
                         BrowserWebKitDownloadAssociation(conversion: captureDownloadConversion()),
@@ -1208,19 +1230,15 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         downloadAssociations.releaseAll(owner: downloadOwner)
     }
 
-    /// Releases main-frame conversions for a navigation that finished or failed without handoff.
-    /// Subframe reservations are released by their exact policy-object terminal callback instead.
-    private func releasePendingDownloadReservations(forNavigationGeneration generation: Int) {
-        downloadAssociations.releaseReservations(forNavigationGeneration: generation, owner: downloadOwner)
+    #if DEBUG
+    func reserveDownloadPolicyForTesting(policyObject: AnyObject, token: BrowserDownloadOwner.AdmissionToken) -> UUID {
+        let association = BrowserWebKitDownloadAssociation(conversion: nil, admissionToken: token)
+        downloadAssociations.insert(association, forPolicyObject: policyObject)
+        return association.reservationID
     }
+    #endif
 
-    private func releasePendingDownloadReservations(
-        forFinishedNavigation completion: BrowserWebKitNavigationCorrelation.Completion,
-    ) {
-        downloadAssociations.releaseReservations(forFinishedNavigation: completion, owner: downloadOwner)
-    }
-
-    private func releaseAbandonedDownloadAssociations() {
+    func releaseAbandonedDownloadAssociations() {
         _ = downloadAssociations.releaseAbandonedAssociations(owner: downloadOwner)
     }
 
@@ -1299,7 +1317,6 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        releasePendingDownloadReservations(forFinishedNavigation: completion)
         backForwardTokens.invalidate()
         emitMetadata(operationID: completion.operationID)
     }
@@ -1314,7 +1331,6 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        releasePendingDownloadReservations(forNavigationGeneration: navigationCorrelation.currentNavigationGeneration())
         emit(error, navigation: navigation)
     }
 
@@ -1332,7 +1348,6 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        releasePendingDownloadReservations(forNavigationGeneration: navigationCorrelation.currentNavigationGeneration())
         emit(error, navigation: navigation)
     }
 

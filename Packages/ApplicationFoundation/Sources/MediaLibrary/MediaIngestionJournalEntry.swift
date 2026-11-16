@@ -100,7 +100,7 @@ struct MediaIngestionJournalSnapshot: Sendable {
 
 /// Persists journal state in the vault database without exposing transitions to callers.
 actor SQLiteMediaLibraryIngestionJournal {
-    private let database: any DatabaseWriter
+    let database: any DatabaseWriter
     private var beforeAcceptanceWriteForTesting: @Sendable () async -> Void = {}
 
     init(database: any DatabaseWriter) {

@@ -21,6 +21,7 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
     /// Keeps only opaque identities and elapsed time from a live partial-transfer checkpoint.
     private struct SlowKnownWitness {
         let runID: String
+        let route: String
         let requestID: String
         let operationID: String
         let connectionID: String
@@ -46,10 +47,12 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
             }
 
             let navigations = events.filter {
-                $0["event"] == "fixtureNavigationRequested" && $0["fixtureRoute"] == "slow-known"
+                $0["event"] == "fixtureNavigationRequested"
+                    && ["slow-known", "finite-continuation"].contains($0["fixtureRoute"] ?? "")
             }
             guard navigations.count == 1, let navigation = navigations.first,
-                  let runID = navigation["runID"], let requestID = navigation["fixtureRequest"]
+                  let runID = navigation["runID"], let requestID = navigation["fixtureRequest"],
+                  let route = navigation["fixtureRoute"]
             else {
                 return nil
             }
@@ -83,6 +86,24 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
                 return nil
             }
 
+            let admissions = runEvents.filter {
+                $0["event"] == "transferAdmitted" && $0["fixtureRequest"] == requestID
+            }
+            let policies = runEvents.filter {
+                $0["event"] == "policyDownloadAdmitted" && $0["fixtureRequest"] == requestID
+            }
+            guard admissions.count == 1, let admission = admissions.first,
+                  policies.count == 1, let policy = policies.first,
+                  let capability = policy["capability"], UUID(uuidString: capability) != nil,
+                  policy["operation"] == operationID, admission["operation"] == operationID,
+                  admission["capability"] == capability, admission["connectionID"] == connectionID,
+                  let policyTime = policy["monotonicSeconds"].flatMap(Double.init),
+                  let admissionTime = admission["monotonicSeconds"].flatMap(Double.init),
+                  policyTime.isFinite, admissionTime.isFinite
+            else {
+                return nil
+            }
+
             let times = [navigation, server, handoff, progress, readiness]
                 .compactMap { $0["monotonicSeconds"].flatMap(Double.init) }
             let failed = runEvents.contains {
@@ -97,8 +118,9 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
                     return false
                 }
 
-                if event["event"] == "slowKnownWriterTerminalAcknowledged" {
-                    return event["fixtureRequest"] == requestID && eventTime <= readyTime
+                if ["writerFinished", "writerFailed", "nativeCancellationRequested", "pendingTransferCancelled"]
+                    .contains(event["event"] ?? "") {
+                    return event["operation"] == operationID && eventTime <= readyTime
                 }
                 return event["event"] == "cleanupRemoval"
                     && event["operation"] == operationID && eventTime <= readyTime
@@ -113,12 +135,12 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
                   UUID(uuidString: requestID) != nil,
                   UUID(uuidString: operationID) != nil,
                   UUID(uuidString: connectionID) != nil,
-                  server["route"] == "slow-known", server["requestParsed"] == "true",
+                  server["route"] == route, server["requestParsed"] == "true",
                   server["requestCount"] == "1", server["connectionCount"] == "1",
                   server["sendStackState"] == "stackPrefixProcessed",
                   server["responseComplete"] == "false", server["connectionClosed"] == "false",
                   prefix > 0, prefix < expected,
-                  handoff["fixtureRoute"] == "slow-known", handoff["fixtureOrigin"] == "true",
+                  handoff["fixtureRoute"] == route, handoff["fixtureOrigin"] == "true",
                   handoff["sameOrigin"] == "true",
                   readiness["connectionID"] == connectionID,
                   progress["expectedBytes"] == String(expected),
@@ -140,7 +162,9 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
                   readiness["privacyCleanupPending"] == "false",
                   readiness["responseComplete"] == "false", readiness["connectionClosed"] == "false",
                   readiness["operation"] == operationID,
-                  times.count == 5, times[0] < times[1], times[0] < times[2], times[1] < times[4],
+                  times.count == 5, times.allSatisfy(\.isFinite),
+                  times[0] < policyTime, policyTime < times[2], times[2] < admissionTime, admissionTime < times[3],
+                  times[0] < times[1], times[0] < times[2], times[1] < times[4],
                   times[2] < times[3], times[3] < times[4],
                   elapsed > 0, elapsed <= 10_000,
                   !failed, !earlyTerminalOrCleanup, !cleanupFailed
@@ -150,6 +174,7 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
 
             return SlowKnownWitness(
                 runID: runID,
+                route: route,
                 requestID: requestID,
                 operationID: operationID,
                 connectionID: connectionID,
@@ -158,72 +183,497 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
             )
         }
 
-        static func cancellationEvidence(
+        /// A released response and a native finish are independent witnesses. Both are required.
+        static func continuationEvidence(
             from events: [Observation],
             for witness: SlowKnownWitness,
         ) -> Observation? {
-            let runEvents = events.filter { $0["runID"] == witness.runID }
-            let backgroundEvents = runEvents.filter {
-                $0["event"] == "qualificationScenePhaseChanged"
-                    && $0["fixtureRequest"] == witness.requestID
-                    && $0["operation"] == witness.operationID
-                    && $0["phase"] == "background"
-            }
-            let closeEvents = runEvents.filter {
-                $0["event"] == "slowKnownConnectionClosed"
-                    && $0["fixtureRequest"] == witness.requestID
-                    && $0["operation"] == witness.operationID
-                    && $0["connectionID"] == witness.connectionID
-            }
-            let writerEvents = runEvents.filter {
-                $0["event"] == "slowKnownWriterTerminalAcknowledged"
-                    && $0["fixtureRequest"] == witness.requestID
-                    && $0["operation"] == witness.operationID
-                    && $0["connectionID"] == witness.connectionID
-            }
-            let cleanupEvents = runEvents.filter {
-                $0["event"] == "cleanupRemoval" && $0["operation"] == witness.operationID
+            guard events.count <= 256, witness.route == "finite-continuation" else {
+                return nil
             }
 
-            guard backgroundEvents.count == 1, let background = backgroundEvents.first,
-                  closeEvents.count == 1, let close = closeEvents.first,
-                  writerEvents.count == 1, let writer = writerEvents.first,
-                  cleanupEvents.count == 1, let cleanup = cleanupEvents.first,
-                  let backgroundTime = background["monotonicSeconds"].flatMap(Double.init),
-                  let closeTime = close["connectionClosedMonotonicSeconds"].flatMap(Double.init),
-                  let closeEventTime = close["monotonicSeconds"].flatMap(Double.init),
-                  let cleanupTime = cleanup["monotonicSeconds"].flatMap(Double.init),
-                  let writerTime = writer["monotonicSeconds"].flatMap(Double.init),
+            let run = events.filter { $0["runID"] == witness.runID }
+            func selected(_ name: String) -> Observation? {
+                let matches = run.filter {
+                    $0["event"] == name && $0["fixtureRequest"] == witness.requestID
+                        && $0["operation"] == witness.operationID
+                        && $0["connectionID"] == witness.connectionID
+                        && (name != "qualificationScenePhaseChanged" || $0["phase"] == "background")
+                }
+                return matches.count == 1 ? matches.first : nil
+            }
+            guard let admission = selected("transferAdmitted"),
+                  let capability = admission["capability"], UUID(uuidString: capability) != nil,
+                  let policy = run.first(where: {
+                      $0["event"] == "policyDownloadAdmitted" && $0["capability"] == capability
+                          && $0["fixtureRequest"] == witness.requestID
+                  }),
+                  let handoff = run.first(where: {
+                      $0["event"] == "nativeDownloadHandoff" && $0["fixtureRequest"] == witness.requestID
+                  }),
+                  let readiness = selected("slowKnownReadiness"),
+                  let background = selected("qualificationScenePhaseChanged"),
+                  let release = selected("finiteResponseReleaseRequested"),
+                  let response = selected("finiteResponseCompleted"),
+                  let finish = selected("writerFinished"),
+                  let progress = selected("nativePostLockProgress"),
+                  let hidden = selected("hiddenCompletion")
+            else {
+                return nil
+            }
+
+            let milestones = [policy, admission, handoff, readiness, background, release, response, finish, hidden]
+            let times = milestones.compactMap { $0["monotonicSeconds"].flatMap(Double.init) }
+            guard times.count == milestones.count, times.allSatisfy(\.isFinite),
+                  times[0] < times[2], times[2] < times[1], times[1] < times[3],
+                  times[3] < times[4], times[4] < times[5], times[5] < times[6],
+                  times[5] < times[7], times[7] < times[8],
+                  background["phase"] == "background", background["authorizationRevokedSynchronously"] == "true",
+                  background["contentEmpty"] == "true", background["available"] == "false",
+                  background["authenticated"] == "false", background["activeWriterCount"] == "1",
+                  background["retainedRecordCount"] == "1",
                   let generationBefore = UInt64(background["generationBefore"] ?? ""),
-                  let generationAfter = UInt64(background["generation"] ?? ""),
-                  let deadlineElapsed = Int(close["deadlineElapsedMilliseconds"] ?? "")
+                  let generation = UInt64(background["generation"] ?? ""),
+                  let initial = UInt64(witness.generation), generationBefore >= initial,
+                  generation > generationBefore,
+                  response["sendStackState"] == "stackProcessed",
+                  let expected = Int(response["expectedBytes"] ?? ""),
+                  let prefix = Int(response["prefixBytes"] ?? ""),
+                  let remainder = Int(response["remainderBytes"] ?? ""),
+                  let releaseTime = response["releaseMonotonicSeconds"].flatMap(Double.init),
+                  releaseTime.isFinite, times[5] <= releaseTime, releaseTime <= times[6],
+                  expected > prefix, prefix > 0, remainder == expected - prefix,
+                  let received = Int(progress["receivedBytes"] ?? ""), received > prefix, received <= expected,
+                  progress["expectedBytes"] == String(expected), progress["authenticated"] == "false",
+                  progress["available"] == "false", progress["capability"] == capability,
+                  let callbackTime = progress["callbackMonotonicSeconds"].flatMap(Double.init),
+                  callbackTime.isFinite, callbackTime > releaseTime,
+                  response["expectedBytes"] == readiness["expectedBytes"],
+                  [release, response, finish, hidden].allSatisfy({ $0["capability"] == capability }),
+                  hidden["contentEmpty"] == "true", hidden["available"] == "false",
+                  hidden["authenticated"] == "false", hidden["activeWriterCount"] == "0",
+                  hidden["retainedRecordCount"] == "1",
+                  !run.contains(where: {
+                      [
+                          "nativeCancellationRequested",
+                          "writerCancellationAcknowledged",
+                          "writerFailed",
+                          "cleanupRemoval",
+                      ]
+                      .contains($0["event"] ?? "") && $0["operation"] == witness.operationID
+                  })
             else {
                 return nil
             }
 
-            let acceptedCloseReasons: Set = [
-                "peerClosedDuringResponse",
-                "peerReceiveFailedDuringResponse",
-            ]
-            guard background["authorizationRevokedSynchronously"] == "true",
-                  background["generationBefore"] == witness.generation,
-                  generationAfter > generationBefore,
-                  close["connectionClosed"] == "true",
-                  close["responseComplete"] == "false",
-                  acceptedCloseReasons.contains(close["closeReason"] ?? ""),
-                  deadlineElapsed >= 0, deadlineElapsed < 15_000,
-                  backgroundTime < closeTime, closeTime <= closeEventTime,
-                  backgroundTime < cleanupTime, cleanup["absence"] == "true",
-                  backgroundTime < writerTime,
-                  writer["activeWriterCount"] == "0",
-                  writer["retainedRecordCount"] == "0",
-                  writer["cleanupPending"] == "false"
-            else {
-                return nil
-            }
-
-            return close
+            return hidden
         }
+    }
+
+    /// Policy admission alone cannot satisfy this contract: native handoff and finish must follow Lock.
+    private func delayedHandoffEvidence(_ events: [Observation]) -> Observation? {
+        guard events.count <= 256 else {
+            return nil
+        }
+
+        let navigations = events.filter {
+            $0["event"] == "fixtureNavigationRequested" && $0["fixtureRoute"] == "delayed-handoff"
+        }
+        guard navigations.count == 1, let navigation = navigations.first,
+              let runID = navigation["runID"], let request = navigation["fixtureRequest"] else {
+            return nil
+        }
+
+        let run = events.filter { $0["runID"] == runID && $0["fixtureRequest"] == request }
+        func one(_ event: String) -> Observation? {
+            let matches = run.filter { $0["event"] == event }
+            return matches.count == 1 ? matches.first : nil
+        }
+        guard let policy = one("policyDownloadAdmitted"), let locked = one("pendingPolicyLockApplied"),
+              let handoff = one("nativeDownloadHandoff"), let admitted = one("transferAdmitted"),
+              let finished = one("writerFinished"), let hidden = one("hiddenCompletion"),
+              let progress = one("nativePostLockProgress"),
+              let operation = admitted["operation"], UUID(uuidString: operation) != nil,
+              let capability = policy["capability"], UUID(uuidString: capability) != nil,
+              let connection = admitted["connectionID"], UUID(uuidString: connection) != nil
+        else {
+            return nil
+        }
+
+        let milestones = [navigation, policy, locked, handoff, admitted, finished, hidden]
+        let times = milestones.compactMap { $0["monotonicSeconds"].flatMap(Double.init) }
+        guard times.count == milestones.count, times.allSatisfy(\.isFinite),
+              zip(times, times.dropFirst()).allSatisfy({ pair in pair.0 < pair.1 }),
+              locked["authenticated"] == "false", locked["available"] == "false", locked["contentEmpty"] == "true",
+              let before = UInt64(locked["generationBefore"] ?? ""),
+              let after = UInt64(locked["generation"] ?? ""), after > before,
+              handoff["sameOrigin"] == "true", handoff["fixtureOrigin"] == "true",
+              handoff["fixtureRoute"] == "delayed-handoff",
+              [policy, locked, admitted, finished, hidden].allSatisfy({
+                  $0["operation"] == operation && $0["capability"] == capability && $0["connectionID"] == connection
+              }),
+              progress["operation"] == operation, progress["capability"] == capability,
+              progress["connectionID"] == connection, progress["authenticated"] == "false",
+              progress["available"] == "false",
+              let received = Int(progress["receivedBytes"] ?? ""), received > 0,
+              let progressTime = progress["callbackMonotonicSeconds"].flatMap(Double.init),
+              progressTime.isFinite, progressTime > times[2],
+              hidden["authenticated"] == "false", hidden["available"] == "false", hidden["contentEmpty"] == "true",
+              hidden["activeWriterCount"] == "0", hidden["retainedRecordCount"] == "1",
+              !events.contains(where: {
+                  $0["runID"] == runID && $0["operation"] == operation
+                      && ["nativeCancellationRequested", "pendingTransferCancelled", "writerFailed", "cleanupRemoval"]
+                      .contains($0["event"] ?? "")
+              })
+        else {
+            return nil
+        }
+
+        return hidden
+    }
+
+    func testAcceptedPolicyHandoffAfterLockCompletesHiddenUntilFreshAuthentication() throws {
+        let app = try launchFixture(passiveSceneCensus: true, delayedHandoffLock: true)
+        defer { app.terminate() }
+        try tapControl("downloadQualificationStartDelayedHandoff", in: app)
+        var completion: Observation?
+        try wait(app, milestone: "actual WebKit handoff after accepted-policy Lock and hidden native finish") {
+            guard let events = try? self.observations(app) else {
+                return false
+            }
+
+            completion = self.delayedHandoffEvidence(events)
+            return completion != nil
+        }
+        let hidden = try XCTUnwrap(completion)
+        XCTAssertFalse(app.buttons["Preview"].exists)
+        XCTAssertFalse(app.buttons["Share"].exists)
+        try authenticateLockedFixture(app)
+        try openDownloads(app)
+        try closeDownloads(app)
+        let events = try observations(app)
+        let retained = try XCTUnwrap(events.last {
+            $0["event"] == "retainedCompletionReconciled" && $0["operation"] == hidden["operation"]
+                && $0["fixtureRequest"] == hidden["fixtureRequest"] && $0["connectionID"] == hidden["connectionID"]
+        })
+        XCTAssertEqual(retained["authenticated"], "true")
+        XCTAssertEqual(retained["available"], "true")
+        XCTAssertGreaterThan(
+            try XCTUnwrap(Double(retained["monotonicSeconds"] ?? "")),
+            try XCTUnwrap(Double(hidden["monotonicSeconds"] ?? "")),
+        )
+        let file = try XCTUnwrap(events.last {
+            $0["event"] == "completedFileProof" && $0["operation"] == hidden["operation"]
+        })
+        XCTAssertEqual(file["bytes"], "608")
+        XCTAssertEqual(file["fixtureBytesMatch"], "true")
+        XCTAssertEqual(file["backupExcluded"], "true")
+        #if targetEnvironment(simulator)
+        XCTAssertEqual(file["nativeProtection"], "UNVERIFIED")
+        #else
+        XCTAssertEqual(file["nativeProtection"], "verified")
+        #endif
+        try tapControl("downloadQualificationOpenFixturePage", in: app)
+        let fresh = try download(app)
+        XCTAssertNotEqual(fresh["operation"], hidden["operation"])
+    }
+
+    func testDelayedHandoffParserRequiresNativeCallbacksAfterLock() throws {
+        let events = delayedHandoffEvents()
+        XCTAssertNotNil(delayedHandoffEvidence(events))
+        for name in [
+            "nativeDownloadHandoff",
+            "transferAdmitted",
+            "writerFinished",
+            "nativePostLockProgress",
+            "hiddenCompletion",
+        ] {
+            XCTAssertNil(delayedHandoffEvidence(events.filter { $0["event"] != name }), name)
+        }
+        for (event, field, value) in [
+            ("nativeDownloadHandoff", "monotonicSeconds", "1.1"),
+            ("transferAdmitted", "operation", "55555555-5555-4555-8555-555555555555"),
+            ("writerFinished", "capability", "55555555-5555-4555-8555-555555555555"),
+            ("hiddenCompletion", "contentEmpty", "false"),
+            ("hiddenCompletion", "authenticated", "true"),
+        ] {
+            var invalid = events
+            let index = try XCTUnwrap(invalid.firstIndex { $0["event"] == event })
+            invalid[index][field] = value
+            XCTAssertNil(delayedHandoffEvidence(invalid), "\(event).\(field)")
+        }
+    }
+
+    private func delayedHandoffEvents() -> [Observation] {
+        let request = "22222222-2222-4222-8222-222222222222"
+        let common: Observation = [
+            "operation": "33333333-3333-4333-8333-333333333333",
+            "connectionID": "44444444-4444-4444-8444-444444444444",
+            "capability": "77777777-7777-4777-8777-777777777777",
+        ]
+        let rows: [(String, String, Observation)] = [
+            ("fixtureNavigationRequested", "1.0", ["fixtureRoute": "delayed-handoff"]),
+            ("policyDownloadAdmitted", "1.1", [:]),
+            ("pendingPolicyLockApplied", "1.2", [
+                "generationBefore": "4",
+                "generation": "5",
+                "authenticated": "false",
+                "available": "false",
+                "contentEmpty": "true",
+            ]),
+            (
+                "nativeDownloadHandoff",
+                "1.3",
+                ["fixtureRoute": "delayed-handoff", "sameOrigin": "true", "fixtureOrigin": "true"],
+            ),
+            ("transferAdmitted", "1.4", [:]),
+            ("nativePostLockProgress", "1.45", [
+                "receivedBytes": "608",
+                "expectedBytes": "608",
+                "callbackMonotonicSeconds": "1.44",
+                "authenticated": "false",
+                "available": "false",
+            ]),
+            ("writerFinished", "1.5", [:]),
+            ("hiddenCompletion", "1.6", [
+                "authenticated": "false",
+                "available": "false",
+                "contentEmpty": "true",
+                "activeWriterCount": "0",
+                "retainedRecordCount": "1",
+            ]),
+        ]
+        return rows.map { name, time, fields in
+            qualificationEvent(name, time: time, fields: common.merging(fields) { _, new in new }, requestID: request)
+        }
+    }
+
+    func testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset() throws {
+        let app = try launchFixture(automaticIngestion: true)
+        defer { app.terminate() }
+        let initial = try librarySnapshot(app, assetCount: 0, rowCount: 0)
+        XCTAssertEqual(initial["temporaryCount"], "0")
+
+        try tapControl("downloadQualificationDownloadImage", in: app)
+        let imported = try librarySnapshot(app, assetCount: 1, rowCount: 1)
+        XCTAssertEqual(imported["temporaryCount"], "0")
+        XCTAssertEqual(imported["originalBytesMatch"], "true")
+        XCTAssertEqual(imported["originalHashMatches"], "true")
+        XCTAssertEqual(imported["importedRows"], "1")
+        XCTAssertEqual(imported["resourceCount"], "1")
+        XCTAssertEqual(imported["temporaryBytes"], "0")
+        let operation = try XCTUnwrap(imported["rowIDs"])
+        XCTAssertTrue(try observations(app).contains {
+            $0["event"] == "writerFinished" && $0["operation"] == operation
+        })
+        XCTAssertNotNil(try UUID(uuidString: XCTUnwrap(imported["canonicalIDs"])))
+        XCTAssertTrue(try observations(app).contains { $0["event"] == "nativeDownloadHandoff" })
+
+        app.terminate()
+        app.launch()
+        let relaunched = try librarySnapshot(app, assetCount: 1, rowCount: 0)
+        XCTAssertEqual(relaunched["canonicalIDs"], imported["canonicalIDs"])
+        XCTAssertEqual(relaunched["originalBytesMatch"], "true")
+    }
+
+    func testRepeatedPNGDownloadSkipsDuplicateAndRetainsCanonicalIdentity() throws {
+        let app = try launchFixture(automaticIngestion: true)
+        defer { app.terminate() }
+        try tapControl("downloadQualificationDownloadImage", in: app)
+        let first = try librarySnapshot(app, assetCount: 1, rowCount: 1)
+
+        // The same PNG arrives with a PDF MIME type and filename on the second request.
+        try tapControl("downloadQualificationDownloadMislabelledImage", in: app)
+        let duplicate = try librarySnapshot(app, assetCount: 1, rowCount: 2)
+        XCTAssertEqual(duplicate["canonicalIDs"], first["canonicalIDs"])
+        XCTAssertEqual(duplicate["duplicateRows"], "1")
+        XCTAssertEqual(duplicate["temporaryCount"], "0")
+        let operations = try XCTUnwrap(duplicate["rowIDs"]).split(separator: ",")
+        XCTAssertEqual(Set(operations).count, 2)
+        XCTAssertTrue(try operations.contains(Substring(XCTUnwrap(first["rowIDs"]))))
+        XCTAssertEqual(duplicate["originalBytesMatch"], "true")
+    }
+
+    func testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation() throws {
+        let app = try launchFixture(automaticIngestion: true)
+        defer { app.terminate() }
+        try tapControl("downloadQualificationDownloadMislabelledPDF", in: app)
+        let excluded = try librarySnapshot(app, assetCount: 0, rowCount: 1)
+        XCTAssertEqual(excluded["resourceCount"], "0")
+        app.terminate()
+        app.launch()
+        _ = try librarySnapshot(app, assetCount: 0, rowCount: 0)
+        try tapControl("downloadQualificationDownloadAttachment", in: app)
+        let pdf = try librarySnapshot(app, assetCount: 0, rowCount: 1)
+        XCTAssertEqual(pdf["resourceCount"], "0")
+        try openDownloads(app)
+        XCTAssertTrue(app.buttons["Preview"].exists)
+        XCTAssertTrue(app.buttons["Share"].exists)
+        try tap(app.buttons["Preview"], in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["QLPreviewControllerView"].waitForExistence(timeout: 10))
+        try tap(app.buttons["QLOverlayDoneButtonAccessibilityIdentifier"], in: app)
+        try tap(app.buttons["Share"], in: app)
+        try wait(app, milestone: "native PDF share sheet") {
+            app.descendants(matching: .any)["Copy"].exists || app.descendants(matching: .any)["AirDrop"].exists
+        }
+    }
+
+    func testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch() throws {
+        let app = try launchFixture(automaticIngestion: true)
+        defer { app.terminate() }
+        try tapControl("downloadQualificationDownloadImageUnderLock", in: app)
+        var accepted: Observation?
+        try wait(app, milestone: "durably accepted PNG under app privacy Lock") {
+            guard let events = try? self.observations(app) else {
+                return false
+            }
+
+            accepted = events.last {
+                $0["event"] == "acceptedLibraryStorage"
+                    && $0["temporaryCount"] == "1"
+                    && $0["authenticated"] == "false"
+                    && $0["contentEmpty"] == "true"
+            }
+            return accepted != nil && events.contains { $0["event"] == "writerFinished" }
+        }
+        XCTAssertFalse(app.buttons["Preview"].exists)
+        XCTAssertFalse(app.buttons["Share"].exists)
+        let hiddenEvents = try observations(app)
+        let lockIndex = try XCTUnwrap(hiddenEvents.lastIndex { $0["event"] == "automaticMediaPolicyLocked" })
+        let lockedEvents = hiddenEvents.suffix(from: lockIndex)
+        XCTAssertTrue(lockedEvents.contains { $0["event"] == "writerFinished" })
+        XCTAssertFalse(lockedEvents.contains { $0["event"] == "canonicalLibrarySnapshot" })
+
+        let durable = try XCTUnwrap(accepted)
+        let previousOperation = try XCTUnwrap(lockedEvents.last { $0["event"] == "writerFinished" }?["operation"])
+        XCTAssertGreaterThan(try XCTUnwrap(try Int64(XCTUnwrap(durable["temporaryBytes"]))), 0)
+        app.terminate()
+        XCTAssertEqual(app.state, .notRunning)
+        app.launchArguments.append("--browser-download-recovery-authentication")
+        app.launch()
+        var startup: Observation?
+        try wait(app, milestone: "new locked process reopens accepted protected Library") {
+            guard let events = try? self.observations(app) else {
+                return false
+            }
+
+            startup = events.last { $0["event"] == "libraryStartup" }
+            return startup != nil
+        }
+        let reopened = try XCTUnwrap(startup)
+        let oldProcessID = try XCTUnwrap(durable["processID"])
+        let newProcessID = try XCTUnwrap(reopened["processID"])
+        XCTAssertNotEqual(newProcessID, oldProcessID)
+        XCTAssertNotEqual(try XCTUnwrap(reopened["runID"]), try XCTUnwrap(durable["runID"]))
+        let libraryID = try XCTUnwrap(durable["libraryID"])
+        let databaseID = try XCTUnwrap(durable["databaseID"])
+        XCTAssertNotNil(UUID(uuidString: libraryID))
+        XCTAssertEqual(databaseID.count, 64)
+        XCTAssertEqual(reopened["libraryID"], libraryID)
+        XCTAssertEqual(reopened["databaseID"], databaseID)
+        XCTAssertEqual(reopened["temporaryCount"], "1")
+        XCTAssertEqual(reopened["temporaryBytes"], durable["temporaryBytes"])
+        XCTAssertEqual(reopened["authenticated"], "false")
+        XCTAssertEqual(reopened["rowCount"], "0")
+        XCTAssertEqual(reopened["contentEmpty"], "true")
+        XCTAssertFalse(try observations(app).contains { $0["event"] == "canonicalLibrarySnapshot" })
+        XCTAssertFalse(app.buttons["Preview"].exists)
+        XCTAssertFalse(app.buttons["Share"].exists)
+
+        try authenticateLockedFixture(app)
+        XCTAssertEqual(app.state, .runningForeground)
+        let recovered = try librarySnapshot(app, assetCount: 1, rowCount: 0)
+        XCTAssertEqual(recovered["processID"], newProcessID)
+        XCTAssertEqual(recovered["databaseID"], reopened["databaseID"])
+        XCTAssertEqual(recovered["originalBytesMatch"], "true")
+        XCTAssertEqual(recovered["originalHashMatches"], "true")
+        XCTAssertEqual(recovered["temporaryCount"], "0")
+        XCTAssertEqual(recovered["temporaryBytes"], "0")
+
+        try wait(app, milestone: "relaunched fixture listener ready") {
+            app.staticTexts["downloadQualificationLoopbackReadiness"].value as? String == "ready"
+        }
+        try tapControl("downloadQualificationDownloadImage", in: app)
+        let fresh = try librarySnapshot(app, assetCount: 1, rowCount: 1)
+        XCTAssertEqual(fresh["canonicalIDs"], recovered["canonicalIDs"])
+        XCTAssertEqual(fresh["duplicateRows"], "1")
+        XCTAssertEqual(fresh["temporaryCount"], "0")
+        let freshOperation = try XCTUnwrap(fresh["rowIDs"])
+        XCTAssertNotEqual(freshOperation, previousOperation)
+        XCTAssertTrue(try observations(app).contains {
+            $0["event"] == "writerFinished" && $0["operation"] == freshOperation
+        })
+    }
+
+    func testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible() throws {
+        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
+        app.launchArguments = [
+            "--browser-download-production-qualification",
+            "--browser-download-automatic-ingestion",
+            "--browser-download-recovery-authentication",
+            "--browser-download-library",
+            UUID().uuidString,
+        ]
+        #if targetEnvironment(simulator)
+        app.launchArguments.append("--browser-download-simulated-protection-readback")
+        #endif
+        app.launch()
+        defer { app.terminate() }
+        var startup: Observation?
+        try wait(app, milestone: "cold locked startup without downloads") {
+            guard let events = try? self.observations(app) else {
+                return false
+            }
+
+            startup = events.last { $0["event"] == "libraryStartup" }
+            return startup != nil
+        }
+        let locked = try XCTUnwrap(startup)
+        XCTAssertEqual(locked["authenticated"], "false")
+        XCTAssertEqual(locked["temporaryCount"], "0")
+        XCTAssertEqual(locked["rowCount"], "0")
+        let lockedReadout = try XCTUnwrap(try observations(app).last {
+            $0["event"] == "diagnosticReadoutState" && $0["phase"] == "locked" && $0["mounted"] == "true"
+        })
+        try authenticateLockedFixture(app)
+        let authenticated = try librarySnapshot(app, assetCount: 0, rowCount: 0)
+        XCTAssertEqual(authenticated["processID"], locked["processID"])
+        let events = try observations(app)
+        let readout = try XCTUnwrap(events.last {
+            $0["event"] == "diagnosticReadoutState"
+                && $0["sampleSource"] == "rootLayoutConfirmed"
+                && $0["sourceRootPhase"] == "authenticated"
+                && $0["phase"] == "authenticated"
+                && $0["mounted"] == "true"
+        })
+        XCTAssertNotEqual(readout["mountID"], lockedReadout["mountID"])
+        XCTAssertEqual(readout["requestedHidden"], "false")
+        XCTAssertEqual(readout["windowAccessibilityHidden"], "false")
+        XCTAssertEqual(readout["accessibilityHiddenAncestorCount"], "0")
+        XCTAssertEqual(readout["transparentAncestorCount"], "0")
+        XCTAssertFalse(events.contains { $0["event"] == "nativeDownloadHandoff" })
+    }
+
+    private func librarySnapshot(
+        _ app: XCUIApplication,
+        assetCount: Int,
+        rowCount: Int,
+    ) throws -> Observation {
+        var snapshot: Observation?
+        try wait(app, milestone: "canonical asset and process-row counts") {
+            guard let events = try? self.observations(app) else {
+                return false
+            }
+
+            snapshot = events.last {
+                $0["event"] == "canonicalLibrarySnapshot"
+                    && $0["assetCount"] == String(assetCount)
+                    && $0["rowCount"] == String(rowCount)
+                    && $0["settled"] == "true"
+            }
+            return snapshot != nil
+        }
+        return try XCTUnwrap(snapshot)
     }
 
     func testQuickLookHomeRevokesAndFreshDownloadRecovers() throws {
@@ -288,6 +738,11 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         let events = slowKnownEvents()
         XCTAssertNil(SlowKnownWitnessContract.witness(from: events.filter { $0["event"] != "nativeDownloadHandoff" }))
         XCTAssertNil(SlowKnownWitnessContract.witness(from: events.filter { $0["event"] != "slowKnownProgress" }))
+        XCTAssertNil(SlowKnownWitnessContract.witness(from: events.filter { $0["event"] != "transferAdmitted" }))
+        var pendingOnly = events
+        pendingOnly[3]["receivedBytes"] = "0"
+        pendingOnly[4]["receivedBytes"] = "0"
+        XCTAssertNil(SlowKnownWitnessContract.witness(from: pendingOnly))
     }
 
     func testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation() {
@@ -310,8 +765,9 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         var terminal = slowKnownEvents()
         let terminalRequestID = try XCTUnwrap(terminal[0]["fixtureRequest"])
         let terminalEvent = qualificationEvent(
-            "slowKnownWriterTerminalAcknowledged",
+            "writerFinished",
             time: "1.45",
+            fields: ["operation": "33333333-3333-4333-8333-333333333333"],
             requestID: terminalRequestID,
         )
         terminal.insert(terminalEvent, at: 4)
@@ -372,92 +828,84 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         XCTAssertNotNil(SlowKnownWitnessContract.witness(from: events))
     }
 
-    func testSlowKnownCancellationAcceptsPeerClosedDuringResponse() throws {
-        let events = slowKnownCancellationEvents(closeReason: "peerClosedDuringResponse")
+    func testContinuationAcceptsFiniteResponseAndNativeFinish() throws {
+        let events = continuationEvents()
         let witness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: events))
-
-        XCTAssertNotNil(SlowKnownWitnessContract.cancellationEvidence(from: events, for: witness))
+        XCTAssertNotNil(SlowKnownWitnessContract.continuationEvidence(from: events, for: witness))
+        // UIKit may revoke content before SwiftUI delivers the later background action.
+        var alreadyRevoked = events
+        let backgroundIndex = try XCTUnwrap(alreadyRevoked
+            .firstIndex { $0["event"] == "qualificationScenePhaseChanged" })
+        let initial = try XCTUnwrap(UInt64(witness.generation))
+        alreadyRevoked[backgroundIndex]["generationBefore"] = String(initial + 1)
+        alreadyRevoked[backgroundIndex]["generation"] = String(initial + 2)
+        XCTAssertNotNil(SlowKnownWitnessContract.continuationEvidence(from: alreadyRevoked, for: witness))
+        alreadyRevoked[backgroundIndex]["generation"] = String(initial + 1)
+        XCTAssertNil(SlowKnownWitnessContract.continuationEvidence(from: alreadyRevoked, for: witness))
+        alreadyRevoked[backgroundIndex]["generationBefore"] = String(initial - 1)
+        alreadyRevoked[backgroundIndex]["generation"] = String(initial)
+        XCTAssertNil(SlowKnownWitnessContract.continuationEvidence(from: alreadyRevoked, for: witness))
     }
 
-    func testSlowKnownCancellationAcceptsPeerReceiveFailureDuringResponse() throws {
-        let events = slowKnownCancellationEvents(closeReason: "peerReceiveFailedDuringResponse")
-        let witness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: events))
-
-        XCTAssertNotNil(SlowKnownWitnessContract.cancellationEvidence(from: events, for: witness))
+    func testContinuationRejectsMissingNativeOrTransportWitness() {
+        for name in [
+            "policyDownloadAdmitted",
+            "transferAdmitted",
+            "writerFinished",
+            "nativePostLockProgress",
+            "finiteResponseCompleted",
+            "hiddenCompletion",
+        ] {
+            let events = continuationEvents().filter { $0["event"] != name }
+            if let witness = SlowKnownWitnessContract.witness(from: events) {
+                XCTAssertNil(SlowKnownWitnessContract.continuationEvidence(from: events, for: witness), name)
+            } else {
+                XCTAssertTrue(["policyDownloadAdmitted", "transferAdmitted"].contains(name))
+            }
+        }
     }
 
-    func testSlowKnownCancellationRejectsDeadlineDrivenTermination() throws {
-        let deadlineReason = slowKnownCancellationEvents(
-            closeReason: "existingDeadline",
-            deadlineElapsedMilliseconds: "14999",
-        )
-        let witness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: deadlineReason))
-        XCTAssertNil(SlowKnownWitnessContract.cancellationEvidence(from: deadlineReason, for: witness))
-
-        let expired = slowKnownCancellationEvents(deadlineElapsedMilliseconds: "15000")
-        let expiredWitness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: expired))
-        XCTAssertNil(SlowKnownWitnessContract.cancellationEvidence(from: expired, for: expiredWitness))
-    }
-
-    func testSlowKnownCancellationIgnoresAnUnrelatedConnection() throws {
-        var events = slowKnownCancellationEvents()
-        events.append(qualificationEvent(
-            "slowKnownConnectionClosed",
-            time: "2.05",
-            fields: [
+    func testContinuationRejectsCancellationFailureAndPrematureCleanup() throws {
+        for name in [
+            "nativeCancellationRequested",
+            "writerCancellationAcknowledged",
+            "writerFailed",
+            "cleanupRemoval",
+        ] {
+            var events = continuationEvents()
+            events.append(qualificationEvent(name, time: "2.4", fields: [
                 "operation": "33333333-3333-4333-8333-333333333333",
-                "connectionID": "55555555-5555-4555-8555-555555555555",
-                "connectionClosed": "true",
-                "closeReason": "existingDeadline",
-                "responseComplete": "false",
-                "deadlineElapsedMilliseconds": "15000",
-                "connectionClosedMonotonicSeconds": "2.05",
-            ],
-            requestID: "22222222-2222-4222-8222-222222222222",
-        ))
-        let witness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: events))
-
-        XCTAssertNotNil(SlowKnownWitnessContract.cancellationEvidence(from: events, for: witness))
-
-        events.removeAll {
-            $0["event"] == "slowKnownConnectionClosed"
-                && $0["connectionID"] == "44444444-4444-4444-8444-444444444444"
+            ]))
+            let witness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: events))
+            XCTAssertNil(SlowKnownWitnessContract.continuationEvidence(from: events, for: witness), name)
         }
-        let unrelatedOnlyWitness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: events))
-        XCTAssertNil(SlowKnownWitnessContract.cancellationEvidence(from: events, for: unrelatedOnlyWitness))
     }
 
-    func testSlowKnownCancellationRejectsAConnectionIdentityMismatch() throws {
-        let events = slowKnownCancellationEvents(
-            connectionID: "55555555-5555-4555-8555-555555555555",
-        )
-        let witness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: events))
-
-        XCTAssertNil(SlowKnownWitnessContract.cancellationEvidence(from: events, for: witness))
-    }
-
-    func testSlowKnownCancellationRejectsInconsistentMonotonicCloseTimestamps() throws {
-        var events = slowKnownCancellationEvents(connectionClosedAt: "2.1")
-        if let index = events.firstIndex(where: { $0["event"] == "slowKnownConnectionClosed" }) {
-            events[index]["monotonicSeconds"] = "2.05"
+    func testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion() throws {
+        let mutations: [(String, String, String)] = [
+            ("writerFinished", "operation", "55555555-5555-4555-8555-555555555555"),
+            ("writerFinished", "runID", "55555555-5555-4555-8555-555555555555"),
+            ("writerFinished", "fixtureRequest", "55555555-5555-4555-8555-555555555555"),
+            ("writerFinished", "capability", "55555555-5555-4555-8555-555555555555"),
+            ("finiteResponseCompleted", "connectionID", "55555555-5555-4555-8555-555555555555"),
+            ("finiteResponseCompleted", "remainderBytes", "1"),
+            ("finiteResponseReleaseRequested", "monotonicSeconds", "1.9"),
+            ("finiteResponseCompleted", "releaseMonotonicSeconds", "1.9"),
+            ("writerFinished", "monotonicSeconds", "nan"),
+            ("nativePostLockProgress", "receivedBytes", "262144"),
+            ("nativePostLockProgress", "callbackMonotonicSeconds", "1.9"),
+            ("hiddenCompletion", "contentEmpty", "false"),
+            ("hiddenCompletion", "available", "true"),
+            ("hiddenCompletion", "authenticated", "true"),
+            ("hiddenCompletion", "retainedRecordCount", "0"),
+        ]
+        for (name, key, value) in mutations {
+            var events = continuationEvents()
+            let index = try XCTUnwrap(events.firstIndex { $0["event"] == name })
+            events[index][key] = value
+            let witness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: events))
+            XCTAssertNil(SlowKnownWitnessContract.continuationEvidence(from: events, for: witness), "\(name).\(key)")
         }
-        let witness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: events))
-
-        XCTAssertNil(SlowKnownWitnessContract.cancellationEvidence(from: events, for: witness))
-    }
-
-    func testSlowKnownCancellationRejectsClosureCleanupOrWriterAckBeforeBackground() throws {
-        let closeBeforeBackground = slowKnownCancellationEvents(connectionClosedAt: "1.9")
-        let closeWitness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: closeBeforeBackground))
-        XCTAssertNil(SlowKnownWitnessContract.cancellationEvidence(from: closeBeforeBackground, for: closeWitness))
-
-        let cleanupBeforeBackground = slowKnownCancellationEvents(cleanupAt: "1.9")
-        let cleanupWitness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: cleanupBeforeBackground))
-        XCTAssertNil(SlowKnownWitnessContract.cancellationEvidence(from: cleanupBeforeBackground, for: cleanupWitness))
-
-        let writerAckBeforeBackground = slowKnownCancellationEvents(writerTerminalAt: "1.9")
-        let writerWitness = try XCTUnwrap(SlowKnownWitnessContract.witness(from: writerAckBeforeBackground))
-        XCTAssertNil(SlowKnownWitnessContract.cancellationEvidence(from: writerAckBeforeBackground, for: writerWitness))
     }
 
     private func slowKnownEvents() -> [Observation] {
@@ -523,6 +971,16 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
                 "connectionClosed": "false",
                 "elapsedMilliseconds": "500",
             ], requestID: requestID, runID: runID),
+            qualificationEvent("policyDownloadAdmitted", time: "1.21", fields: [
+                "operation": operationID,
+                "capability": "77777777-7777-4777-8777-777777777777",
+                "connectionID": connectionID,
+            ], requestID: requestID, runID: runID),
+            qualificationEvent("transferAdmitted", time: "1.35", fields: [
+                "operation": operationID,
+                "capability": "77777777-7777-4777-8777-777777777777",
+                "connectionID": connectionID,
+            ], requestID: requestID, runID: runID),
         ]
     }
 
@@ -543,47 +1001,62 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         return event
     }
 
-    private func slowKnownCancellationEvents(
-        closeReason: String = "peerClosedDuringResponse",
-        connectionID: String = "44444444-4444-4444-8444-444444444444",
-        connectionClosedAt: String = "2.1",
-        deadlineElapsedMilliseconds: String = "1200",
-        cleanupAt: String = "2.2",
-        writerTerminalAt: String = "2.3",
-    ) -> [Observation] {
-        var events = slowKnownEvents()
-        let runID = "11111111-1111-4111-8111-111111111111"
-        let requestID = "22222222-2222-4222-8222-222222222222"
-        let operationID = "33333333-3333-4333-8333-333333333333"
-        let selectedConnectionID = "44444444-4444-4444-8444-444444444444"
-        events.append(qualificationEvent("qualificationScenePhaseChanged", time: "2.0", fields: [
-            "fixtureRequest": requestID,
-            "operation": operationID,
+    private func continuationEvents() -> [Observation] {
+        let request = "22222222-2222-4222-8222-222222222222"
+        let operation = "33333333-3333-4333-8333-333333333333"
+        let connection = "44444444-4444-4444-8444-444444444444"
+        let capability = "77777777-7777-4777-8777-777777777777"
+        var events = slowKnownEvents().map { event in
+            var event = event
+            if event["fixtureRoute"] == "slow-known" {
+                event["fixtureRoute"] = "finite-continuation"
+            }
+            if event["route"] == "slow-known" {
+                event["route"] = "finite-continuation"
+            }
+            return event
+        }
+        func append(_ name: String, _ time: String, _ extra: Observation = [:]) {
+            var fields = extra
+            fields["operation"] = operation
+            fields["connectionID"] = connection
+            fields["capability"] = capability
+            events.append(qualificationEvent(name, time: time, fields: fields, requestID: request))
+        }
+        append("qualificationScenePhaseChanged", "2.0", [
             "phase": "background",
             "generationBefore": "4",
             "generation": "5",
             "authorizationRevokedSynchronously": "true",
-        ], requestID: requestID, runID: runID))
-        events.append(qualificationEvent("slowKnownConnectionClosed", time: connectionClosedAt, fields: [
-            "operation": operationID,
-            "connectionID": connectionID,
-            "connectionClosed": "true",
-            "closeReason": closeReason,
-            "responseComplete": "false",
-            "deadlineElapsedMilliseconds": deadlineElapsedMilliseconds,
-            "connectionClosedMonotonicSeconds": connectionClosedAt,
-        ], requestID: requestID, runID: runID))
-        events.append(qualificationEvent("cleanupRemoval", time: cleanupAt, fields: [
-            "operation": operationID,
-            "absence": "true",
-        ], runID: runID))
-        events.append(qualificationEvent("slowKnownWriterTerminalAcknowledged", time: writerTerminalAt, fields: [
-            "operation": operationID,
-            "connectionID": selectedConnectionID,
+            "contentEmpty": "true",
+            "available": "false",
+            "authenticated": "false",
+            "activeWriterCount": "1",
+            "retainedRecordCount": "1",
+        ])
+        append("finiteResponseReleaseRequested", "2.1")
+        append("finiteResponseCompleted", "2.2", [
+            "sendStackState": "stackProcessed",
+            "expectedBytes": "16777216",
+            "prefixBytes": "262144",
+            "remainderBytes": "16515072",
+            "releaseMonotonicSeconds": "2.11",
+        ])
+        append("nativePostLockProgress", "2.25", [
+            "receivedBytes": "16777216",
+            "expectedBytes": "16777216",
+            "callbackMonotonicSeconds": "2.24",
+            "authenticated": "false",
+            "available": "false",
+        ])
+        append("writerFinished", "2.3")
+        append("hiddenCompletion", "2.4", [
+            "contentEmpty": "true",
+            "available": "false",
+            "authenticated": "false",
             "activeWriterCount": "0",
-            "retainedRecordCount": "0",
-            "cleanupPending": "false",
-        ], requestID: requestID, runID: runID))
+            "retainedRecordCount": "1",
+        ])
         return events
     }
 
@@ -616,106 +1089,79 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         XCTAssertTrue(control.isHittable)
     }
 
-    func testActiveWKDownloadHomeRevokesAndFreshDownloadRecovers() throws {
+    func testActiveWKDownloadHomeContinuesHiddenAndReconcilesAfterFreshAuthentication() throws {
         #if targetEnvironment(simulator)
-        throw XCTSkip("Requires a physical device to qualify the active-download Home transition.")
+        throw XCTSkip("Requires a physical device to qualify native WKDownload continuation across Home.")
         #endif
 
         let app = try launchFixture(passiveSceneCensus: true, activeDownloadHome: true)
         defer { app.terminate() }
-
-        try tapControl("downloadQualificationStartSlowKnown", in: app)
-        let observationNode = app.staticTexts["downloadQualificationObservations"]
+        try tapControl("downloadQualificationStartFiniteContinuation", in: app)
         var witness: SlowKnownWitness?
-        var readinessFailure: String?
-        try wait(app, milestone: "correlated live slow-known readiness") {
-            guard let value = observationNode.value as? String,
+        try wait(app, milestone: "correlated live finite-response readiness") {
+            guard let value = app.staticTexts["downloadQualificationObservations"].value as? String,
                   let events = try? JSONDecoder().decode([Observation].self, from: Data(value.utf8))
             else {
                 return false
             }
 
             witness = SlowKnownWitnessContract.witness(from: events)
-            readinessFailure = events.last {
-                $0["event"] == "slowKnownReadinessFailure"
-            }?["reason"]
-            return witness != nil || readinessFailure != nil
+            return witness != nil || events.contains { $0["event"] == "slowKnownReadinessFailure" }
         }
-        guard let witness else {
-            XCTFail("Slow-known readiness failed: \(readinessFailure ?? "unclassified")")
-            throw FixtureError.waitFailed
-        }
-
-        let beforeHome = Date()
+        let selected = try XCTUnwrap(witness, "Missing native partial-transfer witness")
         XCUIDevice.shared.press(.home)
-        let classification = XCTAttachment(string: "Process state after Home: \(app.state)")
-        classification.name = "active WKDownload background process classification"
-        classification.lifetime = .keepAlways
-        add(classification)
         try wait(app, milestone: "background or termination classification") {
             app.state == .runningBackground || app.state == .notRunning
         }
         guard app.state != .notRunning else {
-            throw XCTSkip("INCONCLUSIVE: the host terminated before active-download revocation could be observed.")
+            throw XCTSkip("INCONCLUSIVE: process terminated before continuation could be observed.")
         }
-
-        XCTAssertEqual(app.state, .runningBackground)
 
         app.activate()
-        try wait(app, milestone: "active-download host returned to foreground") {
-            app.state == .runningForeground && app.windows.firstMatch.exists && app.windows.firstMatch.isHittable
+        try wait(app, milestone: "native finish with hidden retained completion") {
+            guard let events = try? self.observations(app) else {
+                return false
+            }
+
+            return SlowKnownWitnessContract.continuationEvidence(from: events, for: selected) != nil
         }
-        let observed = try observations(app)
-        let cancellation = try XCTUnwrap(
-            SlowKnownWitnessContract.cancellationEvidence(from: observed, for: witness),
-            "The selected connection must close because of background revocation before its fixture deadline.",
-        )
-        XCTAssertEqual(cancellation["connectionID"], witness.connectionID)
-        let revoked = try postRevocationEvidence(observed, for: witness.diagnosticFields, after: beforeHome)
-        let backgroundPhase = try XCTUnwrap(revoked.first {
-            $0["event"] == "qualificationScenePhaseChanged"
-                && $0["fixtureRequest"] == witness.requestID && $0["phase"] == "background"
-        })
-        let serverPrefix = try XCTUnwrap(observed.first {
-            $0["event"] == "slowKnownServerPrefixProcessed"
-                && $0["fixtureRequest"] == witness.requestID
-        })
-        let prefixTime = try XCTUnwrap(serverPrefix["monotonicSeconds"].flatMap(Double.init))
-        let backgroundTime = try XCTUnwrap(backgroundPhase["monotonicSeconds"].flatMap(Double.init))
-        XCTAssertGreaterThan(backgroundTime, prefixTime)
-        XCTAssertLessThan(backgroundTime - prefixTime, 14)
-        let generationBeforeBackground = try XCTUnwrap(backgroundPhase["generationBefore"])
-        let generationAfterBackground = try XCTUnwrap(UInt64(backgroundPhase["generation"] ?? ""))
-        let readinessGeneration = try XCTUnwrap(UInt64(witness.generation))
-        XCTAssertEqual(generationBeforeBackground, witness.generation)
-        XCTAssertGreaterThan(generationAfterBackground, readinessGeneration)
-        XCTAssertEqual(backgroundPhase["authorizationRevokedSynchronously"], "true")
-        XCTAssertFalse(revoked.contains {
-            $0["event"] == "slowKnownReadinessFailure" && $0["fixtureRequest"] == witness.requestID
-        })
-        XCTAssertTrue(revoked.contains {
-            $0["event"] == "qualificationScenePhaseChanged"
-                && $0["fixtureRequest"] == witness.requestID && $0["phase"] == "background"
-        })
-        XCTAssertTrue(revoked.contains {
-            $0["event"] == "qualificationScenePhaseChanged"
-                && $0["fixtureRequest"] == witness.requestID && $0["phase"] == "active"
-        })
-        XCTAssertTrue(revoked.contains {
-            $0["event"] == "slowKnownWriterTerminalAcknowledged"
-                && $0["fixtureRequest"] == witness.requestID
-                && $0["operation"] == witness.operationID
-                && $0["activeWriterCount"] == "0"
-                && $0["retainedRecordCount"] == "0"
-                && $0["cleanupPending"] == "false"
-        })
-        XCTAssertTrue(revoked.contains {
-            $0["event"] == "cleanupRemoval"
-                && $0["operation"] == witness.operationID && $0["absence"] == "true"
-        }, "Missing cleanup evidence proving the revoked allocation is absent")
         XCTAssertFalse(app.buttons["Preview"].exists)
         XCTAssertFalse(app.buttons["Share"].exists)
+        try authenticateLockedFixture(app)
+        try openDownloads(app)
+        try closeDownloads(app)
+        let reconciled = try observations(app)
+        let reconciliation = try XCTUnwrap(reconciled.last {
+            $0["event"] == "retainedCompletionReconciled" && $0["operation"] == selected.operationID
+                && $0["fixtureRequest"] == selected.requestID && $0["connectionID"] == selected.connectionID
+        })
+        let retainedFile = try XCTUnwrap(reconciled.last {
+            $0["event"] == "completedFileProof" && $0["operation"] == selected.operationID
+        })
+        XCTAssertEqual(retainedFile["fixtureBytesMatch"], "true")
+        XCTAssertEqual(retainedFile["backupExcluded"], "true")
+        XCTAssertEqual(retainedFile["nativeProtection"], "verified")
+        XCTAssertEqual(reconciliation["authenticated"], "true")
+        XCTAssertEqual(reconciliation["available"], "true")
+        XCTAssertGreaterThan(
+            try XCTUnwrap(UInt64(reconciliation["generation"] ?? "")),
+            try XCTUnwrap(UInt64(selected.generation)),
+        )
+        let hidden = try XCTUnwrap(reconciled.last { $0["event"] == "hiddenCompletion" })
+        XCTAssertGreaterThan(
+            try XCTUnwrap(Double(reconciliation["monotonicSeconds"] ?? "")),
+            try XCTUnwrap(Double(hidden["monotonicSeconds"] ?? "")),
+        )
+        try tapControl("downloadQualificationOpenFixturePage", in: app)
+        let fresh = try download(app)
+        XCTAssertNotEqual(selected.operationID, fresh["operation"])
+        let finalEvents = try observations(app)
+        let snapshot = try XCTUnwrap(finalEvents.last { $0["event"] == "ownerSnapshot" })
+        XCTAssertTrue(try XCTUnwrap(snapshot["operations"]).contains(selected.operationID))
+        XCTAssertTrue(try XCTUnwrap(snapshot["operations"]).contains(try XCTUnwrap(fresh["operation"])))
+    }
 
+    private func authenticateLockedFixture(_ app: XCUIApplication) throws {
         let unlockTrigger = app.buttons["Equals"]
         try wait(app, milestone: "locked Root calculator authentication trigger") {
             unlockTrigger.exists && unlockTrigger.isHittable
@@ -736,22 +1182,6 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
             app.buttons["Browser Menu"].isHittable
         }
         XCTAssertTrue(app.buttons["Browser Menu"].isHittable)
-
-        try openDownloadSheet(app)
-        try wait(app, milestone: "revoked operation absent from Downloads") {
-            app.staticTexts["No Downloads"].exists
-                && !app.buttons["Preview"].exists && !app.buttons["Share"].exists
-        }
-        try closeDownloads(app)
-        XCTAssertTrue(app.buttons["Browser Menu"].isHittable)
-
-        try tapControl("downloadQualificationOpenFixturePage", in: app)
-        let fresh = try download(app)
-        XCTAssertNotEqual(witness.operationID, fresh["operation"])
-        let finalEvents = try observations(app)
-        let snapshot = try XCTUnwrap(finalEvents.last { $0["event"] == "ownerSnapshot" })
-        XCTAssertFalse(try XCTUnwrap(snapshot["operations"]).contains(witness.operationID))
-        XCTAssertTrue(try XCTUnwrap(snapshot["operations"]).contains(try XCTUnwrap(fresh["operation"])))
     }
 
     func testActiveDiscardFailureRetryAndAuthenticationLoss() throws {
@@ -795,7 +1225,13 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         let lost = try observations(app)
         let authRevoked = try postRevocationEvidence(lost, for: second, after: beforeAuthenticationLoss)
         XCTAssertTrue(authRevoked.contains { $0["event"] == "fixtureAuthenticationLost" })
-        assertRemoved(second, in: authRevoked)
+        XCTAssertFalse(authRevoked.contains {
+            $0["event"] == "cleanupRemoval" && $0["operation"] == second["allocation"]
+        })
+        let hidden = try XCTUnwrap(lost.last { $0["event"] == "ownerSnapshot" })
+        XCTAssertEqual(hidden["operations"], "")
+        XCTAssertEqual(hidden["available"], "false")
+        XCTAssertEqual(hidden["retained"], "1")
         XCTAssertFalse(app.buttons["Preview"].exists)
         XCTAssertFalse(app.buttons["Share"].exists)
         capture(app, milestone: "real Root authentication loss, safe surface and no old actions")
@@ -871,7 +1307,22 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         let covered = try XCTUnwrap(revoked.last { $0["coverVisible"] == "true" })
         XCTAssertEqual(covered["coverFrame"], covered["sceneBounds"].map { "Optional(\($0))" })
         XCTAssertNotNil(covered["sceneSession"])
-        assertRemoved(first, in: revoked)
+        XCTAssertFalse(revoked.contains {
+            $0["event"] == "cleanupRemoval" && $0["operation"] == first["allocation"]
+        })
+        try openDownloads(app)
+        try closeDownloads(app)
+        let current = try observations(app)
+        let retained = try XCTUnwrap(current.last { $0["event"] == "ownerSnapshot" })
+        XCTAssertEqual(retained["available"], "true")
+        XCTAssertTrue(try XCTUnwrap(retained["operations"]).contains(try XCTUnwrap(first["operation"])))
+        try tapControl("downloadQualificationCheckPendingAllocation", in: app)
+        let retainedEvents = try observations(app)
+        let file = try XCTUnwrap(retainedEvents.last {
+            $0["event"] == "pendingAllocationPreTerminationCheck" && $0["operation"] == first["operation"]
+        })
+        XCTAssertEqual(file["verified"], "true")
+        XCTAssertEqual(file["present"], "true")
         XCTAssertFalse(app.descendants(matching: .any)["QLPreviewControllerView"].exists)
         XCTAssertFalse(app.buttons["QLOverlayDoneButtonAccessibilityIdentifier"].exists)
         XCTAssertTrue(app.buttons["Browser Menu"].isHittable)
@@ -880,22 +1331,34 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         XCTAssertNotEqual(first["operation"], second["operation"])
         let fresh = try observations(app)
         let snapshot = try XCTUnwrap(fresh.last { $0["event"] == "ownerSnapshot" })
-        XCTAssertFalse(try XCTUnwrap(snapshot["operations"]).contains(try XCTUnwrap(first["operation"])))
+        XCTAssertTrue(try XCTUnwrap(snapshot["operations"]).contains(try XCTUnwrap(first["operation"])))
         XCTAssertTrue(try XCTUnwrap(snapshot["operations"]).contains(try XCTUnwrap(second["operation"])))
-        capture(app, milestone: "fresh operation, no revoked source resurrection")
+        capture(app, milestone: "retained completion and distinct fresh operation")
     }
 
     private func launchFixture(
         passiveSceneCensus: Bool = false,
         activeDownloadHome: Bool = false,
+        delayedHandoffLock: Bool = false,
+        automaticIngestion: Bool = false,
     ) throws -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
         app.launchArguments = ["--browser-download-production-qualification"]
+        if automaticIngestion {
+            app.launchArguments += [
+                "--browser-download-automatic-ingestion",
+                "--browser-download-library",
+                UUID().uuidString,
+            ]
+        }
         if passiveSceneCensus {
             app.launchArguments.append("--browser-download-passive-scene-census")
         }
         if activeDownloadHome {
             app.launchArguments.append("--browser-download-active-download-home")
+        }
+        if delayedHandoffLock {
+            app.launchArguments.append("--browser-download-delayed-handoff-lock")
         }
         #if targetEnvironment(simulator)
         app.launchArguments.append("--browser-download-simulated-protection-readback")
@@ -936,7 +1399,8 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
 
     private func download(_ app: XCUIApplication) throws -> Observation {
         try wait(app, milestone: "real loopback readiness") {
-            app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
+            let status = app.staticTexts["downloadQualificationLoopbackReadiness"]
+            return status.exists && status.value as? String == "ready"
         }
         let earlier = try observations(app).filter { $0["event"] == "completedFileProof" }
         try tapControl("downloadQualificationDownloadAttachment", in: app)

@@ -49,6 +49,35 @@ BROWSER_DOWNLOAD_MULTI_SCENE_TESTS := \
 	BrowserDownloadMultiSceneUITests/testResizeWindowWitnessAcceptsMarkerOnlyLatestObservation \
 	BrowserDownloadMultiSceneUITests/testResizeWindowWitnessRejectsCoverInCurrentCensus \
 	BrowserDownloadMultiSceneUITests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy
+# Simulator-safe single-scene continuation, presentation, and witness regressions.
+# Physical Home continuation remains a separately authorized device qualification.
+BROWSER_DOWNLOAD_QUALIFICATION_TESTS := \
+BrowserDownloadQualificationUITests/testAcceptedPolicyHandoffAfterLockCompletesHiddenUntilFreshAuthentication \
+BrowserDownloadQualificationUITests/testDelayedHandoffParserRequiresNativeCallbacksAfterLock \
+BrowserDownloadQualificationUITests/testQuickLookHomeRevokesAndFreshDownloadRecovers \
+BrowserDownloadQualificationUITests/testShareHomeRevokesAndFreshDownloadRecovers \
+BrowserDownloadQualificationUITests/testNormalQualificationModeReturnsToAuthenticatedBrowserAfterHome \
+BrowserDownloadQualificationUITests/testActiveDownloadQualificationModeAutoLocksAfterRealHomeTransition \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessAcceptsCorrelatedNativeProgress \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsMissingHandoffOrProgress \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsServerEvidenceAfterReadiness \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsEarlyTerminalAndCleanupFailure \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsPrematureCleanupWithoutFixtureRequest \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessIgnoresPrematureCleanupForAnotherOperation \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessIgnoresPrematureCleanupFromAnotherRun \
+BrowserDownloadQualificationUITests/testContinuationAcceptsFiniteResponseAndNativeFinish \
+BrowserDownloadQualificationUITests/testContinuationRejectsMissingNativeOrTransportWitness \
+BrowserDownloadQualificationUITests/testContinuationRejectsCancellationFailureAndPrematureCleanup \
+BrowserDownloadQualificationUITests/testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion \
+BrowserDownloadQualificationUITests/testSlowKnownWitnessDiagnosticsAreRedactedAndBounded \
+BrowserDownloadQualificationUITests/testSlowKnownDownloadControlIsAccessibleOnMountedBrowser \
+BrowserDownloadQualificationUITests/testActiveDiscardFailureRetryAndAuthenticationLoss \
+BrowserDownloadQualificationUITests/testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset \
+BrowserDownloadQualificationUITests/testRepeatedPNGDownloadSkipsDuplicateAndRetainsCanonicalIdentity \
+BrowserDownloadQualificationUITests/testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation \
+BrowserDownloadQualificationUITests/testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch \
+BrowserDownloadQualificationUITests/testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible
 PACKAGE_SNAPSHOT_SUITES := \
 	AppFeatureTests/VaultFeatureViewSnapshotTests \
 	CalculatorFeatureTests/CalculatorViewSnapshotTests \
@@ -150,8 +179,8 @@ test:
 	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"; \
 	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$test_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
 	assert_tests_ran App-iPad-privacy "$$test_root/App-iPadPrivacy.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme BrowserTabOverviewUITests -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/BrowserDownloadMultiScene" -resultBundlePath "$$test_root/BrowserDownloadMultiScene.xcresult" -parallel-testing-enabled NO $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS),-only-testing:BrowserTabOverviewUITests/$(test)) test; \
-	$(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$test_root/BrowserDownloadMultiScene.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS),--expected-test $(test))
+	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme BrowserTabOverviewUITests -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/BrowserDownloadMultiScene" -resultBundlePath "$$test_root/BrowserDownloadMultiScene.xcresult" -parallel-testing-enabled NO $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),-only-testing:BrowserTabOverviewUITests/$(test)) test; \
+	$(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$test_root/BrowserDownloadMultiScene.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),--expected-test $(test))
 
 # Exercise the native presentation snapshot suites on the canonical 2x iPad.
 # UIKit lifecycle protection remains covered by behavioral tests in `make test`.

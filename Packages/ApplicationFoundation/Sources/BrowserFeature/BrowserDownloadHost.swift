@@ -247,7 +247,7 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
     var qualificationObservation: (@MainActor (String, [String: String]) -> Void)?
     #endif
 
-    private func recordQualification(_ event: String) {
+    private func recordQualification(_ event: String, fields: [String: String] = [:]) {
         #if DEBUG
         guard let qualificationObservation else {
             return
@@ -275,7 +275,7 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
                     sceneActive: active,
                     nativeAdmissionHeld: nativeBarrier,
                 ) == true),
-            ])
+            ].merging(fields) { _, current in current })
         }
         #endif
     }
@@ -456,8 +456,8 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
             registration.controller?.invalidateRootRender()
         }
         lifetime.revoke()
-        // Conceal above all registered application windows before revoking bytes or dismissing UIKit.
-        if request != nil || !owner.snapshot.records.isEmpty || owner.privacyCleanupPending || !covers.isEmpty {
+        // Conceal above all registered application windows before revoking content access or dismissing UIKit.
+        if request != nil || owner.retainedCount > 0 || owner.privacyCleanupPending || !covers.isEmpty {
             for registration in registrations.values {
                 showCover(in: registration.scene)
             }
@@ -483,7 +483,51 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
         reevaluate()
     }
 
+    private var resolvingPresentationID: UUID?
+
     private func present(_ newRequest: BrowserDownloadPresentation) {
+        guard !owner.presentationIsWaitingForExport(newRequest),
+              lifetime.admissionDecision(presenterAvailable: true) != .waitForAbsence else {
+            return
+        }
+        guard resolvingPresentationID != newRequest.requestID else {
+            return
+        }
+
+        resolvingPresentationID = newRequest.requestID
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            let url = await owner.resolvePresentationURL(for: newRequest)
+            recordQualification("nativeURLResolved", fields: [
+                "urlResolved": String(url != nil),
+                "requestIsCurrent": String(owner.snapshot.presentation == newRequest),
+                "authorized": String(authorized),
+                "operation": newRequest.downloadID.rawValue.uuidString,
+                "request": newRequest.requestID.uuidString,
+            ])
+            guard resolvingPresentationID == newRequest.requestID else {
+                owner.presentationDidEnd(newRequest)
+                return
+            }
+
+            resolvingPresentationID = nil
+            guard authorized, owner.snapshot.presentation == newRequest else {
+                owner.presentationDidEnd(newRequest)
+                return
+            }
+            guard let url else {
+                rejectPresentation(newRequest)
+                return
+            }
+
+            present(newRequest, url: url)
+        }
+    }
+
+    private func present(_ newRequest: BrowserDownloadPresentation, url: URL) {
         // An unresolved controller is a barrier, not an unavailable-presenter rejection.
         guard lifetime.admissionDecision(presenterAvailable: true) != .waitForAbsence else {
             return
@@ -499,12 +543,22 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
         }
         let presenterAvailable = anchor.viewIfLoaded?.window != nil && !anchor.isBeingDismissed && !anchor
             .isBeingPresented
-        guard lifetime.admissionDecision(presenterAvailable: presenterAvailable) == .present,
-              let url = owner.presentationURL(for: newRequest) else {
+        guard lifetime.admissionDecision(presenterAvailable: presenterAvailable) == .present else {
             rejectPresentation(newRequest)
             return
         }
         guard let controller = makeNativeController(for: newRequest, url: url) else {
+            return
+        }
+
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = anchor.view
+            popover.sourceRect = CGRect(x: anchor.view.bounds.midX, y: anchor.view.bounds.midY, width: 1, height: 1)
+            popover.permittedArrowDirections = []
+        }
+        guard owner.presentationWillBegin(newRequest) else {
+            previewURL = nil
+            rejectPresentation(newRequest)
             return
         }
 
@@ -513,11 +567,7 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
         presentationHost = host
         presenter = anchor
         _ = lifetime.begin()
-        if let popover = controller.popoverPresentationController {
-            popover.sourceView = anchor.view
-            popover.sourceRect = CGRect(x: anchor.view.bounds.midX, y: anchor.view.bounds.midY, width: 1, height: 1)
-            popover.permittedArrowDirections = []
-        }
+
         // Mark unresolved before UIKit is called; inactivity during this await revokes this identity.
         anchor.present(controller, animated: false) { [weak self, weak controller] in
             MainActor.assumeIsolated {
@@ -542,6 +592,7 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
 
     private func rejectPresentation(_ rejected: BrowserDownloadPresentation) {
         owner.execute(.init(snapshot: owner.snapshot, action: .dismissPresentation(rejected.requestID)))
+        owner.presentationDidEnd(rejected)
     }
 
     private func makeNativeController(for newRequest: BrowserDownloadPresentation, url: URL) -> UIViewController? {
@@ -549,7 +600,13 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
         case .preview:
             // The SDK's Quick Look item protocol is supplied by the NSURL category, not Swift URL.
             // swiftlint:disable:next legacy_objc_type
-            guard QLPreviewController.canPreview(url as NSURL) else {
+            let canPreview = QLPreviewController.canPreview(url as NSURL)
+            recordQualification("nativePreviewSupportChecked", fields: [
+                "canPreview": String(canPreview),
+                "operation": newRequest.downloadID.rawValue.uuidString,
+                "request": newRequest.requestID.uuidString,
+            ])
+            guard canPreview else {
                 owner.presentationUnavailable(newRequest, discard: false)
                 return nil
             }
@@ -651,6 +708,7 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
         previewURL = nil
         if let completedRequest {
             owner.execute(.init(snapshot: owner.snapshot, action: .dismissPresentation(completedRequest.requestID)))
+            owner.presentationDidEnd(completedRequest)
         }
         if let hostID, registrations[hostID]?.mounted == false {
             registrations.removeValue(forKey: hostID)

@@ -11,6 +11,7 @@ import CoreFoundation
 import CoreGraphics
 import Dependencies
 import Foundation
+import ObjectiveC
 import Sharing
 import SwiftUI
 import Testing
@@ -25,6 +26,46 @@ extension AppHostedUITests {
     @MainActor
     @Suite(.serialized)
     struct BrowserDownloadRootAdapterTests {
+        @Test("Admission in another context reclaims only confirmed abandoned policy slots")
+        func quietContextAbandonmentReleasesSharedCapacity() throws {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+                UUID().uuidString,
+                isDirectory: true,
+            )
+            defer { try? FileManager.default.removeItem(at: root) }
+            let owner = BrowserDownloadOwner(
+                store: BrowserDownloadScratchStore(root: root, verifyProtection: { url in
+                    #if !targetEnvironment(simulator)
+                    try BrowserDownloadScratchStore.verifyNativeProtection(url)
+                    #endif
+                }),
+                backgroundExecution: .init(begin: { _ in .invalid }, end: { _ in }),
+            )
+            owner.installAuthorization { true }
+            #expect(owner.snapshot.isAvailable)
+            let adapter = BrowserWebKitAdapter(downloadOwner: owner)
+            adapter.execute(.configureProfile(profile: .ephemeral, retiringTabIDs: []))
+            let quietTab = BrowserTabID()
+            let requestingTab = BrowserTabID()
+            adapter.execute(.ensureContext(tabID: quietTab))
+            adapter.execute(.ensureContext(tabID: requestingTab))
+            var policies: [NSObject]? = (0 ..< 4).map { _ in NSObject() }
+            weak var abandoned = policies?.first
+            for policy in try #require(policies) {
+                #expect(adapter.reserveDownloadPolicyForTesting(tabID: quietTab, policyObject: policy) != nil)
+            }
+            let requester = NSObject()
+            #expect(adapter.reserveDownloadPolicyForTesting(tabID: requestingTab, policyObject: requester) == nil)
+            policies = nil
+            #expect(abandoned == nil)
+            #expect(adapter.reserveDownloadPolicyForTesting(tabID: requestingTab, policyObject: requester) != nil)
+            #expect(owner.snapshot.records.count == 1)
+            adapter.destroyContext(for: quietTab)
+            #expect(owner.snapshot.records.count == 1)
+            adapter.destroyContext(for: requestingTab)
+            #expect(owner.snapshot.records.isEmpty)
+        }
+
         @Test("Removing a qualification Root leaves another adapter's mounted view attached")
         func removingRootKeepsOtherAdapterAttached() async throws {
             let survivor = try RootAdapterFixture()

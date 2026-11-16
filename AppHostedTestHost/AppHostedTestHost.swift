@@ -16,7 +16,7 @@ import SwiftUI
 /// delegates to `AppHostedTestHostRootView`, which always presents an inert
 /// `Color.clear` scene.
 ///
-/// The standalone Issue #42 qualification application is a separate target
+/// The standalone browser-download qualification application is a separate target
 /// with its own entry point in `BrowserDownloadQualificationApp.swift`, so neither
 /// application target compiles the other's entry point.
 @main

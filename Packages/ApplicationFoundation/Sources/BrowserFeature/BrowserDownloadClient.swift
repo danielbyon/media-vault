@@ -19,6 +19,22 @@ public struct BrowserDownloadID: Hashable, Sendable {
 
 /// A safe projection of a transfer. Partial bytes are never a presentation destination.
 public struct BrowserDownloadRecord: Equatable, Sendable, Identifiable {
+    /// Session state is separate from ownership of temporary or canonical bytes.
+    public enum Status: Equatable, Sendable {
+        /// The native writer is receiving bytes.
+        case downloading
+        /// Verified bytes await authenticated ingestion.
+        case pendingImport
+        /// The download created a canonical Library asset.
+        case imported
+        /// The download matched an existing canonical Library asset.
+        case duplicate
+        /// Library does not support these retained completed bytes.
+        case unsupported
+        /// Ingestion could not finish; temporary ownership remains retained.
+        case failed
+    }
+
     /// Operation identity stable through progress and completion.
     public let id: BrowserDownloadID
     /// Logical tab that owns this operation.
@@ -31,6 +47,8 @@ public struct BrowserDownloadRecord: Equatable, Sendable, Identifiable {
     public let expectedBytes: Int64?
     /// Whether the completed file passed its storage verification.
     public let isReady: Bool
+    /// Imported rows keep no temporary-byte reservation.
+    public var status: Status = .downloading
 }
 
 /// Opaque native presentation request. A later presenter must resolve it through the live owner.
@@ -75,13 +93,13 @@ public struct BrowserDownloadSnapshot: Equatable, Sendable {
 
     /// Strictly increasing owner revision; older deliveries cannot resurrect projections.
     public var revision: UInt64 = 0
-    /// Synchronous privacy generation; revoked operations never join a newer generation.
+    /// Synchronous content-access generation; stale grants never authorize retained transfers.
     public var generation: UInt64 = 0
     /// True only while the owner is authorized and cleanup is verified.
     public var isAvailable = false
     /// Download-only recovery state; ordinary browsing remains independent.
     public var cleanupNeedsRetry = false
-    /// Safe transfer projections, excluding every revoked operation.
+    /// Authorized transfer projections; empty while content access is unavailable.
     public var records: [BrowserDownloadRecord] = []
     /// Current native request, cleared synchronously by privacy invalidation.
     public var presentation: BrowserDownloadPresentation?
@@ -175,12 +193,13 @@ public enum BrowserDownloadPrivacy {
         BrowserDownloadOwner.shared.installAuthorization(predicate)
     }
 
-    /// Revokes every operation before deferred reducer effects or native dismissal can run.
+    /// Revokes content grants before deferred reducer effects or native dismissal can run.
+    /// Previously admitted transfers retain only their existing write authority.
     public static func invalidate() {
         BrowserDownloadOwner.shared.invalidateAuthorization()
     }
 
-    /// Rechecks live authorization and retries cleanup without resurrecting old operations.
+    /// Rechecks live authorization and verifies retained work before issuing fresh content grants.
     public static func recheck() {
         BrowserDownloadOwner.shared.recheckAuthorization()
     }

@@ -31,7 +31,7 @@ final class BrowserDownloadNoticeUITests: XCTestCase {
         XCTAssertEqual(notice.label, capacity)
         assertOnscreen(notice, in: app)
 
-        let retainedLimit = "Download limit reached. Eight downloads are kept in the list. Discard a download and try again."
+        let retainedLimit = "Temporary download storage is unavailable or full. Wait for imports or discard a pending download."
         let showRetainedLimit = app.buttons["downloadQualificationShowRetainedLimitNotice"]
         XCTAssertTrue(showRetainedLimit.exists)
         XCTAssertTrue(showRetainedLimit.isHittable)

@@ -107,7 +107,8 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         }
     }
 
-    /// A real system-created scene backgrounds the original scene; shared downloads must revoke.
+    /// A system-created scene backgrounds the original scene and revokes shared content access.
+    /// The completed operation remains retained while unauthorized projections stay empty.
     func testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable() throws {
         let requiresOperatorArrangement = physicalOperatorArrangementEnabled
         let app = try launchFixture(
@@ -209,7 +210,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
                 }
                 let denied = postRequest.last { $0["event"] == "ownerSnapshot" }.map {
                     $0["available"] == "false" && $0["operations"] == "" && $0["active"] == "0"
-                        && $0["retained"] == "0"
+                        && $0["retained"] == "1"
                 } ?? false
                 let safeRoot = self.latestFreshSafeRoots(
                     in: postRequest,
@@ -225,7 +226,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
                     "ownerDenied": String(denied),
                     "activeSceneSafeRoot": String(safeRoot),
                 ]
-                return removed && denied && safeRoot
+                return !removed && denied && safeRoot
             }
         } catch {
             attach(postRequestStatus, named: "global revocation and active-root assertion status")
@@ -270,7 +271,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
                 && (observation["coverVisible"] == "true" || observation["nativeBarrier"] == "true")
         }
         XCTAssertFalse(laterBarrier, "A visible cover or native barrier superseded the active scene's fresh safe Root.")
-        attach(postRequest, named: "actual A-background B-active revocation and source absence")
+        attach(postRequest, named: "actual A-background B-active concealment and retained operation")
         try wait(app, milestone: "active B fixture navigation control") {
             self.hittableButton("downloadQualificationOpenFixturePage", in: app) != nil
         }
@@ -1905,7 +1906,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         XCTAssertEqual(owner["presentation"], "none")
         XCTAssertEqual(owner["operations"], "")
         XCTAssertEqual(owner["active"], "0")
-        XCTAssertEqual(owner["retained"], "0")
+        XCTAssertEqual(owner["retained"], "1")
         attach(owner, named: "owner authorization sampled with final original-scene census")
         let registeredSessions = Set(census.latestCoordinatorObservations.compactMap { observation -> String? in
             guard observation["runID"] == runID,
@@ -1942,6 +1943,9 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
                 + "\(registeredScenes.map { "\($0.sessionID)=\($0.activation)" }.sorted()).",
         )
         XCTAssertNotEqual(owner["operations"], oldOperation)
+        XCTAssertFalse(currentObservations.contains {
+            $0["runID"] == runID && $0["event"] == "cleanupRemoval" && $0["operation"] == oldOperation
+        }, "Privacy transitions must not remove the retained completed operation.")
     }
 
     private func completedDownload(in app: XCUIApplication) throws -> Observation {

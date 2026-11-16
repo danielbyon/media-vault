@@ -648,6 +648,12 @@ extension VaultFeature {
     }
 
     private func unlockShell(state: inout State) {
+        let generation = mediaLibrary.beginAuthenticatedDownloadSession()
+        let library = mediaLibrary
+        // Recovery belongs to the authenticated session and runs even when Library is not mounted.
+        Task {
+            _ = await library.reconcileAcceptedDownloads(generation: generation)
+        }
         state.shell.isSessionLocked = false
         state.shell.library.isSessionLocked = false
         state.shell.browser.isSessionLocked = false

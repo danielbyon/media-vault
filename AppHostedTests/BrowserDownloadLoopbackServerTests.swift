@@ -5,14 +5,74 @@
 //  SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import CoreFoundation
+import CoreGraphics
 import Foundation
+import ImageIO
 import Network
 import Testing
+import UniformTypeIdentifiers
 
 extension AppHostedUITests {
     @Suite("Loopback fixture teardown")
     @MainActor
     struct BrowserDownloadLoopbackServerTests {
+        @Test("Image attachment routes preserve actual PNG bytes despite misleading metadata")
+        func imageAttachmentRoutesPreserveActualPNGBytes() async throws {
+            let server = try BrowserDownloadLoopbackServer()
+            try await server.start()
+            defer { server.stop() }
+
+            for route in ["image", "image-as-pdf"] {
+                let (body, response) = try await URLSession.shared.data(from: server.url(route))
+                let http = try #require(response as? HTTPURLResponse)
+                #expect(http.statusCode == 200)
+                #expect(body == BrowserDownloadLoopbackServer.fixturePNG)
+                let source = try #require(CGImageSourceCreateWithData(body as CFData, nil))
+                #expect(CGImageSourceGetCount(source) == 1)
+                #expect(CGImageSourceCreateImageAtIndex(source, 0, nil) != nil)
+                #expect(hasSupportedStillImageContent(body))
+                #expect(http.mimeType == (route == "image" ? "image/png" : "application/pdf"))
+                let disposition = try #require(http.value(forHTTPHeaderField: "Content-Disposition"))
+                #expect(disposition.contains(route == "image" ? "valid-image.png" : "document.pdf"))
+            }
+        }
+
+        @Test("A PDF labelled as PNG still contains the unchanged non-media PDF")
+        func pdfWithImageMetadataPreservesPDFBytes() async throws {
+            let server = try BrowserDownloadLoopbackServer()
+            try await server.start()
+            defer { server.stop() }
+            let (body, response) = try await URLSession.shared.data(from: server.url("pdf-as-image"))
+            let http = try #require(response as? HTTPURLResponse)
+            #expect(http.statusCode == 200)
+            #expect(http.mimeType == "image/png")
+            #expect(body == BrowserDownloadLoopbackServer.fixturePDF)
+            let provider = try #require(CGDataProvider(data: body as CFData))
+            let pdf = try #require(CGPDFDocument(provider))
+            #expect(pdf.numberOfPages == 1)
+            #expect(!hasSupportedStillImageContent(body))
+            #expect(http.value(forHTTPHeaderField: "Content-Disposition") == "attachment; filename=image.png")
+        }
+
+        /// Uses the importer's count, decoded-dimension, and detected-type gates.
+        /// Creating an ImageIO source alone does not establish supported image content.
+        private func hasSupportedStillImageContent(_ bytes: Data) -> Bool {
+            guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+                  CGImageSourceGetCount(source) == 1,
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                  image.width > 0, image.height > 0,
+                  let sourceType = CGImageSourceGetType(source),
+                  let type = UTType(sourceType as String),
+                  type.conforms(to: .image),
+                  !type.conforms(to: .rawImage),
+                  type != .livePhoto else {
+                return false
+            }
+
+            return true
+        }
+
         @Test("Complete HTTP responses remain open until the peer closes")
         func completedResponseWaitsForPeerClose() async throws {
             let server = try BrowserDownloadLoopbackServer()
@@ -145,6 +205,82 @@ extension AppHostedUITests {
 
             connection.close()
             server.stop()
+        }
+
+        @Test("Finite response sends the exact remainder once after its release event")
+        func finiteResponseCompletesExactBodyAfterRelease() async throws {
+            let server = try BrowserDownloadLoopbackServer()
+            try await server.start()
+            defer { server.stop() }
+            let requestID = UUID()
+            var released = false
+            var duplicateRelease = true
+            server.qualificationEvidenceDidChange = {
+                let evidence = server.slowKnownEvidence(for: requestID, route: "finite-continuation")
+                guard !released, evidence["sendStackState"] == "stackPrefixProcessed",
+                      let value = evidence["connectionID"], let connectionID = UUID(uuidString: value)
+                else {
+                    return
+                }
+
+                // Set the guard before release publishes another transport observation.
+                released = true
+                #expect(evidence["responseComplete"] == "false")
+                #expect(!server.releaseFiniteResponse(requestID: UUID(), connectionID: connectionID))
+                #expect(!server.releaseFiniteResponse(requestID: requestID, connectionID: UUID()))
+                #expect(server.releaseFiniteResponse(requestID: requestID, connectionID: connectionID))
+                duplicateRelease = server.releaseFiniteResponse(requestID: requestID, connectionID: connectionID)
+            }
+            let url = try server.url("finite-continuation").appending(queryItems: [
+                URLQueryItem(name: "qualificationRequest", value: requestID.uuidString),
+            ])
+            let (body, response) = try await URLSession.shared.data(from: url)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            #expect(released)
+            #expect(!duplicateRelease)
+            #expect(body == BrowserDownloadLoopbackServer.slowPayload)
+            let completed = try await waitForAppHostedPolling(timeout: .seconds(2)) {
+                server.slowKnownEvidence(for: requestID, route: "finite-continuation")["responseComplete"] == "true"
+            }
+            #expect(completed)
+            let evidence = server.slowKnownEvidence(for: requestID, route: "finite-continuation")
+            #expect(evidence["remainderBytes"] == String(body.count - 262_144))
+            #expect(evidence["releaseUptime"].flatMap(Double.init) != nil)
+        }
+
+        @Test("Finite release rejects duplicate requests, prefix-pending and stopped connections")
+        func finiteReleaseFailsClosed() throws {
+            let server = try BrowserDownloadLoopbackServer()
+            defer { server.stop() }
+            let requestID = UUID()
+            let request = Data((
+                "GET \(server.cookiePath)finite-continuation?qualificationRequest=\(requestID.uuidString) HTTP/1.1\r\n"
+                    + "Host: 127.0.0.1\r\n\r\n"
+            ).utf8)
+            let connection = try #require(server.accept(NWConnection(host: "127.0.0.1", port: .https, using: .tcp)))
+            connection.didReceive(request, complete: false, failed: false)
+            #expect(!server.releaseFiniteResponse(requestID: requestID, connectionID: connection.id))
+            connection.didSendSlowPrefix(failed: false)
+            let duplicate = try #require(server.accept(NWConnection(host: "127.0.0.1", port: .https, using: .tcp)))
+            duplicate.didReceive(request, complete: false, failed: false)
+            #expect(!server.releaseFiniteResponse(requestID: requestID, connectionID: connection.id))
+            server.stop()
+            #expect(!server.releaseFiniteResponse(requestID: requestID, connectionID: connection.id))
+            #expect(!connection.releaseFiniteRemainder())
+        }
+
+        @Test("Original slow-known route cannot release a remainder")
+        func slowKnownPreservesPrefixOnlySemantics() throws {
+            let server = try BrowserDownloadLoopbackServer()
+            defer { server.stop() }
+            let (connection, requestID) = try slowKnownConnection(server: server)
+            connection.didSendSlowPrefix(failed: false)
+            #expect(!connection.releaseFiniteRemainder())
+            #expect(!server.releaseFiniteResponse(requestID: requestID, connectionID: connection.id))
+            let evidence = server.slowKnownEvidence(for: requestID)
+            #expect(evidence["responseComplete"] == "false")
+            #expect(evidence["sendStackState"] == "stackPrefixProcessed")
+            #expect(evidence["releaseUptime"] == "unavailable")
         }
 
         private func slowKnownConnection(

@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// Entry point for the standalone Issue #42 qualification application.
+/// Entry point for the standalone browser-download qualification application.
 ///
 /// The application presents the routing root view declared in
 /// `BrowserDownloadQualificationRootView.swift`, which selects one qualification

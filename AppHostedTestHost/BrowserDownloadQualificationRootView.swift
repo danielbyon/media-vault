@@ -13,7 +13,7 @@ import Foundation
 
 /// Routing root view presented by the standalone qualification application.
 ///
-/// The view selects one of the Issue #42 qualification surfaces from the
+/// The view selects one of the browser-download qualification surfaces from the
 /// launch arguments passed by the UI-test drivers. It is the root view of the
 /// qualification entry point in `BrowserDownloadQualificationApp.swift`; the
 /// package-free unit-test host presents the inert
