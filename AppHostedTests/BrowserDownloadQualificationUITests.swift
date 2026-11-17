@@ -514,8 +514,9 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         try tap(app.buttons["QLOverlayDoneButtonAccessibilityIdentifier"], in: app)
         try tap(app.buttons["Share"], in: app)
         try wait(app, milestone: "native PDF share sheet") {
-            app.descendants(matching: .any)["Copy"].exists || app.descendants(matching: .any)["AirDrop"].exists
+            self.nativeShareSurfaceIsPresent(app)
         }
+        XCTAssertFalse(nativeShareSurfaceIsAbsent(app))
     }
 
     func testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch() throws {
@@ -1237,6 +1238,62 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         capture(app, milestone: "real Root authentication loss, safe surface and no old actions")
     }
 
+    func testNativeShareOracleRejectsLockedCalculatorCopy() throws {
+        let app = try launchFixture(automaticIngestion: true)
+        defer { app.terminate() }
+        try tap(app.buttons["Lock"], in: app)
+        try wait(app, milestone: "public locked calculator without native Share") {
+            app.buttons["Equals"].exists && !app.buttons["Browser Menu"].exists
+        }
+        XCTAssertTrue(app.buttons["Copy"].exists)
+        XCTAssertFalse(nativeShareSurfaceIsPresent(app))
+        XCTAssertTrue(nativeShareSurfaceIsAbsent(app))
+        capture(app, milestone: "calculator Copy is not native Share")
+    }
+
+    func testNativeWaitResultsPreserveMilestoneAndCause() {
+        let completed = XCTestExpectation(description: "fulfilled native expectation")
+        completed.fulfill()
+        let completedResult = XCTWaiter.wait(for: [completed], timeout: 1)
+        XCTAssertEqual(completedResult, .completed)
+        XCTAssertNil(waitFailureMessage(completedResult, milestone: "completed milestone"))
+
+        let pending = XCTestExpectation(description: "unfulfilled native expectation")
+        let timedOutResult = XCTWaiter.wait(for: [pending], timeout: 0.01)
+        XCTAssertEqual(timedOutResult, .timedOut)
+        XCTAssertEqual(
+            waitFailureMessage(timedOutResult, milestone: "deadline milestone"),
+            "Timed out: deadline milestone",
+        )
+
+        // Use XCTest's actual enclosing-wait cancellation, rather than manufacturing a result.
+        var armed = false
+        var entered = false
+        var interruptedResult: XCTWaiter.Result?
+        let predicate = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                if armed, !entered {
+                    entered = true
+                    let nested = XCTestExpectation(description: "nested native expectation")
+                    interruptedResult = XCTWaiter.wait(for: [nested], timeout: 10)
+                }
+                return false
+            }
+        }
+        let enclosing = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        armed = true
+        let enclosingResult = XCTWaiter.wait(for: [enclosing], timeout: 2)
+        XCTAssertTrue(entered)
+        XCTAssertEqual(enclosingResult, .timedOut)
+        XCTAssertEqual(interruptedResult, .interrupted)
+        if let interruptedResult {
+            XCTAssertEqual(
+                waitFailureMessage(interruptedResult, milestone: "original nested milestone"),
+                "Interrupted by an enclosing waiter: original nested milestone",
+            )
+        }
+    }
+
     private func qualifyHomeInterruption(action: String) throws {
         let app = try launchFixture()
         defer { app.terminate() }
@@ -1272,8 +1329,9 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
             add(geometry)
         } else {
             try wait(app, milestone: "native activity sheet") {
-                app.descendants(matching: .any)["Copy"].exists || app.descendants(matching: .any)["AirDrop"].exists
+                self.nativeShareSurfaceIsPresent(app)
             }
+            XCTAssertFalse(nativeShareSurfaceIsAbsent(app))
         }
         capture(app, milestone: "actual native \(action) before Home")
         let beforeHome = Date()
@@ -1289,8 +1347,7 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
                 return !app.descendants(matching: .any)["QLPreviewControllerView"].exists
                     && !app.buttons["QLOverlayDoneButtonAccessibilityIdentifier"].exists
             }
-            return !app.descendants(matching: .any)["Copy"].exists
-                && !app.descendants(matching: .any)["AirDrop"].exists
+            return self.nativeShareSurfaceIsAbsent(app)
         }
         let beforeClosingSheet = Date()
         try closeDownloads(app)
@@ -1497,6 +1554,19 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         try wait(app, milestone: "safe Browser surface") { app.buttons["Browser Menu"].isHittable }
     }
 
+    /// Requires the pinned runtime native Share container and a populated typed action.
+    private func nativeShareSurfaceIsPresent(_ app: XCUIApplication) -> Bool {
+        let activity = app.descendants(matching: .any).matching(identifier: "ActivityListView").firstMatch
+        let copy = activity.cells.matching(identifier: "Copy").firstMatch
+        return activity.exists && copy.exists
+    }
+
+    /// An empty or still-populating Share container is not evidence of dismissal.
+    private func nativeShareSurfaceIsAbsent(_ app: XCUIApplication) -> Bool {
+        !app.descendants(matching: .any).matching(identifier: "ActivityListView").firstMatch.exists
+            && !app.descendants(matching: .any).matching(identifier: "ShareSheet.RemoteContainerView").firstMatch.exists
+    }
+
     private func observations(_ app: XCUIApplication) throws -> [Observation] {
         try tapControl("downloadQualificationRefreshObservations", in: app)
         let node = app.staticTexts["downloadQualificationObservations"]
@@ -1534,18 +1604,49 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
     private func wait(_ app: XCUIApplication, milestone: String, condition: @escaping @MainActor () -> Bool) throws {
         let predicate = NSPredicate { _, _ in MainActor.assumeIsolated { condition() } }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-        guard XCTWaiter.wait(for: [expectation], timeout: 10) == .completed else {
+        let result = XCTWaiter.wait(for: [expectation], timeout: 10)
+        if let failure = waitFailureMessage(result, milestone: milestone) {
             capture(app, milestone: "FAILED \(milestone)")
-            XCTFail("Timed out: \(milestone)")
+            XCTFail(failure)
             throw FixtureError.waitFailed
         }
     }
 
+    private func waitFailureMessage(_ result: XCTWaiter.Result, milestone: String) -> String? {
+        switch result {
+        case .completed:
+            nil
+        case .timedOut:
+            "Timed out: \(milestone)"
+        case .interrupted:
+            "Interrupted by an enclosing waiter: \(milestone)"
+        default:
+            "Wait failed (result \(result.rawValue)): \(milestone)"
+        }
+    }
+
     private func capture(_ app: XCUIApplication, milestone: String) {
-        let image = XCTAttachment(screenshot: app.screenshot())
-        image.name = milestone
-        image.lifetime = .keepAlways
-        add(image)
+        let state = app.state
+        let frame = state == .runningForeground ? app.frame : CGRect.null
+        let coordinates = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height]
+        let hasUsableFrame = !frame.isInfinite && coordinates.allSatisfy(\.isFinite)
+            && frame.width > 0 && frame.height > 0
+        // XCTest can lose the application frame while the process remains alive. Preserve the
+        // original failure and accessibility evidence without requesting an unavailable screenshot.
+        if state == .runningForeground, hasUsableFrame {
+            let image = XCTAttachment(screenshot: app.screenshot())
+            image.name = milestone
+            image.lifetime = .keepAlways
+            add(image)
+        } else {
+            let reason = state == .runningForeground
+                ? "XCTest reported an empty, infinite, or non-finite application frame."
+                : "Application was not running in the foreground."
+            let diagnostic = XCTAttachment(string: "\(reason)\nApplication state: \(state.rawValue)\nFrame: \(frame)")
+            diagnostic.name = "\(milestone) screenshot unavailable"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+        }
         let tree = XCTAttachment(string: app.debugDescription)
         tree.name = "\(milestone) accessibility tree"
         tree.lifetime = .keepAlways
