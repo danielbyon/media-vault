@@ -9,10 +9,13 @@ import Foundation
 import SwiftUI
 #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
 import CalculatorFeature
+import Combine
 import ComposableArchitecture
+import CoreFoundation
 import CoreGraphics
 import CryptoKit
 import Dependencies
+import Dispatch
 import MediaLibrary
 import Observation
 import Sharing
@@ -135,6 +138,68 @@ private final class BrowserDownloadProductionQualificationProcess {
     private var slowKnownRun: BrowserDownloadSlowKnownRun?
     private var qualificationProgressObservation: NSKeyValueObservation?
     private var libraryInspectionPending = false
+    private let observationProcessNonce: UUID = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: BrowserDownloadObservationContext.launchNonceArgument) else {
+            return UUID()
+        }
+        guard arguments.indices.contains(index + 1), let nonce = UUID(uuidString: arguments[index + 1]) else {
+            preconditionFailure("The observation launch nonce is malformed.")
+        }
+
+        return nonce
+    }()
+
+    var observationReceiptJSON = ""
+    private var observationPreparation: BrowserDownloadObservationPreparation?
+
+    var observationPreparationJSON: String {
+        let preparation = observationPreparation ?? .init(processNonce: observationProcessNonce)
+        guard let data = try? JSONEncoder().encode(preparation) else {
+            return ""
+        }
+
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    @ObservationIgnored
+    private var phaseObservation: AnyCancellable?
+    @ObservationIgnored
+    private var lastAuthenticationGeometry: [String: String] = [:]
+    @ObservationIgnored
+    private var authenticationGeometryCount = 0
+    @ObservationIgnored
+    private lazy var observationController = BrowserDownloadObservationController(
+        context: { [store, owner, library, evidence, observationProcessNonce] in
+            .init(
+                processNonce: observationProcessNonce,
+                runID: evidence.runID,
+                authorizationGeneration: owner.snapshot.generation,
+                resourceGeneration: library.currentResourceLoadGeneration,
+                ingestionGeneration: library.currentDownloadIngestionGeneration,
+                phase: String(describing: store.vault.phase),
+            )
+        },
+        publish: { [weak self] receipt in
+            guard let data = try? JSONEncoder().encode(receipt) else {
+                return
+            }
+
+            self?.observationReceiptJSON = String(decoding: data, as: UTF8.self)
+        },
+    )
+
+    private var observationContext: BrowserDownloadObservationContext {
+        .init(
+            processNonce: observationProcessNonce,
+            runID: evidence.runID,
+            authorizationGeneration: owner.snapshot.generation,
+            resourceGeneration: library.currentResourceLoadGeneration,
+            ingestionGeneration: library.currentDownloadIngestionGeneration,
+            phase: String(describing: store.vault.phase),
+        )
+    }
+
     private var lockNextImageHandoff = false
     @ObservationIgnored
     private weak var readoutProbe: BrowserDownloadReadoutAccessibilityProbe.ProbeView?
@@ -146,50 +211,59 @@ private final class BrowserDownloadProductionQualificationProcess {
     /// Copy redacted observations only on explicit fixture input, avoiding a Root-layout feedback loop.
     func refreshObservations() {
         refreshSlowKnownReadiness()
+        // Keep the legacy array endpoint's immediate-copy behavior for physical consumers.
         observationsJSON = evidence.observationsJSON
         inspectFixtureNavigation()
-        refreshCanonicalLibraryEvidence()
-    }
-
-    /// Reads the isolated canonical store without driving acceptance or reconciliation.
-    /// Results are discarded if authentication changes while the read is suspended.
-    private func refreshCanonicalLibraryEvidence() {
-        guard BrowserDownloadProductionQualification.automaticIngestionEnabled,
-              !libraryInspectionPending else {
-            return
-        }
-
-        libraryInspectionPending = true
-        let generation = library.currentResourceLoadGeneration
         Task { @MainActor [weak self] in
             guard let self else {
                 return
             }
 
-            defer { libraryInspectionPending = false }
-            if store.vault.phase != .authenticated {
-                do {
-                    let storage = try await library.acceptedDownloadStorage()
-                    guard store.vault.phase != .authenticated else {
-                        return
-                    }
+            _ = await observationController.refresh(inspect: inspectObservationSnapshot)
+        }
+    }
 
-                    let snapshot = owner.snapshot
-                    evidence.record("acceptedLibraryStorage", [
-                        "temporaryCount": String(storage.operationCount),
-                        "temporaryBytes": String(storage.byteCount),
-                        "libraryID": libraryIdentity,
-                        "databaseID": databaseIdentity,
-                        "authenticated": "false",
-                        "contentEmpty": String(snapshot.records.isEmpty && snapshot.presentation == nil),
-                    ])
-                    observationsJSON = evidence.observationsJSON
-                } catch {
-                    evidence.record("acceptedLibraryStorageUnavailable", [:])
+    private func inspectObservationSnapshot() async throws -> BrowserDownloadObservationSnapshot {
+        guard observationContext.phase != "authentication" else {
+            throw BrowserDownloadObservationError.invalidated
+        }
+
+        let inspection = try await inspectCanonicalLibraryEvidence()
+        return BrowserDownloadObservationSnapshot(inspection: inspection, events: evidence.observationEvents)
+            .addingFixtureProofs(expectedStagingBytes: Int64(BrowserDownloadLoopbackServer.fixturePNG.count))
+    }
+
+    /// Completes a real read before returning its evidence; stale reads never become receipts.
+    private func inspectCanonicalLibraryEvidence() async throws -> [String: String]? {
+        guard BrowserDownloadProductionQualification.automaticIngestionEnabled else {
+            return nil
+        }
+        guard !libraryInspectionPending else {
+            throw BrowserDownloadObservationError.busy
+        }
+
+        let context = observationContext
+
+        libraryInspectionPending = true
+        defer { libraryInspectionPending = false }
+        do {
+            if store.vault.phase != .authenticated {
+                let storage = try await library.acceptedDownloadStorage()
+                guard observationContext == context else {
+                    throw BrowserDownloadObservationError.invalidated
                 }
-                return
-            }
-            do {
+
+                let snapshot = owner.snapshot
+                evidence.record("acceptedLibraryStorage", [
+                    "temporaryCount": String(storage.operationCount),
+                    "temporaryBytes": String(storage.byteCount),
+                    "libraryID": libraryIdentity,
+                    "databaseID": databaseIdentity,
+                    "authenticated": "false",
+                    "contentEmpty": String(snapshot.records.isEmpty && snapshot.presentation == nil),
+                ])
+            } else {
+                let generation = library.currentResourceLoadGeneration
                 let assets = try await library.loadAssets()
                 let storage = try await library.acceptedDownloadStorage()
                 var bytesMatch = true
@@ -197,7 +271,7 @@ private final class BrowserDownloadProductionQualificationProcess {
                 var resourceCount = 0
                 for resource in assets.flatMap(\.resources) {
                     guard let data = try await library.resourceDataIfCurrent(resource, generation: generation) else {
-                        return
+                        throw BrowserDownloadObservationError.invalidated
                     }
 
                     resourceCount += 1
@@ -205,9 +279,8 @@ private final class BrowserDownloadProductionQualificationProcess {
                     let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                     hashesMatch = hashesMatch && digest == resource.sha256
                 }
-                guard store.vault.phase == .authenticated,
-                      library.currentResourceLoadGeneration == generation else {
-                    return
+                guard observationContext == context else {
+                    throw BrowserDownloadObservationError.invalidated
                 }
 
                 let rows = owner.snapshot.records
@@ -230,16 +303,20 @@ private final class BrowserDownloadProductionQualificationProcess {
                     "originalHashMatches": String(hashesMatch),
                     "settled": String(settled),
                 ])
-                observationsJSON = evidence.observationsJSON
-            } catch {
-                guard store.vault.phase == .authenticated,
-                      library.currentResourceLoadGeneration == generation else {
-                    return
-                }
-
-                evidence.record("canonicalLibraryInspectionFailed", [:])
-                observationsJSON = evidence.observationsJSON
             }
+            observationsJSON = evidence.observationsJSON
+            return evidence.observationEvents.last
+        } catch {
+            // Legacy readers retain their original failure events and publication behavior.
+            if observationContext == context {
+                if context.phase == "authenticated" {
+                    evidence.record("canonicalLibraryInspectionFailed", [:])
+                    observationsJSON = evidence.observationsJSON
+                } else {
+                    evidence.record("acceptedLibraryStorageUnavailable", [:])
+                }
+            }
+            throw error
         }
     }
 
@@ -665,6 +742,131 @@ private final class BrowserDownloadProductionQualificationProcess {
         ])
     }
 
+    /// Observe exact phases without changing Root actions, layout or credential behavior.
+    private func startAuthenticationDiagnostics() {
+        guard phaseObservation == nil else {
+            return
+        }
+
+        phaseObservation = store.publisher
+            .map(\.vault.phase)
+            .removeDuplicates()
+            .sink { [weak self] phase in
+                MainActor.assumeIsolated {
+                    guard let self else {
+                        return
+                    }
+
+                    self.observationController.contextDidChange()
+                    guard BrowserDownloadProductionQualification.automaticIngestionEnabled else {
+                        return
+                    }
+
+                    self.evidence.record("authenticationPhaseObserved", [
+                        "phase": String(describing: phase),
+                        "processNonce": self.observationProcessNonce.uuidString,
+                        "privacyGeneration": String(self.owner.snapshot.generation),
+                        "resourceGeneration": String(self.library.currentResourceLoadGeneration),
+                        "ingestionGeneration": String(self.library.currentDownloadIngestionGeneration),
+                    ])
+                }
+            }
+    }
+
+    func recordReadoutLayout(_ fields: [String: String]) {
+        evidence.record("diagnosticReadoutState", fields)
+        guard fields["sampleSource"] == "readoutLayout",
+              let window = readoutProbe?.window else {
+            return
+        }
+
+        // Sample after the probe's actual layout turn; do not force a Root layout or read field text.
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else {
+                return
+            }
+
+            recordAuthenticationGeometry(in: window)
+        }
+    }
+
+    private func recordAuthenticationGeometry(in window: UIWindow) {
+        guard authenticationGeometryCount < 64 else {
+            return
+        }
+
+        var queue: [UIView] = [window]
+        var visited = 0
+        var secureFields: [UITextField] = []
+        var primaryCoverVisible = false
+        while let view = queue.popLast(), visited < 2_048 {
+            visited += 1
+            if let field = view as? UITextField, field.isSecureTextEntry {
+                secureFields.append(field)
+            }
+            if view.accessibilityIdentifier == "MediaVault.ScenePrivacyCoverPrimaryContent" {
+                primaryCoverVisible = !view.isHidden && view.alpha > 0
+            }
+            queue.append(contentsOf: view.subviews)
+        }
+        func isVisible(_ view: UIView) -> Bool {
+            var ancestor: UIView? = view
+            while let current = ancestor {
+                if current.isHidden || current.alpha <= 0.01 {
+                    return false
+                }
+                ancestor = current.superview
+            }
+            return true
+        }
+        var visible = 0
+        var reachable = 0
+        var frames: [String] = []
+        for field in secureFields {
+            let frame = field.convert(field.bounds, to: window)
+            let finite = [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite)
+            if finite, !frame.isInfinite, !frame.isEmpty {
+                frames.append(String(describing: frame))
+                if isVisible(field), frame.intersects(window.bounds) {
+                    visible += 1
+                    let point = CGPoint(x: frame.midX, y: frame.midY)
+                    if let hit = window.hitTest(point, with: nil), hit === field || hit.isDescendant(of: field) {
+                        reachable += 1
+                    }
+                }
+            }
+        }
+        let windows = window.windowScene?.windows ?? []
+        let latest = evidence.latestCoordinatorObservations.last ?? [:]
+        let state: [String: String] = [
+            "phase": String(describing: store.vault.phase),
+            "processNonce": observationProcessNonce.uuidString,
+            "windowBounds": String(describing: window.bounds),
+            "windowKey": String(window.isKeyWindow),
+            "windowHidden": String(window.isHidden),
+            "secureFieldCount": String(secureFields.count),
+            "secureFieldVisibleGeometryCount": String(visible),
+            "secureFieldHitTestReachableCount": String(reachable),
+            "secureFieldFrames": frames.joined(separator: ";"),
+            "traversalTruncated": String(!queue.isEmpty),
+            "primaryCoverVisible": String(primaryCoverVisible),
+            "coverWindowVisible": String(windows.contains {
+                $0.accessibilityIdentifier == "MediaVault.ScenePrivacyCoverWindow" && !$0.isHidden && $0.alpha > 0
+            }),
+            "visibleElevatedWindowCount": String(windows.count { !$0.isHidden && $0.windowLevel > .normal }),
+            "lastCoordinatorNativeBarrier": latest["nativeBarrier"] ?? "unknown",
+            "lastCoordinatorCoverVisible": latest["coverVisible"] ?? "unknown",
+            "readoutBounds": String(describing: readoutProbe?.bounds),
+        ]
+        guard state != lastAuthenticationGeometry else {
+            return
+        }
+
+        lastAuthenticationGeometry = state
+        authenticationGeometryCount += 1
+        evidence.record("authenticationPostLayoutGeometry", state)
+    }
+
     func registerReadoutProbe(_ probe: BrowserDownloadReadoutAccessibilityProbe.ProbeView) {
         readoutProbe = probe
     }
@@ -691,7 +893,50 @@ private final class BrowserDownloadProductionQualificationProcess {
         ])
     }
 
+    /// Publishes startup metadata only after real foreground delivery and host preparation.
+    private func updateObservationPreparation(_ preparation: BrowserDownloadObservationPreparation) {
+        var next = preparation
+        if next.canPublish {
+            let receipt = observationController.receipt
+            let context = observationContext
+            if receipt.context == context, let data = try? JSONEncoder().encode(receipt) {
+                observationReceiptJSON = String(decoding: data, as: UTF8.self)
+                _ = next.markPublished(context: context, revision: next.revision)
+            }
+        }
+        observationPreparation = next
+    }
+
+    func observeObservationScenePhase(_ phase: String, ingestionBefore: UInt64? = nil) {
+        var preparation = observationPreparation ?? .init(processNonce: observationProcessNonce)
+        let generation = library.currentDownloadIngestionGeneration
+        preparation.observePhase(
+            .init(rawValue: phase) ?? .unknown,
+            ingestionBefore: ingestionBefore ?? generation,
+            ingestionAfter: generation,
+        )
+        updateObservationPreparation(preparation)
+    }
+
+    private func refreshObservationPreparationContext() {
+        guard var preparation = observationPreparation,
+              let publishedContext = preparation.publishedContext,
+              publishedContext != observationContext
+        else {
+            return
+        }
+
+        preparation.contextDidChange()
+        updateObservationPreparation(preparation)
+    }
+
     func start() async {
+        if observationReceiptJSON.isEmpty,
+           let data = try? JSONEncoder().encode(observationController.receipt) {
+            observationReceiptJSON = String(decoding: data, as: UTF8.self)
+        }
+        startAuthenticationDiagnostics()
+
         guard !started else {
             return
         }
@@ -723,6 +968,8 @@ private final class BrowserDownloadProductionQualificationProcess {
             }
 
             for await snapshot in owner.subscribe() {
+                observationController.contextDidChange()
+                refreshObservationPreparationContext()
                 evidence.record("ownerSnapshot", [
                     "revision": String(snapshot.revision),
                     "generation": String(snapshot.generation),
@@ -751,6 +998,9 @@ private final class BrowserDownloadProductionQualificationProcess {
             try await loopback.start()
             status = "Loopback ready. Open fixture page, then download attachment PDF."
             evidence.record("loopbackReady", [:])
+            var preparation = observationPreparation ?? .init(processNonce: observationProcessNonce)
+            preparation.markStartupComplete()
+            updateObservationPreparation(preparation)
         } catch {
             status = "Loopback failed; qualification unavailable."
             evidence.record("loopbackFailure", [:])
@@ -864,7 +1114,9 @@ private final class BrowserDownloadProductionQualificationProcess {
         applicationPhase: VaultApplicationScenePhase,
     ) {
         let generationBefore = owner.snapshot.generation
+        let ingestionBefore = library.currentDownloadIngestionGeneration
         store.send(.applicationPhaseChanged(applicationPhase))
+        observeObservationScenePhase(phase, ingestionBefore: ingestionBefore)
         let snapshot = owner.snapshot
         guard let run = slowKnownRun else {
             return
@@ -1630,10 +1882,27 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                         .accessibilityIdentifier("downloadQualificationSecuritySentinelStatus")
                         .accessibilityValue(process.securitySentinel.stageSummary)
                 }
-                Text("Qualification observations")
-                    .font(.caption2)
-                    .accessibilityIdentifier("downloadQualificationObservations")
-                    .accessibilityValue(process.observationsJSON)
+                ZStack(alignment: .topLeading) {
+                    // The receipt must not reserve additional diagnostic inset space.
+                    Text("Observation receipt")
+                        .font(.caption2)
+                        .frame(width: 1, height: 1)
+                        .clipped()
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("downloadQualificationObservationReceipt")
+                        .accessibilityValue(process.observationReceiptJSON)
+                    Text("Observation preparation")
+                        .font(.caption2)
+                        .frame(width: 1, height: 1)
+                        .clipped()
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("downloadQualificationObservationPreparation")
+                        .accessibilityValue(process.observationPreparationJSON)
+                    Text("Qualification observations")
+                        .font(.caption2)
+                        .accessibilityIdentifier("downloadQualificationObservations")
+                        .accessibilityValue(process.observationsJSON)
+                }
                 Text("Connected window-scene census")
                     .font(.caption2)
                     .accessibilityIdentifier("downloadQualificationSceneCensus")
@@ -1654,7 +1923,7 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                             "ingestionGeneration": String(process.library.currentDownloadIngestionGeneration),
                             "requestedHidden": String(process.store.vault.phase == .authentication),
                         ],
-                        record: { process.evidence.record("diagnosticReadoutState", $0) },
+                        record: { process.recordReadoutLayout($0) },
                         register: { process.registerReadoutProbe($0) },
                     )
                 }
@@ -1691,6 +1960,8 @@ private struct BrowserDownloadProductionQualificationRoot: View {
             if BrowserDownloadProductionQualification.activeDownloadHomeEnabled
                 || BrowserDownloadProductionQualification.automaticIngestionEnabled {
                 process.applyQualificationScenePhase(phase, applicationPhase: applicationPhase)
+            } else {
+                process.observeObservationScenePhase(phase)
             }
 
             guard BrowserDownloadProductionQualification.passiveSceneCensusEnabled else {
@@ -1850,8 +2121,12 @@ private final class BrowserDownloadProductionEvidence {
         String(uptime - origin)
     }
 
-    private let runID = UUID().uuidString
+    let runID = UUID().uuidString
     private var observations: [[String: String]] = []
+    var observationEvents: [[String: String]] {
+        observations
+    }
+
     private var latestByRegistration: [String: [String: String]] = [:]
 
     /// Latest callback per mounted Root registration; unregister events remove stale entries.

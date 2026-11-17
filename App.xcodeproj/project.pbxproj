@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        C91A00000000000000000003 /* BrowserDownloadObservationReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */; };
+        C91A00000000000000000004 /* BrowserDownloadObservationReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */; };
+        C91A00000000000000000005 /* BrowserDownloadObservationReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */; };
+        C91A00000000000000000006 /* BrowserDownloadObservationReceiptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000002 /* BrowserDownloadObservationReceiptTests.swift */; };
         A10000000000000000000048 /* BrowserDownloadQualificationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000048 /* BrowserDownloadQualificationUITests.swift */; };
         A10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift */; };
         A10000000000000000000069 /* BrowserDownloadAdapterUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000069 /* BrowserDownloadAdapterUITests.swift */; };
@@ -89,6 +93,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+        C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadObservationReceipt.swift; sourceTree = "<group>"; };
+        C91A00000000000000000002 /* BrowserDownloadObservationReceiptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadObservationReceiptTests.swift; sourceTree = "<group>"; };
         B10000000000000000000048 /* BrowserDownloadQualificationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadQualificationUITests.swift; sourceTree = "<group>"; };
         B10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadRootAdapterTests.swift; sourceTree = "<group>"; };
         B10000000000000000000069 /* BrowserDownloadAdapterUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadAdapterUITests.swift; sourceTree = "<group>"; };
@@ -351,6 +357,8 @@
                 B10000000000000000000072 /* BrowserDownloadSecurityQualificationUITests.swift */,
                 B10000000000000000000075 /* BrowserDownloadSecuritySentinelLifecycleTests.swift */,
                 B10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift */,
+                C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */,
+                C91A00000000000000000002 /* BrowserDownloadObservationReceiptTests.swift */,
 				B1000000000000000000001A /* ScenePrivacyCoverTests.swift */,
 				B1000000000000000000001B /* ScenePrivacyCoverSentinelTestSupport.swift */,
 				);
@@ -648,6 +656,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                C91A00000000000000000005 /* BrowserDownloadObservationReceipt.swift in Sources */,
 				A10000000000000000000055 /* BrowserDownloadMultiSceneUITests.swift in Sources */,
 				A20000000000000000000041 /* BrowserDownloadNoticeUITests.swift in Sources */,
                 A10000000000000000000048 /* BrowserDownloadQualificationUITests.swift in Sources */,
@@ -673,6 +682,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                C91A00000000000000000004 /* BrowserDownloadObservationReceipt.swift in Sources */,
+                C91A00000000000000000006 /* BrowserDownloadObservationReceiptTests.swift in Sources */,
 				A10000000000000000000033 /* UIKitTestSupport.swift in Sources */,
 				A10000000000000000000034 /* AppHostedBrowserWebKitAdapterTests.swift in Sources */,
 				A10000000000000000000035 /* AppHostedBrowserProfileTests.swift in Sources */,
@@ -697,7 +708,9 @@
 		420000000000000000000004 = {
             isa = PBXSourcesBuildPhase;
             buildActionMask = 2147483647;
-            files = (420000000000000000000011 /* BrowserDownloadQualificationApp.swift in Sources */,
+            files = (
+                C91A00000000000000000003 /* BrowserDownloadObservationReceipt.swift in Sources */,
+420000000000000000000011 /* BrowserDownloadQualificationApp.swift in Sources */,
                 42000000000000000000000A /* BrowserDownloadNoticeQualification.swift in Sources */,
                 42000000000000000000000D /* BrowserDownloadProductionQualification.swift in Sources */,
                 420000000000000000000010 /* BrowserDownloadQualificationRootView.swift in Sources */,
