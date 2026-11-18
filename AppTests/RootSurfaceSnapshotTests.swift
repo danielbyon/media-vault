@@ -8,17 +8,15 @@
 import AppFeature
 import CalculatorFeature
 import ComposableArchitecture
-import CoreFoundation
 import Dependencies
 import FoundationTestSupport
 import SnapshotTesting
 import SwiftUI
 import Testing
-import UIKit
 import VaultFeature
 
 @MainActor
-@Suite("Root surface snapshots")
+@Suite("Root surface snapshots", .snapshots(record: .never))
 struct RootSurfaceSnapshotTests {
     @Test("The root state has a stable structural snapshot")
     func rootStateSnapshot() {
@@ -27,48 +25,35 @@ struct RootSurfaceSnapshotTests {
     }
 
     @Test("The root surface is stable on a compact iPhone")
-    func compactPhoneSnapshot() {
-        rootSurfaceSnapshot(
-            horizontalSizeClass: .compact,
-            config: DeterministicTestSupport.compactPhone,
-            testName: #function,
+    func compactPhoneSnapshot() throws {
+        let scale = try NativeSnapshotScale.current(capture: #function, target: "AppTests")
+        let configuration = scale.configuration(DeterministicTestSupport.compactPhone)
+        assertSnapshot(
+            of: rootView(horizontalSizeClass: .compact),
+            as: .image(layout: .device(config: configuration), traits: configuration.traits),
+            named: scale.referenceName(nil),
         )
     }
 
     @Test("The root surface is stable on a large iPhone")
-    func largePhoneSnapshot() {
-        rootSurfaceSnapshot(
-            horizontalSizeClass: .compact,
-            config: DeterministicTestSupport.largePhone,
-            testName: #function,
+    func largePhoneSnapshot() throws {
+        let scale = try NativeSnapshotScale.current(capture: #function, target: "AppTests")
+        let configuration = scale.configuration(DeterministicTestSupport.largePhone)
+        assertSnapshot(
+            of: rootView(horizontalSizeClass: .compact),
+            as: .image(layout: .device(config: configuration), traits: configuration.traits),
+            named: scale.referenceName(nil),
         )
     }
 
     @Test("The root surface is stable at regular iPad width")
-    func regularWidthIPadSnapshot() {
-        rootSurfaceSnapshot(
-            horizontalSizeClass: .regular,
-            config: DeterministicTestSupport.regularWidthIPad,
-            testName: #function,
-        )
-    }
-
-    private func rootSurfaceSnapshot(
-        horizontalSizeClass: UserInterfaceSizeClass,
-        config: ViewImageConfig,
-        testName: String,
-    ) {
-        let displayScale = UITraitCollection.current.displayScale
-        let referenceTestName = displayScale == 3
-            ? testName
-            : String(testName.dropLast(2)) + "\(Int(displayScale))x()"
+    func regularWidthIPadSnapshot() throws {
+        let scale = try NativeSnapshotScale.current(capture: #function, target: "AppTests")
+        let configuration = scale.configuration(DeterministicTestSupport.regularWidthIPad)
         assertSnapshot(
-            of: rootView(horizontalSizeClass: horizontalSizeClass),
-            as: .image(
-                layout: .device(config: config),
-                traits: .init(displayScale: displayScale),
-            ),
-            testName: referenceTestName,
+            of: rootView(horizontalSizeClass: .regular),
+            as: .image(layout: .device(config: configuration), traits: configuration.traits),
+            named: scale.referenceName(nil),
         )
     }
 

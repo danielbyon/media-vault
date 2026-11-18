@@ -110,12 +110,12 @@ elif tool == "xcrun":
         else:
             print("iOS 27.2 (27.2 - 24B8117) - com.apple.CoreSimulator.SimRuntime.iOS-27-2")
     elif args[:4] == ["xcresulttool", "get", "test-results", "summary"]:
-        bundle = args[args.index("--path") + 1]
+        bundle = pathlib.Path(args[args.index("--path") + 1])
         if (root / "result-plan.json").exists():
-            completed = pathlib.Path(bundle) / "fixture-completed.json"
+            completed = bundle / "fixture-completed.json"
             if not completed.exists():
                 sys.exit("Incomplete fixture result bundle")
-        if bundle.endswith("BrowserDownloadMultiScene.xcresult"):
+        if bundle.name == "BrowserDownloadMultiScene.xcresult":
             identities = json.loads((root / "multi-scene-test-identities.json").read_text())
             print(json.dumps({
                 "result": "Passed",
@@ -132,7 +132,9 @@ elif tool == "xcrun":
                 }}],
             }))
         else:
-            print('{"totalTestCount": 3}')
+            summary = bundle / "summary.json"
+            print(summary.read_text() if summary.exists() else '{"totalTestCount": 3}')
+        if os.environ.get("SCENARIO") == "summary-error": sys.exit(2)
     elif args[:4] == ["xcresulttool", "get", "test-results", "tests"]:
         identities = json.loads((root / "multi-scene-test-identities.json").read_text())
         print(json.dumps({"testNodes": [
@@ -140,6 +142,11 @@ elif tool == "xcrun":
              "result": "Passed"}
             for identity in identities
         ]}))
+    elif args[:3] == ["xcresulttool", "export", "attachments"]:
+        bundle = pathlib.Path(args[args.index("--path") + 1])
+        output = pathlib.Path(args[args.index("--output-path") + 1])
+        __import__("shutil").copytree(bundle / "exports", output, dirs_exist_ok=True)
+        if os.environ.get("SCENARIO") == "export-error": sys.exit(2)
     else:
         sys.exit("Unexpected xcrun arguments: " + repr(args))
 elif tool == "xcodebuild":
@@ -155,37 +162,91 @@ elif tool == "xcodebuild":
         with (root / "executed.jsonl").open("a") as stream:
             stream.write(json.dumps(args) + "\n")
         if "-resultBundlePath" in args:
+            if os.environ.get("SCENARIO") == "missing-bundle": sys.exit(0)
             bundle = pathlib.Path(args[args.index("-resultBundlePath") + 1])
             bundle.mkdir(parents=True)
-            (bundle / "fixture-partial").write_text("result writer started")
-            plan_path = root / "result-plan.json"
-            plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
-            phase = len((root / "executed.jsonl").read_text().splitlines())
-            if phase == plan.get("wait_on"):
-                import signal
-                ignore = plan.get("ignore_signals", False)
-                for event in (signal.SIGINT, signal.SIGTERM):
-                    signal.signal(event, signal.SIG_IGN if ignore else
-                                  lambda number, frame: sys.exit(128 + number))
-                # Signal only after the partial result and handlers exist.
-                fd = int(os.environ["FIXTURE_READY_FD"])
-                os.write(fd, (json.dumps({"bundle": str(bundle)}) + "\n").encode())
-                os.close(fd)
-                while True:
-                    signal.pause()
-            if phase != plan.get("partial_on"):
-                (bundle / "fixture-completed.json").write_text(json.dumps({
-                    "phase": phase,
-                    "result": "Failed" if phase == plan.get("fail_on") else "Passed",
-                }))
-            if phase == plan.get("fail_on"):
-                sys.exit(65)
+            if os.environ.get("TEST_RUNNER_NATIVE_SNAPSHOT_QUALIFICATION") == "1":
+                with (root / "environment.jsonl").open("a") as stream:
+                    stream.write(json.dumps(dict(os.environ)) + "\n")
+                hosted = "Hosted" in bundle.name
+                scenario = os.environ.get("SCENARIO", "")
+                summary = dict(totalTestCount=1 if hosted else 4, passedTests=1 if hosted else 4,
+                               failedTests=0, skippedTests=0)
+                if scenario == "zero": summary["totalTestCount"] = 0
+                if scenario == "bad-summary": summary = "not a summary"
+                if scenario == "boolean-count": summary["skippedTests"] = False
+                if scenario == "skipped": summary["skippedTests"] = 1
+                if scenario == "failed": summary["failedTests"] = 1
+                if scenario == "extra": summary["totalTestCount"] += 1
+                if scenario == "missing-count": del summary["skippedTests"]
+                (bundle / "summary.json").write_text(json.dumps(summary))
+                exports = bundle / "exports"
+                exports.mkdir()
+                captures = ([f"root-content-v1-{content}-{layout}" for content in ("calculator", "library")
+                             for layout in ("compact-iphone", "regular-ipad")] * 2 if hosted else
+                            ["compactPhoneSnapshot()", "largePhoneSnapshot()", "regularWidthIPadSnapshot()"])
+                manifest = []
+                for index, capture in enumerate(captures):
+                    method = ("AppHostedUITests/ScenePrivacyCoverTests/"
+                              "rootPresentationSnapshotsCoverPrimaryShellStates()" if hosted else
+                              "RootSurfaceSnapshotTests/" + capture)
+                    receipt = dict(schemaVersion=1, qualification="1",
+                                   expectedScale=os.environ["TEST_RUNNER_NATIVE_SNAPSHOT_EXPECTED_SCALE"],
+                                   recordMode="never", nativeScale=int(os.environ["TEST_RUNNER_NATIVE_SNAPSHOT_EXPECTED_SCALE"]),
+                                   referenceScale=int(os.environ["TEST_RUNNER_NATIVE_SNAPSHOT_EXPECTED_SCALE"]),
+                                   capture=capture, target="AppHostedTests" if hosted else "AppTests",
+                                   processID=123, processName="TestHost", validationError=None)
+                    mutations = {"scale": ("nativeScale", 2 if receipt["nativeScale"] == 3 else 3),
+                                 "reference": ("referenceScale", 1), "qualification": ("qualification", None),
+                                 "expected": ("expectedScale", "2"), "record": ("recordMode", "all"),
+                                 "validation": ("validationError", "bad environment"), "schema": ("schemaVersion", True),
+                                 "pid": ("processID", 0), "process": ("processName", ""),
+                                 "target": ("target", "Other"), "capture": ("capture", "Other")}
+                    if scenario in mutations:
+                        key, value = mutations[scenario]
+                        receipt[key] = value
+                    filename = (f"opaque-{index}.json" if scenario == "opaque-filenames" else
+                                f"native-snapshot-environment-{index}.json")
+                    (exports / filename).write_text("{" if scenario == "bad-json" else json.dumps(receipt))
+                    attachment = dict(exportedFileName=filename, suggestedHumanReadableName=f"native-snapshot-environment_{index}.json")
+                    if scenario == "missing-file": (exports / filename).unlink()
+                    manifest.append(dict(testIdentifier="Wrong/method()" if scenario == "attribution" else method,
+                                         attachments=[attachment]))
+                if scenario == "missing": manifest.pop()
+                if scenario == "duplicate": manifest.append(manifest[0])
+                (exports / "manifest.json").write_text("{" if scenario == "bad-manifest" else json.dumps(manifest))
+                if scenario == "no-manifest": (exports / "manifest.json").unlink()
+                if scenario == "xcode-failure" and not hosted: sys.exit(65)
+            else:
+                (bundle / "fixture-partial").write_text("result writer started")
+                plan_path = root / "result-plan.json"
+                plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+                phase = len((root / "executed.jsonl").read_text().splitlines())
+                if phase == plan.get("wait_on"):
+                    import signal
+                    ignore = plan.get("ignore_signals", False)
+                    for event in (signal.SIGINT, signal.SIGTERM):
+                        signal.signal(event, signal.SIG_IGN if ignore else
+                                      lambda number, frame: sys.exit(128 + number))
+                    # Signal only after the partial result and handlers exist.
+                    fd = int(os.environ["FIXTURE_READY_FD"])
+                    os.write(fd, (json.dumps({"bundle": str(bundle)}) + "\n").encode())
+                    os.close(fd)
+                    while True:
+                        signal.pause()
+                if phase != plan.get("partial_on"):
+                    (bundle / "fixture-completed.json").write_text(json.dumps({
+                        "phase": phase,
+                        "result": "Failed" if phase == plan.get("fail_on") else "Passed",
+                    }))
+                if phase == plan.get("fail_on"):
+                    sys.exit(65)
 else:
     sys.exit("Unexpected tool: " + tool)
 '''
 
 
-class DestinationTests(unittest.TestCase):
+class DestinationFixture:
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -259,6 +320,8 @@ class DestinationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.executions(), [])
 
+
+class DestinationTests(DestinationFixture, unittest.TestCase):
     def test_exact_valid_device_returns_verified_udid(self):
         result = self.verify()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -666,7 +729,7 @@ class WorkflowEvidenceTests(unittest.TestCase):
     @staticmethod
     def steps():
         source = (ROOT / ".github/workflows/tests.yml").read_text()
-        return re.split(r"(?m)^      - name: ", source)[1:]
+        return re.split(r"(?m)^(?:      - name: |  [\w-]+:\s*$)", source)[1:]
 
     @staticmethod
     def render(source, run_id, attempt):
@@ -674,9 +737,9 @@ class WorkflowEvidenceTests(unittest.TestCase):
         return re.sub(r"\$\{\{\s*github\.(run_id|run_attempt)\s*\}\}",
                       lambda match: values[match[1]], source)
 
-    def test_upload_names_preserve_both_jobs_and_every_run_attempt(self):
+    def test_upload_names_preserve_every_gate_and_run_attempt(self):
         uploads = [step for step in self.steps() if "uses: actions/upload-artifact@" in step]
-        self.assertEqual(len(uploads), 2)
+        self.assertEqual(len(uploads), 3)
         names = []
         for step in uploads:
             self.assertRegex(step, r"(?m)^        if: always\(\)$")
@@ -690,7 +753,7 @@ class WorkflowEvidenceTests(unittest.TestCase):
                     self.assertIn(attempt, name.rsplit(run_id, 1)[-1])
                     self.assertNotIn("${{", name)
                     names.append(name)
-        self.assertEqual(len(set(names)), 8)
+        self.assertEqual(len(set(names)), 12)
 
     def test_snapshot_failure_reporting_names_the_attempt_without_claiming_pass(self):
         report = next(step for step in self.steps()
@@ -724,6 +787,114 @@ class WorkflowEvidenceTests(unittest.TestCase):
                     status = "failed" if outcome == "failure" else "did not complete"
                     self.assertIn("| Qualification status | " + status + " |", text)
                     self.assertNotIn("| Qualification status | automated snapshot success", text)
+
+
+class NativeSnapshotRecipeTests(DestinationFixture, unittest.TestCase):
+    def native_run(self, scenario="", scale="3", **overrides):
+        checkout = self.root / "native-checkout"
+        checkout.mkdir(exist_ok=True)
+        shutil.copy2(ROOT / "Makefile", checkout / "Makefile")
+        scripts = checkout / "Scripts"
+        if not scripts.exists():
+            scripts.symlink_to(ROOT / "Scripts", target_is_directory=True)
+        self.write_inventory()
+        self.env.update(SCENARIO=scenario, NATIVE_SNAPSHOT_QUALIFICATION="ambient",
+                        NATIVE_SNAPSHOT_EXPECTED_SCALE="ambient", SNAPSHOT_TESTING_RECORD="all")
+        command = [MAKE, "test-native-snapshots", f"XCODE_WRAPPER={self.wrapper}",
+                   f"PATH={self.env['PATH']}", f"NATIVE_SNAPSHOT_EXPECTED_SCALE={scale}",
+                   f"NATIVE_SNAPSHOT_BUILD_DIRECTORY={self.root / 'external build'}",
+                   f"TEST_RESULTS_DIRECTORY={self.root / 'evidence'}",
+                   f"SOURCE_PACKAGES_DIRECTORY={self.root / 'package cache'}"]
+        command += [f"{key}={value}" for key, value in overrides.items()]
+        return subprocess.run(command, cwd=checkout, env=self.env, text=True, capture_output=True)
+
+    def test_native_recipe_validates_and_preserves_both_bundles(self):
+        result = self.native_run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        commands = self.executions()
+        self.assertEqual(len(commands), 2)
+        selectors = [next(arg for arg in args if arg.startswith("-only-testing:")) for args in commands]
+        self.assertEqual(selectors, ["-only-testing:AppTests/RootSurfaceSnapshotTests",
+                                    "-only-testing:AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/"
+                                    "rootPresentationSnapshotsCoverPrimaryShellStates()"])
+        for args in commands:
+            self.assertEqual(args[args.index("-scheme") + 1], "App")
+            self.assertEqual(args[args.index("-parallel-testing-enabled") + 1], "NO")
+            self.assertEqual(args[args.index("-collect-test-diagnostics") + 1], "never")
+            self.assertTrue(args[args.index("-derivedDataPath") + 1].startswith(str(self.root / "external build")))
+            self.assertEqual(args[args.index("-clonedSourcePackagesDirPath") + 1], str(self.root / "package cache"))
+        self.assertEqual(commands[0][commands[0].index("-derivedDataPath") + 1],
+                         commands[1][commands[1].index("-derivedDataPath") + 1])
+        environments = [json.loads(line) for line in (self.root / "environment.jsonl").read_text().splitlines()]
+        for env in environments:
+            for key in ("NATIVE_SNAPSHOT_QUALIFICATION", "NATIVE_SNAPSHOT_EXPECTED_SCALE", "SNAPSHOT_TESTING_RECORD"):
+                self.assertNotIn(key, env)
+            self.assertEqual(env["TEST_RUNNER_NATIVE_SNAPSHOT_QUALIFICATION"], "1")
+            self.assertEqual(env["TEST_RUNNER_NATIVE_SNAPSHOT_EXPECTED_SCALE"], "3")
+            self.assertEqual(env["TEST_RUNNER_SNAPSHOT_TESTING_RECORD"], "never")
+        self.assertEqual(len(list((self.root / "evidence").glob("*/*.xcresult"))), 2)
+        self.assertEqual(len(list((self.root / "evidence").glob("*/*-attachments/manifest.json"))), 2)
+
+    def test_native_recipe_accepts_explicit_2x_destination(self):
+        name = "iPad Pro 11-inch (M5)"
+        self.devices = {"devices": {RUNTIME: [self.device(name=name)]}}
+        self.destinations = [self.destination(name=name)]
+        result = self.native_run(scale="2", NATIVE_SNAPSHOT_DESTINATION=f"platform=iOS Simulator,name={name},OS=27.2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_native_recipe_keeps_wrapper_chatter_out_of_summary_json(self):
+        self.wrapper.write_text('#!/usr/bin/env bash\n'
+                                'printf "Verified simulator runtime: fixture\\n"\n'
+                                'exec "$@"\n')
+        result = self.native_run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        evidence, = (self.root / "evidence").iterdir()
+        for target, count in (("AppTests", 4), ("AppHostedTests", 1)):
+            summary = json.loads((evidence / f"{target}-summary.json").read_text())
+            self.assertEqual(summary["totalTestCount"], count)
+            self.assertIn("Verified simulator runtime: fixture",
+                          (evidence / f"{target}-summary.log").read_text())
+        self.assertEqual(len(self.executions()), 2)
+
+    def test_native_recipe_uses_suggested_name_for_opaque_exports(self):
+        result = self.native_run("opaque-filenames")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_native_recipe_keeps_fresh_evidence_for_each_run(self):
+        for _ in range(2):
+            result = self.native_run()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(list((self.root / "evidence").glob("*/*.xcresult"))), 4)
+
+    def test_native_recipe_checks_evidence_with_python_optimization_enabled(self):
+        self.env["PYTHONOPTIMIZE"] = "1"
+        result = self.native_run("validation")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.executions()), 2)
+
+    def test_native_recipe_retains_default_evidence_after_build_cleanup(self):
+        result = self.native_run(TEST_RESULTS_DIRECTORY="")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        build = self.root / "external build"
+        self.assertEqual(len(list((build / "TestResults").glob("*/*.xcresult"))), 2)
+        self.assertEqual(list(build.glob("xcodebuild-native-snapshot.*")), [])
+
+    def test_native_recipe_rejects_bad_evidence_and_attempts_both(self):
+        for scenario in ("zero", "extra", "skipped", "failed", "missing-count", "bad-summary", "boolean-count", "scale", "reference",
+                         "qualification", "expected", "record", "validation", "schema", "pid", "process",
+                         "target", "capture", "missing", "duplicate", "attribution", "bad-json",
+                         "missing-file", "bad-manifest", "no-manifest", "xcode-failure",
+                         "missing-bundle", "summary-error", "export-error"):
+            with self.subTest(scenario=scenario):
+                (self.root / "executed.jsonl").unlink(missing_ok=True)
+                result = self.native_run(scenario)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(len(self.executions()), 2, result.stdout + result.stderr)
+
+    def test_native_recipe_rejects_unsupported_scale_before_execution(self):
+        result = self.native_run(scale="4")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.executions(), [])
 
 
 if __name__ == "__main__":

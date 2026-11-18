@@ -6,9 +6,11 @@ running a command and stops if either is missing. It does not download simulator
 runtimes. CI also records the runner image, source revision, and selected
 simulator UDID.
 
-This repository has two test commands with different jobs. The iPhone command
-checks functional behavior. The iPad command compares visual snapshots against
-the committed 2x baseline. In CI, both commands are required gates.
+Three test commands run as blocking CI gates. `make test` checks functional
+behavior on iPhone and the hosted privacy sentinel on iPad.
+`make test-snapshots` compares visual snapshots against the canonical 2x iPad
+baseline. `make test-native-snapshots` qualifies the focused root and hosted
+snapshots at the destination's native scale, defaulting to the 3x iPhone.
 
 ## Privacy test layers
 
@@ -19,7 +21,7 @@ pixel-perfect full-window images.
 | --- | --- | --- |
 | A. Policy and session state | `ScenePrivacyCoverPolicyTests`, `RootFeatureTests`, and `VaultShellFeatureTests.navigationStateTracksTabsAndSettings` cover policy transitions, lock timing, cancellation, verification ordering, expired returns, tab selection, and Settings state transitions with deterministic state and clocks. | `make test` |
 | B. UIKit protection behavior | App-hosted `ScenePrivacyCoverTests` exercise the real `RootView`, TCA store, scene, primary window, calculator decoy, and separate cover window. The hosted suites check attachment, occlusion, hit-test and accessibility isolation, reveal ordering, expiry, and cleanup without golden full-window snapshot comparisons. The sentinel-occlusion test runs on both the iPhone and canonical iPad destinations to exercise compact and regular fixtures. `BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests.testAuthenticatedShellTabsAreAccessibleAndChangeDestinations` checks Collections, Browser, and Library navigation in the simulator's default layout; it does not establish the two-layout privacy fixture matrix. | `make test` for hosted behavior; separate `BrowserTabOverviewUITests` selectors below |
-| C. Native presentation snapshots | SnapshotTesting compares production calculator and Library content at compact and regular sizes. Locked and expired states share calculator references; authenticated and resumed states share Library references. The shell's rendered controls are covered by Layer B. Separate calculator snapshots cover the overlay's glyphs, keys, colors, and layout. Comparisons are exact. | `make test-snapshots` |
+| C. Native presentation snapshots | SnapshotTesting compares production calculator and Library content at compact and regular sizes. Locked and expired states share calculator references; authenticated and resumed states share Library references. The shell's rendered controls are covered by Layer B. Separate calculator snapshots cover the overlay's glyphs, keys, colors, and layout. Comparisons are exact. | `make test-snapshots`; focused root/hosted native-scale checks use `make test-native-snapshots` |
 
 `make test` runs Layer A and the app-hosted part of Layer B. The iPhone
 invocations skip root-surface snapshots, hosted presentation snapshots, and
@@ -207,7 +209,7 @@ Check `totalTestCount` in each result bundle; a command that discovers zero
 tests does not qualify snapshots.
 
 Baseline HEAD contains 37 snapshot methods and 65 reference files: 61 PNG
-files and 4 text files. The candidate contains 39 methods and 55 reference
+files and 4 text files. The canonical 2x baseline contains 39 methods and 55 reference
 files: 51 PNG files and 4 text files. It adds one hosted root-presentation
 method, a two-case calculator suite, four hosted content references, and two
 calculator references, and retires the 16 full-window lifecycle images.
@@ -295,25 +297,110 @@ Do not record or replace references from a failing run;
 candidate actual, reference, and difference images belong in external
 comparison evidence.
 
+### 2a. Focused native-scale qualification
+
+The 55 canonical reference files remain unchanged: 51 PNGs and four text files.
+Seven additional 3x PNGs bring the reference inventory to 62 files without adding
+snapshot methods. At 2x, root and hosted content assertions retain their existing
+reference identities. At 3x, root image names use `.3x.png`, and hosted content
+names end in `-3x.png`. The five package snapshot suites remain qualified at 2x.
+
+`make test-native-snapshots` uses `NATIVE_SNAPSHOT_DESTINATION`, which defaults
+to `IPHONE_DESTINATION`, and `NATIVE_SNAPSHOT_EXPECTED_SCALE=3`. An explicit 2x
+run uses the canonical iPad:
+
+```sh
+make test-native-snapshots \
+  NATIVE_SNAPSHOT_DESTINATION='platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.2' \
+  NATIVE_SNAPSHOT_EXPECTED_SCALE=2 \
+  TEST_RESULTS_DIRECTORY="$HOME/Library/Logs/native-snapshot-evidence"
+```
+
+`NATIVE_SNAPSHOT_BUILD_DIRECTORY` defaults to the checkout's `.build`.
+An external directory keeps DerivedData off the internal disk.
+`SOURCE_PACKAGES_DIRECTORY` continues to accept the existing Make override.
+The functional and canonical snapshot commands retain their defaults and
+canonical 2x references.
+
+The target runs two App-scheme selections sequentially, with parallel testing
+disabled and `-collect-test-diagnostics never`. Expected-failure diagnostics
+have previously hung; the result bundles and exported attachments supply the
+evidence. There are no retries or test skips. The second selection and evidence
+validation are attempted even if the first selection fails.
+
+1. `AppTests/RootSurfaceSnapshotTests` must report exactly four passed tests.
+   Its three image methods each emit one environment receipt:
+   `compactPhoneSnapshot()`, `largePhoneSnapshot()`, and
+   `regularWidthIPadSnapshot()`. The fourth test covers text.
+2. `AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates()`
+   must report exactly one passed test. It performs eight hosted snapshot
+   assertions across four identities:
+   `root-content-v1-{calculator|library}-{compact-iphone|regular-ipad}`.
+   Each identity must have exactly two receipts, attributed to that method.
+
+Each summary must report the exact total and passed counts, zero failed tests,
+and zero skipped tests. The target exports all attachments for each bundle.
+The inline Python standard-library validator reads `manifest.json`, resolves
+receipt files through `exportedFileName`, and recognizes their
+`native-snapshot-environment` prefix through either that name or
+`suggestedHumanReadableName`. Exporter suffixes do not change receipt identity.
+Each receipt must belong to the corresponding test ID in the manifest.
+
+Schema version 1 requires raw `qualification`, `expectedScale`, and
+`recordMode` values of `"1"`, the requested `"2"` or `"3"`, and `"never"`.
+Both numeric `nativeScale` and `referenceScale` must equal the requested scale.
+The receipt also requires the expected `capture` and `target` (`AppTests` or
+`AppHostedTests`), a positive integer `processID`, a nonempty `processName`,
+and `validationError: null`. Missing, malformed, duplicated, mismatched, or
+misattributed evidence fails qualification even when Xcode exits successfully.
+
+The Make invocation clears ambient `NATIVE_SNAPSHOT_QUALIFICATION`,
+`NATIVE_SNAPSHOT_EXPECTED_SCALE`, and `SNAPSHOT_TESTING_RECORD`. It explicitly
+passes `TEST_RUNNER_NATIVE_SNAPSHOT_QUALIFICATION=1`,
+`TEST_RUNNER_NATIVE_SNAPSHOT_EXPECTED_SCALE=2` or `3`, and
+`TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never` through Xcode's runner transport.
+The receipts prove what the test process received and which scale it used.
+Direct Xcode runs without these overrides are allowed for development; their
+receipts do not qualify the run.
+
+The hosted native layouts accept a 32-point top inset on iPad and a 54-point
+top inset on iPhone. These are accepted native test-host geometries. They do
+not establish physical-device layout or lifecycle behavior, and the two scales
+need not produce identical point geometry.
+
+Every invocation creates a fresh evidence directory below
+`TEST_RESULTS_DIRECTORY`, or below
+`NATIVE_SNAPSHOT_BUILD_DIRECTORY/TestResults` when that option is unset.
+Both bundles, all attachment exports, summaries, Xcode logs, export logs, and
+validation logs remain there after build cleanup, including on failure.
+Interrupted runs can leave partial evidence; partial evidence does not qualify.
+
 ## 3. Result bundles and failure handling
 
-`TEST_RESULTS_DIRECTORY` is optional. When set, each Make invocation creates a
-unique subdirectory below it and passes those `.xcresult` paths directly to
-`xcodebuild`. Completed and partial bundles stay at those paths during success,
-failure, cancellation, and cleanup. Retention does not depend on an exit-time
-copy. A partial or unreadable bundle is diagnostic evidence, not a passing suite.
+`TEST_RESULTS_DIRECTORY` is optional. For `make test` and `make test-snapshots`,
+each invocation creates a unique subdirectory below it and points `xcodebuild`
+at those `.xcresult` paths. Xcode writes bundles there directly, so completed
+and partial results remain available after success, failure, cancellation, and
+cleanup. Each test command requires a readable bundle with a positive test count.
 
-`XCODE_BUILD_ROOT` selects the temporary DerivedData and build-product storage
-for `make build`, `make test`, and `make test-snapshots`. Cleanup removes the
-invocation's generated build root and leaves the caller's result directory and
-unrelated files intact. When `TEST_RESULTS_DIRECTORY` is unset, bundles remain in
-the temporary root and are removed during normal cleanup, as before.
+`XCODE_BUILD_ROOT` selects temporary DerivedData and build-product storage for
+`make build`, `make test`, and `make test-snapshots`. Cleanup removes the
+invocation's generated build root and preserves the caller's result directory
+and unrelated files. Without `TEST_RESULTS_DIRECTORY`, bundles stay in the
+temporary root and are removed during normal cleanup.
+
+`make test-native-snapshots` writes result bundles, summary output, exported
+attachments, and validation logs to a unique `native-snapshots.*` directory
+under `TEST_RESULTS_DIRECTORY`. Without that setting, it writes under
+`NATIVE_SNAPSHOT_BUILD_DIRECTORY/TestResults`. The target removes its temporary
+build root after the run.
 
 `make destination-test` exercises these ownership rules with disposable process
 fixtures. It covers completed and partial results, later failures, graceful and
 abrupt termination, repeated invocations, paths with spaces, cleanup boundaries,
-and artifact-name/report consistency. Abrupt-termination tests signal only their
-own mock process groups; they do not launch or terminate Xcode or simulators.
+and artifact-name/report consistency. Abrupt-termination tests signal only
+their own mock process groups, exercising cleanup without launching Xcode or
+simulators.
 
 After each `xcodebuild test` invocation, the Makefile reads that scheme's own
 bundle with `xcresulttool get test-results summary --path <bundle> --compact`.
@@ -347,7 +434,7 @@ replaces a tracked reference.
 
 ## 4. Continuous integration
 
-`.github/workflows/tests.yml` defines two jobs.
+`.github/workflows/tests.yml` defines three jobs.
 
 1. `test`, named `iOS tests`, is the blocking gate. It runs `make test` on the
    iPhone destination and has no `continue-on-error` setting.
@@ -357,34 +444,47 @@ replaces a tracked reference.
    build failure, simulator failure, or timeout fails the job and the `Tests`
    workflow.
 
-The blocking job writes its four result bundles in a unique subdirectory of
-`TEST_RESULTS_DIRECTORY`: App, ApplicationFoundation, iPad privacy, and the
-required UI qualification bundle. An `if: always()` step uploads available files
-as `ios-test-evidence-run-<run_id>-attempt-<run_attempt>`. Missing files produce a
-warning; upload success does not establish test success or prove that an artifact
-exists. An upload failure does not replace the test step's outcome.
+3. `native-snapshot-qualification`, named
+   `Native snapshot qualification (3x iPhone)`, runs `make test-native-snapshots`
+   with a 60-minute job timeout and a 45-minute test-step timeout. It uses the
+   pinned `xcode-27` runner, toolchain preflight, and package cache. A failed
+   command blocks the workflow.
 
-The two jobs are separate so their time budgets are independent. The snapshot
-job has a 60-minute job timeout and a 45-minute timeout on the test step, so a
-hung snapshot run cannot consume the iPhone job's time budget, and the snapshot
-outcome is visible on its own job. The snapshot job is also a required gate. A
-failed command can mean a reference mismatch, a build error, an unavailable
-simulator destination, or a timeout; inspect its artifact or job log before
-attributing a cause. The job's final step reports the observed step outcomes to
-the workflow run summary and deliberately stays cause-neutral.
+The blocking iOS job writes four result bundles under its unique
+`TEST_RESULTS_DIRECTORY` subdirectory: App, ApplicationFoundation, iPad privacy,
+and browser UI qualification. An `if: always()` step attempts to upload
+available files as `ios-test-evidence-run-<run_id>-attempt-<run_attempt>`. Missing
+files produce a warning, and upload status does not change the test outcome.
 
-A passing snapshot command confirms that the committed 2x references match in
-the automated run and that both schemes recorded positive test counts. It does
-not constitute final owner visual approval; that approval is a separate
-acceptance decision.
+The 2x iPad job uploads available snapshot results from `.build/TestResults` as
+`2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Its `if: always()`
+step preserves evidence after test failure, and the final step reports command
+and upload outcomes in the workflow summary.
 
-The snapshot job writes its App and ApplicationFoundation result bundles in a
-unique `xcodebuild-snapshot-test.*` subdirectory below `TEST_RESULTS_DIRECTORY`.
-Its `if: always()` upload
-uses `2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Both artifact
-names include GitHub's run ID and attempt number so a retry does not conflict with
-or replace earlier evidence. Existing artifacts remain bound to their original
-IDs and names.
+The native 3x iPhone job writes evidence under `.build/NativeSnapshotResults`.
+Its `if: always()` upload uses
+`native-3x-iphone-snapshot-evidence-run-<run_id>-attempt-<run_attempt>` and
+preserves result bundles and exported scale receipts.
+
+Each snapshot job has a 60-minute job timeout and a 45-minute test-step limit.
+Separate jobs give the snapshot runs independent time budgets, and both jobs are
+required gates. The 2x job's final step reports command and upload outcomes in
+the workflow summary. A failed command can indicate a reference mismatch, build
+error, unavailable simulator destination, or timeout. Check that job's artifact
+or logs before assigning a cause.
+
+A passing 2x snapshot command confirms that the committed 2x references match
+in the automated run and both schemes record positive test counts. The owner
+reviews visual results separately.
+
+The 2x job writes its App and ApplicationFoundation result bundles to a unique
+`xcodebuild-snapshot-test.*` subdirectory below `TEST_RESULTS_DIRECTORY`. Its
+`if: always()` upload uses
+`2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. The native 3x job
+stores its results under `.build/NativeSnapshotResults` and uploads them with
+`native-3x-iphone-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Each
+artifact name includes GitHub's run ID and attempt number, so retries preserve
+earlier evidence under its original name.
 
 The snapshot step timeout remains shorter than the job timeout so the upload
 step has time to run. A runner loss or forced cancellation can still prevent an
@@ -419,7 +519,7 @@ command. A device that becomes unavailable causes that invocation to fail.
 
 Run `make destination-test` for the host regression suite. It uses synthetic
 inventories and records the commands received at the execution boundary, including
-both Make test targets. It does not create, erase, or modify simulators.
+all three Make test targets. It does not create, erase, or modify simulators.
 
 ## 5. Changing the selection
 
