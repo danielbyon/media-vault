@@ -16,7 +16,7 @@ import Testing
 import VaultFeature
 
 @MainActor
-@Suite("Root surface snapshots")
+@Suite("Root surface snapshots", .snapshots(record: .never))
 struct RootSurfaceSnapshotTests {
     @Test("The root state has a stable structural snapshot")
     func rootStateSnapshot() {
@@ -25,26 +25,35 @@ struct RootSurfaceSnapshotTests {
     }
 
     @Test("The root surface is stable on a compact iPhone")
-    func compactPhoneSnapshot() {
+    func compactPhoneSnapshot() throws {
+        let scale = try NativeSnapshotScale.current(capture: #function, target: "AppTests")
+        let configuration = scale.configuration(DeterministicTestSupport.compactPhone)
         assertSnapshot(
             of: rootView(horizontalSizeClass: .compact),
-            as: .image(layout: .device(config: DeterministicTestSupport.compactPhone)),
+            as: .image(layout: .device(config: configuration), traits: configuration.traits),
+            named: scale.referenceName(nil),
         )
     }
 
     @Test("The root surface is stable on a large iPhone")
-    func largePhoneSnapshot() {
+    func largePhoneSnapshot() throws {
+        let scale = try NativeSnapshotScale.current(capture: #function, target: "AppTests")
+        let configuration = scale.configuration(DeterministicTestSupport.largePhone)
         assertSnapshot(
             of: rootView(horizontalSizeClass: .compact),
-            as: .image(layout: .device(config: DeterministicTestSupport.largePhone)),
+            as: .image(layout: .device(config: configuration), traits: configuration.traits),
+            named: scale.referenceName(nil),
         )
     }
 
     @Test("The root surface is stable at regular iPad width")
-    func regularWidthIPadSnapshot() {
+    func regularWidthIPadSnapshot() throws {
+        let scale = try NativeSnapshotScale.current(capture: #function, target: "AppTests")
+        let configuration = scale.configuration(DeterministicTestSupport.regularWidthIPad)
         assertSnapshot(
             of: rootView(horizontalSizeClass: .regular),
-            as: .image(layout: .device(config: DeterministicTestSupport.regularWidthIPad)),
+            as: .image(layout: .device(config: configuration), traits: configuration.traits),
+            named: scale.referenceName(nil),
         )
     }
 

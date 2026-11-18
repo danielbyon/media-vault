@@ -198,3 +198,40 @@ jobs:
             echo
             echo "Automated snapshot success confirms the committed 2x reference baseline. Final owner visual approval remains pending."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  native-snapshot-qualification:
+    name: Native snapshot qualification (3x iPhone)
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verify toolchain and simulator
+        id: destination
+        run: make verify-test-destination
+
+      - name: Cache Swift package checkouts
+        uses: actions/cache@v6
+        with:
+          path: .build/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-
+
+      - name: Run native 3x snapshot qualification
+        timeout-minutes: 45
+        run: make test-native-snapshots VERIFIED_SIMULATOR_UDID="${{ steps.destination.outputs.simulator_udid }}" TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/NativeSnapshotResults"
+
+      - name: Upload native 3x snapshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-3x-iphone-snapshot-evidence-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: .build/NativeSnapshotResults
+          if-no-files-found: warn

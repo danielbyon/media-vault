@@ -799,7 +799,7 @@ extension AppHostedUITests {
             }
         }
 
-        @Test("Root presentation content snapshots cover primary shell states")
+        @Test("Root presentation content snapshots cover primary shell states", .snapshots(record: .never))
         func rootPresentationSnapshotsCoverPrimaryShellStates() async throws {
             for layout in RootPrivacySnapshotLayout.allCases {
                 let lockedClock = LockIsolated(ContinuousClock.now)
@@ -1059,13 +1059,13 @@ extension AppHostedUITests {
                 try await awaitCoreAnimationCommit()
                 let snapshotName = "\(name)-\(layout.snapshotName)"
                 if phase == .locked {
-                    assertRootPresentationContentSnapshot(
+                    try assertRootPresentationContentSnapshot(
                         of: store.decoySession.rootView,
                         layout: layout,
                         name: snapshotName,
                     )
                 } else {
-                    assertRootPresentationContentSnapshot(
+                    try assertRootPresentationContentSnapshot(
                         of: MediaLibraryView(
                             store: store.scope(
                                 state: \.vault.shell.library,
@@ -1087,17 +1087,19 @@ extension AppHostedUITests {
             of content: some View,
             layout: RootPrivacySnapshotLayout,
             name: String,
-        ) {
+        ) throws {
+            let scale = try NativeSnapshotScale.current(capture: name, target: "AppHostedTests")
+            let configuration = scale.configuration(layout.imageConfiguration)
             assertSnapshot(
                 of: content
                     .environment(\.scenePhase, .active)
                     .environment(\.horizontalSizeClass, layout.horizontalSizeClass)
                     .environment(\.colorScheme, .light),
                 as: .image(
-                    layout: .device(config: layout.imageConfiguration),
-                    traits: layout.imageConfiguration.traits,
+                    layout: .device(config: configuration),
+                    traits: configuration.traits,
                 ),
-                named: name,
+                named: scale.referenceName(name),
             )
         }
 
