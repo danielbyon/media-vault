@@ -16,6 +16,26 @@ import UIKit
 @MainActor
 struct BrowserDownloadCoreTests {
     @Test
+    func storageAvailabilityControlsFixtureAdmission() throws {
+        let lowCapacityFixture = try DownloadCoreFixture(
+            availableBytes: { BrowserDownloadReservations.itemLimit - 1 },
+        )
+        defer { lowCapacityFixture.removeTestFiles() }
+        let ampleCapacityFixture = try DownloadCoreFixture(
+            availableBytes: { 4_294_967_296 },
+        )
+        defer { ampleCapacityFixture.removeTestFiles() }
+
+        let tab = BrowserTabID()
+        let lowCapacityToken = lowCapacityFixture.owner.captureAdmissionToken(for: tab)
+        let ampleCapacityToken = ampleCapacityFixture.owner.captureAdmissionToken(for: tab)
+
+        #expect(lowCapacityToken == nil)
+        #expect(lowCapacityFixture.owner.snapshot.notice == .retainedRecordLimitReached)
+        #expect(ampleCapacityToken != nil)
+    }
+
+    @Test
     func explicitPendingCancellationKeepsCapacityUntilNativeAcknowledgement() throws {
         let fixture = try DownloadCoreFixture()
         defer { fixture.removeTestFiles() }
@@ -1216,7 +1236,10 @@ private final class DownloadCoreFixture {
     let store: BrowserDownloadScratchStore
     let owner: BrowserDownloadOwner
 
-    init(authorized: Bool = true) throws {
+    init(
+        authorized: Bool = true,
+        availableBytes: (@MainActor () -> Int64?)? = nil,
+    ) throws {
         let faults = Control()
         faults.authorized = authorized
         control = faults
@@ -1242,6 +1265,7 @@ private final class DownloadCoreFixture {
             store: store,
             protectedDataAvailable: { faults.protectedDataAvailable },
             backgroundExecution: .init(begin: { _ in .invalid }, end: { _ in }),
+            availableBytes: availableBytes ?? { 4_294_967_296 },
         )
         owner.installAuthorization { faults.authorized }
     }

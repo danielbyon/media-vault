@@ -3,6 +3,7 @@
 
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 import re
 import select
@@ -19,8 +20,41 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
 UDID = "11111111-1111-4111-8111-111111111111"
 OTHER_UDID = "22222222-2222-4222-8222-222222222222"
+FIXTURE_DEVELOPER_DIR = "/fixture/Xcode"
+FIXTURE_SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 MAKE = str(Path(subprocess.check_output(
     ["/usr/bin/xcrun", "--find", "make"], text=True).strip()).with_name("gnumake"))
+
+
+def _can_run_python_with_fixture_environment(executable):
+    """Return whether an interpreter starts with the fixture's Xcode path."""
+    path = Path(executable)
+    if not path.is_absolute() or not path.is_file():
+        return False
+    environment = dict(os.environ, DEVELOPER_DIR=FIXTURE_DEVELOPER_DIR,
+                       PATH=FIXTURE_SYSTEM_PATH)
+    try:
+        result = subprocess.run([str(path), "-c", "pass"], env=environment,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+@lru_cache(maxsize=1)
+def _select_fixture_python():
+    """Choose an interpreter that remains usable under the fixture environment."""
+    if _can_run_python_with_fixture_environment(sys.executable):
+        return sys.executable
+
+    result = subprocess.run(["/usr/bin/xcrun", "--find", "python3"],
+                            check=True, text=True, capture_output=True)
+    executable = result.stdout.strip()
+    if not _can_run_python_with_fixture_environment(executable):
+        raise RuntimeError("xcrun --find python3 did not return a usable interpreter")
+    return executable
+
+
 NAME = "iPhone 17"
 DESTINATION = "platform=iOS Simulator,name=iPhone 17,OS=27.2"
 MULTI_SCENE_TEST_IDENTITIES = (
@@ -248,11 +282,14 @@ else:
 
 class DestinationFixture:
     def setUp(self):
+        self.python = _select_fixture_python()
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
+        # Apple's shim reads the fake developer path, so pin env-based shebangs.
+        (self.bin / "python3").symlink_to(self.python)
         for name in ("xcrun", "xcodebuild", "swift"):
             path = self.bin / name
             path.write_text(TOOL)
@@ -261,7 +298,7 @@ class DestinationFixture:
         self.wrapper.write_text('#!/usr/bin/env bash\nexec "$@"\n')
         self.wrapper.chmod(0o755)
         self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}",
-                        DEVELOPER_DIR="/fixture/Xcode", FIXTURE_ROOT=str(self.root),
+                        DEVELOPER_DIR=FIXTURE_DEVELOPER_DIR, FIXTURE_ROOT=str(self.root),
                         GITHUB_OUTPUT=str(self.root / "outputs"), PYTHONDONTWRITEBYTECODE="1")
         self.devices = {"devices": {RUNTIME: [self.device()]}}
         self.runtimes = {"runtimes": [{"identifier": RUNTIME, "version": "27.2",
@@ -300,7 +337,7 @@ class DestinationFixture:
             json.dumps(observed_identities)
         )
         command = [
-            sys.executable,
+            self.python,
             str(ROOT / "Scripts/assert-xcresult-tests.py"),
             "--bundle",
             str(self.root / "BrowserDownloadMultiScene.xcresult"),
@@ -327,6 +364,17 @@ class DestinationTests(DestinationFixture, unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.splitlines()[-1], UDID)
         self.assertIn(f"simulator_udid={UDID}", (self.root / "outputs").read_text())
+
+    def test_minimal_path_uses_verified_python_for_resolver_and_tools(self):
+        self.env["PATH"] = f"{self.bin}:{FIXTURE_SYSTEM_PATH}"
+        result = self.verify(execute=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        executed = self.executions()
+        self.assertEqual(len(executed), 1)
+        self.assertEqual(
+            executed[0][executed[0].index("-destination") + 1],
+            f"platform=iOS Simulator,id={UDID}",
+        )
 
     def test_similar_name_suffix_is_rejected(self):
         self.devices["devices"][RUNTIME] = [self.device(name="iPhone 17 Pro")]
