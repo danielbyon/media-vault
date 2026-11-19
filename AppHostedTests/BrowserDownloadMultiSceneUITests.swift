@@ -17,6 +17,8 @@ import XCUIAutomation
 final class BrowserDownloadMultiSceneUITests: XCTestCase {
     private typealias Observation = [String: String]
     private let physicalOperatorArrangementTimeout: TimeInterval = 120
+    private let sampleRunID = "ABF518D2-AF57-4890-913B-654CF8F43649"
+    private let sampleRegistration = "7F95FA75-B735-458B-A170-C018C70BCD96"
 
     private enum QualificationError: Error {
         case missingSceneCensus
@@ -36,6 +38,66 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         let connectedWindowScenes: [WindowScene]
         let latestCoordinatorObservations: [Observation]
         var ownerSnapshot: Observation? = nil
+        var liveRegisteredRoots: [Observation]? = nil
+    }
+
+    private struct ActiveRootTarget {
+        let runID: String
+        let originalSceneID: String
+        let sceneID: String
+        let requestedAt: Double
+        let initial: SceneCensus
+
+        func registrations(in census: SceneCensus) -> Set<String> {
+            Set(census.latestCoordinatorObservations.compactMap { observation in
+                guard observation["runID"] == runID, observation["sceneSession"] == sceneID,
+                      let registration = observation["registration"], !registration.isEmpty
+                else {
+                    return nil
+                }
+
+                return registration
+            })
+        }
+    }
+
+    private struct LiveRoot {
+        let registration: String
+        let sceneID: String
+        let generation: String
+        let revision: UInt64
+        let isMounted: Bool
+        let safe: Bool
+
+        init?(_ row: Observation, runID: String, scenes: [WindowScene]) {
+            guard row["runID"] == runID,
+                  let id = row["registration"], UUID(uuidString: id) != nil,
+                  let session = row["sceneSession"], !session.isEmpty,
+                  let scene = scenes.first(where: { $0.sessionID == session }),
+                  row["activation"] == scene.activationRawValue,
+                  let ownerGeneration = row["generation"], UInt64(ownerGeneration).map(String.init) == ownerGeneration,
+                  let revisionText = row["renderRevision"], let renderRevision = UInt64(revisionText),
+                  String(renderRevision) == revisionText,
+                  let mounted = row["mounted"].flatMap(Bool.init),
+                  let active = row["registrationActive"].flatMap(Bool.init),
+                  let confirmed = row["renderConfirmed"].flatMap(Bool.init),
+                  let proof = row["rootProof"].flatMap(Bool.init),
+                  let barrier = row["nativeBarrier"].flatMap(Bool.init),
+                  let cover = row["coverPresent"].flatMap(Bool.init),
+                  let visible = row["coverVisible"].flatMap(Bool.init),
+                  !visible || cover
+            else {
+                return nil
+            }
+
+            registration = id
+            sceneID = session
+            generation = ownerGeneration
+            revision = renderRevision
+            isMounted = mounted
+            safe = mounted && active && scene.activation == "foregroundActive" && scene.activationRawValue == "0"
+                && confirmed && proof && !barrier && !cover
+        }
     }
 
     /// One connected UIKit window scene as recorded by the qualification host census.
@@ -121,17 +183,19 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         let originalScene = try XCTUnwrap(baseline.connectedWindowScenes.first)
         XCTAssertEqual(originalScene.activation, "foregroundActive")
         let proof = try completedDownload(in: app)
+        let retainedAllocation = try XCTUnwrap(proof["allocation"].flatMap { UUID(uuidString: $0)?.uuidString })
         let request = try requestSecondScene(in: app, passively: true)
         let runID = try XCTUnwrap(request["runID"])
         let requestedAt = try XCTUnwrap(request["monotonicSeconds"].flatMap { Double($0) })
+        let mountedCensus = try awaitMountedForegroundScene(
+            in: app,
+            originalSceneID: originalScene.sessionID,
+            runID: runID,
+            requestedAt: requestedAt,
+            requiringOriginalBackground: !requiresOperatorArrangement,
+        )
         let census: SceneCensus
         if requiresOperatorArrangement {
-            let mountedCensus = try awaitMountedForegroundScene(
-                in: app,
-                baselineSessionIDs: [originalScene.sessionID],
-                runID: runID,
-                requestedAt: requestedAt,
-            )
             attach(mountedCensus, named: "new mounted foreground scene before operator arrangement")
             let mountedScreenshot = XCTAttachment(screenshot: app.screenshot())
             mountedScreenshot.name = "operator arrangement prompt with the new scene mounted"
@@ -139,17 +203,12 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             add(mountedScreenshot)
             census = try awaitPhysicalOperatorArrangement(
                 in: app,
-                baselineSessionIDs: [originalScene.sessionID],
+                originalSceneID: originalScene.sessionID,
                 runID: runID,
                 after: mountedCensus,
             )
         } else {
-            census = try awaitMountedForegroundScene(
-                in: app,
-                baselineSessionIDs: [originalScene.sessionID],
-                runID: runID,
-                requestedAt: requestedAt,
-            )
+            census = mountedCensus
         }
         try assertNewSceneEvidence(census, baselineSessionIDs: [originalScene.sessionID], runID: runID)
         XCTAssertEqual(
@@ -159,87 +218,68 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         let activeScene = try XCTUnwrap(census.connectedWindowScenes.first {
             $0.sessionID != originalScene.sessionID && $0.activation == "foregroundActive"
         })
-        // The census may follow the safe-root callback immediately; its coordinator data carries that proof.
-        let backgroundCensusAt = try XCTUnwrap(Double(census.capturedMonotonicSeconds))
-        XCTAssertGreaterThanOrEqual(backgroundCensusAt, requestedAt)
-        let activeSceneRegistrations: Set<String> = Set(
-            census.latestCoordinatorObservations.compactMap { observation -> String? in
-                guard observation["runID"] == runID,
-                      observation["sceneSession"] == activeScene.sessionID,
-                      let registration = observation["registration"], !registration.isEmpty
-                else {
-                    return nil
-                }
-
-                return registration
-            },
+        let target = ActiveRootTarget(
+            runID: runID,
+            originalSceneID: originalScene.sessionID,
+            sceneID: activeScene.sessionID,
+            requestedAt: requestedAt,
+            initial: census,
         )
+        let activeSceneRegistrations = target.registrations(in: census)
         XCTAssertFalse(
             activeSceneRegistrations.isEmpty,
             "Expected a registered coordinator Root for the active scene.",
         )
-        let safeCensusRegistrations = Set(census.latestCoordinatorObservations.compactMap { observation -> String? in
-            guard observation["runID"] == runID,
-                  observation["sceneSession"] == activeScene.sessionID,
-                  observation["rootProof"] == "true",
-                  observation["coverVisible"] == "false",
-                  observation["nativeBarrier"] == "false",
-                  let registration = observation["registration"], !registration.isEmpty
-            else {
-                return nil
-            }
-
-            return registration
-        })
-        XCTAssertEqual(safeCensusRegistrations, activeSceneRegistrations)
         attach(census, named: "actual UIKit scene census before global revocation wait")
         var postRequest: [Observation] = []
         var postRequestStatus: [String: String] = [:]
+        var latestCensus: SceneCensus?
+        var confirmed: [Observation]?
+        var removalObserved = false
         do {
-            try wait(app, milestone: "global revocation and safe active-scene Root") {
-                guard let events = try? self.observations(app) else {
+            try wait(app, milestone: "global revocation and safe active-scene Root", enforceDeadline: true) {
+                guard let (current, events) = self.postRequestSceneEvidence(
+                    runID: runID,
+                    requestedAt: requestedAt,
+                    readCensus: { self.passiveSceneCensus(in: app) },
+                    readLedger: { try? self.observations(app) },
+                ) else {
                     return false
                 }
 
-                postRequest = events.filter {
-                    $0["runID"] == runID && ($0["monotonicSeconds"].flatMap { Double($0) } ?? -1) >= requestedAt
-                }
-                let removed = postRequest.contains {
-                    $0["event"] == "cleanupRemoval" && $0["operation"] == proof["allocation"]
-                        && $0["absence"] == "true"
-                }
-                let denied = postRequest.last { $0["event"] == "ownerSnapshot" }.map {
-                    $0["available"] == "false" && $0["operations"] == "" && $0["active"] == "0"
-                        && $0["retained"] == "1"
-                } ?? false
-                let safeRoot = self.latestFreshSafeRoots(
+                latestCensus = current
+                postRequest = events
+                removalObserved = removalObserved || self.recordedRemoval(
+                    of: retainedAllocation,
                     in: postRequest,
-                    sceneID: activeScene.sessionID,
-                    registrations: activeSceneRegistrations,
                     runID: runID,
-                    atOrAfter: requestedAt,
-                ) != nil
+                )
+                let denied = self.retainedOwnerIsRevoked(in: current, observations: postRequest, atOrAfter: requestedAt)
+                confirmed = self.confirmedRoots(in: current, observations: postRequest, target: target)
                 postRequestStatus = [
                     "eventCount": String(postRequest.count),
                     "latestEvent": postRequest.last?["event"] ?? "none",
-                    "cleanupRemoved": String(removed),
+                    "cleanupRemoved": String(removalObserved),
                     "ownerDenied": String(denied),
-                    "activeSceneSafeRoot": String(safeRoot),
+                    "activeSceneSafeRoot": String(confirmed != nil),
                 ]
-                return !removed && denied && safeRoot
+                return !removalObserved && denied && confirmed != nil
             }
         } catch {
+            if let latestCensus {
+                attach(latestCensus, named: "last passive census before safe Root timeout")
+            }
             attach(postRequestStatus, named: "global revocation and active-root assertion status")
             attach(postRequest, named: "last observed post-request event set")
             throw error
         }
-        let freshSafeRoots = try XCTUnwrap(latestFreshSafeRoots(
-            in: postRequest,
-            sceneID: activeScene.sessionID,
-            registrations: activeSceneRegistrations,
-            runID: runID,
-            atOrAfter: requestedAt,
-        ))
+        let acceptedCensus = try XCTUnwrap(latestCensus)
+        XCTAssertEqual(
+            acceptedCensus.connectedWindowScenes.first { $0.sessionID == originalScene.sessionID }?.activation,
+            "background",
+        )
+        attach(acceptedCensus, named: "fresh UIKit census paired with the confirmed foreground Root")
+        let freshSafeRoots = try XCTUnwrap(confirmed)
         var freshSafeRootAtByRegistration: [String: Double] = [:]
         for freshSafeRoot in freshSafeRoots {
             let registration: String = try XCTUnwrap(freshSafeRoot["registration"])
@@ -282,6 +322,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             originalSceneID: originalScene.sessionID,
             runID: runID,
             oldOperation: proof["operation"],
+            retainedAllocation: retainedAllocation,
         )
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "safe active Root after global download revocation"
@@ -555,6 +596,501 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         )
 
         XCTAssertNil(latestPassiveSceneCensus(in: [first, conflicting]))
+    }
+
+    func testPassiveAccessibilityReadsRefreshCensusWithoutPublishingRootEvents() async throws {
+        let app = try launchFixture(passiveSceneCensus: true)
+        defer { app.terminate() }
+        var baseline: SceneCensus?
+        try wait(app, milestone: "initial confirmed Root before passive reads") {
+            guard let census = self.passiveSceneCensus(in: app),
+                  let latest = census.latestCoordinatorObservations.first,
+                  let sceneID = latest["sceneSession"], let runID = latest["runID"],
+                  let confirmed = self.liveConfirmedRoots(in: census, sceneID: sceneID, runID: runID, atOrAfter: 0),
+                  confirmed.allSatisfy({ callback in
+                      census.rootLayoutObservations.contains { layout in
+                          layout["runID"] == runID && layout["sceneSession"] == sceneID
+                              && layout["registration"] == callback["registration"]
+                              && layout["generation"] == callback["generation"]
+                              && layout["renderRevision"] == callback["renderRevision"]
+                              && self.coordinatorObservationIsSafeRoot(layout)
+                      }
+                  })
+            else {
+                return false
+            }
+
+            baseline = census
+            return true
+        }
+        let initial = try XCTUnwrap(baseline)
+        var previousCapture = try XCTUnwrap(Double(initial.capturedMonotonicSeconds))
+        func assertStableRead() throws {
+            let events = try observations(app)
+            let current = try XCTUnwrap(passiveSceneCensus(in: app))
+            let capturedAt = try XCTUnwrap(Double(current.capturedMonotonicSeconds))
+            XCTAssertGreaterThan(capturedAt, previousCapture)
+            XCTAssertEqual(current.liveRegisteredRoots, initial.liveRegisteredRoots)
+            XCTAssertEqual(current.latestCoordinatorObservations, initial.latestCoordinatorObservations)
+            XCTAssertEqual(current.rootLayoutObservations, initial.rootLayoutObservations)
+            XCTAssertEqual(events.filter { $0["event"] == "rootLayoutConfirmed" }, initial.rootLayoutObservations)
+            previousCapture = capturedAt
+        }
+        for _ in 0 ..< 3 {
+            try assertStableRead()
+        }
+        // Give the host time to commit any SwiftUI work queued by the preceding accessibility reads.
+        try await Task.sleep(for: .milliseconds(500))
+        try assertStableRead()
+    }
+
+    func testHostedRootUpdatePublishesCurrentRevisionWithoutReadFeedback() async throws {
+        let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
+        app.launchArguments = [
+            "--browser-download-production-qualification",
+            "--browser-download-hosted-root-read",
+            "--browser-download-passive-scene-census",
+        ]
+        #if targetEnvironment(simulator)
+        app.launchArguments.append("--browser-download-simulated-protection-readback")
+        #endif
+        app.launch()
+        defer { app.terminate() }
+        let update = app.buttons["downloadQualificationReconcileCurrentRoot"].firstMatch
+        var registration: String?
+        var runID: String?
+        try wait(app, milestone: "hosted foreground Root registration") {
+            guard let census = self.passiveSceneCensus(in: app), census.liveRegisteredRoots?.count == 1,
+                  let row = census.liveRegisteredRoots?.first, row["mounted"] == "true", row["activation"] == "0",
+                  update.isHittable else {
+                return false
+            }
+
+            runID = row["runID"]
+            registration = row["registration"]
+            return runID != nil && registration != nil
+        }
+        let run = try XCTUnwrap(runID)
+        let id = try XCTUnwrap(registration)
+        func confirmed(_ expectedRevision: UInt64? = nil) -> SceneCensus? {
+            guard let census = passiveSceneCensus(in: app), let root = liveRoots(in: census, runID: run)?[id],
+                  root.safe, expectedRevision == nil || root.revision == expectedRevision,
+                  let callback = census.latestCoordinatorObservations.first, callback["registration"] == id,
+                  callback["renderRevision"] == String(root.revision), callback["generation"] == root.generation,
+                  coordinatorObservationIsSafeRoot(callback) else {
+                return nil
+            }
+
+            return census
+        }
+        update.tap()
+        var initial: SceneCensus?
+        try wait(app, milestone: "first real hosted Root confirmation") {
+            initial = confirmed()
+            return initial != nil
+        }
+        let before = try XCTUnwrap(initial)
+        let previous = try XCTUnwrap(liveRoots(in: before, runID: run)?[id])
+        let nextRevision = previous.revision + 1
+
+        update.tap()
+        let value = try XCTUnwrap(app.staticTexts["downloadQualificationRootUpdateCensus"].firstMatch.value as? String)
+        let pending = try JSONDecoder().decode(SceneCensus.self, from: Data(value.utf8))
+        let pendingRoot = try XCTUnwrap(liveRoots(in: pending, runID: run)?[id])
+        XCTAssertEqual(pendingRoot.revision, nextRevision)
+        XCTAssertEqual(pendingRoot.generation, previous.generation)
+        XCTAssertFalse(pendingRoot.safe)
+        XCTAssertEqual(pending.liveRegisteredRoots?.first?["renderConfirmed"], "false")
+        XCTAssertEqual(pending.liveRegisteredRoots?.first?["rootProof"], "false")
+        let lastCallback = try XCTUnwrap(pending.latestCoordinatorObservations.first)
+        XCTAssertEqual(lastCallback["registration"], id)
+        XCTAssertEqual(lastCallback["renderRevision"], String(previous.revision))
+        XCTAssertEqual(lastCallback["generation"], previous.generation)
+        XCTAssertTrue(coordinatorObservationIsSafeRoot(lastCallback))
+        attach(pending, named: "equal-token update before the real layout transaction")
+
+        var completed: SceneCensus?
+        try wait(app, milestone: "same hosted revision confirmed by UIKit") {
+            completed = confirmed(nextRevision)
+            return completed != nil
+        }
+        let after = try XCTUnwrap(completed)
+        XCTAssertGreaterThan(after.rootLayoutObservations.count, pending.rootLayoutObservations.count)
+        attach(after, named: "matching hosted revision after the real layout transaction")
+        let layoutCount = app.staticTexts["downloadQualificationRootLayoutPasses"].firstMatch
+        let layouts = try XCTUnwrap((layoutCount.value as? String).flatMap(Int.init))
+        XCTAssertGreaterThan(layouts, 0)
+        var capturedAt = try XCTUnwrap(Double(after.capturedMonotonicSeconds))
+        func assertStableRead() throws {
+            let events = try observations(app)
+            let next = try XCTUnwrap(confirmed(nextRevision))
+            let nextAt = try XCTUnwrap(Double(next.capturedMonotonicSeconds))
+            XCTAssertGreaterThan(nextAt, capturedAt)
+            XCTAssertEqual(next.liveRegisteredRoots, after.liveRegisteredRoots)
+            XCTAssertEqual(next.rootLayoutObservations, after.rootLayoutObservations)
+            XCTAssertEqual(events.filter { $0["event"] == "rootLayoutConfirmed" }, after.rootLayoutObservations)
+            XCTAssertEqual((layoutCount.value as? String).flatMap(Int.init), layouts)
+            capturedAt = nextAt
+        }
+        for _ in 0 ..< 3 {
+            try assertStableRead()
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        try assertStableRead()
+    }
+
+    func testInitialMountedSceneWaitsForCoherentRegistrationsWhileProofIsPending() {
+        let callback = passiveRootObservation(["renderRevision": "10"])
+        let cached = passiveRootCensus([callback])
+        let pending = liveRootObservation(callback, changes: [
+            "renderRevision": "11",
+            "renderConfirmed": "false",
+            "rootProof": "false",
+        ])
+        var coherent = cached
+        coherent.liveRegisteredRoots = [pending]
+        var missing = cached
+        missing.liveRegisteredRoots = []
+        var unmounted = cached
+        unmounted.liveRegisteredRoots = [liveRootObservation(callback, changes: ["mounted": "false"])]
+        var extra = cached
+        extra.liveRegisteredRoots = [pending, liveRootObservation(callback, changes: [
+            "registration": "087E818B-1608-4A37-B492-DA45E1AB979F",
+        ])]
+
+        func mounted(_ census: SceneCensus, requiringBackground: Bool = true) -> Bool {
+            hasCoherentMountedScene(
+                census,
+                originalSceneID: "OLD",
+                runID: sampleRunID,
+                requiringOriginalBackground: requiringBackground,
+            )
+        }
+        let captures = [missing, unmounted, extra, coherent]
+        XCTAssertEqual(captures.map { mounted($0) }, [false, false, false, true])
+        XCTAssertEqual(captures.first { mounted($0) }, coherent)
+        let beforeArrangement = passiveRootCensus([callback], foregroundSceneIDs: ["OLD", "NEW"])
+        XCTAssertFalse(mounted(beforeArrangement))
+        XCTAssertTrue(mounted(beforeArrangement, requiringBackground: false))
+    }
+
+    func testReactivationRequiresMatchingLiveRevisionForEveryOriginalSceneRegistration() {
+        let other = passiveRootObservation([
+            "sceneSession": "OLD",
+            "registration": "087E818B-1608-4A37-B492-DA45E1AB979F",
+        ])
+        let cached = passiveRootObservation(["sceneSession": "OLD", "renderRevision": "10"])
+        var census = passiveRootCensus([other, cached], foregroundSceneIDs: ["OLD"])
+        func confirmations(_ sample: SceneCensus) -> [Observation]? {
+            liveConfirmedRoots(in: sample, sceneID: "OLD", runID: sampleRunID, atOrAfter: 20)
+        }
+
+        XCTAssertEqual(confirmations(census), [other, cached])
+        census.liveRegisteredRoots = [liveRootObservation(other), liveRootObservation(cached, changes: [
+            "renderRevision": "11",
+            "renderConfirmed": "false",
+            "rootProof": "false",
+        ])]
+        XCTAssertNil(confirmations(census))
+        let confirmed = passiveRootObservation([
+            "sceneSession": "OLD",
+            "renderRevision": "11",
+            "monotonicSeconds": "21.5",
+        ])
+        census.liveRegisteredRoots = [liveRootObservation(other), liveRootObservation(confirmed)]
+        XCTAssertNil(confirmations(census))
+        let paired = passiveRootCensus([other, confirmed], foregroundSceneIDs: ["OLD"])
+        XCTAssertEqual(confirmations(paired), [other, confirmed])
+    }
+
+    func testPassiveRootAcceptsMatchingConfirmationAfterPendingCensus() {
+        let target = pendingRootTarget
+        let confirmed = passiveRootObservation()
+        let fresh = passiveRootCensus([confirmed])
+        XCTAssertNil(confirmedRoots(in: target.initial, observations: [confirmed], target: target))
+        XCTAssertEqual(confirmedRoots(in: fresh, observations: [confirmed], target: target), [confirmed])
+    }
+
+    func testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances() {
+        let cached = passiveRootObservation(["renderRevision": "10"])
+        var census = passiveRootCensus([cached])
+        XCTAssertEqual(confirmedRoots(in: census, observations: [cached], target: pendingRootTarget), [cached])
+        census.liveRegisteredRoots = [liveRootObservation(cached, changes: [
+            "renderRevision": "11",
+            "renderConfirmed": "false",
+            "rootProof": "false",
+        ])]
+        XCTAssertNil(confirmedRoots(in: census, observations: [cached], target: pendingRootTarget))
+    }
+
+    func testPassiveRootRejectsUnmatchedOrMalformedLiveRows() {
+        let callback = passiveRootObservation()
+        let live = liveRootObservation(callback)
+        let otherRegistration = "087E818B-1608-4A37-B492-DA45E1AB979F"
+        let changes: [Observation] = [
+            ["runID": "3B40C2E2-8629-4BA1-BD9C-757AAE7DC86F"],
+            ["sceneSession": "OLD"],
+            ["registration": otherRegistration],
+            ["generation": "4"],
+            ["renderRevision": "12"],
+            ["renderRevision": "-1"],
+            ["mounted": "false"],
+            ["registrationActive": "false"],
+            ["activation": "2"],
+            ["renderConfirmed": "false"],
+            ["rootProof": "false"],
+            ["nativeBarrier": "true"],
+            ["coverPresent": "true"],
+            ["coverVisible": "true"],
+            ["rootProof": "unknown"],
+        ]
+        var census = passiveRootCensus([callback])
+        let extra = liveRootObservation(callback, changes: ["registration": otherRegistration])
+        for rows in [nil, [], [live, live], [live, extra]] as [[Observation]?] {
+            census.liveRegisteredRoots = rows
+            XCTAssertNil(confirmedRoots(in: census, observations: [callback], target: pendingRootTarget))
+        }
+        for change in changes {
+            census.liveRegisteredRoots = [liveRootObservation(callback, changes: change)]
+            XCTAssertNil(confirmedRoots(in: census, observations: [callback], target: pendingRootTarget), "\(change)")
+        }
+        for key in live.keys {
+            census.liveRegisteredRoots = [live.filter { $0.key != key }]
+            XCTAssertNil(confirmedRoots(in: census, observations: [callback], target: pendingRootTarget), key)
+        }
+        let outside = passiveRootObservation(["registration": otherRegistration])
+        let single = passiveRootCensus([callback])
+        XCTAssertNil(confirmedRoots(in: single, observations: [callback, outside], target: pendingRootTarget))
+        let duplicates = passiveRootCensus([callback, callback])
+        XCTAssertNil(confirmedRoots(in: duplicates, observations: [callback], target: pendingRootTarget))
+    }
+
+    func testPassiveRootRequiresCurrentRetainedDownloadCounts() {
+        let owner: Observation = [
+            "generation": "3",
+            "active": "0",
+            "retained": "1",
+            "available": "false",
+            "presentation": "none",
+            "operations": "",
+            "cleanupRetry": "false",
+            "sampleStartedMonotonicSeconds": "21.5",
+            "sampleCompletedMonotonicSeconds": "21.6",
+        ]
+        let events = [owner.merging(["event": "ownerSnapshot", "monotonicSeconds": "21"]) { _, new in new }]
+        var census = passiveRootCensus([passiveRootObservation()])
+        census.ownerSnapshot = owner
+        XCTAssertTrue(retainedOwnerIsRevoked(in: census, observations: events, atOrAfter: 20))
+        for change in [
+            ["retained": "0"],
+            ["retained": "2"],
+            ["active": "1"],
+            ["available": "true"],
+            ["presentation": "pending"],
+            ["operations": "old"],
+            ["sampleStartedMonotonicSeconds": "19"],
+        ] {
+            census.ownerSnapshot = owner.merging(change) { _, new in new }
+            XCTAssertFalse(retainedOwnerIsRevoked(in: census, observations: events, atOrAfter: 20), "\(change)")
+        }
+    }
+
+    func testRetainedAllocationRejectsEveryRecordedRemovalOutcome() {
+        for absence in ["true", "false", "unconfirmed"] {
+            let events = [[
+                "event": "cleanupRemoval",
+                "runID": sampleRunID,
+                "operation": "retained",
+                "absence": absence,
+            ]]
+            XCTAssertTrue(recordedRemoval(of: "retained", in: events, runID: sampleRunID))
+            XCTAssertFalse(recordedRemoval(of: "another", in: events, runID: sampleRunID))
+            XCTAssertFalse(recordedRemoval(of: "retained", in: events, runID: "earlier run"))
+        }
+    }
+
+    func testRetainedAllocationRemovalAtCensusBoundaryPreventsAcceptance() throws {
+        let census = passiveRootCensus([passiveRootObservation()], capturedAt: "22")
+        let unrelated = [
+            "event": "cleanupRemoval",
+            "runID": sampleRunID,
+            "operation": "other",
+            "monotonicSeconds": "21",
+        ]
+        for (timestamp, rejects) in [("19.9", false), ("20", true), ("21.9", true), ("22", true), ("22.1", true)] {
+            let removal = unrelated.merging(["operation": "retained", "monotonicSeconds": timestamp]) { _, new in new }
+            var ledger = [unrelated]
+            var reads: [String] = []
+            let sample = try XCTUnwrap(postRequestSceneEvidence(
+                runID: sampleRunID,
+                requestedAt: 20,
+                readCensus: {
+                    reads.append("census")
+                    defer { ledger.append(removal) }
+                    return census
+                },
+                readLedger: {
+                    reads.append("ledger")
+                    return ledger
+                },
+            ))
+            XCTAssertEqual(reads, ["census", "ledger"])
+            XCTAssertEqual(sample.census, census)
+            XCTAssertEqual(recordedRemoval(of: "retained", in: sample.events, runID: sampleRunID), rejects, timestamp)
+        }
+    }
+
+    func testPassiveRootRejectsMissingOrMismatchedConfirmation() {
+        let target = pendingRootTarget
+        let confirmed = passiveRootObservation()
+        let fresh = passiveRootCensus([confirmed])
+        XCTAssertNil(confirmedRoots(in: fresh, observations: [], target: target))
+        for change in [["runID": "OTHER"], ["sceneSession": "OTHER"], ["registration": "OTHER"]] {
+            let unrelated = passiveRootObservation(change)
+            XCTAssertNil(confirmedRoots(in: passiveRootCensus([unrelated]), observations: [unrelated], target: target))
+            XCTAssertNil(confirmedRoots(in: fresh, observations: [unrelated], target: target))
+        }
+        let pending = passiveRootObservation(["rootProof": "false"])
+        XCTAssertNil(confirmedRoots(in: passiveRootCensus([pending]), observations: [pending], target: target))
+        XCTAssertNil(confirmedRoots(
+            in: passiveRootCensus([confirmed], capturedAt: "19"),
+            observations: [confirmed],
+            target: target,
+        ))
+    }
+
+    func testPassiveRootRejectsSupersededOrUnpairedProof() {
+        let target = pendingRootTarget
+        let confirmed = passiveRootObservation()
+        let fresh = passiveRootCensus([confirmed])
+        let unsafe = passiveRootObservation(["monotonicSeconds": "21.5", "rootProof": "false"])
+        XCTAssertNil(confirmedRoots(in: fresh, observations: [unsafe, confirmed], target: target))
+        XCTAssertNil(confirmedRoots(
+            in: passiveRootCensus([unsafe, confirmed]),
+            observations: [confirmed],
+            target: target,
+        ))
+        let old = passiveRootObservation(["monotonicSeconds": "18"])
+        XCTAssertNil(confirmedRoots(in: passiveRootCensus([old]), observations: [old], target: target))
+        let newer = passiveRootObservation(["monotonicSeconds": "21.5"])
+        XCTAssertNil(confirmedRoots(in: fresh, observations: [newer], target: target))
+        let future = passiveRootObservation(["monotonicSeconds": "23"])
+        XCTAssertNil(confirmedRoots(in: passiveRootCensus([future]), observations: [future], target: target))
+    }
+
+    func testPassiveRootRequiresCoverAndNativeBarrierAbsence() {
+        let target = pendingRootTarget
+        let confirmed = passiveRootObservation()
+        XCTAssertNil(confirmedRoots(
+            in: passiveRootCensus([confirmed], cover: true),
+            observations: [confirmed],
+            target: target,
+        ))
+        for change in [["coverVisible": "true"], ["nativeBarrier": "true"], ["mounted": "false"], ["generation": "2"]] {
+            let blocked = passiveRootObservation(change)
+            XCTAssertNil(confirmedRoots(in: passiveRootCensus([blocked]), observations: [blocked], target: target))
+        }
+    }
+
+    func testPassiveRootRequiresProofBeforeOriginalDeadline() {
+        var now = 9.0
+        func evaluate(endingAt time: Double) -> Bool {
+            withinDeadline(10, now: { now }) {
+                now = time
+                return true
+            }
+        }
+        XCTAssertTrue(evaluate(endingAt: 9.5))
+        XCTAssertFalse(evaluate(endingAt: 10))
+        XCTAssertFalse(withinDeadline(10, now: { now }) {
+            XCTFail("A passive read began after its deadline.")
+            return true
+        })
+    }
+
+    func testPendingLiveRootCannotQualifyAfterDeadline() {
+        let cached = passiveRootObservation()
+        var census = passiveRootCensus([cached])
+        census.liveRegisteredRoots = [liveRootObservation(
+            cached,
+            changes: ["rootProof": "false", "renderConfirmed": "false"],
+        )]
+        let deadline = 10.0
+        for time in [8.0, 9.9] {
+            XCTAssertFalse(withinDeadline(deadline, now: { time }) {
+                confirmedRoots(in: census, observations: [cached], target: pendingRootTarget) != nil
+            })
+        }
+        census.liveRegisteredRoots = [liveRootObservation(cached)]
+        XCTAssertFalse(withinDeadline(deadline, now: { deadline }) {
+            confirmedRoots(in: census, observations: [cached], target: pendingRootTarget) != nil
+        })
+    }
+
+    private func passiveRootObservation(_ changes: Observation = [:]) -> Observation {
+        [
+            "event": "rootLayoutConfirmed",
+            "runID": sampleRunID,
+            "sceneSession": "NEW",
+            "registration": sampleRegistration,
+            "monotonicSeconds": "21",
+            "generation": "3",
+            "renderRevision": "11",
+            "mounted": "true",
+            "activation": "0",
+            "rootProof": "true",
+            "coverVisible": "false",
+            "nativeBarrier": "false",
+        ].merging(changes) { _, changed in changed }
+    }
+
+    private func liveRootObservation(_ callback: Observation, changes: Observation = [:]) -> Observation {
+        var live = callback.filter { $0.key != "event" && $0.key != "monotonicSeconds" }
+        live["registrationActive"] = "true"
+        live["renderConfirmed"] = callback["rootProof"]
+        live["coverPresent"] = "false"
+        return live.merging(changes) { _, changed in changed }
+    }
+
+    private func passiveRootCensus(
+        _ observations: [Observation],
+        capturedAt: String = "22",
+        cover: Bool = false,
+        foregroundSceneIDs: Set<String> = ["NEW"],
+    ) -> SceneCensus {
+        let scenes = ["OLD", "NEW"].map { id in
+            let active = foregroundSceneIDs.contains(id)
+            return WindowScene(
+                sessionID: id,
+                activation: active ? "foregroundActive" : "background",
+                activationRawValue: active ? "0" : "2",
+                bounds: "(0, 0, 100, 100)",
+                screenBounds: "(0, 0, 100, 100)",
+                windows: [sceneWindow(key: "true", isCover: String(active && cover))],
+            )
+        }
+        return SceneCensus(
+            capturedMonotonicSeconds: capturedAt,
+            distinctSessionIDs: 2,
+            rootLayoutObservations: observations,
+            connectedWindowScenes: scenes,
+            latestCoordinatorObservations: observations,
+            ownerSnapshot: ["generation": "3"],
+            liveRegisteredRoots: observations.map { liveRootObservation($0) },
+        )
+    }
+
+    private var pendingRootTarget: ActiveRootTarget {
+        ActiveRootTarget(
+            runID: sampleRunID,
+            originalSceneID: "OLD",
+            sceneID: "NEW",
+            requestedAt: 17,
+            initial: passiveRootCensus(
+                [passiveRootObservation(["rootProof": "false", "monotonicSeconds": "19", "renderRevision": "10"])],
+                capturedAt: "20",
+            ),
+        )
     }
 
     func testLatestFreshSafeRootsRequiresEveryRegistrationAndUsesMonotonicTime() {
@@ -1778,6 +2314,200 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             && observation["nativeBarrier"] == "false"
     }
 
+    /// Every cached registration must still exist in the live coordinator under the same identity.
+    private func liveRoots(in census: SceneCensus, runID: String) -> [String: LiveRoot]? {
+        guard UUID(uuidString: runID) != nil, let rows = census.liveRegisteredRoots, !rows.isEmpty,
+              rows.count == census.latestCoordinatorObservations.count else {
+            return nil
+        }
+
+        var roots: [String: LiveRoot] = [:]
+        for row in rows {
+            guard let root = LiveRoot(row, runID: runID, scenes: census.connectedWindowScenes),
+                  roots.updateValue(root, forKey: root.registration) == nil else {
+                return nil
+            }
+        }
+        var seen: Set<String> = []
+        for row in census.latestCoordinatorObservations {
+            guard row["runID"] == runID, let registration = row["registration"],
+                  let root = roots[registration], row["sceneSession"] == root.sceneID,
+                  seen.insert(registration).inserted else {
+                return nil
+            }
+        }
+        return roots
+    }
+
+    /// Pairs each foreground registration's latest callback with its live revision and the actual windows.
+    /// An equal-token update can invalidate a revision while its last callback still reports a safe Root.
+    private func liveConfirmedRoots(
+        in census: SceneCensus,
+        sceneID: String,
+        runID: String,
+        atOrAfter minimumTime: Double,
+    ) -> [Observation]? {
+        let sessions = census.connectedWindowScenes.map(\.sessionID)
+        guard Set(sessions).count == sessions.count, sessions.count == census.distinctSessionIDs,
+              let scene = census.connectedWindowScenes.first(where: { $0.sessionID == sceneID }),
+              scene.activation == "foregroundActive", scene.activationRawValue == "0",
+              !scene.windows.isEmpty, scene.windows.allSatisfy({ $0.isCover == "false" }),
+              let capturedAt = Double(census.capturedMonotonicSeconds), capturedAt.isFinite,
+              let generation = census.ownerSnapshot?["generation"],
+              let live = liveRoots(in: census, runID: runID) else {
+            return nil
+        }
+
+        let registrations = Set(live.values.filter { $0.sceneID == sceneID }.map(\.registration))
+        guard let callbacks = latestFreshSafeRoots(
+            in: census.latestCoordinatorObservations,
+            sceneID: sceneID,
+            registrations: registrations,
+            runID: runID,
+            atOrAfter: minimumTime,
+        ), callbacks.allSatisfy({ callback in
+            guard let id = callback["registration"], let root = live[id],
+                  let observedAt = callback["monotonicSeconds"].flatMap(Double.init) else {
+                return false
+            }
+
+            return root.safe && root.generation == generation && callback["generation"] == generation
+                && callback["renderRevision"] == String(root.revision) && callback["mounted"] == "true"
+                && callback["activation"] == scene.activationRawValue && observedAt <= capturedAt
+        }) else {
+            return nil
+        }
+
+        return callbacks
+    }
+
+    /// Requires the independent event ledger to agree with the live proof for every pinned registration.
+    private func confirmedRoots(
+        in census: SceneCensus,
+        observations: [Observation],
+        target: ActiveRootTarget,
+    ) -> [Observation]? {
+        let registrations = target.registrations(in: target.initial)
+        guard let initialAt = Double(target.initial.capturedMonotonicSeconds), initialAt.isFinite,
+              initialAt >= target.requestedAt,
+              let capturedAt = Double(census.capturedMonotonicSeconds), capturedAt.isFinite, capturedAt > initialAt,
+              let scene = uniqueNewActiveScene(
+                  census,
+                  baselineSessionIDs: [target.originalSceneID],
+                  runID: target.runID,
+              ),
+              scene.sessionID == target.sceneID,
+              census.connectedWindowScenes
+              .first(where: { $0.sessionID == target.originalSceneID })?
+              .activation == "background",
+              target.registrations(in: census) == registrations,
+              let roots = liveConfirmedRoots(
+                  in: census,
+                  sceneID: target.sceneID,
+                  runID: target.runID,
+                  atOrAfter: target.requestedAt,
+              ),
+              let initialRoots = liveRoots(in: target.initial, runID: target.runID)
+        else {
+            return nil
+        }
+
+        let latestEvents = latestCoordinatorObservationsByRegistration(
+            in: observations,
+            runID: target.runID,
+            atOrAfter: target.requestedAt,
+        )
+        let ledgerRegistrations = Set(latestEvents.filter {
+            $0["sceneSession"] == target.sceneID && $0["mounted"] == "true"
+        }
+        .compactMap { $0["registration"] })
+        guard ledgerRegistrations == registrations,
+              latestFreshSafeRoots(
+                  in: latestEvents,
+                  sceneID: target.sceneID,
+                  registrations: registrations,
+                  runID: target.runID,
+                  atOrAfter: target.requestedAt,
+              ) == roots,
+              roots.allSatisfy({ root in
+                  guard let registration = root["registration"],
+                        let revision = root["renderRevision"].flatMap(UInt64.init),
+                        let previousLive = initialRoots[registration], revision >= previousLive.revision,
+                        let observedAt = root["monotonicSeconds"].flatMap(Double.init), observedAt <= capturedAt,
+                        let initial = target.initial.latestCoordinatorObservations.first(where: {
+                            $0["runID"] == target.runID && $0["sceneSession"] == target.sceneID
+                                && $0["registration"] == root["registration"]
+                        }),
+                        let previousAt = initial["monotonicSeconds"].flatMap(Double.init),
+                        previousAt.isFinite, previousAt <= initialAt, observedAt >= previousAt
+                  else {
+                      return false
+                  }
+
+                  let alreadyConfirmed = previousLive.safe && previousLive.generation == root["generation"]
+                      && previousLive.revision == revision && initial["renderRevision"] == root["renderRevision"]
+                      && coordinatorObservationIsSafeRoot(initial)
+                  return alreadyConfirmed || observedAt > initialAt
+              })
+        else {
+            return nil
+        }
+
+        return roots
+    }
+
+    /// Read the ledger after the census so it includes cleanup recorded during the window scan.
+    /// A later removal of the retained allocation also disqualifies the sample.
+    private func postRequestSceneEvidence(
+        runID: String,
+        requestedAt: Double,
+        readCensus: () -> SceneCensus?,
+        readLedger: () -> [Observation]?,
+    ) -> (census: SceneCensus, events: [Observation])? {
+        guard let census = readCensus(), let ledger = readLedger() else {
+            return nil
+        }
+
+        let events = ledger.filter {
+            $0["runID"] == runID && ($0["monotonicSeconds"].flatMap(Double.init) ?? -1) >= requestedAt
+        }
+        return (census, events)
+    }
+
+    private func recordedRemoval(of allocation: String, in events: [Observation], runID: String) -> Bool {
+        events.contains { $0["runID"] == runID && $0["event"] == "cleanupRemoval" && $0["operation"] == allocation }
+    }
+
+    private func retainedOwnerIsRevoked(
+        in census: SceneCensus,
+        observations: [Observation],
+        atOrAfter requestedAt: Double,
+    ) -> Bool {
+        guard let current = census.ownerSnapshot, let generation = current["generation"],
+              let latest = observations.last(where: { $0["event"] == "ownerSnapshot" }),
+              latest["generation"] == generation,
+              let observedAt = latest["monotonicSeconds"].flatMap(Double.init),
+              let start = current["sampleStartedMonotonicSeconds"].flatMap(Double.init),
+              let end = current["sampleCompletedMonotonicSeconds"].flatMap(Double.init),
+              let capturedAt = Double(census.capturedMonotonicSeconds),
+              start.isFinite, end.isFinite, capturedAt.isFinite, observedAt.isFinite,
+              requestedAt <= observedAt, observedAt <= capturedAt,
+              requestedAt <= start, start <= end, end <= capturedAt
+        else {
+            return false
+        }
+
+        let expected = [
+            "available": "false",
+            "retained": "1",
+            "active": "0",
+            "operations": "",
+            "presentation": "none",
+            "cleanupRetry": "false",
+        ]
+        return expected.allSatisfy { key, value in current[key] == value && latest[key] == value }
+    }
+
     /// `nil` when a census captured after the resize gesture shows the active scene session still
     /// foreground-active with new bounds and exactly one visible attached window whose frame,
     /// bounds, and loaded root view bounds match the new scene bounds. The window selector also
@@ -1848,6 +2578,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         originalSceneID: String,
         runID: String,
         oldOperation: String?,
+        retainedAllocation: String,
     ) throws {
         try XCTUnwrap(hittableButton("downloadQualificationReactivateBackgroundScene", in: app)).tap()
         var requestObservation: Observation?
@@ -1866,15 +2597,10 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
             newerThan: requestedAt,
             milestone: "actual original scene reactivated",
             condition: {
-                $0.connectedWindowScenes
-                    .contains { $0.sessionID == originalSceneID && $0.activation == "foregroundActive" }
-                    && $0.latestCoordinatorObservations.contains {
-                        $0["runID"] == runID && $0["sceneSession"] == originalSceneID && $0["rootProof"] == "true"
-                            && $0["coverVisible"] == "false" && $0["nativeBarrier"] == "false"
-                            && ($0["monotonicSeconds"].flatMap { Double($0) } ?? -1) >= requestedAt
-                    }
+                self.liveConfirmedRoots(in: $0, sceneID: originalSceneID, runID: runID, atOrAfter: requestedAt) != nil
             },
             includingMinimumCapture: true,
+            enforceDeadline: true,
         )
         attach(census, named: "actual original session reactivation with safe Root")
         let censusCapturedAt = try XCTUnwrap(Double(census.capturedMonotonicSeconds))
@@ -1943,6 +2669,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
                 + "\(registeredScenes.map { "\($0.sessionID)=\($0.activation)" }.sorted()).",
         )
         XCTAssertNotEqual(owner["operations"], oldOperation)
+        XCTAssertFalse(recordedRemoval(of: retainedAllocation, in: currentObservations, runID: runID))
         XCTAssertFalse(currentObservations.contains {
             $0["runID"] == runID && $0["event"] == "cleanupRemoval" && $0["operation"] == oldOperation
         }, "Privacy transitions must not remove the retained completed operation.")
@@ -2065,25 +2792,63 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         )
     }
 
-    /// Waits until the requested session is mounted and foreground active, using passive
-    /// accessibility snapshots so the test does not change scene activation while observing it.
+    /// Pins the new scene once its mounted registrations appear in both the live query and callback cache.
+    /// Its render revision can still be awaiting layout at this point.
+    private func hasCoherentMountedScene(
+        _ census: SceneCensus,
+        originalSceneID: String,
+        runID: String,
+        requiringOriginalBackground: Bool,
+    ) -> Bool {
+        guard let scene = uniqueNewActiveScene(census, baselineSessionIDs: [originalSceneID], runID: runID),
+              let original = census.connectedWindowScenes.first(where: { $0.sessionID == originalSceneID }),
+              !requiringOriginalBackground || original.activation == "background",
+              let capturedAt = Double(census.capturedMonotonicSeconds), capturedAt.isFinite,
+              let roots = liveRoots(in: census, runID: runID) else {
+            return false
+        }
+
+        return census.latestCoordinatorObservations.allSatisfy { callback in
+            guard let id = callback["registration"], let live = roots[id],
+                  callback["mounted"] == String(live.isMounted),
+                  let observedAt = callback["monotonicSeconds"].flatMap(Double.init),
+                  observedAt.isFinite, observedAt <= capturedAt else {
+                return false
+            }
+
+            return live.sceneID != scene.sessionID || live.isMounted
+        }
+    }
+
+    /// Uses passive accessibility reads so checking the mount does not activate another scene.
     private func awaitMountedForegroundScene(
         in app: XCUIApplication,
-        baselineSessionIDs: Set<String>,
+        originalSceneID: String,
         runID: String,
         requestedAt: Double,
+        requiringOriginalBackground: Bool,
     ) throws -> SceneCensus {
         var result: SceneCensus?
         var lastCensus: SceneCensus?
         do {
-            try wait(app, milestone: "passive new scene mount and foreground activation", timeout: 60) {
+            try wait(
+                app,
+                milestone: "passive new scene mount and foreground activation",
+                timeout: 60,
+                enforceDeadline: true,
+            ) {
                 guard let census = self.passiveSceneCensus(in: app) else {
                     return false
                 }
 
                 lastCensus = census
                 guard let capturedAt = Double(census.capturedMonotonicSeconds), capturedAt >= requestedAt,
-                      self.uniqueNewActiveScene(census, baselineSessionIDs: baselineSessionIDs, runID: runID) != nil
+                      self.hasCoherentMountedScene(
+                          census,
+                          originalSceneID: originalSceneID,
+                          runID: runID,
+                          requiringOriginalBackground: requiringOriginalBackground,
+                      )
                 else {
                     return false
                 }
@@ -2105,7 +2870,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
     /// remains foreground active. Each read is passive and newer than the mounted-scene proof.
     private func awaitPhysicalOperatorArrangement(
         in app: XCUIApplication,
-        baselineSessionIDs: Set<String>,
+        originalSceneID: String,
         runID: String,
         after mountedCensus: SceneCensus,
     ) throws -> SceneCensus {
@@ -2117,6 +2882,7 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
                 app,
                 milestone: "physical operator scene arrangement (original background, new foreground-active)",
                 timeout: physicalOperatorArrangementTimeout,
+                enforceDeadline: true,
             ) {
                 guard let census = self.passiveSceneCensus(in: app) else {
                     return false
@@ -2126,20 +2892,18 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
                     observedCensuses.append(census)
                 }
                 guard let capturedAt = Double(census.capturedMonotonicSeconds), capturedAt > minimumCapture,
-                      baselineSessionIDs.count == 1,
-                      let originalSceneID = baselineSessionIDs.first,
-                      let newScene = self.uniqueNewActiveScene(
+                      self.hasCoherentMountedScene(
                           census,
-                          baselineSessionIDs: baselineSessionIDs,
+                          originalSceneID: originalSceneID,
                           runID: runID,
-                      ),
-                      census.connectedWindowScenes.first(where: { $0.sessionID == originalSceneID })?.activation == "background"
+                          requiringOriginalBackground: true,
+                      )
                 else {
                     return false
                 }
 
                 result = census
-                return newScene.activation == "foregroundActive"
+                return true
             }
         } catch {
             attach(
@@ -2159,11 +2923,12 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         milestone: String,
         condition: @escaping @MainActor (SceneCensus) -> Bool,
         includingMinimumCapture: Bool = false,
+        enforceDeadline: Bool = false,
     ) throws -> SceneCensus {
         var result: SceneCensus?
         var attempts: [Observation] = []
         do {
-            try wait(app, milestone: milestone) {
+            try wait(app, milestone: milestone, enforceDeadline: enforceDeadline) {
                 guard let scope = self.hittableScope("downloadQualificationRefreshSceneCensus", in: app) else {
                     return false
                 }
@@ -2495,15 +3260,36 @@ final class BrowserDownloadMultiSceneUITests: XCTestCase {
         add(attachment)
     }
 
+    private func withinDeadline(
+        _ deadline: TimeInterval,
+        now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        evaluate: () -> Bool,
+    ) -> Bool {
+        guard now() < deadline else {
+            return false
+        }
+
+        return evaluate() && now() < deadline
+    }
+
     private func wait(
         _ app: XCUIApplication,
         milestone: String,
         timeout: TimeInterval = 10,
+        enforceDeadline: Bool = false,
         condition: @escaping @MainActor () -> Bool,
     ) throws {
-        let predicate = NSPredicate { _, _ in MainActor.assumeIsolated { condition() } }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        let predicate = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                enforceDeadline ? self.withinDeadline(deadline, evaluate: condition) : condition()
+            }
+        }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-        guard XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed else {
+        let remaining = enforceDeadline ? max(0, deadline - ProcessInfo.processInfo.systemUptime) : timeout
+        guard XCTWaiter.wait(for: [expectation], timeout: remaining) == .completed,
+              !enforceDeadline || ProcessInfo.processInfo.systemUptime < deadline
+        else {
             let attachment = XCTAttachment(screenshot: app.screenshot())
             attachment.name = "failed qualification: \(milestone)"
             attachment.lifetime = .keepAlways

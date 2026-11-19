@@ -17,6 +17,7 @@ import CryptoKit
 import Dependencies
 import Dispatch
 import MediaLibrary
+import ObjectiveC
 import Observation
 import Sharing
 import UIKit
@@ -77,7 +78,11 @@ enum BrowserDownloadProductionQualification {
     @ViewBuilder
     static var root: some View {
         #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-        BrowserDownloadProductionQualificationRoot(process: .shared)
+        if ProcessInfo.processInfo.arguments.contains("--browser-download-hosted-root-read") {
+            BrowserDownloadHostedRootReadFixture(process: .shared)
+        } else {
+            BrowserDownloadProductionQualificationRoot(process: .shared)
+        }
         #else
         Color.clear
         #endif
@@ -320,40 +325,59 @@ private final class BrowserDownloadProductionQualificationProcess {
         }
     }
 
-    /// Publishes the redacted event copy when passive scene sampling is enabled.
+    /// Completes pending fixture checks before their results appear in the passive event ledger.
     func refreshPassiveObservations() {
         guard BrowserDownloadProductionQualification.passiveSceneCensusEnabled else {
             return
         }
 
         refreshSlowKnownReadiness()
-        observationsJSON = evidence.observationsJSON
         inspectFixtureNavigation()
     }
 
-    /// Captures current UIKit window scenes separately from the latest coordinator callbacks.
     func refreshSceneCensus() {
+        let census = currentSceneCensusJSON()
+        if !BrowserDownloadProductionQualification.passiveSceneCensusEnabled {
+            sceneCensusJSON = census
+        }
+        guard census != "{}" else {
+            return
+        }
+
+        evidence.record("sceneCensusCaptured", ["census": census])
+        refreshPassiveObservations()
+    }
+
+    /// Reads the UIKit windows, owner and latest callbacks in one turn of the main actor.
+    /// Accessibility can call this getter repeatedly without publishing a new Root layout.
+    func currentSceneCensusJSON() -> String {
         // Bracket the synchronous owner read so the test can place it relative to scene activation.
         let ownerSampleStartedAt = evidence.currentMonotonicSeconds
         let ownerSnapshot = owner.snapshot
+        let retainedCount = owner.retainedCount
+        let activeCount = owner.activeCount
         let ownerSampleCompletedAt = evidence.currentMonotonicSeconds
-        let capturedMonotonicSeconds = evidence.currentMonotonicSeconds
         let connectedWindowScenes = UIApplication.shared
             .connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .map(sceneGeometry)
             .sorted { ($0["sessionID"] as? String ?? "") < ($1["sessionID"] as? String ?? "") }
         let distinctSessionIDs = Set(connectedWindowScenes.compactMap { $0["sessionID"] as? String }).count
+        let liveRoots = coordinator.qualificationRootSnapshots().map { fields in
+            var row = fields
+            row["runID"] = evidence.runID
+            return row
+        }
         let census: [String: Any] = [
-            "capturedMonotonicSeconds": capturedMonotonicSeconds,
+            "capturedMonotonicSeconds": evidence.currentMonotonicSeconds,
             "distinctSessionIDs": distinctSessionIDs,
             "ownerGeneration": String(ownerSnapshot.generation),
             "ownerSnapshot": [
                 "generation": String(ownerSnapshot.generation),
                 "available": String(ownerSnapshot.isAvailable),
                 "cleanupRetry": String(ownerSnapshot.cleanupNeedsRetry),
-                "retained": String(owner.retainedCount),
-                "active": String(owner.activeCount),
+                "retained": String(retainedCount),
+                "active": String(activeCount),
                 "presentation": ownerSnapshot.presentation.map(\.requestID.uuidString) ?? "none",
                 "operations": ownerSnapshot.records.map(\.id.rawValue.uuidString).joined(separator: ","),
                 "sampleStartedMonotonicSeconds": ownerSampleStartedAt,
@@ -362,15 +386,13 @@ private final class BrowserDownloadProductionQualificationProcess {
             "rootLayoutObservations": evidence.rootLayoutObservations,
             "connectedWindowScenes": connectedWindowScenes,
             "latestCoordinatorObservations": evidence.latestCoordinatorObservations,
+            "liveRegisteredRoots": liveRoots,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: census, options: [.sortedKeys]) else {
-            sceneCensusJSON = "{}"
-            return
+            return "{}"
         }
 
-        sceneCensusJSON = String(decoding: data, as: UTF8.self)
-        evidence.record("sceneCensusCaptured", ["census": sceneCensusJSON])
-        refreshPassiveObservations()
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Samples actual native geometry without loading views, assigning frames or granting admission.
@@ -1898,15 +1920,19 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("downloadQualificationObservationPreparation")
                         .accessibilityValue(process.observationPreparationJSON)
-                    Text("Qualification observations")
-                        .font(.caption2)
-                        .accessibilityIdentifier("downloadQualificationObservations")
-                        .accessibilityValue(process.observationsJSON)
+                    evidenceReadout(
+                        "Qualification observations",
+                        identifier: "downloadQualificationObservations",
+                        lastRefresh: process.observationsJSON,
+                        read: { process.evidence.observationsJSON },
+                    )
                 }
-                Text("Connected window-scene census")
-                    .font(.caption2)
-                    .accessibilityIdentifier("downloadQualificationSceneCensus")
-                    .accessibilityValue(process.sceneCensusJSON)
+                evidenceReadout(
+                    "Connected window-scene census",
+                    identifier: "downloadQualificationSceneCensus",
+                    lastRefresh: process.sceneCensusJSON,
+                    read: process.currentSceneCensusJSON,
+                )
                 Text("Latest scene-request event")
                     .font(.caption2)
                     .accessibilityIdentifier("downloadQualificationSceneRequest")
@@ -1980,6 +2006,136 @@ private struct BrowserDownloadProductionQualificationRoot: View {
             }
 
             process.refreshPassiveObservations()
+        }
+    }
+
+    @ViewBuilder
+    private func evidenceReadout(
+        _ title: String,
+        identifier: String,
+        lastRefresh: @autoclosure () -> String,
+        read: @escaping @MainActor () -> String,
+    ) -> some View {
+        if BrowserDownloadProductionQualification.passiveSceneCensusEnabled {
+            BrowserDownloadPassiveEvidenceLabel(title: title, identifier: identifier) {
+                process.store.vault.phase == .authentication ? nil : read()
+            }
+            .fixedSize()
+        } else {
+            Text(verbatim: title)
+                .font(.caption2)
+                .accessibilityIdentifier(identifier)
+                .accessibilityValue(lastRefresh())
+        }
+    }
+}
+
+/// UIKit asks for the value when taking an accessibility snapshot. Reading it leaves SwiftUI
+/// observation untouched, so polling the label does not schedule another Root render.
+@MainActor
+private struct BrowserDownloadPassiveEvidenceLabel: UIViewRepresentable {
+    let title: String
+    let identifier: String
+    let read: @MainActor () -> String?
+
+    func makeUIView(context _: Context) -> Label {
+        makeLabel()
+    }
+
+    func makeLabel() -> Label {
+        let label = Label()
+        label.text = title
+        label.font = .preferredFont(forTextStyle: .caption2)
+        label.adjustsFontForContentSizeCategory = true
+        label.isAccessibilityElement = true
+        label.accessibilityTraits = .staticText
+        label.accessibilityIdentifier = identifier
+        label.read = read
+        return label
+    }
+
+    func updateUIView(_ label: Label, context _: Context) {
+        label.read = read
+    }
+
+    final class Label: UILabel {
+        var read: (@MainActor () -> String?)?
+
+        override var accessibilityValue: String? {
+            get { read?() }
+            set { super.accessibilityValue = newValue }
+        }
+    }
+}
+
+/// Hosts a real registered controller so the test can sample an equal-token update before
+/// the main actor yields to its scheduled layout verification.
+@MainActor
+private struct BrowserDownloadHostedRootReadFixture: UIViewControllerRepresentable {
+    let process: BrowserDownloadProductionQualificationProcess
+
+    func makeUIViewController(context _: Context) -> BrowserDownloadHostController {
+        let host = BrowserDownloadHostController()
+        host.nativeCoordinator = process.coordinator
+        host.authentication = { process.store.vault.phase == .authenticated }
+        host.currentRenderToken = {
+            .init(
+                surfaceID: "hostedRoot",
+                authenticated: process.store.vault.phase == .authenticated,
+                privacyGeneration: process.owner.snapshot.generation,
+            )
+        }
+        let root = LayoutView()
+        host.view = root
+        func label(_ title: String, _ identifier: String, _ read: @escaping @MainActor () -> String?) -> UILabel {
+            BrowserDownloadPassiveEvidenceLabel(title: title, identifier: identifier) {
+                process.store.vault.phase == .authenticated ? read() : nil
+            }.makeLabel()
+        }
+        let census = label("Scene census", "downloadQualificationSceneCensus", process.currentSceneCensusJSON)
+        let events = label("Coordinator events", "downloadQualificationObservations") {
+            process.evidence.observationsJSON
+        }
+        let pending = label("Census at update", "downloadQualificationRootUpdateCensus") { [weak root] in
+            root?.censusAtUpdate
+        }
+        let layouts = label("Host layout passes", "downloadQualificationRootLayoutPasses") { [weak root] in
+            root.map { String($0.layoutPasses) }
+        }
+        let update = UIButton(type: .system, primaryAction: UIAction(title: "Reconcile current Root") {
+            [weak host, weak root, weak census] _ in
+            guard let host, host.authentication() else {
+                return
+            }
+
+            host.rootUpdated(host.currentRenderToken())
+            root?.censusAtUpdate = census?.accessibilityValue
+        })
+        update.accessibilityIdentifier = "downloadQualificationReconcileCurrentRoot"
+        let stack = UIStackView(arrangedSubviews: [census, events, pending, layouts, update])
+        stack.axis = .vertical
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+        ])
+        return host
+    }
+
+    func updateUIViewController(_: BrowserDownloadHostController, context _: Context) {}
+
+    static func dismantleUIViewController(_ host: BrowserDownloadHostController, coordinator: ()) {
+        BrowserDownloadHost.dismantleUIViewController(host, coordinator: coordinator)
+    }
+
+    private final class LayoutView: UIView {
+        var censusAtUpdate: String?
+        private(set) var layoutPasses = 0
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            layoutPasses += 1
         }
     }
 }

@@ -245,6 +245,52 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
     /// Values describe actual registered scenes, cover windows and the existing native/root barriers;
     /// observations neither authorize work nor alter controller, source or registration lifetimes.
     var qualificationObservation: (@MainActor (String, [String: String]) -> Void)?
+
+    /// Samples each registered controller at its current revision, including updates that
+    /// have invalidated confirmation since the last layout callback.
+    func qualificationRootSnapshots() -> [[String: String]] {
+        let generation = owner.snapshot.generation
+        return registrations.map { id, registration in
+            var row = qualificationRootFields(id, registration, generation: generation)
+            row["registrationActive"] = String(registration.active)
+            row["renderConfirmed"] = String(registration.controller?.rootRender.confirmed == true)
+            let cover = covers[ObjectIdentifier(registration.scene)]
+            let attached = registration.scene
+                .windows
+                .filter { $0 === cover || $0.rootViewController is BrowserDownloadCoverController }
+            row["coverPresent"] = String(cover != nil || !attached.isEmpty)
+            row["coverVisible"] = String(attached.contains { !$0.isHidden && $0.alpha > 0 })
+            return row
+        }
+        .sorted { ($0["registration"] ?? "") < ($1["registration"] ?? "") }
+    }
+
+    private func qualificationRootFields(
+        _ id: UUID,
+        _ registration: Registration,
+        generation: UInt64,
+    ) -> [String: String] {
+        let scene = registration.scene
+        let render = registration.controller?.rootRender
+        let active = registration.active && scene.activationState == .foregroundActive
+        let nativeBarrier = lifetime.admitted && presentationHost?.hostingScene === scene
+        let cover = covers[ObjectIdentifier(scene)]
+        var row = [
+            "registration": id.uuidString,
+            "sceneSession": scene.session.persistentIdentifier,
+            "activation": String(scene.activationState.rawValue),
+            "mounted": String(registration.mounted),
+            "generation": String(generation),
+            "coverVisible": String(cover?.isHidden == false && cover?.windowScene === scene),
+            "nativeBarrier": String(nativeBarrier),
+            "rootProof": String(registration.mounted && render?.canReleaseCover(
+                sceneActive: active,
+                nativeAdmissionHeld: nativeBarrier,
+            ) == true),
+        ]
+        row["renderRevision"] = render.map { String($0.revision) }
+        return row
+    }
     #endif
 
     private func recordQualification(_ event: String, fields: [String: String] = [:]) {
@@ -255,27 +301,13 @@ final class BrowserDownloadNativeCoordinator: NSObject, QLPreviewControllerDataS
 
         for (id, registration) in registrations {
             let scene = registration.scene
-            let active = registration.active && scene.activationState == .foregroundActive
-            let nativeBarrier = lifetime.admitted && presentationHost?.hostingScene === scene
-            let cover = covers[ObjectIdentifier(scene)]
-            qualificationObservation(event, [
-                "registration": id.uuidString,
-                "sceneSession": scene.session.persistentIdentifier,
-                "activation": String(scene.activationState.rawValue),
-                "mounted": String(registration.mounted),
-                "generation": String(owner.snapshot.generation),
-                "operation": request?.downloadID.rawValue.uuidString ?? "none",
-                "request": request?.requestID.uuidString ?? "none",
-                "coverVisible": String(cover?.isHidden == false && cover?.windowScene === scene),
-                "coverFrame": String(describing: cover?.frame),
-                "sceneBounds": String(describing: scene.effectiveGeometry.coordinateSpace.bounds),
-                "nativeBarrier": String(nativeBarrier),
-                "nativeLifecycle": presentationDiagnostics,
-                "rootProof": String(registration.mounted && registration.controller?.rootRender.canReleaseCover(
-                    sceneActive: active,
-                    nativeAdmissionHeld: nativeBarrier,
-                ) == true),
-            ].merging(fields) { _, current in current })
+            var row = qualificationRootFields(id, registration, generation: owner.snapshot.generation)
+            row["operation"] = request?.downloadID.rawValue.uuidString ?? "none"
+            row["request"] = request?.requestID.uuidString ?? "none"
+            row["coverFrame"] = String(describing: covers[ObjectIdentifier(scene)]?.frame)
+            row["sceneBounds"] = String(describing: scene.effectiveGeometry.coordinateSpace.bounds)
+            row["nativeLifecycle"] = presentationDiagnostics
+            qualificationObservation(event, row.merging(fields) { _, current in current })
         }
         #endif
     }

@@ -21,6 +21,12 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
     private lazy var observationCursor = BrowserDownloadObservationCursor()
     private var preparationFailureMetadata: [String: String]?
 
+    private struct ObservationReaderFixture {
+        let context: BrowserDownloadObservationContext
+        let baseline: BrowserDownloadObservationReceipt
+        var cursor: BrowserDownloadObservationCursor
+    }
+
     /// Keeps only opaque identities and elapsed time from a live partial-transfer checkpoint.
     private struct SlowKnownWitness {
         let runID: String
@@ -1397,6 +1403,366 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         capture(app, milestone: "calculator Copy is not native Share")
     }
 
+    func testCompletedObservationReaderAcceptsAvailableReceiptBeforeWaiting() throws {
+        let fixture = try makeObservationReaderFixture()
+        let deadline = BrowserDownloadObservationDeadline(start: 100, duration: 10)
+        let receipt = makeObservationReaderReceipt(
+            context: fixture.context,
+            sequence: 1,
+            state: .completed,
+            revision: 1,
+        )
+        let now = 109.95
+        var readCount = 0
+        var waitCount = 0
+
+        let snapshot = try readCompletedObservationSnapshot(
+            after: fixture.baseline,
+            deadline: deadline,
+            cursor: fixture.cursor,
+            now: { now },
+            readReceipt: {
+                readCount += 1
+                return receipt
+            },
+            waitForCompletion: { _, _ in
+                waitCount += 1
+                return .timedOut
+            },
+        )
+
+        XCTAssertEqual(snapshot, receipt.snapshot.projected(for: fixture.context))
+        XCTAssertEqual(readCount, 1)
+        XCTAssertEqual(waitCount, 0)
+        XCTAssertLessThan(deadline.remaining(at: now), 0.1)
+    }
+
+    func testCompletedObservationReaderPollsUntilPendingReceiptCompletes() throws {
+        let fixture = try makeObservationReaderFixture()
+        let deadline = BrowserDownloadObservationDeadline(start: 100, duration: 10)
+        let pending = makeObservationReaderReceipt(
+            context: fixture.context,
+            sequence: 1,
+            state: .pending,
+            revision: 0,
+        )
+        let completed = makeObservationReaderReceipt(
+            context: fixture.context,
+            sequence: 1,
+            state: .completed,
+            revision: 1,
+        )
+        var current = pending
+        var readCount = 0
+        var waitTimeout: TimeInterval?
+
+        let snapshot = try readCompletedObservationSnapshot(
+            after: fixture.baseline,
+            deadline: deadline,
+            cursor: fixture.cursor,
+            now: { 100 },
+            readReceipt: {
+                readCount += 1
+                return current
+            },
+            waitForCompletion: { timeout, evaluate in
+                waitTimeout = timeout
+                XCTAssertFalse(evaluate())
+                current = completed
+                return evaluate() ? .completed : .timedOut
+            },
+        )
+
+        XCTAssertEqual(snapshot, completed.snapshot.projected(for: fixture.context))
+        XCTAssertEqual(readCount, 3)
+        XCTAssertEqual(waitTimeout, 10)
+    }
+
+    func testCompletedObservationReaderRejectsUnchangedReceiptWhenWaitExpires() throws {
+        let fixture = try makeObservationReaderFixture()
+        let deadline = BrowserDownloadObservationDeadline(start: 100, duration: 10)
+        var readCount = 0
+
+        XCTAssertThrowsError(try readCompletedObservationSnapshot(
+            after: fixture.baseline,
+            deadline: deadline,
+            cursor: fixture.cursor,
+            now: { 100 },
+            readReceipt: {
+                readCount += 1
+                return fixture.baseline
+            },
+            waitForCompletion: { _, evaluate in
+                XCTAssertFalse(evaluate())
+                return .timedOut
+            },
+        )) { error in
+            XCTAssertEqual(error as? BrowserDownloadObservationError, .deadlineExceeded)
+        }
+        XCTAssertEqual(readCount, 2)
+    }
+
+    func testCompletedObservationReaderRejectsWrongProcessRequestAndContext() throws {
+        let wrongProcess = try makeObservationReaderFixture()
+        try wrongProcess.cursor.authorizeProcess(UUID())
+        let matchingReceipt = makeObservationReaderReceipt(
+            context: wrongProcess.context,
+            sequence: 1,
+            state: .completed,
+            revision: 1,
+        )
+        assertObservationReaderRejects(
+            fixture: wrongProcess,
+            readReceipt: { matchingReceipt },
+            expectedError: .stale,
+        )
+
+        let wrongRequest = try makeObservationReaderFixture()
+        let skippedRequest = makeObservationReaderReceipt(
+            context: wrongRequest.context,
+            sequence: 2,
+            state: .completed,
+            revision: 1,
+        )
+        assertObservationReaderRejects(
+            fixture: wrongRequest,
+            readReceipt: { skippedRequest },
+            expectedError: .stale,
+        )
+
+        let wrongContext = try makeObservationReaderFixture()
+        let foreignContext = BrowserDownloadObservationContext(
+            processNonce: wrongContext.context.processNonce,
+            runID: "another-run",
+            authorizationGeneration: wrongContext.context.authorizationGeneration,
+            resourceGeneration: wrongContext.context.resourceGeneration,
+            ingestionGeneration: wrongContext.context.ingestionGeneration,
+            phase: wrongContext.context.phase,
+        )
+        let foreignReceipt = makeObservationReaderReceipt(
+            context: foreignContext,
+            sequence: 1,
+            state: .completed,
+            revision: 1,
+        )
+        assertObservationReaderRejects(
+            fixture: wrongContext,
+            readReceipt: { foreignReceipt },
+            expectedError: .stale,
+        )
+    }
+
+    func testCompletedObservationReaderPreservesInvalidatedMalformedAndMissingErrors() throws {
+        let invalidated = try makeObservationReaderFixture()
+        let invalidatedReceipt = makeObservationReaderReceipt(
+            context: invalidated.context,
+            sequence: 1,
+            state: .invalidated,
+            revision: 0,
+        )
+        assertObservationReaderRejects(
+            fixture: invalidated,
+            readReceipt: { invalidatedReceipt },
+            expectedError: .invalidated,
+        )
+
+        let busy = try makeObservationReaderFixture()
+        let busyReceipt = makeObservationReaderReceipt(
+            context: busy.context,
+            sequence: 1,
+            state: .busy,
+            revision: 0,
+        )
+        assertObservationReaderRejects(
+            fixture: busy,
+            readReceipt: { busyReceipt },
+            expectedError: .busy,
+        )
+
+        let failed = try makeObservationReaderFixture()
+        let failedReceipt = makeObservationReaderReceipt(
+            context: failed.context,
+            sequence: 1,
+            state: .failed,
+            revision: 0,
+        )
+        assertObservationReaderRejects(
+            fixture: failed,
+            readReceipt: { failedReceipt },
+            expectedError: .failed,
+        )
+
+        let malformed = try makeObservationReaderFixture()
+        assertObservationReaderRejects(
+            fixture: malformed,
+            readReceipt: { try BrowserDownloadObservationReceipt.decode("not a receipt") },
+            expectedError: .malformed,
+        )
+
+        let absentNode = try makeObservationReaderFixture()
+        assertObservationReaderRejects(
+            fixture: absentNode,
+            readReceipt: { throw BrowserDownloadObservationError.missing },
+            expectedError: .missing,
+        )
+
+        let absentValue = try makeObservationReaderFixture()
+        assertObservationReaderRejects(
+            fixture: absentValue,
+            readReceipt: { try BrowserDownloadObservationReceipt.decode(nil) },
+            expectedError: .missing,
+        )
+    }
+
+    func testCompletedObservationReaderRejectsReceiptsAtAndAfterDeadline() throws {
+        let expiredBeforeRead = try makeObservationReaderFixture()
+        var earlyReadCount = 0
+
+        XCTAssertThrowsError(try readCompletedObservationSnapshot(
+            after: expiredBeforeRead.baseline,
+            deadline: BrowserDownloadObservationDeadline(start: 100, duration: 10),
+            cursor: expiredBeforeRead.cursor,
+            now: { 110 },
+            readReceipt: {
+                earlyReadCount += 1
+                return expiredBeforeRead.baseline
+            },
+            waitForCompletion: { _, _ in .timedOut },
+        )) { error in
+            XCTAssertEqual(error as? BrowserDownloadObservationError, .deadlineExceeded)
+        }
+        XCTAssertEqual(earlyReadCount, 0)
+
+        let readAtDeadline = try makeObservationReaderFixture()
+        let completed = makeObservationReaderReceipt(
+            context: readAtDeadline.context,
+            sequence: 1,
+            state: .completed,
+            revision: 1,
+        )
+        var now = 109.0
+
+        XCTAssertThrowsError(try readCompletedObservationSnapshot(
+            after: readAtDeadline.baseline,
+            deadline: BrowserDownloadObservationDeadline(start: 100, duration: 10),
+            cursor: readAtDeadline.cursor,
+            now: { now },
+            readReceipt: {
+                now = 110
+                return completed
+            },
+            waitForCompletion: { _, _ in .timedOut },
+        )) { error in
+            XCTAssertEqual(error as? BrowserDownloadObservationError, .deadlineExceeded)
+        }
+
+        let expiredAfterValidation = try makeObservationReaderFixture()
+        let finalReceipt = makeObservationReaderReceipt(
+            context: expiredAfterValidation.context,
+            sequence: 1,
+            state: .completed,
+            revision: 1,
+        )
+        var clockReads = 0
+
+        XCTAssertThrowsError(try readCompletedObservationSnapshot(
+            after: expiredAfterValidation.baseline,
+            deadline: BrowserDownloadObservationDeadline(start: 100, duration: 10),
+            cursor: expiredAfterValidation.cursor,
+            now: {
+                clockReads += 1
+                return clockReads <= 2 ? 109 : 110
+            },
+            readReceipt: { finalReceipt },
+            waitForCompletion: { _, _ in .timedOut },
+        )) { error in
+            XCTAssertEqual(error as? BrowserDownloadObservationError, .deadlineExceeded)
+        }
+        XCTAssertEqual(clockReads, 3)
+    }
+
+    func testCompletedObservationReaderRechecksDeadlineAfterWaiterCompletion() throws {
+        let fixture = try makeObservationReaderFixture()
+        let completed = makeObservationReaderReceipt(
+            context: fixture.context,
+            sequence: 1,
+            state: .completed,
+            revision: 1,
+        )
+        var current = fixture.baseline
+        var now = 100.0
+
+        XCTAssertThrowsError(try readCompletedObservationSnapshot(
+            after: fixture.baseline,
+            deadline: BrowserDownloadObservationDeadline(start: 100, duration: 10),
+            cursor: fixture.cursor,
+            now: { now },
+            readReceipt: { current },
+            waitForCompletion: { _, evaluate in
+                current = completed
+                now = 109.9
+                let didComplete = evaluate()
+                now = 110
+                return didComplete ? .completed : .timedOut
+            },
+        )) { error in
+            XCTAssertEqual(error as? BrowserDownloadObservationError, .deadlineExceeded)
+        }
+    }
+
+    func testCompletedObservationReaderPreservesInterruptedWait() throws {
+        let fixture = try makeObservationReaderFixture()
+        let pending = makeObservationReaderReceipt(
+            context: fixture.context,
+            sequence: 1,
+            state: .pending,
+            revision: 0,
+        )
+
+        XCTAssertThrowsError(try readCompletedObservationSnapshot(
+            after: fixture.baseline,
+            deadline: BrowserDownloadObservationDeadline(start: 100, duration: 10),
+            cursor: fixture.cursor,
+            now: { 100 },
+            readReceipt: { pending },
+            waitForCompletion: { _, evaluate in
+                XCTAssertFalse(evaluate())
+                return .interrupted
+            },
+        )) { error in
+            XCTAssertEqual(error as? BrowserDownloadObservationError, .interrupted)
+        }
+    }
+
+    func testCompletedObservationReaderMapsPendingWaitTimeoutToDeadlineExceeded() throws {
+        let fixture = try makeObservationReaderFixture()
+        let pending = makeObservationReaderReceipt(
+            context: fixture.context,
+            sequence: 1,
+            state: .pending,
+            revision: 0,
+        )
+        var readCount = 0
+
+        XCTAssertThrowsError(try readCompletedObservationSnapshot(
+            after: fixture.baseline,
+            deadline: BrowserDownloadObservationDeadline(start: 100, duration: 10),
+            cursor: fixture.cursor,
+            now: { 100 },
+            readReceipt: {
+                readCount += 1
+                return pending
+            },
+            waitForCompletion: { _, evaluate in
+                XCTAssertFalse(evaluate())
+                return .timedOut
+            },
+        )) { error in
+            XCTAssertEqual(error as? BrowserDownloadObservationError, .deadlineExceeded)
+        }
+        XCTAssertEqual(readCount, 2)
+    }
+
     func testNativeWaitResultsPreserveMilestoneAndCause() {
         let completed = XCTestExpectation(description: "fulfilled native expectation")
         completed.fulfill()
@@ -1916,49 +2282,143 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         after baseline: BrowserDownloadObservationReceipt,
         deadline: BrowserDownloadObservationDeadline,
     ) throws -> BrowserDownloadObservationSnapshot {
-        guard deadline.remaining(at: ProcessInfo.processInfo.systemUptime) > 0 else {
-            throw BrowserDownloadObservationError.deadlineExceeded
+        try readCompletedObservationSnapshot(
+            after: baseline,
+            deadline: deadline,
+            cursor: observationCursor,
+            now: { ProcessInfo.processInfo.systemUptime },
+            readReceipt: { try self.readObservationReceipt(app) },
+            waitForCompletion: { timeout, evaluate in
+                let predicate = NSPredicate { _, _ in
+                    MainActor.assumeIsolated { evaluate() }
+                }
+                let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+                return XCTWaiter.wait(for: [expectation], timeout: timeout)
+            },
+        )
+    }
+
+    private typealias ObservationReaderPredicate = () -> Bool
+    private typealias ObservationReaderWaiter = (TimeInterval, @escaping ObservationReaderPredicate) -> XCTWaiter.Result
+
+    private func makeObservationReaderFixture() throws -> ObservationReaderFixture {
+        let context = BrowserDownloadObservationContext(
+            processNonce: UUID(),
+            runID: "receipt-reader-run",
+            authorizationGeneration: 1,
+            resourceGeneration: 1,
+            ingestionGeneration: 1,
+            phase: "authenticated",
+        )
+        let cursor = BrowserDownloadObservationCursor()
+        try cursor.authorizeProcess(context.processNonce)
+        let baseline = BrowserDownloadObservationReceipt(
+            request: nil,
+            revision: 0,
+            context: context,
+            state: .idle,
+        )
+        return ObservationReaderFixture(context: context, baseline: baseline, cursor: cursor)
+    }
+
+    private func makeObservationReaderReceipt(
+        context: BrowserDownloadObservationContext,
+        sequence: UInt64,
+        state: BrowserDownloadObservationReceipt.State,
+        revision: UInt64,
+    ) -> BrowserDownloadObservationReceipt {
+        BrowserDownloadObservationReceipt(
+            request: BrowserDownloadObservationRequest(sequence: sequence, id: UUID(), context: context),
+            revision: revision,
+            context: context,
+            state: state,
+        )
+    }
+
+    private func assertObservationReaderRejects(
+        fixture: ObservationReaderFixture,
+        readReceipt: @escaping () throws -> BrowserDownloadObservationReceipt,
+        expectedError: BrowserDownloadObservationError,
+    ) {
+        var waitCount = 0
+        XCTAssertThrowsError(try readCompletedObservationSnapshot(
+            after: fixture.baseline,
+            deadline: BrowserDownloadObservationDeadline(start: 100, duration: 10),
+            cursor: fixture.cursor,
+            now: { 100 },
+            readReceipt: readReceipt,
+            waitForCompletion: { _, evaluate in
+                waitCount += 1
+                return evaluate() ? .completed : .timedOut
+            },
+        )) { error in
+            XCTAssertEqual(error as? BrowserDownloadObservationError, expectedError)
+        }
+        XCTAssertEqual(waitCount, 0)
+    }
+
+    // Reads before waiting and reuses the same check for each predicate poll.
+
+    private func readCompletedObservationSnapshot(
+        after baseline: BrowserDownloadObservationReceipt,
+        deadline: BrowserDownloadObservationDeadline,
+        cursor: BrowserDownloadObservationCursor,
+        now: @escaping () -> TimeInterval,
+        readReceipt: @escaping () throws -> BrowserDownloadObservationReceipt,
+        waitForCompletion: ObservationReaderWaiter,
+    ) throws -> BrowserDownloadObservationSnapshot {
+        var outcome: Result<BrowserDownloadObservationSnapshot, Error>?
+        let evaluate: ObservationReaderPredicate = {
+            if outcome != nil {
+                return true
+            }
+            guard deadline.remaining(at: now()) > 0 else {
+                outcome = .failure(BrowserDownloadObservationError.deadlineExceeded)
+                return true
+            }
+
+            do {
+                let receipt = try readReceipt()
+                let sampledAt = now()
+                if let snapshot = try cursor.validatedSnapshot(
+                    receipt,
+                    after: baseline,
+                    context: baseline.context,
+                    deadline: deadline,
+                    now: sampledAt,
+                ) {
+                    outcome = .success(snapshot)
+                }
+            } catch {
+                outcome = .failure(error)
+            }
+            return outcome != nil
         }
 
-        var outcome: Result<BrowserDownloadObservationSnapshot, Error>?
-        let predicate = NSPredicate { _, _ in
-            MainActor.assumeIsolated {
-                if outcome != nil {
-                    return true
-                }
-                do {
-                    let receipt = try self.readObservationReceipt(app)
-                    if let snapshot = try self.observationCursor.validatedSnapshot(
-                        receipt,
-                        after: baseline,
-                        context: baseline.context,
-                        deadline: deadline,
-                        now: ProcessInfo.processInfo.systemUptime,
-                    ) {
-                        outcome = .success(snapshot)
-                    }
-                } catch {
-                    outcome = .failure(error)
-                }
-                return outcome != nil
+        if !evaluate() {
+            let remaining = deadline.remaining(at: now())
+            guard remaining > 0 else {
+                throw BrowserDownloadObservationError.deadlineExceeded
             }
-        }
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-        let result = XCTWaiter.wait(
-            for: [expectation],
-            timeout: deadline.remaining(at: ProcessInfo.processInfo.systemUptime),
-        )
-        guard result == .completed else {
-            if result == .interrupted {
-                throw BrowserDownloadObservationError.interrupted
+
+            let result = waitForCompletion(remaining, evaluate)
+            guard result == .completed else {
+                if result == .interrupted {
+                    throw BrowserDownloadObservationError.interrupted
+                }
+                throw BrowserDownloadObservationError.deadlineExceeded
             }
-            throw BrowserDownloadObservationError.missing
         }
         guard let outcome else {
             throw BrowserDownloadObservationError.missing
         }
 
-        return try outcome.get()
+        let snapshot = try outcome.get()
+        guard deadline.remaining(at: now()) > 0 else {
+            throw BrowserDownloadObservationError.deadlineExceeded
+        }
+
+        return snapshot
     }
 
     private func tapControl(
