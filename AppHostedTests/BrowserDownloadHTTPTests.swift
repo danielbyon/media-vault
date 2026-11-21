@@ -11,7 +11,6 @@ import CoreGraphics
 import CryptoKit
 import Dependencies
 import Foundation
-import GRDB
 import ObjectiveC
 import Testing
 import UIKit
@@ -247,6 +246,17 @@ extension AppHostedUITests {
                 nativeErrorEvidence.contains("nativeErrorsTruncated total=12 omitted=5"),
             )
             #expect(nativeErrorEvidence.hasSuffix("WebKitErrorDomain:11"))
+        }
+
+        @Test("HTTP request evidence uses bounded plain fixture labels")
+        func requestEvidenceUsesPlainFixtureLabels() {
+            let requests = ["first", "attachment?ignored=value", "unrecognized"].map {
+                BrowserDownloadLoopbackServer.Request(method: "GET", path: "/fixture/" + $0, headers: [:], body: Data())
+            }
+            #expect(
+                HTTPDownloadDiagnosticEvidence.requestList(requests, cookiePath: "/fixture/")
+                    == "GET:first,GET:attachment,GET:loopback-other",
+            )
         }
 
         @Test("Adapter commit evidence must follow the request baseline")
@@ -493,6 +503,11 @@ extension AppHostedUITests {
                 let requestBaseline = fixture.server.requests.count
                 let adapterEventBaseline = fixture.observations.events.count
                 let adapterCommandBaseline = fixture.observations.commands.count
+                #if DEBUG
+                if row == .attachment {
+                    fixture.observeAttachmentHandoff()
+                }
+                #endif
                 try await fixture.trigger(row)
                 if row == .inline {
                     let inlineURL = try #require(fixture.inlineURL)
@@ -540,6 +555,7 @@ extension AppHostedUITests {
                         // Separate request dispatch from the bounded WebKit handoff and
                         // reducer-conversion check so the latter starts after the exact GET.
                         try await fixture.waitForDispatchedRequest("attachment", baseline: requestBaseline)
+                        fixture.observations.mark("fixture.observedGET")
                     }
                     try await fixture.wait("completed native download and reducer conversion") {
                         fixture.owner.snapshot.records.first?.isReady == true
@@ -624,7 +640,7 @@ extension AppHostedUITests {
             try await withHTTPDownloadFixture(profile) { fixture in
                 let before = try #require(fixture.store.selectedTab?.metadata)
                 let route = knownLength ? "slow-known" : "slow-unknown"
-                try fixture.store.send(.navigate(fixture.server.url(route)))
+                try fixture.navigate(to: route)
                 try await fixture.wait("owner receives native progress while server remainder is held") {
                     fixture.server.slowPrefixSent && (fixture.owner.snapshot.records.first?.receivedBytes ?? 0) > 0
                 }
@@ -725,7 +741,11 @@ private enum HTTPDownloadDiagnosticEvidence {
             return "nil"
         }
 
-        switch url.lastPathComponent {
+        return knownRoute(url.lastPathComponent) ?? (url.host == "127.0.0.1" ? "loopback-other" : "external")
+    }
+
+    private static func knownRoute(_ component: String) -> String? {
+        switch component {
         case "first",
              "committed",
              "attachment",
@@ -739,9 +759,23 @@ private enum HTTPDownloadDiagnosticEvidence {
              "blob-bytes",
              "slow-known",
              "slow-unknown":
-            return url.lastPathComponent
+            component
         default:
-            return url.host == "127.0.0.1" ? "loopback-other" : "external"
+            nil
+        }
+    }
+
+    static func requestList(_ requests: [BrowserDownloadLoopbackServer.Request], cookiePath: String) -> String {
+        let labels: [String] = requests.map { request in
+            let method = ["GET", "HEAD", "POST"].contains(request.method) ? request.method : "other"
+            let path = request.path.split(separator: "?", maxSplits: 1).first ?? ""
+            let route = path.hasPrefix(cookiePath)
+                ? knownRoute(String(path.dropFirst(cookiePath.count))) ?? "loopback-other"
+                : "<outside-fixture>"
+            return "\(method):\(route)"
+        }
+        return boundedLabels(labels, maximum: 16, leading: 4, emptyLabel: "", separator: ",") { _, omitted in
+            "requestsOmitted=\(omitted)"
         }
     }
 
@@ -1053,6 +1087,16 @@ private func withSinglePageHTTPDownloadFixture(
 /// Observations retain stable identities and projections, never a WKDownload or its source path.
 @MainActor
 private final class HTTPDownloadObservations {
+    private static let handoffMarkerLimit = 64
+
+    private final class WeakPolicyObjectSlot {
+        weak var object: AnyObject?
+
+        init(_ object: AnyObject) {
+            self.object = object
+        }
+    }
+
     struct Handoff {
         let identity: ObjectIdentifier
         let tabID: BrowserTabID
@@ -1066,6 +1110,49 @@ private final class HTTPDownloadObservations {
     var handoffs: [Handoff] = []
     var events: [BrowserWebKitEvent] = []
     var snapshots: [BrowserDownloadSnapshot] = []
+
+    var capturesHandoff = false
+    private var handoffMarkers: [(uptime: TimeInterval, stage: String, navigation: BrowserNavigationOperationID?)] = []
+    private var omittedMarkers = 0
+    private var policyObjectSlots: [WeakPolicyObjectSlot] = []
+
+    func mark(_ stage: String, navigation: BrowserNavigationOperationID? = nil) {
+        guard capturesHandoff else {
+            return
+        }
+        guard handoffMarkers.count < Self.handoffMarkerLimit else {
+            omittedMarkers += 1
+            return
+        }
+
+        handoffMarkers.append((ProcessInfo.processInfo.systemUptime, stage, navigation))
+    }
+
+    /// Assigns fixture-local ordinals; released slots stay reserved for later objects.
+    func policyObjectLabel(for object: AnyObject) -> String {
+        if let index = policyObjectSlots.firstIndex(where: { $0.object === object }) {
+            return "\(index + 1)"
+        }
+        guard policyObjectSlots.count < Self.handoffMarkerLimit else {
+            return "untracked"
+        }
+
+        policyObjectSlots.append(WeakPolicyObjectSlot(object))
+        return "\(policyObjectSlots.count)"
+    }
+
+    var handoffEvidence: String {
+        guard capturesHandoff else {
+            return ""
+        }
+
+        let labels = HTTPDownloadDiagnosticEvidence.operationLabels(commands)
+        let lines = handoffMarkers.map { marker in
+            let operation = HTTPDownloadDiagnosticEvidence.operationLabel(marker.navigation, labels: labels)
+            return "\(marker.uptime) \(marker.stage) op=\(operation)"
+        }
+        return "handoffTimeline (uptime seconds, omitted=\(omittedMarkers))\n" + lines.joined(separator: "\n") + "\n"
+    }
 
     var conversions: Int {
         events.count {
@@ -1099,6 +1186,13 @@ private final class HTTPDownloadObservations {
             let pump = Task { @MainActor in
                 for await event in upstream {
                     self.events.append(event)
+                    if case let .navigationConvertedToDownload(_, correlation) = event {
+                        if case let .operation(id) = correlation {
+                            self.mark("adapter.conversionDelivered", navigation: id)
+                        } else {
+                            self.mark("adapter.conversionDelivered")
+                        }
+                    }
                     continuation.yield(event)
                 }
                 continuation.finish()
@@ -1112,6 +1206,10 @@ private final class HTTPDownloadObservations {
         return AsyncStream { continuation in
             let pump = Task { @MainActor in
                 for await snapshot in upstream {
+                    if self.capturesHandoff, (snapshot.records.first?.receivedBytes ?? 0) > 0,
+                       (self.snapshots.last?.records.first?.receivedBytes ?? 0) == 0 {
+                        self.mark("owner.firstPositiveProgress")
+                    }
                     self.snapshots.append(snapshot)
                     continuation.yield(snapshot)
                 }
@@ -1138,7 +1236,7 @@ private final class HTTPDownloadFixture {
     let observations = HTTPDownloadObservations()
     private var subscription: StoreTask?
     private(set) var inlineURL: URL?
-    private var requestedPage: URL?
+    private var expectedRoute = "none"
 
     init(profile: BrowserBrowsingProfile, nativeContentSize: CGSize? = nil) throws {
         server = try BrowserDownloadLoopbackServer()
@@ -1203,6 +1301,7 @@ private final class HTTPDownloadFixture {
         webView = try #require(adapter.webView(for: tabID))
         observations.origin = webView
         adapter.downloadHandoffObserver = { [weak recorder] download, tabID in
+            recorder?.mark("handoff.acceptedOrigin")
             recorder?.handoffs.append(.init(
                 identity: ObjectIdentifier(download),
                 tabID: tabID,
@@ -1213,16 +1312,44 @@ private final class HTTPDownloadFixture {
         subscription = store.send(.task)
     }
 
+    #if DEBUG
+    /// Enables per-row capture before navigation. Only a failed wait exports the timeline.
+    func observeAttachmentHandoff() {
+        observations.capturesHandoff = true
+        adapter.downloadPolicyObjectLabeler = { [weak observations] object in
+            observations?.policyObjectLabel(for: object) ?? "untracked"
+        }
+        observations.mark("fixture.trigger")
+        owner.policyHandoffObservation = { [weak observations] stage, association, navigation in
+            let label = association.map { "\(stage) association=\($0.uuidString)" } ?? "\(stage)"
+            observations?.mark(label, navigation: navigation)
+        }
+        owner.qualificationTransferObservation = { [weak observations] event, fields in
+            switch event {
+            case "policyDownloadAdmitted",
+                 "transferAdmitted",
+                 "nativeCancellationRequested",
+                 "writerFinished",
+                 "writerFailed",
+                 "writerCancellationAcknowledged":
+                let operation = fields["operation"].flatMap(UUID.init(uuidString:))?.uuidString ?? "none"
+                let capability = fields["capability"].flatMap(UUID.init(uuidString:))?.uuidString ?? "none"
+                observations?.mark("\(event) transfer=\(operation) capability=\(capability)")
+            default:
+                break
+            }
+        }
+    }
+    #endif
+
     func prepareSingleFirstPage() async throws -> URL {
         try await server.start()
         try await waitForSinglePageControl("event subscription and active hosting scene") {
             observations.subscribed && window.windowScene?.activationState == .foregroundActive
                 && adapter.profileIsConfigured && store.downloads.revision == owner.snapshot.revision
         }
-        let firstURL = try server.url("first")
-        requestedPage = firstURL
         let requestBaseline = server.requests.count
-        store.send(.navigate(firstURL))
+        let firstURL = try navigate(to: "first")
         // The first navigation pays the system's NetworkProcess launch. Local cold-start
         // evidence included a 45.4 s WebContent launch plus NetworkProcess suspension/resume.
         // The shared 60 s receipt budget covers startup without extending committed-page or
@@ -1264,6 +1391,7 @@ private final class HTTPDownloadFixture {
                     + "reducerLoading=\(String(describing: store.selectedTab?.metadata.isLoading)) "
                     + "nativeLoading=\(webView.isLoading) attached=\(webView.window === window) "
                     + "bounds=\(webView.bounds.size) errors=\(observations.nativeErrors.count) "
+                    + (satisfied ? "" : observations.handoffEvidence)
                     + failureTransportEvidence(),
             ),
         )
@@ -1310,11 +1438,17 @@ private final class HTTPDownloadFixture {
         #expect(adapter.hasCommittedDocument(for: tabID))
     }
 
-    private func loadPage(_ route: String) async throws {
+    @discardableResult
+    func navigate(to route: String) throws -> URL {
         let url = try server.url(route)
-        requestedPage = url
-        let requestBaseline = server.requests.count
+        expectedRoute = route
         store.send(.navigate(url))
+        return url
+    }
+
+    private func loadPage(_ route: String) async throws {
+        let requestBaseline = server.requests.count
+        let url = try navigate(to: route)
         try await waitForDispatchedRequest(route, baseline: requestBaseline)
         try await wait("native page committed: \(route)") {
             store.selectedTab?.metadata.committedURL == url && store.selectedTab?.metadata.title == "Browser download \(route)"
@@ -1324,6 +1458,7 @@ private final class HTTPDownloadFixture {
     }
 
     func trigger(_ row: HTTPDownloadCase) async throws {
+        expectedRoute = row == .blob ? "blob-bytes" : row.rawValue
         switch row {
         case .attribute:
             try await script("document.getElementById('attribute').click()")
@@ -1434,13 +1569,14 @@ private final class HTTPDownloadFixture {
                     + "navigationOrigin=\(navigationOrigin) "
                     + "reducerCommitted=\(reducerCommitted) "
                     + "reducerLoading=\(store.selectedTab?.metadata.isLoading == true) "
-                    + "generation=\(store.downloads.revision)/\(owner.snapshot.revision) "
-                    + "expectedRoute=\(HTTPDownloadDiagnosticEvidence.routeLabel(requestedPage)) "
+                    + "revision=\(store.downloads.revision)/\(owner.snapshot.revision) "
+                    + "expectedRoute=\(expectedRoute) "
                     + "attached=\(webView.window === window) bounds=\(webView.bounds) "
                     + "loading=\(webView.isLoading) nativeRoute=\(HTTPDownloadDiagnosticEvidence.routeLabel(webView.url)) "
                     + "events=\(observations.events.count) "
                     + "nativeErrors=\(HTTPDownloadDiagnosticEvidence.nativeErrorList(observations.nativeErrors)) "
-                    + "\(failureTransportEvidence())",
+                    + (satisfied ? "" : observations.handoffEvidence)
+                    + failureTransportEvidence(),
             ),
         )
     }
@@ -1450,19 +1586,7 @@ private final class HTTPDownloadFixture {
     /// while the fixture is still alive, so a stalled wait can be classified
     /// from test output alone without changing what the wait asserts.
     private func failureTransportEvidence() -> String {
-        let requests = server.requests
-            .map { request in
-                let route = request.path.hasPrefix(server.cookiePath)
-                    ? request.path
-                        .dropFirst(server.cookiePath.count)
-                        .split(separator: "?", maxSplits: 1)
-                        .first
-                        .map(String.init)
-                        ?? ""
-                    : "<outside-fixture>"
-                return "\(request.method):\(route)"
-            }
-            .joined(separator: ",")
+        let requests = HTTPDownloadDiagnosticEvidence.requestList(server.requests, cookiePath: server.cookiePath)
         let connections =
             if let data = try? JSONSerialization.data(
                 withJSONObject: server.connectionEvidence,

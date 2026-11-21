@@ -57,59 +57,85 @@ def _select_fixture_python():
 
 NAME = "iPhone 17"
 DESTINATION = "platform=iOS Simulator,name=iPhone 17,OS=27.2"
+HTTP_MATRIX_ID = "AppHostedUITests/BrowserDownloadHTTPTests/originatingMatrix(profile:row:)"
+APP_HOSTED_EVIDENCE_TEST_IDENTITIES = (
+    "BrowserDownloadSceneEvidenceTests/testResizeHandleNormalizesMeasuredRotatedFrame",
+    "BrowserDownloadSceneEvidenceTests/testResizeHandleRejectsUnrelatedOffscreenFrame",
+    "BrowserDownloadSceneEvidenceTests/testResizeHandleUsesScreenSpaceOriginWithOffsetCard",
+    "BrowserDownloadSceneEvidenceTests/testResizeGestureDeltaMovesOutwardPerAvailableAxis",
+    "BrowserDownloadSceneEvidenceTests/testResizeGestureDeltaShrinksFullScreenCardOnBothAxes",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionAllowsVisibleNonKeyedAuxiliaryWindow",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionRejectsVisibleCover",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionRejectsZeroOrMultipleVisibleKeyedWindows",
+    "BrowserDownloadSceneEvidenceTests/testResizeSceneRequiresUniqueNewActiveSession",
+    "BrowserDownloadSceneEvidenceTests/testResizeTimeoutDiagnosticsReadOptionalValuesIndependently",
+    "BrowserDownloadSceneEvidenceTests/testPassiveSceneCensusSelectsNewestWindowSnapshot",
+    "BrowserDownloadSceneEvidenceTests/testPassiveSceneCensusRejectsConflictingSnapshotsAtSameTime",
+    "BrowserDownloadSceneEvidenceTests/testLatestFreshSafeRootsRequiresEveryRegistrationAndUsesMonotonicTime",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionAllowsSnapshotBetweenActivationAndCensus",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsSnapshotBeforeActivation",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsWrongRun",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsWrongGeneration",
+    "BrowserDownloadSceneEvidenceTests/testFinalCensusGenerationRejectsNewerUnsafeObservation",
+    "BrowserDownloadSceneEvidenceTests/testFinalCensusGenerationRejectsNewerObservationWithoutGeneration",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsSnapshotAfterCensus",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionAcceptsInclusiveBoundaries",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsNonFiniteTimestamps",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionUsesLatestObservationWithinInterval",
+    "BrowserDownloadSceneEvidenceTests/testReactivationAvailabilityRejectsMismatchWithFinalRegisteredScenes",
+    "BrowserDownloadSceneEvidenceTests/testResizeGestureMarkerSelectsExactNewSceneRegistrationAndRun",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessAcceptsMarkerOnlyLatestObservation",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessRejectsCoverInCurrentCensus",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy",
+    "BrowserDownloadSceneEvidenceTests/testInitialMountedSceneWaitsForCoherentRegistrationsWhileProofIsPending",
+    "BrowserDownloadSceneEvidenceTests/testReactivationRequiresMatchingLiveRevisionForEveryOriginalSceneRegistration",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootAcceptsMatchingConfirmationAfterPendingCensus",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsUnmatchedOrMalformedLiveRows",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresCurrentRetainedDownloadCounts",
+    "BrowserDownloadSceneEvidenceTests/testRetainedAllocationRejectsEveryRecordedRemovalOutcome",
+    "BrowserDownloadSceneEvidenceTests/testRetainedAllocationRemovalAtCensusBoundaryPreventsAcceptance",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsMissingOrMismatchedConfirmation",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsSupersededOrUnpairedProof",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresCoverAndNativeBarrierAbsence",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresProofBeforeOriginalDeadline",
+    "BrowserDownloadSceneEvidenceTests/testPendingLiveRootCannotQualifyAfterDeadline",
+    "BrowserDownloadTransferWitnessTests/testDelayedHandoffParserRequiresNativeCallbacksAfterLock",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessAcceptsCorrelatedNativeProgress",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsMissingHandoffOrProgress",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsServerEvidenceAfterReadiness",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsEarlyTerminalAndCleanupFailure",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsPrematureCleanupWithoutFixtureRequest",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessIgnoresPrematureCleanupForAnotherOperation",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessIgnoresPrematureCleanupFromAnotherRun",
+    "BrowserDownloadTransferWitnessTests/testContinuationAcceptsFiniteResponseAndNativeFinish",
+    "BrowserDownloadTransferWitnessTests/testContinuationRejectsMissingNativeOrTransportWitness",
+    "BrowserDownloadTransferWitnessTests/testContinuationRejectsCancellationFailureAndPrematureCleanup",
+    "BrowserDownloadTransferWitnessTests/testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessDiagnosticsAreRedactedAndBounded",
+    "BrowserDownloadObservationReceiptTests/passiveReaderAcceptsAvailableMilestoneBeforeWaiting",
+    "BrowserDownloadObservationReceiptTests/passiveReaderPollsUntilMilestoneAppears",
+    "BrowserDownloadObservationReceiptTests/passiveReaderRejectsUnchangedMilestone",
+    "BrowserDownloadObservationReceiptTests/passiveReaderRejectsWrongProcessRunAndContext",
+    "BrowserDownloadObservationReceiptTests/passiveReaderPreservesInvalidatedMalformedAndMissing",
+    "BrowserDownloadObservationReceiptTests/passiveReaderRejectsMilestoneAtAndAfterDeadline",
+    "BrowserDownloadObservationReceiptTests/passiveReaderChecksDeadlineAfterWaiterCompletes",
+    "BrowserDownloadObservationReceiptTests/passiveReaderPreservesInterruption",
+    "BrowserDownloadObservationReceiptTests/passiveReaderMapsPendingTimeoutToOriginalDeadline",
+)
 MULTI_SCENE_TEST_IDENTITIES = (
     "BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene",
     "BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable",
-    "BrowserDownloadMultiSceneUITests/testResizeHandleNormalizesMeasuredRotatedFrame",
-    "BrowserDownloadMultiSceneUITests/testResizeHandleRejectsUnrelatedOffscreenFrame",
-    "BrowserDownloadMultiSceneUITests/testResizeHandleUsesScreenSpaceOriginWithOffsetCard",
-    "BrowserDownloadMultiSceneUITests/testResizeGestureDeltaMovesOutwardPerAvailableAxis",
-    "BrowserDownloadMultiSceneUITests/testResizeGestureDeltaShrinksFullScreenCardOnBothAxes",
-    "BrowserDownloadMultiSceneUITests/testResizeWindowSelectionAllowsVisibleNonKeyedAuxiliaryWindow",
-    "BrowserDownloadMultiSceneUITests/testResizeWindowSelectionRejectsVisibleCover",
-    "BrowserDownloadMultiSceneUITests/testResizeWindowSelectionRejectsZeroOrMultipleVisibleKeyedWindows",
-    "BrowserDownloadMultiSceneUITests/testResizeSceneRequiresUniqueNewActiveSession",
-    "BrowserDownloadMultiSceneUITests/testResizeTimeoutDiagnosticsReadOptionalValuesIndependently",
-    "BrowserDownloadMultiSceneUITests/testPassiveSceneCensusSelectsNewestWindowSnapshot",
-    "BrowserDownloadMultiSceneUITests/testPassiveSceneCensusRejectsConflictingSnapshotsAtSameTime",
-    "BrowserDownloadMultiSceneUITests/testLatestFreshSafeRootsRequiresEveryRegistrationAndUsesMonotonicTime",
-    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionAllowsSnapshotBetweenActivationAndCensus",
-    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsSnapshotBeforeActivation",
-    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsWrongRun",
-    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsWrongGeneration",
-    "BrowserDownloadMultiSceneUITests/testFinalCensusGenerationRejectsNewerUnsafeObservation",
-    "BrowserDownloadMultiSceneUITests/testFinalCensusGenerationRejectsNewerObservationWithoutGeneration",
-    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsSnapshotAfterCensus",
-    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionAcceptsInclusiveBoundaries",
-    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsNonFiniteTimestamps",
-    "BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionUsesLatestObservationWithinInterval",
-    "BrowserDownloadMultiSceneUITests/testReactivationAvailabilityRejectsMismatchWithFinalRegisteredScenes",
-    "BrowserDownloadMultiSceneUITests/testResizeGestureMarkerSelectsExactNewSceneRegistrationAndRun",
-    "BrowserDownloadMultiSceneUITests/testResizeWindowWitnessAcceptsMarkerOnlyLatestObservation",
-    "BrowserDownloadMultiSceneUITests/testResizeWindowWitnessRejectsCoverInCurrentCensus",
-    "BrowserDownloadMultiSceneUITests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy",
+    "BrowserDownloadMultiSceneUITests/testPassiveAccessibilityReadsRefreshCensusWithoutPublishingRootEvents",
+    "BrowserDownloadMultiSceneUITests/testHostedRootUpdatePublishesCurrentRevisionWithoutReadFeedback",
 )
-
 QUALIFICATION_TEST_IDENTITIES = (
     "BrowserDownloadQualificationUITests/testAcceptedPolicyHandoffAfterLockCompletesHiddenUntilFreshAuthentication",
-    "BrowserDownloadQualificationUITests/testDelayedHandoffParserRequiresNativeCallbacksAfterLock",
     "BrowserDownloadQualificationUITests/testQuickLookHomeRevokesAndFreshDownloadRecovers",
     "BrowserDownloadQualificationUITests/testShareHomeRevokesAndFreshDownloadRecovers",
     "BrowserDownloadQualificationUITests/testNormalQualificationModeReturnsToAuthenticatedBrowserAfterHome",
     "BrowserDownloadQualificationUITests/testActiveDownloadQualificationModeAutoLocksAfterRealHomeTransition",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessAcceptsCorrelatedNativeProgress",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsMissingHandoffOrProgress",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsServerEvidenceAfterReadiness",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsEarlyTerminalAndCleanupFailure",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsPrematureCleanupWithoutFixtureRequest",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessIgnoresPrematureCleanupForAnotherOperation",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessIgnoresPrematureCleanupFromAnotherRun",
-    "BrowserDownloadQualificationUITests/testContinuationAcceptsFiniteResponseAndNativeFinish",
-    "BrowserDownloadQualificationUITests/testContinuationRejectsMissingNativeOrTransportWitness",
-    "BrowserDownloadQualificationUITests/testContinuationRejectsCancellationFailureAndPrematureCleanup",
-    "BrowserDownloadQualificationUITests/testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion",
-    "BrowserDownloadQualificationUITests/testSlowKnownWitnessDiagnosticsAreRedactedAndBounded",
     "BrowserDownloadQualificationUITests/testSlowKnownDownloadControlIsAccessibleOnMountedBrowser",
     "BrowserDownloadQualificationUITests/testActiveDiscardFailureRetryAndAuthenticationLoss",
     "BrowserDownloadQualificationUITests/testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset",
@@ -117,6 +143,7 @@ QUALIFICATION_TEST_IDENTITIES = (
     "BrowserDownloadQualificationUITests/testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation",
     "BrowserDownloadQualificationUITests/testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch",
     "BrowserDownloadQualificationUITests/testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible",
+    "BrowserDownloadQualificationUITests/testPassiveEventHistoryReadsTheRealMountedBrowserBridge",
 )
 AUTOMATED_DOWNLOAD_TEST_IDENTITIES = MULTI_SCENE_TEST_IDENTITIES + QUALIFICATION_TEST_IDENTITIES
 
@@ -143,39 +170,47 @@ elif tool == "xcrun":
             print((root / "runtimes.json").read_text())
         else:
             print("iOS 27.2 (27.2 - 24B8117) - com.apple.CoreSimulator.SimRuntime.iOS-27-2")
-    elif args[:4] == ["xcresulttool", "get", "test-results", "summary"]:
+    elif args[:3] == ["xcresulttool", "get", "test-results"]:
         bundle = pathlib.Path(args[args.index("--path") + 1])
-        if (root / "result-plan.json").exists():
-            completed = bundle / "fixture-completed.json"
-            if not completed.exists():
-                sys.exit("Incomplete fixture result bundle")
-        if bundle.name == "BrowserDownloadMultiScene.xcresult":
-            identities = json.loads((root / "multi-scene-test-identities.json").read_text())
-            print(json.dumps({
-                "result": "Passed",
-                "totalTestCount": len(identities),
-                "passedTests": len(identities),
-                "failedTests": 0,
-                "skippedTests": 0,
-                "expectedFailures": 0,
-                "devicesAndConfigurations": [{"device": {
-                    "deviceId": "22222222-2222-4222-8222-222222222222",
-                    "deviceName": "iPad Pro 11-inch (M5)",
-                    "osVersion": "27.2",
-                    "platform": "iOS Simulator",
-                }}],
-            }))
+        plan_path = root / "result-plan.json"
+        plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+        if plan_path.exists() and not (bundle / "fixture-completed.json").exists():
+            sys.exit("Incomplete fixture result bundle")
+        method = args[3]
+        if method == "summary" and (bundle / "summary.json").is_file():
+            print((bundle / "summary.json").read_text())
         else:
-            summary = bundle / "summary.json"
-            print(summary.read_text() if summary.exists() else '{"totalTestCount": 3}')
-        if os.environ.get("SCENARIO") == "summary-error": sys.exit(2)
-    elif args[:4] == ["xcresulttool", "get", "test-results", "tests"]:
-        identities = json.loads((root / "multi-scene-test-identities.json").read_text())
-        print(json.dumps({"testNodes": [
-            {"nodeType": "Test Case", "nodeIdentifier": identity + "()",
-             "result": "Passed"}
-            for identity in identities
-        ]}))
+            inventory = json.loads((root / "test-cases.json").read_text())
+            cases = inventory[bundle.name]
+            if bundle.name == "BrowserDownloadMultiScene.xcresult":
+                if plan.get("omit_ui_identity"):
+                    cases.pop()
+                if plan.get("skip_ui_identity"):
+                    cases[0]["result"] = "Skipped"
+            if plan.get("omit_case"):
+                cases = [case for case in cases if case["nodeIdentifier"] != plan["omit_case"]]
+            for case in cases:
+                if case["nodeIdentifier"] == plan.get("skip_case"):
+                    case["result"] = "Skipped"
+            if method == "tests":
+                print(json.dumps({"testNodes": [{"nodeType": "Test Plan", "children": cases}]}))
+            elif method == "summary":
+                ipad = bundle.name in {"BrowserDownloadMultiScene.xcresult", "App-iPadPrivacy.xcresult"}
+                device_id = ("22222222-2222-4222-8222-222222222222" if ipad else
+                             "11111111-1111-4111-8111-111111111111")
+                print(json.dumps({
+                    "result": "Passed", "totalTestCount": len(cases),
+                    "passedTests": sum(case["result"] == "Passed" for case in cases),
+                    "failedTests": 0, "expectedFailures": 0,
+                    "skippedTests": sum(case["result"] == "Skipped" for case in cases),
+                    "devicesAndConfigurations": [{"device": {
+                        "deviceId": device_id, "deviceName": "iPad Pro 11-inch (M5)" if ipad else "iPhone 17",
+                        "osVersion": "27.2", "platform": "iOS Simulator",
+                    }}],
+                }))
+            else:
+                sys.exit("Unexpected result method: " + method)
+        if method == "summary" and os.environ.get("SCENARIO") == "summary-error": sys.exit(2)
     elif args[:3] == ["xcresulttool", "export", "attachments"]:
         bundle = pathlib.Path(args[args.index("--path") + 1])
         output = pathlib.Path(args[args.index("--output-path") + 1])
@@ -198,6 +233,11 @@ elif tool == "xcodebuild":
         if "-resultBundlePath" in args:
             if os.environ.get("SCENARIO") == "missing-bundle": sys.exit(0)
             bundle = pathlib.Path(args[args.index("-resultBundlePath") + 1])
+            plan_path = root / "result-plan.json"
+            plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+            phase = len((root / "executed.jsonl").read_text().splitlines())
+            if phase == plan.get("missing_on"):
+                sys.exit(0)
             bundle.mkdir(parents=True)
             if os.environ.get("TEST_RUNNER_NATIVE_SNAPSHOT_QUALIFICATION") == "1":
                 with (root / "environment.jsonl").open("a") as stream:
@@ -253,9 +293,6 @@ elif tool == "xcodebuild":
                 if scenario == "xcode-failure" and not hosted: sys.exit(65)
             else:
                 (bundle / "fixture-partial").write_text("result writer started")
-                plan_path = root / "result-plan.json"
-                plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
-                phase = len((root / "executed.jsonl").read_text().splitlines())
                 if phase == plan.get("wait_on"):
                     import signal
                     ignore = plan.get("ignore_signals", False)
@@ -305,6 +342,11 @@ class DestinationFixture:
                                       "buildversion": "24B8117", "isAvailable": True}]}
         self.destinations = [self.destination()]
         (self.root / "ineligible.txt").write_text("")
+        self.http_matrix_arguments = [
+            {"nodeType": "Arguments", "name": f".{profile}, .{row}", "result": "Passed"}
+            for profile in ("persistentPrivate", "ephemeral")
+            for row in ("attachment", "inline", "octet", "redirect", "protected", "post", "blob", "attribute")
+        ]
 
     def device(self, name=NAME, udid=UDID, available=True):
         return {"name": name, "udid": udid, "isAvailable": available, "state": "Shutdown"}
@@ -316,9 +358,36 @@ class DestinationFixture:
         (self.root / "devices.json").write_text(json.dumps(self.devices))
         (self.root / "runtimes.json").write_text(json.dumps(self.runtimes))
         (self.root / "destinations.txt").write_text("\n".join(self.destinations))
-        (self.root / "multi-scene-test-identities.json").write_text(
-            json.dumps(AUTOMATED_DOWNLOAD_TEST_IDENTITIES)
-        )
+        self.write_result_cases(AUTOMATED_DOWNLOAD_TEST_IDENTITIES)
+
+    def write_result_cases(self, browser_identities):
+        physical = ("AppHostedUITests/BrowserDownloadPersistenceIsolationTests/"
+                    "completedFilesRetainProtectionAndBackupExclusion()")
+        suites = {
+            "App.xcresult": [
+                physical,
+                *(identity + "()" for identity in APP_HOSTED_EVIDENCE_TEST_IDENTITIES),
+            ],
+            "ApplicationFoundation.xcresult": [
+                "VaultFeatureTests/globalLockFencesPendingBrowserProfileTransition()",
+                "RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification()",
+            ],
+            "App-iPadPrivacy.xcresult": [
+                "AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)",
+            ],
+            "BrowserDownloadMultiScene.xcresult": [identity + "()" for identity in browser_identities],
+        }
+        cases = {
+            name: [{"nodeType": "Test Case", "nodeIdentifier": identity,
+                    "result": "Skipped" if identity == physical else "Passed"} for identity in identities]
+            for name, identities in suites.items()
+        }
+        cases["App.xcresult"].append({
+            "nodeType": "Test Case", "nodeIdentifier": HTTP_MATRIX_ID,
+            "name": "Native HTTP classification and request ownership", "result": "Passed",
+            "children": self.http_matrix_arguments,
+        })
+        (self.root / "test-cases.json").write_text(json.dumps(cases))
 
     def verify(self, expected="", destination=NAME, execute=False):
         self.write_inventory()
@@ -333,9 +402,7 @@ class DestinationFixture:
 
     def run_multi_scene_result_check(self, observed_identities):
         self.write_inventory()
-        (self.root / "multi-scene-test-identities.json").write_text(
-            json.dumps(observed_identities)
-        )
+        self.write_result_cases(observed_identities)
         command = [
             self.python,
             str(ROOT / "Scripts/assert-xcresult-tests.py"),
@@ -510,8 +577,6 @@ class DestinationTests(DestinationFixture, unittest.TestCase):
                 self.assertIn("test identities differ", result.stderr)
 
     def test_make_binds_each_invocation_to_its_expected_destination(self):
-        self.assertEqual(len(MULTI_SCENE_TEST_IDENTITIES), 30)
-        self.assertEqual(len(set(MULTI_SCENE_TEST_IDENTITIES)), 30)
         checkout = self.root / "checkout"
         checkout.mkdir()
         shutil.copy2(ROOT / "Makefile", checkout / "Makefile")
@@ -560,6 +625,51 @@ class DestinationTests(DestinationFixture, unittest.TestCase):
                             for identity in AUTOMATED_DOWNLOAD_TEST_IDENTITIES
                         ],
                     )
+
+
+    def test_xcode_wrapper_keeps_xcresulttool_json_stdout_clean_and_fails_closed(self):
+        script_directory = self.root / "wrapper"
+        script_directory.mkdir()
+        wrapper = script_directory / "with-xcode-27.2.sh"
+        shutil.copy2(ROOT / "Scripts/with-xcode-27.2.sh", wrapper)
+        selector = script_directory / "select-xcode-27.2.sh"
+        shutil.copy2(ROOT / "Scripts/select-xcode-27.2.sh", selector)
+        preflight = script_directory / "ensure-ios-27.2-runtime.sh"
+        preflight.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'Verified simulator runtime: fixture\\n'\n"
+            "if [[ \"${FIXTURE_FAIL_RUNTIME_PREFLIGHT:-0}\" == 1 ]]; then\n"
+            "  printf 'fixture preflight failure\\n' >&2\n"
+            "  exit 19\n"
+            "fi\n"
+        )
+        preflight.chmod(0o755)
+
+        marker = self.root / "wrapped-xcresulttool-ran"
+        command_tool = self.bin / "xcresulttool"
+        command_tool.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, pathlib\n"
+            "pathlib.Path('" + str(marker) + "').write_text('ran')\n"
+            "print(json.dumps({'fixture': 'xcresulttool'}))\n"
+        )
+        command_tool.chmod(0o755)
+        command = [str(wrapper), str(command_tool), "get", "test-results", "summary"]
+        env = dict(__import__('os').environ)
+        env.pop("DEVELOPER_DIR", None)
+        result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '{"fixture": "xcresulttool"}\n')
+        self.assertEqual(json.loads(result.stdout), {"fixture": "xcresulttool"})
+        self.assertIn("Verified simulator runtime: fixture", result.stderr)
+        self.assertTrue(marker.is_file())
+
+        marker.unlink()
+        failure_env = dict(env, FIXTURE_FAIL_RUNTIME_PREFLIGHT="1")
+        result = subprocess.run(command, cwd=ROOT, env=failure_env, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fixture preflight failure", result.stderr)
+        self.assertFalse(marker.exists())
 
 
 class ResultRetentionTests(unittest.TestCase):
@@ -676,12 +786,91 @@ class ResultRetentionTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 paths = [Path(args[args.index("-resultBundlePath") + 1])
                          for args in self.fixture.executions()]
-                self.assertEqual([path.name for path in paths],
-                                 ["App.xcresult", "ApplicationFoundation.xcresult"])
+                expected_names = ["App.xcresult", "ApplicationFoundation.xcresult"]
+                expected_results = ["Passed", "Failed"]
+                if target == "test":
+                    expected_names += ["App-iPadPrivacy.xcresult", "BrowserDownloadMultiScene.xcresult"]
+                    expected_results += ["Passed", "Passed"]
+                self.assertEqual([path.name for path in paths], expected_names)
                 for path in paths:
                     self.assertTrue(path.is_dir(), f"Native result path was removed: {path}")
                 self.assertEqual([json.loads((path / "fixture-completed.json").read_text())
-                                  ["result"] for path in paths], ["Passed", "Failed"])
+                                  ["result"] for path in paths], expected_results)
+                self.assert_builds_cleaned()
+
+    def test_functional_failure_collects_command_and_validation_errors_and_runs_later_lanes(self):
+        result = self.run_make("test", {"fail_on": 1, "partial_on": 1, "missing_on": 2})
+        self.assertNotEqual(result.returncode, 0)
+        paths = [Path(args[args.index("-resultBundlePath") + 1])
+                 for args in self.fixture.executions()]
+        self.assertEqual([path.name for path in paths], [
+            "App.xcresult", "ApplicationFoundation.xcresult", "App-iPadPrivacy.xcresult",
+            "BrowserDownloadMultiScene.xcresult",
+        ])
+        self.assertTrue((paths[0] / "fixture-partial").is_file())
+        self.assertFalse(paths[1].exists())
+        self.assertTrue(all((path / "fixture-completed.json").is_file() for path in paths[2:]))
+        self.assertIn("App-xcodebuild=65", result.stderr)
+        self.assertIn("App-validation=1", result.stderr)
+        self.assertIn("ApplicationFoundation-validation=1", result.stderr)
+        self.assertIn("Error 65", result.stderr)
+        self.assert_builds_cleaned()
+
+    def test_functional_identity_validation_rejects_missing_and_skipped_required_ui_tests(self):
+        for plan, reason in (({"omit_ui_identity": True}, "test identities differ"),
+                             ({"skip_ui_identity": True}, "skipped")):
+            with self.subTest(plan=plan):
+                result = self.run_make("test", plan)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(reason, result.stderr)
+                self.assertIn("BrowserDownloadMultiScene-validation=1", result.stderr)
+                self.assertEqual(len(self.fixture.executions()), 4)
+                self.assert_builds_cleaned()
+
+    def test_functional_suites_reject_missing_required_cases_and_unexpected_skips(self):
+        privacy = "AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)"
+        for mutation, identity, label in (
+            ("omit_case", HTTP_MATRIX_ID, "App"),
+            ("omit_case", "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances()", "App"),
+            ("skip_case", "RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification()", "ApplicationFoundation"),
+            ("skip_case", privacy, "App-iPadPrivacy"),
+        ):
+            with self.subTest(mutation=mutation, identity=identity):
+                result = self.run_make("test", {mutation: identity})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(label + "-validation=1", result.stderr)
+                self.assertEqual(len(self.fixture.executions()), 4)
+                self.assert_builds_cleaned()
+
+    def test_passing_http_parent_requires_each_argument_pair_to_pass_once(self):
+        passing = self.fixture.http_matrix_arguments
+        attachment = next(row for row in passing if row["name"] == ".persistentPrivate, .attachment")
+        other_rows = [row for row in passing if row != attachment]
+        skipped = dict(attachment, result="Skipped")
+        unknown = dict(attachment, name=".persistentPrivate, .unknown")
+        for scenario, rows, diagnostic in (
+            ("parent only", [], attachment["name"]),
+            ("missing attachment", other_rows, attachment["name"]),
+            ("skipped attachment", [*other_rows, skipped], '"result":"Skipped"'),
+            ("substituted row", [*other_rows, unknown], unknown["name"]),
+            ("duplicate instead of attachment", [*other_rows, other_rows[0]], other_rows[0]["name"]),
+            ("extra copy of attachment", [*passing, attachment], attachment["name"]),
+        ):
+            with self.subTest(scenario=scenario):
+                self.fixture.http_matrix_arguments = rows
+                result = self.run_make("test")
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("App HTTP matrix", result.stderr)
+                self.assertIn(diagnostic, result.stderr)
+                self.assertIn("App-validation=1", result.stderr)
+                paths = [Path(args[args.index("-resultBundlePath") + 1])
+                         for args in self.fixture.executions()]
+                self.assertEqual([path.name for path in paths], [
+                    "App.xcresult", "ApplicationFoundation.xcresult", "App-iPadPrivacy.xcresult",
+                    "BrowserDownloadMultiScene.xcresult",
+                ])
+                self.assertEqual([json.loads((path / "fixture-completed.json").read_text())["result"]
+                                  for path in paths], ["Passed"] * 4)
                 self.assert_builds_cleaned()
 
     def test_snapshot_app_failure_still_runs_package_and_remains_failed(self):

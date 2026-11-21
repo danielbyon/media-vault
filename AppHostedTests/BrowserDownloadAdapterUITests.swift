@@ -14,12 +14,17 @@ import XCUIAutomation
 @MainActor
 final class BrowserDownloadAdapterUITests: XCTestCase {
     private enum Failure: Error { case deadline, observations }
+    private let launchNonce = UUID()
+    private lazy var reader = BrowserDownloadPassiveReader(processNonce: launchNonce)
 
     func testMountedBrowserUsesCommandAdapterAndReturnsFromOverview() throws {
         let app = XCUIApplication(bundleIdentifier: "com.danielbyon.mediavault.browserdownloadqualificationhost")
         app.launchArguments = [
             "--browser-download-production-qualification",
             "--browser-download-simulated-protection-readback",
+            "--browser-download-passive-scene-census",
+            BrowserDownloadObservationContext.launchNonceArgument,
+            launchNonce.uuidString,
         ]
         app.launch()
         defer { app.terminate() }
@@ -65,17 +70,14 @@ final class BrowserDownloadAdapterUITests: XCTestCase {
     }
 
     private func observations(_ app: XCUIApplication) throws -> [[String: String]] {
-        let refresh = app.buttons["downloadQualificationRefreshObservations"]
-        guard refresh.isHittable else {
+        let node = app.staticTexts["downloadQualificationPassiveObservations"]
+        guard node.exists else {
             throw Failure.observations
         }
 
-        refresh.tap()
-        guard let value = app.staticTexts["downloadQualificationObservations"].value as? String else {
-            throw Failure.observations
-        }
-
-        return try JSONDecoder().decode([[String: String]].self, from: Data(value.utf8))
+        let sample = try BrowserDownloadPassiveObservation.decode(node.value as? String)
+        try reader.validate(sample)
+        return sample.events
     }
 
     private func wait(_ app: XCUIApplication, _ milestone: String, condition: @escaping @MainActor () -> Bool) throws {

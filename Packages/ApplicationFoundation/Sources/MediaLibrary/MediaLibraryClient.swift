@@ -92,6 +92,16 @@ final class MediaLibraryResourceLoadFence: Sendable {
             }
     }
 
+    #if DEBUG
+    /// Samples both generations under the mutex so an inspection cannot span two sessions.
+    func permitsInspection(resource: UInt64, ingestion: UInt64, requiresAuthentication: Bool) -> Bool {
+        generation.withLock {
+            $0.generation == resource && $0.downloadGeneration == ingestion
+                && (!requiresAuthentication || ($0.downloadAuthorized && $0.downloadProcessingActive))
+        }
+    }
+    #endif
+
     /// Revokes only this operation's unclaimed transaction before asynchronous cleanup queues.
     func invalidateDownload(_ operationID: UUID) {
         _ = generation.withLock { $0.discardedDownloadIDs.insert(operationID) }
@@ -124,6 +134,10 @@ final class MediaLibraryResourceLoadFence: Sendable {
 
 /// The dependency boundary used by the TCA media-library feature.
 public struct MediaLibraryClient: Sendable {
+    #if DEBUG
+    var downloadInspection: DownloadInspection?
+    #endif
+
     /// Loads all assets committed to the vault store.
     public var loadAssets: @Sendable () async throws -> [MediaAsset]
 
@@ -404,6 +418,9 @@ extension MediaLibraryClient: DependencyKey {
         client.completedDownloadPresentationURLOperation = { operationID, generation in
             try await importer.completedDownloadPresentationURL(operationID: operationID, generation: generation)
         }
+        #if DEBUG
+        client.downloadInspection = DownloadInspection(importer: importer, fence: resourceLoadFence)
+        #endif
         return client
     }
 

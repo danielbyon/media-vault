@@ -66,6 +66,9 @@ final class BrowserDownloadOwner {
         var acceptance: Task<Void, Never>?
         var discardRequested = false
         var completionVerified = false
+        #if DEBUG
+        var fileIdentityAtCompletion: BrowserDownloadScratchStore.OwnershipFileIdentity?
+        #endif
         var acceptanceUncertain = false
         var acceptanceRejected = false
         var presentationFilename: String?
@@ -92,6 +95,9 @@ final class BrowserDownloadOwner {
     #if DEBUG
     /// Optional path-free transfer evidence for the standalone qualification host.
     var qualificationTransferObservation: (@MainActor (String, [String: String]) -> Void)?
+
+    /// Traces decisions for the HTTP fixture even if a callback reaches a detached tab context.
+    var policyHandoffObservation: (@MainActor (String, UUID?, BrowserNavigationOperationID?) -> Void)?
     #endif
 
     private func recordTransfer(_ event: String, _ fields: [String: String]) {
@@ -255,12 +261,15 @@ final class BrowserDownloadOwner {
         presentationDidEnd(request)
     }
 
+    private var cleanupNeedsRetry: Bool {
+        startupCleanupPending || !cleanupFailures.isEmpty || presentationExport?.cleanupFailed == true
+    }
+
     var snapshot: BrowserDownloadSnapshot {
         var value = BrowserDownloadSnapshot()
         value.revision = revision
         value.generation = generation
-        value.cleanupNeedsRetry = startupCleanupPending || !cleanupFailures.isEmpty
-            || presentationExport?.cleanupFailed == true
+        value.cleanupNeedsRetry = cleanupNeedsRetry
         value.isAvailable = authorizationActive && authorization() && !value.cleanupNeedsRetry
         value.notice = value.cleanupNeedsRetry ? .cleanupRequired : notice
         value.presentation = value.isAvailable ? presentation : nil
@@ -592,6 +601,9 @@ final class BrowserDownloadOwner {
         entry.filename = allocation.destination.lastPathComponent
         do {
             try store.prepare(allocation)
+            #if DEBUG
+            policyHandoffObservation?("destination.prepared", nil, nil)
+            #endif
             return allocation.destination
         } catch {
             #if DEBUG
@@ -664,6 +676,10 @@ final class BrowserDownloadOwner {
         }
 
         do {
+            #if DEBUG
+            var allocation = allocation
+            allocation.recordVerifiedIdentity = { entry.fileIdentityAtCompletion = $0 }
+            #endif
             entry.receivedBytes = try store.verifyCompleted(allocation)
             guard entry.receivedBytes <= BrowserDownloadReservations.itemLimit else {
                 notice = .transferFailed
@@ -1221,28 +1237,36 @@ final class BrowserDownloadOwner {
     }
 
     #if DEBUG
-    // The standalone qualification target calls this method; the canonical analyzer corpus
-    // builds the package and inert hosted target, so it cannot see that cross-target reference.
-    // swiftlint:disable unused_declaration
-    /// Qualification-only inspection of an already completed, currently authorized allocation.
-    /// Uses the same live authorization, generation, cleanup and native-file checks as presentation.
-    /// The URL never enters reducer state; inspection does not acquire a presentation or retain bytes.
-    func qualificationCompletedFile(_ id: BrowserDownloadID) throws -> URL {
-        guard let entry = currentEntry(id), entry.isReady, entry.writerStopped,
-              let allocation = entry.allocation
-        else {
-            throw BrowserDownloadScratchStore.Failure.unsafeFile
+    enum CompletedFileInspectionError: Error, Equatable {
+        case unauthorized
+        case unavailable
+    }
+
+    /// Checks a finished download under the current grant. A failed check leaves the entry,
+    /// its presentation, and the file's existing attributes intact.
+    func inspectCompletedFile(_ id: BrowserDownloadID) throws -> URL {
+        guard authorizationActive, authorization() else {
+            throw CompletedFileInspectionError.unauthorized
+        }
+        guard protectedDataAvailable(), !cleanupNeedsRetry, let entry = entries[id],
+              !entry.revoked, entry.isReady, entry.writerStopped,
+              let allocation = entry.allocation, let identity = entry.fileIdentityAtCompletion else {
+            throw CompletedFileInspectionError.unavailable
         }
 
+        try store.inspectCompleted(allocation, expectedBytes: entry.receivedBytes, verifiedIdentity: identity)
+        return allocation.destination
+    }
+
+    /// The qualification host receives `unsafeFile` for an ineligible entry.
+    /// Filesystem errors retain their original type.
+    func qualificationCompletedFile(_ id: BrowserDownloadID) throws -> URL {
         do {
-            _ = try store.verifyCompleted(allocation)
-            return allocation.destination
-        } catch {
-            revoke(entry.id)
-            throw error
+            return try inspectCompletedFile(id)
+        } catch is CompletedFileInspectionError {
+            throw BrowserDownloadScratchStore.Failure.unsafeFile
         }
     }
-    // swiftlint:enable unused_declaration
     #endif
 
     /// Retries only stopped writers' cleanup. Active cancellation ownership remains in place.

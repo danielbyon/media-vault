@@ -189,12 +189,24 @@ extension MediaLibraryImporter {
         }
 
         let assets = try await store.loadAssets()
+        return try downloadStorage(records, entries: snapshot.entries, canonicalPaths: Self.canonicalPaths(for: assets))
+    }
+
+    static func canonicalPaths(for assets: [MediaAsset]) throws -> Set<String> {
         let canonicalResources = assets.flatMap(\.resources)
         guard canonicalResources.allSatisfy({ $0.relativePath == $0.id.uuidString.lowercased() }) else {
             throw MediaLibraryStoreError.corrupt
         }
 
-        let canonicalPaths = Set(canonicalResources.map(\.relativePath))
+        return Set(canonicalResources.map(\.relativePath))
+    }
+
+    /// Applies the same capacity rules to journal and canonical rows captured by the caller.
+    nonisolated func downloadStorage(
+        _ records: [CompletedDownloadRecord],
+        entries: [MediaIngestionJournalEntry],
+        canonicalPaths: Set<String>,
+    ) throws -> AcceptedDownloadStorage {
         let inventory = try resources.temporaryResourceInventory(excluding: canonicalPaths)
         var bytesByOperation: [String: Int64] = [:]
         for item in inventory {
@@ -206,7 +218,7 @@ extension MediaLibraryImporter {
             bytesByOperation[item.operationKey] = sum.partialValue
         }
         let browserIDs = Set(records.map(\.operationID))
-        for entry in snapshot.entries where !browserIDs.contains(entry.id) {
+        for entry in entries where !browserIDs.contains(entry.id) {
             switch entry.state {
             case .received,
                  .validating,

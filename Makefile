@@ -22,66 +22,91 @@ NATIVE_SNAPSHOT_BUILD_DIRECTORY ?= $(CURDIR)/.build
 APP_SNAPSHOT_SUITE := AppTests/RootSurfaceSnapshotTests
 APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates
 APP_HOSTED_PRIVACY_OCCLUSION_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)
+APP_HOSTED_DOWNLOAD_EVIDENCE_TESTS := \
+	BrowserDownloadSceneEvidenceTests/testResizeHandleNormalizesMeasuredRotatedFrame \
+	BrowserDownloadSceneEvidenceTests/testResizeHandleRejectsUnrelatedOffscreenFrame \
+	BrowserDownloadSceneEvidenceTests/testResizeHandleUsesScreenSpaceOriginWithOffsetCard \
+	BrowserDownloadSceneEvidenceTests/testResizeGestureDeltaMovesOutwardPerAvailableAxis \
+	BrowserDownloadSceneEvidenceTests/testResizeGestureDeltaShrinksFullScreenCardOnBothAxes \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionAllowsVisibleNonKeyedAuxiliaryWindow \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionRejectsVisibleCover \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionRejectsZeroOrMultipleVisibleKeyedWindows \
+	BrowserDownloadSceneEvidenceTests/testResizeSceneRequiresUniqueNewActiveSession \
+	BrowserDownloadSceneEvidenceTests/testResizeTimeoutDiagnosticsReadOptionalValuesIndependently \
+	BrowserDownloadSceneEvidenceTests/testPassiveSceneCensusSelectsNewestWindowSnapshot \
+	BrowserDownloadSceneEvidenceTests/testPassiveSceneCensusRejectsConflictingSnapshotsAtSameTime \
+	BrowserDownloadSceneEvidenceTests/testLatestFreshSafeRootsRequiresEveryRegistrationAndUsesMonotonicTime \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionAllowsSnapshotBetweenActivationAndCensus \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsSnapshotBeforeActivation \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsWrongRun \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsWrongGeneration \
+	BrowserDownloadSceneEvidenceTests/testFinalCensusGenerationRejectsNewerUnsafeObservation \
+	BrowserDownloadSceneEvidenceTests/testFinalCensusGenerationRejectsNewerObservationWithoutGeneration \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsSnapshotAfterCensus \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionAcceptsInclusiveBoundaries \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsNonFiniteTimestamps \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionUsesLatestObservationWithinInterval \
+	BrowserDownloadSceneEvidenceTests/testReactivationAvailabilityRejectsMismatchWithFinalRegisteredScenes \
+	BrowserDownloadSceneEvidenceTests/testResizeGestureMarkerSelectsExactNewSceneRegistrationAndRun \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessAcceptsMarkerOnlyLatestObservation \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessRejectsCoverInCurrentCensus \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy \
+	BrowserDownloadSceneEvidenceTests/testInitialMountedSceneWaitsForCoherentRegistrationsWhileProofIsPending \
+	BrowserDownloadSceneEvidenceTests/testReactivationRequiresMatchingLiveRevisionForEveryOriginalSceneRegistration \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootAcceptsMatchingConfirmationAfterPendingCensus \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsUnmatchedOrMalformedLiveRows \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresCurrentRetainedDownloadCounts \
+	BrowserDownloadSceneEvidenceTests/testRetainedAllocationRejectsEveryRecordedRemovalOutcome \
+	BrowserDownloadSceneEvidenceTests/testRetainedAllocationRemovalAtCensusBoundaryPreventsAcceptance \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsMissingOrMismatchedConfirmation \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsSupersededOrUnpairedProof \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresCoverAndNativeBarrierAbsence \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresProofBeforeOriginalDeadline \
+	BrowserDownloadSceneEvidenceTests/testPendingLiveRootCannotQualifyAfterDeadline \
+	BrowserDownloadTransferWitnessTests/testDelayedHandoffParserRequiresNativeCallbacksAfterLock \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessAcceptsCorrelatedNativeProgress \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsMissingHandoffOrProgress \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsServerEvidenceAfterReadiness \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsEarlyTerminalAndCleanupFailure \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsPrematureCleanupWithoutFixtureRequest \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessIgnoresPrematureCleanupForAnotherOperation \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessIgnoresPrematureCleanupFromAnotherRun \
+	BrowserDownloadTransferWitnessTests/testContinuationAcceptsFiniteResponseAndNativeFinish \
+	BrowserDownloadTransferWitnessTests/testContinuationRejectsMissingNativeOrTransportWitness \
+	BrowserDownloadTransferWitnessTests/testContinuationRejectsCancellationFailureAndPrematureCleanup \
+	BrowserDownloadTransferWitnessTests/testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessDiagnosticsAreRedactedAndBounded \
+	BrowserDownloadObservationReceiptTests/passiveReaderAcceptsAvailableMilestoneBeforeWaiting \
+	BrowserDownloadObservationReceiptTests/passiveReaderPollsUntilMilestoneAppears \
+	BrowserDownloadObservationReceiptTests/passiveReaderRejectsUnchangedMilestone \
+	BrowserDownloadObservationReceiptTests/passiveReaderRejectsWrongProcessRunAndContext \
+	BrowserDownloadObservationReceiptTests/passiveReaderPreservesInvalidatedMalformedAndMissing \
+	BrowserDownloadObservationReceiptTests/passiveReaderRejectsMilestoneAtAndAfterDeadline \
+	BrowserDownloadObservationReceiptTests/passiveReaderChecksDeadlineAfterWaiterCompletes \
+	BrowserDownloadObservationReceiptTests/passiveReaderPreservesInterruption \
+	BrowserDownloadObservationReceiptTests/passiveReaderMapsPendingTimeoutToOriginalDeadline
 BROWSER_DOWNLOAD_MULTI_SCENE_TESTS := \
 	BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene \
 	BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable \
-	BrowserDownloadMultiSceneUITests/testResizeHandleNormalizesMeasuredRotatedFrame \
-	BrowserDownloadMultiSceneUITests/testResizeHandleRejectsUnrelatedOffscreenFrame \
-	BrowserDownloadMultiSceneUITests/testResizeHandleUsesScreenSpaceOriginWithOffsetCard \
-	BrowserDownloadMultiSceneUITests/testResizeGestureDeltaMovesOutwardPerAvailableAxis \
-	BrowserDownloadMultiSceneUITests/testResizeGestureDeltaShrinksFullScreenCardOnBothAxes \
-	BrowserDownloadMultiSceneUITests/testResizeWindowSelectionAllowsVisibleNonKeyedAuxiliaryWindow \
-	BrowserDownloadMultiSceneUITests/testResizeWindowSelectionRejectsVisibleCover \
-	BrowserDownloadMultiSceneUITests/testResizeWindowSelectionRejectsZeroOrMultipleVisibleKeyedWindows \
-	BrowserDownloadMultiSceneUITests/testResizeSceneRequiresUniqueNewActiveSession \
-	BrowserDownloadMultiSceneUITests/testResizeTimeoutDiagnosticsReadOptionalValuesIndependently \
-	BrowserDownloadMultiSceneUITests/testPassiveSceneCensusSelectsNewestWindowSnapshot \
-	BrowserDownloadMultiSceneUITests/testPassiveSceneCensusRejectsConflictingSnapshotsAtSameTime \
-	BrowserDownloadMultiSceneUITests/testLatestFreshSafeRootsRequiresEveryRegistrationAndUsesMonotonicTime \
-	BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionAllowsSnapshotBetweenActivationAndCensus \
-	BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsSnapshotBeforeActivation \
-	BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsWrongRun \
-	BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsWrongGeneration \
-	BrowserDownloadMultiSceneUITests/testFinalCensusGenerationRejectsNewerUnsafeObservation \
-	BrowserDownloadMultiSceneUITests/testFinalCensusGenerationRejectsNewerObservationWithoutGeneration \
-	BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsSnapshotAfterCensus \
-	BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionAcceptsInclusiveBoundaries \
-	BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionRejectsNonFiniteTimestamps \
-	BrowserDownloadMultiSceneUITests/testReactivationOwnerSelectionUsesLatestObservationWithinInterval \
-	BrowserDownloadMultiSceneUITests/testReactivationAvailabilityRejectsMismatchWithFinalRegisteredScenes \
-	BrowserDownloadMultiSceneUITests/testResizeGestureMarkerSelectsExactNewSceneRegistrationAndRun \
-	BrowserDownloadMultiSceneUITests/testResizeWindowWitnessAcceptsMarkerOnlyLatestObservation \
-	BrowserDownloadMultiSceneUITests/testResizeWindowWitnessRejectsCoverInCurrentCensus \
-	BrowserDownloadMultiSceneUITests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy
-# Simulator-safe single-scene continuation, presentation, and witness regressions.
-# Physical Home continuation remains a separately authorized device qualification.
+	BrowserDownloadMultiSceneUITests/testPassiveAccessibilityReadsRefreshCensusWithoutPublishingRootEvents \
+	BrowserDownloadMultiSceneUITests/testHostedRootUpdatePublishesCurrentRevisionWithoutReadFeedback
+# Real scenario actions and passive accessibility reads use the qualification host on iPad.
 BROWSER_DOWNLOAD_QUALIFICATION_TESTS := \
-BrowserDownloadQualificationUITests/testAcceptedPolicyHandoffAfterLockCompletesHiddenUntilFreshAuthentication \
-BrowserDownloadQualificationUITests/testDelayedHandoffParserRequiresNativeCallbacksAfterLock \
-BrowserDownloadQualificationUITests/testQuickLookHomeRevokesAndFreshDownloadRecovers \
-BrowserDownloadQualificationUITests/testShareHomeRevokesAndFreshDownloadRecovers \
-BrowserDownloadQualificationUITests/testNormalQualificationModeReturnsToAuthenticatedBrowserAfterHome \
-BrowserDownloadQualificationUITests/testActiveDownloadQualificationModeAutoLocksAfterRealHomeTransition \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessAcceptsCorrelatedNativeProgress \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsMissingHandoffOrProgress \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsServerEvidenceAfterReadiness \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsEarlyTerminalAndCleanupFailure \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessRejectsPrematureCleanupWithoutFixtureRequest \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessIgnoresPrematureCleanupForAnotherOperation \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessIgnoresPrematureCleanupFromAnotherRun \
-BrowserDownloadQualificationUITests/testContinuationAcceptsFiniteResponseAndNativeFinish \
-BrowserDownloadQualificationUITests/testContinuationRejectsMissingNativeOrTransportWitness \
-BrowserDownloadQualificationUITests/testContinuationRejectsCancellationFailureAndPrematureCleanup \
-BrowserDownloadQualificationUITests/testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion \
-BrowserDownloadQualificationUITests/testSlowKnownWitnessDiagnosticsAreRedactedAndBounded \
-BrowserDownloadQualificationUITests/testSlowKnownDownloadControlIsAccessibleOnMountedBrowser \
-BrowserDownloadQualificationUITests/testActiveDiscardFailureRetryAndAuthenticationLoss \
-BrowserDownloadQualificationUITests/testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset \
-BrowserDownloadQualificationUITests/testRepeatedPNGDownloadSkipsDuplicateAndRetainsCanonicalIdentity \
-BrowserDownloadQualificationUITests/testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation \
-BrowserDownloadQualificationUITests/testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch \
-BrowserDownloadQualificationUITests/testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible
+	BrowserDownloadQualificationUITests/testAcceptedPolicyHandoffAfterLockCompletesHiddenUntilFreshAuthentication \
+	BrowserDownloadQualificationUITests/testQuickLookHomeRevokesAndFreshDownloadRecovers \
+	BrowserDownloadQualificationUITests/testShareHomeRevokesAndFreshDownloadRecovers \
+	BrowserDownloadQualificationUITests/testNormalQualificationModeReturnsToAuthenticatedBrowserAfterHome \
+	BrowserDownloadQualificationUITests/testActiveDownloadQualificationModeAutoLocksAfterRealHomeTransition \
+	BrowserDownloadQualificationUITests/testSlowKnownDownloadControlIsAccessibleOnMountedBrowser \
+	BrowserDownloadQualificationUITests/testActiveDiscardFailureRetryAndAuthenticationLoss \
+	BrowserDownloadQualificationUITests/testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset \
+	BrowserDownloadQualificationUITests/testRepeatedPNGDownloadSkipsDuplicateAndRetainsCanonicalIdentity \
+	BrowserDownloadQualificationUITests/testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation \
+	BrowserDownloadQualificationUITests/testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch \
+	BrowserDownloadQualificationUITests/testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible \
+	BrowserDownloadQualificationUITests/testPassiveEventHistoryReadsTheRealMountedBrowserBridge
 PACKAGE_SNAPSHOT_SUITES := \
 	AppFeatureTests/VaultFeatureViewSnapshotTests \
 	CalculatorFeatureTests/CalculatorViewSnapshotTests \
@@ -130,6 +155,41 @@ build:
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Release -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" build; \
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPAD_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" build
 
+# App and package schemes run mixed suites. Require each named regression to pass
+# while counting every other test case and checking the one physical-only exception.
+# Xcode counts the HTTP matrix once in the summary. Its argument names and
+# individual results are direct children of that test case in the result tree.
+define functional_suite_inventory
+def verify_http_matrix:
+  [.[] | select(.nodeIdentifier == "AppHostedUITests/BrowserDownloadHTTPTests/originatingMatrix(profile:row:)")] as $parents |
+  [(".persistentPrivate", ".ephemeral") as $profile |
+   (".attachment", ".inline", ".octet", ".redirect", ".protected", ".post", ".blob", ".attribute") |
+   {name: "\($profile), \(.)", result: "Passed"}] as $expected |
+  [$parents[].children[]? | select(.nodeType == "Arguments") | {name, result}] as $rows |
+  if ($parents | length) != 1 then error("App HTTP matrix parent count: \($parents | length)")
+  elif ($rows | sort) != ($expected | sort) then
+    error("App HTTP matrix missing passes: \($expected - $rows), unexpected results: \($rows - $expected), duplicate pairs: \($rows | group_by(.name) | map(select(length > 1) | .[0].name))")
+  elif $parents[0].result != "Passed" then error("App HTTP matrix parent result: \($parents[0].result)")
+  else . end;
+[.testNodes[] | recurse(.children[]?) | select(.nodeType == "Test Case")] |
+if $lane == "App" then verify_http_matrix else . end |
+. as $cases |
+[$cases[] | select(.result == "Passed") | .nodeIdentifier | split("/") | .[-2:] | join("/") | rtrimstr("()")] as $passed |
+[$cases[] | select(.result == "Skipped") | .nodeIdentifier] as $skipped |
+[$ARGS.positional[] as $id | select(([$passed[] | select(. == $id)] | length) != 1) | $id] as $missing |
+$summary[0] as $s |
+if ($cases | length) == 0 or $s.result != "Passed" or $s.totalTestCount != ($cases | length)
+   or $s.passedTests != ($passed | length) or $s.skippedTests != ($skipped | length)
+   or $s.failedTests != 0 or $s.expectedFailures != 0
+   or ($passed | length) + ($skipped | length) != ($cases | length)
+then error("\($lane) has incomplete or failed test results")
+elif ($skipped - [$physical] | length) != 0 then error("\($lane) unexpected skipped tests: \($skipped)")
+elif ($missing | length) != 0 then error("\($lane) requires one pass for each of: \($missing)")
+else "\($lane): \($s.passedTests) passed, \($s.skippedTests) skipped"
+end
+endef
+
+test: export FUNCTIONAL_SUITE_INVENTORY = $(value functional_suite_inventory)
 test:
 	@set -euo pipefail; \
 	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
@@ -149,36 +209,37 @@ test:
 	}; \
 	trap cleanup_test_build EXIT; \
 	trap 'exit 143' TERM INT; \
-	assert_tests_ran() { \
-		label="$$1"; bundle="$$2"; \
-		if [[ ! -d "$$bundle" ]]; then \
-			printf 'test results bundle missing for %s: %s\n' "$$label" "$$bundle" >&2; \
-			return 1; \
-		fi; \
-		if ! summary=$$($(XCODE_WRAPPER) xcrun xcresulttool get test-results summary --path "$$bundle" --compact 2>&1); then \
-			printf 'test results summary unreadable for %s: %s\n' "$$label" "$$bundle" >&2; \
-			printf '%s\n' "$$summary" >&2; \
-			return 1; \
-		fi; \
-		count=$$(printf '%s\n' "$$summary" | sed -n 's/.*"totalTestCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n 1); \
-		if [[ -z "$$count" ]]; then \
-			printf 'test results summary missing totalTestCount for %s: %s\n' "$$label" "$$bundle" >&2; \
-			return 1; \
-		fi; \
-		if [[ ! "$$count" =~ ^[1-9][0-9]*$$ ]]; then \
-			printf 'zero tests recorded for %s: %s totalTestCount=%s\n' "$$label" "$$bundle" "$$count" >&2; \
-			return 1; \
-		fi; \
-		printf '%s: %s tests\n' "$$label" "$$count"; \
+	first_failure=0; \
+	failure_summary=""; \
+	run_check() { \
+		local label="$$1" code; shift; \
+		"$$@" && return 0; \
+		code=$$?; \
+		failure_summary+="$$label=$$code "; \
+		if (( first_failure == 0 )); then first_failure=$$code; fi; \
+		return 0; \
 	}; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test; \
-	assert_tests_ran App "$$result_root/App.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$result_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
-	assert_tests_ran ApplicationFoundation "$$result_root/ApplicationFoundation.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$result_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
-	assert_tests_ran App-iPad-privacy "$$result_root/App-iPadPrivacy.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme BrowserTabOverviewUITests -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/BrowserDownloadMultiScene" -resultBundlePath "$$result_root/BrowserDownloadMultiScene.xcresult" -parallel-testing-enabled NO $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),-only-testing:BrowserTabOverviewUITests/$(test)) test; \
-	$(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/BrowserDownloadMultiScene.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),--expected-test $(test))
+	assert_suite_ran() { \
+		local lane="$$1" bundle="$$2" physical="$$3"; shift 3; \
+		local summary="$$test_root/$$lane-summary.json"; \
+		if [[ ! -d "$$bundle" ]]; then \
+			printf 'test results bundle missing for %s: %s\n' "$$lane" "$$bundle" >&2; \
+			return 1; \
+		fi; \
+		$(XCODE_WRAPPER) xcrun xcresulttool get test-results summary --path "$$bundle" --compact > "$$summary" || return 1; \
+		$(XCODE_WRAPPER) xcrun xcresulttool get test-results tests --path "$$bundle" --compact | \
+			/usr/bin/jq -er --slurpfile summary "$$summary" --arg lane "$$lane" --arg physical "$$physical" --args "$$FUNCTIONAL_SUITE_INVENTORY" "$$@" || return 1; \
+	}; \
+	run_check App-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test; \
+	run_check App-validation assert_suite_ran App "$$result_root/App.xcresult" 'AppHostedUITests/BrowserDownloadPersistenceIsolationTests/completedFilesRetainProtectionAndBackupExclusion()' $(APP_HOSTED_DOWNLOAD_EVIDENCE_TESTS); \
+	run_check ApplicationFoundation-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$result_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
+	run_check ApplicationFoundation-validation assert_suite_ran ApplicationFoundation "$$result_root/ApplicationFoundation.xcresult" '' VaultFeatureTests/globalLockFencesPendingBrowserProfileTransition RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification; \
+	run_check App-iPadPrivacy-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$result_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
+	run_check App-iPadPrivacy-validation $(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/App-iPadPrivacy.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 --expected-test '$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)'; \
+	run_check BrowserDownloadMultiScene-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme BrowserTabOverviewUITests -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/BrowserDownloadMultiScene" -resultBundlePath "$$result_root/BrowserDownloadMultiScene.xcresult" -parallel-testing-enabled NO $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),-only-testing:BrowserTabOverviewUITests/$(test)) test; \
+	run_check BrowserDownloadMultiScene-validation $(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/BrowserDownloadMultiScene.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),--expected-test $(test)); \
+	if [[ -n "$$failure_summary" ]]; then printf 'test failures: %s\n' "$$failure_summary" >&2; fi; \
+	exit "$$first_failure"
 
 # Exercise the native presentation snapshot suites on the canonical 2x iPad.
 # UIKit lifecycle protection remains covered by behavioral tests in `make test`.

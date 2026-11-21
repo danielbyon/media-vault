@@ -329,6 +329,192 @@ struct BrowserDownloadCoreTests {
         #expect(fixture.owner.snapshot == recoveredSnapshot)
     }
 
+    #if DEBUG
+    @Test
+    func completedFileInspectionRequiresLiveAccessWithoutRevokingPresentation() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let transfer = try fixture.start()
+        try Data([1, 2]).write(to: transfer.url)
+        #expect(throws: BrowserDownloadOwner.CompletedFileInspectionError.unavailable) {
+            try fixture.owner.inspectCompletedFile(transfer.id)
+        }
+        fixture.owner.finished(transfer.id)
+        fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .present(transfer.id, .preview)))
+        let authorized = fixture.owner.snapshot
+        _ = try #require(authorized.presentation)
+        #expect(try fixture.owner.inspectCompletedFile(transfer.id) == transfer.url)
+        fixture.control.authorized = false
+        let concealed = fixture.owner.snapshot
+        #expect(throws: BrowserDownloadOwner.CompletedFileInspectionError.unauthorized) {
+            try fixture.owner.inspectCompletedFile(transfer.id)
+        }
+        #expect(throws: BrowserDownloadScratchStore.Failure.unsafeFile) {
+            try fixture.owner.qualificationCompletedFile(transfer.id)
+        }
+        #expect(fixture.owner.snapshot == concealed)
+        fixture.control.authorized = true
+        fixture.control.protectedDataAvailable = false
+        #expect(throws: BrowserDownloadOwner.CompletedFileInspectionError.unavailable) {
+            try fixture.owner.inspectCompletedFile(transfer.id)
+        }
+        #expect(fixture.owner.snapshot == authorized)
+        #expect(fixture.owner.retainedCount == 1)
+    }
+
+    @Test
+    func completedFileInspectionLeavesFailedAttributesAndOwnerIntact() throws {
+        let support = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false,
+        )
+        let fixture = try DownloadCoreFixture(parentDirectory: support)
+        defer { fixture.removeTestFiles() }
+        let transfer = try fixture.start()
+        let bytes = Data([1, 2])
+        try bytes.write(to: transfer.url)
+        fixture.owner.finished(transfer.id)
+        fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .present(transfer.id, .preview)))
+        let before = fixture.owner.snapshot
+        _ = try #require(before.presentation)
+        #expect(try fixture.owner.inspectCompletedFile(transfer.id) == transfer.url)
+
+        fixture.control.failProtection = true
+        #expect(throws: BrowserDownloadScratchStore.Failure.protectionUnavailable) {
+            try fixture.owner.inspectCompletedFile(transfer.id)
+        }
+        #expect(throws: BrowserDownloadScratchStore.Failure.protectionUnavailable) {
+            try fixture.owner.qualificationCompletedFile(transfer.id)
+        }
+        fixture.control.failProtection = false
+        // Backup exclusion can be inherited. Clear each ancestor owned by this fixture first.
+        let locations = [fixture.root, transfer.url.deletingLastPathComponent(), transfer.url]
+        func backupExclusion(at url: URL) throws -> Bool? {
+            let freshURL = URL(fileURLWithPath: url.path, isDirectory: url.hasDirectoryPath)
+            return try freshURL.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        }
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = false
+        for url in locations {
+            var freshURL = URL(fileURLWithPath: url.path, isDirectory: url.hasDirectoryPath)
+            try freshURL.setResourceValues(values)
+            let cleared = try backupExclusion(at: url)
+            try #require(cleared == false)
+        }
+        #expect(throws: BrowserDownloadScratchStore.Failure.backupExclusionUnavailable) {
+            try fixture.owner.inspectCompletedFile(transfer.id)
+        }
+        #expect(throws: BrowserDownloadScratchStore.Failure.backupExclusionUnavailable) {
+            try fixture.owner.qualificationCompletedFile(transfer.id)
+        }
+        #expect(try locations.allSatisfy { try backupExclusion(at: $0) == false })
+        #expect(try Data(contentsOf: transfer.url) == bytes)
+        #expect(fixture.owner.snapshot == before)
+    }
+
+    @Test
+    func completedFileInspectionRejectsSizeChangesAfterCompletion() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let transfer = try fixture.start()
+        try Data([1, 2]).write(to: transfer.url)
+        fixture.owner.finished(transfer.id)
+        let before = fixture.owner.snapshot
+
+        let writer = try FileHandle(forWritingTo: transfer.url)
+        try writer.truncate(atOffset: 1)
+        try writer.close()
+        #expect(throws: BrowserDownloadScratchStore.Failure.unsafeFile) {
+            try fixture.owner.inspectCompletedFile(transfer.id)
+        }
+        #expect(try Data(contentsOf: transfer.url) == Data([1]))
+        #expect(fixture.owner.snapshot == before)
+    }
+
+    @Test
+    func completedFileInspectionRejectsSameSizeReplacementBeforeFirstRead() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let transfer = try fixture.start()
+        let bytes = Data([1, 2, 3])
+        try bytes.write(to: transfer.url)
+        fixture.owner.finished(transfer.id)
+        fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .present(transfer.id, .preview)))
+        let before = fixture.owner.snapshot
+        _ = try #require(before.presentation)
+
+        let files = FileManager.default
+        func fileFacts(at url: URL) throws
+            -> (inode: UInt64, attributes: [FileAttributeKey: AnyHashable], backupExcluded: Bool) {
+            let attributes = try files.attributesOfItem(atPath: url.path)
+            let inode = try #require(attributes[.systemFileNumber] as? UInt64)
+            let keys: Set<FileAttributeKey> = [
+                .systemNumber,
+                .size,
+                .type,
+                .ownerAccountID,
+                .posixPermissions,
+                .protectionKey,
+            ]
+            let checked = try attributes.filter { keys.contains($0.key) }.mapValues { try #require($0 as? AnyHashable) }
+            let freshURL = URL(fileURLWithPath: url.path)
+            let backup = try freshURL.resourceValues(forKeys: [.isExcludedFromBackupKey])
+            return (inode, checked, backup.isExcludedFromBackup == true)
+        }
+
+        let original = try fileFacts(at: transfer.url)
+        let saved = transfer.url.appendingPathExtension("original")
+        try files.moveItem(at: transfer.url, to: saved)
+        try files.copyItem(at: saved, to: transfer.url)
+        let replacement = try fileFacts(at: transfer.url)
+        try #require(replacement.inode != original.inode)
+        try #require(replacement.attributes == original.attributes)
+        try #require(original.backupExcluded && replacement.backupExcluded)
+        try #require(try Data(contentsOf: transfer.url) == bytes)
+
+        #expect(throws: BrowserDownloadScratchStore.Failure.unsafeFile) {
+            try fixture.owner.inspectCompletedFile(transfer.id)
+        }
+        #expect(throws: BrowserDownloadScratchStore.Failure.unsafeFile) {
+            try fixture.owner.qualificationCompletedFile(transfer.id)
+        }
+        #expect(fixture.owner.snapshot == before)
+        #expect(fixture.owner.retainedCount == 1)
+        #expect(try fileFacts(at: transfer.url) == replacement)
+        #expect(try Data(contentsOf: transfer.url) == bytes)
+
+        try files.removeItem(at: transfer.url)
+        try files.moveItem(at: saved, to: transfer.url)
+        #expect(try fixture.owner.inspectCompletedFile(transfer.id) == transfer.url)
+        #expect(fixture.owner.snapshot == before)
+    }
+
+    @Test
+    func completedFileInspectionLeavesUnrelatedCleanupPending() throws {
+        let fixture = try DownloadCoreFixture()
+        defer { fixture.removeTestFiles() }
+        let retained = try fixture.start()
+        let discarded = try fixture.start()
+        for transfer in [retained, discarded] {
+            try Data([1]).write(to: transfer.url)
+            fixture.owner.finished(transfer.id)
+        }
+        fixture.control.failRemoval = true
+        fixture.owner.execute(.init(snapshot: fixture.owner.snapshot, action: .discard(discarded.id)))
+        let pending = fixture.owner.snapshot
+        try #require(pending.cleanupNeedsRetry)
+        fixture.control.failRemoval = false
+
+        #expect(throws: BrowserDownloadOwner.CompletedFileInspectionError.unavailable) {
+            try fixture.owner.inspectCompletedFile(retained.id)
+        }
+        #expect(fixture.owner.snapshot == pending)
+        #expect(FileManager.default.fileExists(atPath: discarded.url.path))
+    }
+    #endif
+
     @Test(
         arguments: [false, true],
     )
@@ -1239,11 +1425,12 @@ private final class DownloadCoreFixture {
     init(
         authorized: Bool = true,
         availableBytes: (@MainActor () -> Int64?)? = nil,
+        parentDirectory: URL = FileManager.default.temporaryDirectory,
     ) throws {
         let faults = Control()
         faults.authorized = authorized
         control = faults
-        root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        root = parentDirectory.appendingPathComponent(
             "browser-download-core-" + UUID().uuidString,
             isDirectory: true,
         )

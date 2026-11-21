@@ -161,7 +161,7 @@ extension CompletedDownloadTests {
     }
 }
 
-private final class DownloadFixture: @unchecked Sendable {
+final class DownloadFixture: @unchecked Sendable {
     static let png = Data([
         137,
         80,
@@ -233,6 +233,7 @@ private final class DownloadFixture: @unchecked Sendable {
         130,
     ])
     let root: URL
+    let database: any DatabaseWriter
     let store: SQLiteMediaLibraryStore
     let resources: FileMediaResourceRepository
     let fence = MediaLibraryResourceLoadFence()
@@ -245,7 +246,8 @@ private final class DownloadFixture: @unchecked Sendable {
             protectionOperation: { _ in },
             completedDownloadRootURL: root.appendingPathComponent("NativeDownloads", isDirectory: true),
         )
-        store = try SQLiteMediaLibraryStore(database: PersistenceStore.makeInMemory())
+        database = try PersistenceStore.makeInMemory()
+        store = SQLiteMediaLibraryStore(database: database)
     }
 
     func importer() -> MediaLibraryImporter {
@@ -371,7 +373,7 @@ extension CompletedDownloadTests {
     }
 }
 
-private actor DownloadCommitBarrier {
+actor DownloadCommitBarrier {
     private var paused = false
     private var observer: CheckedContinuation<Void, Never>?
     private var continuation: CheckedContinuation<Void, Never>?

@@ -360,6 +360,11 @@ struct RootFeatureTests {
     @Test("A background return cancels a pending hidden verification", .timeLimit(.minutes(1)))
     @MainActor
     func backgroundReturnCancelsPendingHiddenVerification() async {
+        await TransitionAwaitEvidence.observe(#function, assertBackgroundReturnCancelsVerification)
+    }
+
+    @MainActor
+    private func assertBackgroundReturnCancelsVerification(_ waits: TransitionAwaitEvidence) async {
         let verificationStarted = PendingVerificationStart()
         let pendingVerification = PendingVerificationResponse()
         let verificationCancellationObserved = LockIsolated<Bool?>(nil)
@@ -377,44 +382,57 @@ struct RootFeatureTests {
             ),
             decoy: decoy,
             verify: { _ in
+                waits.mark("verifier.suspend")
                 let result = await pendingVerification.suspend {
+                    waits.mark("verifier.parked")
                     verificationStarted.resumeOnce(started: true)
                 }
+                waits.mark("verifier.returned")
                 verificationCancellationObserved.withValue { $0 = Task.isCancelled }
                 return result
             },
         )
         defer {
+            waits.mark("body.unwind")
             verificationStarted.resumeOnce(started: false)
             pendingVerification.resumeOnce(with: .unavailable)
         }
 
+        waits.mark("decoyAttempt.send")
         await store.send(.decoyAttempt(attempt))
+        waits.mark("verifyHidden.receive")
         await store.receive(
             .vault(.verifyHidden(attemptID: attempt.id, candidate: .init("1234"))),
         )
         let didStartVerification = await withTaskCancellationHandler(
             operation: {
-                await verificationStarted.wait()
+                waits.mark("verifier.start.wait")
+                return await verificationStarted.wait()
             },
             onCancel: {
+                waits.mark("verifier.start.cancelHandler")
                 verificationStarted.resumeOnce(started: false)
                 pendingVerification.resumeOnce(with: .unavailable)
             },
         )
+        waits.mark("verifier.start.returned")
         #expect(didStartVerification)
         #expect(store.state.vault.phase == .locked)
         #expect(store.state.vault.isWorking)
         #expect(store.state.vault.pendingHiddenVerificationID == attempt.id)
 
+        waits.mark("background.send")
         await store.send(.applicationPhaseChanged(.background))
+        waits.mark("background.returned")
 
         #expect(store.state.applicationReturnPending)
         #expect(store.state.vault.phase == .locked)
         #expect(store.state.vault.isWorking)
         #expect(store.state.vault.pendingHiddenVerificationID == attempt.id)
 
+        waits.mark("active.send")
         await store.send(.applicationPhaseChanged(.active))
+        waits.mark("active.returned")
 
         #expect(!store.state.applicationReturnPending)
         #expect(store.state.vault.phase == .locked)
@@ -424,7 +442,9 @@ struct RootFeatureTests {
         #expect(store.state.vault.shell.isSessionLocked)
 
         pendingVerification.resumeOnce(with: .succeeded)
+        waits.mark("store.finish")
         await store.finish()
+        waits.mark("store.finished")
 
         #expect(verificationCancellationObserved.value == true)
         #expect(store.state.vault.phase == .locked)

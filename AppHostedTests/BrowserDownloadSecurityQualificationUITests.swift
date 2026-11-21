@@ -357,7 +357,7 @@ final class BrowserDownloadSecurityQualificationUITests: XCTestCase {
             modeElementExists && modeLabel.label.contains("Real native .complete verification required"),
         )
         let fixtureReady = waitUntil(10) {
-            app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
+            app.staticTexts["downloadQualificationLoopbackReadiness"].value as? String == "ready"
         }
         report["host.fixtureReady"] = String(fixtureReady)
         guard modeElementExists, fixtureReady else {
@@ -618,7 +618,7 @@ final class BrowserDownloadSecurityQualificationUITests: XCTestCase {
         let modeLabel = app.staticTexts["downloadQualificationProtectionQualificationMode"].label
         XCTAssertTrue(modeLabel.contains("Real native .complete verification required"))
         try wait(app, milestone: "fixture server ready") {
-            app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
+            app.staticTexts["downloadQualificationLoopbackReadiness"].value as? String == "ready"
         }
     }
 
@@ -626,12 +626,6 @@ final class BrowserDownloadSecurityQualificationUITests: XCTestCase {
     private func openFixturePage(_ app: XCUIApplication) throws {
         try tapControl("downloadQualificationOpenFixturePage", in: app)
         try wait(app, milestone: "root browser bridge registration") {
-            let refresh = app.buttons["downloadQualificationRefreshObservations"]
-            guard refresh.exists, refresh.isHittable else {
-                return false
-            }
-
-            refresh.tap()
             guard let value = app.staticTexts["downloadQualificationObservations"].value as? String,
                   let events = try? JSONDecoder().decode([Observation].self, from: Data(value.utf8))
             else {
@@ -662,7 +656,7 @@ final class BrowserDownloadSecurityQualificationUITests: XCTestCase {
     /// Drives one real production download and returns its completed-file proof.
     private func download(_ app: XCUIApplication) throws -> Observation {
         try wait(app, milestone: "real loopback readiness") {
-            app.staticTexts["Loopback ready. Open fixture page, then download attachment PDF."].exists
+            app.staticTexts["downloadQualificationLoopbackReadiness"].value as? String == "ready"
         }
         let earlier = try observations(app).filter { $0["event"] == "completedFileProof" }
         try tapControl("downloadQualificationDownloadAttachment", in: app)
@@ -696,7 +690,6 @@ final class BrowserDownloadSecurityQualificationUITests: XCTestCase {
     }
 
     private func observations(_ app: XCUIApplication) throws -> [Observation] {
-        try tapControl("downloadQualificationRefreshObservations", in: app)
         let node = app.staticTexts["downloadQualificationObservations"]
         guard let value = node.value as? String else {
             throw FixtureError.missingObservation
@@ -714,12 +707,6 @@ final class BrowserDownloadSecurityQualificationUITests: XCTestCase {
     /// recording a failure while the host surface is unreachable. The caller retries until its
     /// bounded deadline, where a still-unreadable or undecodable surface is a harness failure.
     private func probeObservations(_ app: XCUIApplication) -> [Observation]? {
-        let refresh = app.buttons["downloadQualificationRefreshObservations"]
-        guard refresh.waitForExistence(timeout: 2), refresh.exists, refresh.isHittable else {
-            return nil
-        }
-
-        refresh.tap()
         let node = app.staticTexts["downloadQualificationObservations"]
         guard node.exists, let value = node.value as? String,
               let events = try? JSONDecoder().decode([Observation].self, from: Data(value.utf8))

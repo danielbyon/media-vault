@@ -87,6 +87,8 @@ final class BrowserWebKitAdapter: NSObject {
     var downloadHandoffObserver: (@MainActor (WKDownload, BrowserTabID) -> Void)?
 
     #if DEBUG
+    /// Formats exact policy-object identities in opt-in fixture diagnostics.
+    var downloadPolicyObjectLabeler: (@MainActor (AnyObject) -> String)?
     /// Observes an accepted native policy after capability registration and before handoff.
     /// Qualification can schedule a real global Lock at this exact WebKit boundary.
     var downloadPolicyDecisionObserver: (@MainActor (BrowserTabID) -> Void)?
@@ -128,12 +130,26 @@ final class BrowserWebKitAdapter: NSObject {
         association: BrowserWebKitDownloadAssociation.Handoff?,
     ) {
         guard !downloadOwner.owns(download) else {
+            #if DEBUG
+            downloadOwner.policyHandoffObservation?("handoff.alreadyOwned", nil, nil)
+            #endif
             downloadOwner.releaseAdmissionReservation(association?.admissionToken)
             return
         }
 
         let transfer = BrowserWKDownloadTransfer(download: download, owner: downloadOwner)
         guard let association, let context = contexts[tabID], download.webView === context.webView else {
+            #if DEBUG
+            if let observe = downloadOwner.policyHandoffObservation {
+                if association == nil {
+                    observe("handoff.noAssociation", nil, nil)
+                } else if contexts[tabID] == nil {
+                    observe("handoff.noLiveTab", nil, nil)
+                } else {
+                    observe("handoff.wrongWebView", nil, nil)
+                }
+            }
+            #endif
             downloadOwner.releaseAdmissionReservation(association?.admissionToken)
             downloadOwner.reject(transfer, notice: .invalidOrigin)
             return
@@ -1135,18 +1151,25 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler: @MainActor (WKNavigationActionPolicy) -> Void,
     ) {
         guard navigationAction.shouldPerformDownload else {
+            #if DEBUG
+            downloadOwner?.policyHandoffObservation?("action.allow", nil, nil)
+            #endif
             decisionHandler(.allow)
             return
         }
         guard let association = captureDownloadAssociation(
             isMainFrame: navigationAction.targetFrame?.isMainFrame == true,
         ) else {
+            #if DEBUG
+            downloadOwner?.policyHandoffObservation?("action.cancel", nil, nil)
+            #endif
             decisionHandler(.cancel)
             return
         }
 
         downloadAssociations.insert(association, forPolicyObject: navigationAction)
         #if DEBUG
+        observePolicyHandoff("action.download", object: navigationAction, association: association)
         adapter?.downloadPolicyDecisionObserver?(tabID)
         #endif
         decisionHandler(.download)
@@ -1163,30 +1186,49 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
             canShowMIMEType: navigationResponse.canShowMIMEType,
             contentDisposition: disposition,
         ) else {
+            #if DEBUG
+            downloadOwner?.policyHandoffObservation?("response.allow", nil, nil)
+            #endif
             decisionHandler(.allow)
             return
         }
         guard let association = captureDownloadAssociation(isMainFrame: navigationResponse.isForMainFrame) else {
+            #if DEBUG
+            downloadOwner?.policyHandoffObservation?("response.cancel", nil, nil)
+            #endif
             decisionHandler(.cancel)
             return
         }
 
         downloadAssociations.insert(association, forPolicyObject: navigationResponse)
         #if DEBUG
+        observePolicyHandoff("response.download", object: navigationResponse, association: association)
         adapter?.downloadPolicyDecisionObserver?(tabID)
         #endif
         decisionHandler(.download)
     }
 
     func webView(_: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        #if DEBUG
+        observePolicyHandoff("action.didBecome", object: navigationAction)
+        #endif
         releaseAbandonedDownloadAssociations()
-        let associated = consumeDownloadAssociation(downloadAssociations.take(forPolicyObject: navigationAction))
+        let associated = consumeDownloadAssociation(
+            downloadAssociations.take(forPolicyObject: navigationAction),
+            policyObject: navigationAction,
+        )
         handoff(download, association: associated)
     }
 
     func webView(_: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        #if DEBUG
+        observePolicyHandoff("response.didBecome", object: navigationResponse)
+        #endif
         releaseAbandonedDownloadAssociations()
-        let associated = consumeDownloadAssociation(downloadAssociations.take(forPolicyObject: navigationResponse))
+        let associated = consumeDownloadAssociation(
+            downloadAssociations.take(forPolicyObject: navigationResponse),
+            policyObject: navigationResponse,
+        )
         handoff(download, association: associated)
     }
 
@@ -1227,6 +1269,9 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// Releases policy-time slots that WebKit cannot hand off after a tab or process ends.
     func releasePendingDownloadReservations() {
+        #if DEBUG
+        downloadOwner?.policyHandoffObservation?("associations.releaseAll", nil, nil)
+        #endif
         downloadAssociations.releaseAll(owner: downloadOwner)
     }
 
@@ -1239,18 +1284,58 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
     #endif
 
     func releaseAbandonedDownloadAssociations() {
+        #if DEBUG
+        let released = downloadAssociations.releaseAbandonedAssociations(owner: downloadOwner)
+        if let observe = downloadOwner?.policyHandoffObservation {
+            for id in released {
+                observe("association.abandoned", id, nil)
+            }
+        }
+        #else
         _ = downloadAssociations.releaseAbandonedAssociations(owner: downloadOwner)
+        #endif
     }
+
+    #if DEBUG
+    /// Adds the exact policy-object identity to an existing handoff marker.
+    private func observePolicyHandoff(
+        _ stage: String,
+        object: AnyObject? = nil,
+        association: BrowserWebKitDownloadAssociation? = nil,
+    ) {
+        let label = object.flatMap { adapter?.downloadPolicyObjectLabeler?($0) }
+        downloadOwner?.policyHandoffObservation?(
+            label.map { "\(stage) policy=\($0)" } ?? stage,
+            association?.reservationID,
+            association?.conversion?.operationID,
+        )
+    }
+    #endif
 
     private func consumeDownloadAssociation(
         _ association: BrowserWebKitDownloadAssociation?,
+        policyObject: AnyObject? = nil,
     ) -> BrowserWebKitDownloadAssociation.Handoff? {
         guard var association,
               let handoff = association.consume(correlation: &navigationCorrelation)
         else {
+            #if DEBUG
+            observePolicyHandoff(
+                association == nil ? "association.missing" : "association.alreadyConsumed",
+                object: policyObject,
+                association: association,
+            )
+            #endif
             return nil
         }
 
+        #if DEBUG
+        downloadOwner?.policyHandoffObservation?(
+            handoff.completion == nil ? "association.consumedWithoutConversion" : "association.converted",
+            association.reservationID,
+            association.conversion?.operationID,
+        )
+        #endif
         if let completion = handoff.completion {
             adapter?.emit(.navigationConvertedToDownload(
                 tabID: tabID,
@@ -1264,6 +1349,9 @@ private final class Context: NSObject, WKNavigationDelegate, WKUIDelegate {
         if let adapter {
             adapter.receiveDownload(download, tabID: tabID, association: association)
         } else {
+            #if DEBUG
+            downloadOwner?.policyHandoffObservation?("handoff.detachedAdapter", nil, nil)
+            #endif
             guard let owner = downloadOwner else {
                 download.cancel { _ in }
                 return

@@ -7,9 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-        C91A00000000000000000003 /* BrowserDownloadObservationReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */; };
-        C91A00000000000000000004 /* BrowserDownloadObservationReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */; };
-        C91A00000000000000000005 /* BrowserDownloadObservationReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */; };
+        C91A00000000000000000003 /* BrowserDownloadPassiveObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadPassiveObservation.swift */; };
+        C91A00000000000000000004 /* BrowserDownloadPassiveObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadPassiveObservation.swift */; };
+        C91A00000000000000000005 /* BrowserDownloadPassiveObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000001 /* BrowserDownloadPassiveObservation.swift */; };
+        A18E00000000000000000001 /* BrowserDownloadSceneEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18E00000000000000000001 /* BrowserDownloadSceneEvidence.swift */; };
+        A18E00000000000000000002 /* BrowserDownloadSceneEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18E00000000000000000001 /* BrowserDownloadSceneEvidence.swift */; };
+        A18E00000000000000000003 /* BrowserDownloadSceneEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18E00000000000000000002 /* BrowserDownloadSceneEvidenceTests.swift */; };
+        58A080297EB44E318CD9CAE1 /* BrowserDownloadTransferWitness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D413ED8697640D0BF8C52AA /* BrowserDownloadTransferWitness.swift */; };
+        C50C0D5DD2B84925906654AA /* BrowserDownloadTransferWitness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D413ED8697640D0BF8C52AA /* BrowserDownloadTransferWitness.swift */; };
+        A2E9DAD1CCDD4B11AE22A743 /* BrowserDownloadTransferWitnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D367076915D443AB57546AB /* BrowserDownloadTransferWitnessTests.swift */; };
         C91A00000000000000000006 /* BrowserDownloadObservationReceiptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91A00000000000000000002 /* BrowserDownloadObservationReceiptTests.swift */; };
         A10000000000000000000048 /* BrowserDownloadQualificationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000048 /* BrowserDownloadQualificationUITests.swift */; };
         A10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift */; };
@@ -93,7 +99,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-        C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadObservationReceipt.swift; sourceTree = "<group>"; };
+        C91A00000000000000000001 /* BrowserDownloadPassiveObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadPassiveObservation.swift; sourceTree = "<group>"; };
+        B18E00000000000000000001 /* BrowserDownloadSceneEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadSceneEvidence.swift; sourceTree = "<group>"; };
+        B18E00000000000000000002 /* BrowserDownloadSceneEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadSceneEvidenceTests.swift; sourceTree = "<group>"; };
+        8D413ED8697640D0BF8C52AA /* BrowserDownloadTransferWitness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadTransferWitness.swift; sourceTree = "<group>"; };
+        5D367076915D443AB57546AB /* BrowserDownloadTransferWitnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadTransferWitnessTests.swift; sourceTree = "<group>"; };
         C91A00000000000000000002 /* BrowserDownloadObservationReceiptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadObservationReceiptTests.swift; sourceTree = "<group>"; };
         B10000000000000000000048 /* BrowserDownloadQualificationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadQualificationUITests.swift; sourceTree = "<group>"; };
         B10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserDownloadRootAdapterTests.swift; sourceTree = "<group>"; };
@@ -336,6 +346,10 @@
 			E1000000000000000000000B /* AppHostedTests */ = {
 				isa = PBXGroup;
 				children = (
+				B18E00000000000000000001 /* BrowserDownloadSceneEvidence.swift */,
+				B18E00000000000000000002 /* BrowserDownloadSceneEvidenceTests.swift */,
+				8D413ED8697640D0BF8C52AA /* BrowserDownloadTransferWitness.swift */,
+				5D367076915D443AB57546AB /* BrowserDownloadTransferWitnessTests.swift */,
 				B10000000000000000000055 /* BrowserDownloadMultiSceneUITests.swift */,
 				B10000000000000000000050 /* BrowserDownloadPersistenceIsolationTests.swift */,
 				B10000000000000000000051 /* BrowserDownloadPersistenceFixture.swift */,
@@ -357,7 +371,7 @@
                 B10000000000000000000072 /* BrowserDownloadSecurityQualificationUITests.swift */,
                 B10000000000000000000075 /* BrowserDownloadSecuritySentinelLifecycleTests.swift */,
                 B10000000000000000000070 /* BrowserDownloadRootAdapterTests.swift */,
-                C91A00000000000000000001 /* BrowserDownloadObservationReceipt.swift */,
+                C91A00000000000000000001 /* BrowserDownloadPassiveObservation.swift */,
                 C91A00000000000000000002 /* BrowserDownloadObservationReceiptTests.swift */,
 				B1000000000000000000001A /* ScenePrivacyCoverTests.swift */,
 				B1000000000000000000001B /* ScenePrivacyCoverSentinelTestSupport.swift */,
@@ -656,7 +670,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-                C91A00000000000000000005 /* BrowserDownloadObservationReceipt.swift in Sources */,
+                C91A00000000000000000005 /* BrowserDownloadPassiveObservation.swift in Sources */,
+				A18E00000000000000000002 /* BrowserDownloadSceneEvidence.swift in Sources */,
+				C50C0D5DD2B84925906654AA /* BrowserDownloadTransferWitness.swift in Sources */,
 				A10000000000000000000055 /* BrowserDownloadMultiSceneUITests.swift in Sources */,
 				A20000000000000000000041 /* BrowserDownloadNoticeUITests.swift in Sources */,
                 A10000000000000000000048 /* BrowserDownloadQualificationUITests.swift in Sources */,
@@ -682,7 +698,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-                C91A00000000000000000004 /* BrowserDownloadObservationReceipt.swift in Sources */,
+                C91A00000000000000000004 /* BrowserDownloadPassiveObservation.swift in Sources */,
+                A18E00000000000000000001 /* BrowserDownloadSceneEvidence.swift in Sources */,
+                A18E00000000000000000003 /* BrowserDownloadSceneEvidenceTests.swift in Sources */,
+                58A080297EB44E318CD9CAE1 /* BrowserDownloadTransferWitness.swift in Sources */,
+                A2E9DAD1CCDD4B11AE22A743 /* BrowserDownloadTransferWitnessTests.swift in Sources */,
                 C91A00000000000000000006 /* BrowserDownloadObservationReceiptTests.swift in Sources */,
 				A10000000000000000000033 /* UIKitTestSupport.swift in Sources */,
 				A10000000000000000000034 /* AppHostedBrowserWebKitAdapterTests.swift in Sources */,
@@ -709,7 +729,7 @@
             isa = PBXSourcesBuildPhase;
             buildActionMask = 2147483647;
             files = (
-                C91A00000000000000000003 /* BrowserDownloadObservationReceipt.swift in Sources */,
+                C91A00000000000000000003 /* BrowserDownloadPassiveObservation.swift in Sources */,
 420000000000000000000011 /* BrowserDownloadQualificationApp.swift in Sources */,
                 42000000000000000000000A /* BrowserDownloadNoticeQualification.swift in Sources */,
                 42000000000000000000000D /* BrowserDownloadProductionQualification.swift in Sources */,

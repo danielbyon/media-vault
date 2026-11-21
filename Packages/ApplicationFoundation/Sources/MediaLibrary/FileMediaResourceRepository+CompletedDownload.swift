@@ -102,18 +102,33 @@ extension FileMediaResourceRepository {
     }
 
     func verifyDownloadIdentity(at url: URL, record: CompletedDownloadRecord) throws {
+        do {
+            try checkStagedDownloadIdentity(at: url, record: record)
+        } catch {
+            throw CompletedDownloadAcceptanceError.unsafeSource
+        }
+    }
+
+    func checkStagedDownloadIdentity(at url: URL, record: CompletedDownloadRecord) throws {
         var info = stat()
         var directory = stat()
-        guard lstat(stagingURL.path, &directory) == 0, directory.st_mode & S_IFMT == S_IFDIR,
-              directory.st_uid == getuid(),
-              lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+        guard lstat(stagingURL.path, &directory) == 0 else {
+            throw MediaLibraryStoreError.unavailable
+        }
+        guard directory.st_mode & S_IFMT == S_IFDIR, directory.st_uid == getuid() else {
+            throw MediaLibraryStoreError.corrupt
+        }
+        guard lstat(url.path, &info) == 0 else {
+            throw MediaLibraryStoreError.unavailable
+        }
+        guard info.st_mode & S_IFMT == S_IFREG,
               info.st_uid == getuid(), info.st_nlink == 1,
               Int64(info.st_dev) == record.device, Int64(info.st_ino) == record.inode,
               info.st_size == record.byteCount,
               url.deletingLastPathComponent().resolvingSymlinksInPath().path == stagingURL.resolvingSymlinksInPath()
               .path
         else {
-            throw CompletedDownloadAcceptanceError.unsafeSource
+            throw MediaLibraryStoreError.corrupt
         }
     }
 
@@ -197,6 +212,45 @@ extension FileMediaResourceRepository {
 extension FileMediaResourceRepository {
     /// Hashes the canonical file in bounded chunks while retaining its verified file descriptor.
     func verifiedPresentationURL(for resource: MediaResource, isCurrent: () -> Bool) throws -> URL {
+        try withCanonicalResource(resource, isCurrent: isCurrent, inspectChunk: { _ in }) { digest in
+            guard digest == resource.sha256 else {
+                throw MediaLibraryStoreError.corrupt
+            }
+            guard isCurrent() else {
+                throw CancellationError()
+            }
+
+            return url(for: resource)
+        }
+    }
+
+    #if DEBUG
+    func readCanonicalResource(
+        _ resource: MediaResource,
+        isCurrent: () -> Bool,
+        inspectChunk: (Data) -> Void,
+    ) throws -> String {
+        guard isCurrent() else {
+            throw CancellationError()
+        }
+
+        return try withCanonicalResource(resource, isCurrent: isCurrent, inspectChunk: inspectChunk) { digest in
+            guard isCurrent() else {
+                throw CancellationError()
+            }
+
+            return digest
+        }
+    }
+    #endif
+
+    /// Keeps the descriptor open through the directory-entry check and the caller's final authorization check.
+    private func withCanonicalResource<Result>(
+        _ resource: MediaResource,
+        isCurrent: () -> Bool,
+        inspectChunk: (Data) -> Void,
+        finish: (String) throws -> Result,
+    ) throws -> Result {
         guard resource.relativePath == resource.id.uuidString.lowercased(), resource.byteCount >= 0,
               resource.sha256.count == 64 else {
             throw MediaLibraryStoreError.corrupt
@@ -237,21 +291,18 @@ extension FileMediaResourceRepository {
                 break
             }
             digest.update(data: bytes)
+            inspectChunk(bytes)
         }
         let hash = digest.finalize().map { String(format: "%02x", $0) }.joined()
         var current = stat()
-        guard hash == resource.sha256,
-              fstatat(directory, resource.relativePath, &current, AT_SYMLINK_NOFOLLOW) == 0,
+        guard fstatat(directory, resource.relativePath, &current, AT_SYMLINK_NOFOLLOW) == 0,
               current.st_ino == info.st_ino, current.st_dev == info.st_dev,
               current.st_size == info.st_size, current.st_mode & S_IFMT == S_IFREG,
               current.st_nlink == 1, current.st_uid == getuid() else {
             throw MediaLibraryStoreError.corrupt
         }
-        guard isCurrent() else {
-            throw CancellationError()
-        }
 
-        return url(for: resource)
+        return try finish(hash)
     }
 }
 

@@ -12,6 +12,10 @@ import Foundation
 struct BrowserDownloadAllocation {
     let directory: URL
     let destination: URL
+    #if DEBUG
+    /// Set only on the copy passed to writer-completion verification.
+    var recordVerifiedIdentity: (@MainActor (BrowserDownloadScratchStore.OwnershipFileIdentity) -> Void)?
+    #endif
 }
 
 /// Owns the dedicated transient scratch root and verifies real filesystem attributes.
@@ -197,9 +201,18 @@ final class BrowserDownloadScratchStore {
         let identity: OwnershipFileIdentity?
     }
 
-    private struct OwnershipFileIdentity: Equatable {
+    struct OwnershipFileIdentity: Equatable {
         let device: UInt64
         let inode: UInt64
+
+        static func from(_ attributes: [FileAttributeKey: Any]) -> Self? {
+            guard let fileDevice = attributes[.systemNumber] as? UInt64,
+                  let fileInode = attributes[.systemFileNumber] as? UInt64 else {
+                return nil
+            }
+
+            return Self(device: fileDevice, inode: fileInode)
+        }
     }
     #endif
 
@@ -310,26 +323,62 @@ final class BrowserDownloadScratchStore {
         markQualificationStage("completedOperationAttributes", resource: "operation")
         try verifyDirectory(allocation.directory)
         markQualificationStage("completedFileAttributes", resource: "destination")
-        let attributes = try files.attributesOfItem(atPath: allocation.destination.path)
-        guard attributes[.type] as? FileAttributeType == .typeRegular,
-              attributes[.ownerAccountID] as? UInt32 == Darwin.getuid(),
-              let size = attributes[.size] as? Int64, size >= 0
-        else {
+        let attributes = try ownedAttributes(at: allocation.destination, type: .typeRegular)
+        guard let size = attributes[.size] as? Int64, size >= 0 else {
             throw Failure.unsafeFile
         }
 
         markQualificationStage("completedProtection", resource: "destination")
         try protect(allocation.destination)
-        let verified = try files.attributesOfItem(atPath: allocation.destination.path)
-        guard verified[.type] as? FileAttributeType == .typeRegular,
-              verified[.ownerAccountID] as? UInt32 == Darwin.getuid(),
-              verified[.size] as? Int64 == size
-        else {
+        let verified = try ownedAttributes(at: allocation.destination, type: .typeRegular)
+        guard verified[.size] as? Int64 == size else {
             throw Failure.unsafeFile
         }
 
+        #if DEBUG
+        if let record = allocation.recordVerifiedIdentity,
+           let identity = OwnershipFileIdentity.from(attributes),
+           identity == OwnershipFileIdentity.from(verified) {
+            record(identity)
+        }
+        #endif
         return size
     }
+
+    #if DEBUG
+    /// Checks the file seen at writer completion on both sides of the protection read.
+    func inspectCompleted(
+        _ allocation: BrowserDownloadAllocation,
+        expectedBytes: Int64,
+        verifiedIdentity: OwnershipFileIdentity,
+    ) throws {
+        try validateOwnership(allocation)
+        for directory in [root, allocation.directory] {
+            _ = try ownedAttributes(at: directory, type: .typeDirectory)
+            try inspectProtection(at: directory)
+        }
+
+        let destination = allocation.destination
+        try checkFileIdentity(at: destination, expectedBytes: expectedBytes, verifiedIdentity: verifiedIdentity)
+        try inspectProtection(at: destination)
+        try checkFileIdentity(at: destination, expectedBytes: expectedBytes, verifiedIdentity: verifiedIdentity)
+    }
+
+    private func checkFileIdentity(at url: URL, expectedBytes: Int64, verifiedIdentity: OwnershipFileIdentity) throws {
+        let attributes = try ownedAttributes(at: url, type: .typeRegular)
+        guard expectedBytes >= 0, attributes[.size] as? Int64 == expectedBytes,
+              OwnershipFileIdentity.from(attributes) == verifiedIdentity else {
+            throw Failure.unsafeFile
+        }
+    }
+
+    private func inspectProtection(at url: URL) throws {
+        try verifyProtection(url)
+        // A URL retained since completion can have a cached backup-exclusion value.
+        let current = URL(fileURLWithPath: url.path, isDirectory: url.hasDirectoryPath)
+        try verifyBackupExclusion(at: current)
+    }
+    #endif
 
     /// Removes owned bytes only after the caller has established that WebKit stopped writing.
     func cleanup(_ allocation: BrowserDownloadAllocation) throws {
@@ -369,12 +418,18 @@ final class BrowserDownloadScratchStore {
 
     private func verifyDirectory(_ url: URL) throws {
         markQualificationStage("directoryAttributes")
+        _ = try ownedAttributes(at: url, type: .typeDirectory)
+    }
+
+    private func ownedAttributes(at url: URL, type: FileAttributeType) throws -> [FileAttributeKey: Any] {
         let attributes = try files.attributesOfItem(atPath: url.path)
-        guard attributes[.type] as? FileAttributeType == .typeDirectory,
+        guard attributes[.type] as? FileAttributeType == type,
               attributes[.ownerAccountID] as? UInt32 == Darwin.getuid()
         else {
             throw Failure.unsafeFile
         }
+
+        return attributes
     }
 
     private func protect(_ url: URL) throws {
@@ -388,6 +443,10 @@ final class BrowserDownloadScratchStore {
         markQualificationStage("protectionReadback")
         try verifyProtection(url)
         markQualificationStage("backupReadback")
+        try verifyBackupExclusion(at: url)
+    }
+
+    private func verifyBackupExclusion(at url: URL) throws {
         guard try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true else {
             throw Failure.backupExclusionUnavailable
         }
