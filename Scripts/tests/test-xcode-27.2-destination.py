@@ -656,7 +656,6 @@ class DestinationTests(DestinationFixture, unittest.TestCase):
         command_tool.chmod(0o755)
         command = [str(wrapper), str(command_tool), "get", "test-results", "summary"]
         env = dict(__import__('os').environ)
-        env.pop("DEVELOPER_DIR", None)
         result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '{"fixture": "xcresulttool"}\n')
