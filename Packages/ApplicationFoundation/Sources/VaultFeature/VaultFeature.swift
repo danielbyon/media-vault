@@ -117,6 +117,7 @@ public struct VaultFeature {
         public mutating func commitGlobalLock(
             advanceResourceLoadGeneration: () -> Void,
             advanceBrowserProfileConfigurationGeneration: @Sendable (UInt64) -> Void,
+            invalidateBrowserDownloadAuthorization: @Sendable () -> BrowserDownloadSnapshot,
         ) -> Effect<VaultFeature.Action> {
             guard phase != .locked || isWorking || pendingHiddenVerificationID != nil else {
                 return .none
@@ -130,6 +131,8 @@ public struct VaultFeature {
             let browserProfileConfigurationGeneration = shell.browser
                 .advanceProfileConfigurationGenerationForLock()
             advanceBrowserProfileConfigurationGeneration(browserProfileConfigurationGeneration)
+            let revokedDownloadSnapshot = invalidateBrowserDownloadAuthorization()
+            shell.browser.commitDownloadAuthorizationLoss(revokedDownloadSnapshot)
             phase = .locked
             credentialInput = ""
             confirmationInput = ""
@@ -266,6 +269,9 @@ public struct VaultFeature {
     @Dependency(\.browserProfileConfigurationFence)
     var browserProfileConfigurationFence
 
+    @Dependency(\.browserDownloads)
+    var browserDownloads
+
     /// Creates the vault feature.
     public init() {}
 
@@ -312,6 +318,7 @@ extension VaultFeature {
             return state.commitGlobalLock(
                 advanceResourceLoadGeneration: mediaLibrary.advanceResourceLoadGeneration,
                 advanceBrowserProfileConfigurationGeneration: browserProfileConfigurationFence.advance,
+                invalidateBrowserDownloadAuthorization: browserDownloads.invalidateAuthorization,
             )
         case let .sessionSettingsChanged(settings):
             guard state.phase == .authenticated, state.sessionSettings != settings else {
@@ -641,6 +648,12 @@ extension VaultFeature {
     }
 
     private func unlockShell(state: inout State) {
+        let generation = mediaLibrary.beginAuthenticatedDownloadSession()
+        let library = mediaLibrary
+        // Recovery belongs to the authenticated session and runs even when Library is not mounted.
+        Task {
+            _ = await library.reconcileAcceptedDownloads(generation: generation)
+        }
         state.shell.isSessionLocked = false
         state.shell.library.isSessionLocked = false
         state.shell.browser.isSessionLocked = false

@@ -3,10 +3,16 @@
 
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
+import re
+import select
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 
 
@@ -14,10 +20,132 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
 UDID = "11111111-1111-4111-8111-111111111111"
 OTHER_UDID = "22222222-2222-4222-8222-222222222222"
+FIXTURE_DEVELOPER_DIR = "/fixture/Xcode"
+FIXTURE_SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 MAKE = str(Path(subprocess.check_output(
     ["/usr/bin/xcrun", "--find", "make"], text=True).strip()).with_name("gnumake"))
+
+
+def _can_run_python_with_fixture_environment(executable):
+    """Return whether an interpreter starts with the fixture's Xcode path."""
+    path = Path(executable)
+    if not path.is_absolute() or not path.is_file():
+        return False
+    environment = dict(os.environ, DEVELOPER_DIR=FIXTURE_DEVELOPER_DIR,
+                       PATH=FIXTURE_SYSTEM_PATH)
+    try:
+        result = subprocess.run([str(path), "-c", "pass"], env=environment,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+@lru_cache(maxsize=1)
+def _select_fixture_python():
+    """Choose an interpreter that remains usable under the fixture environment."""
+    if _can_run_python_with_fixture_environment(sys.executable):
+        return sys.executable
+
+    result = subprocess.run(["/usr/bin/xcrun", "--find", "python3"],
+                            check=True, text=True, capture_output=True)
+    executable = result.stdout.strip()
+    if not _can_run_python_with_fixture_environment(executable):
+        raise RuntimeError("xcrun --find python3 did not return a usable interpreter")
+    return executable
+
+
 NAME = "iPhone 17"
 DESTINATION = "platform=iOS Simulator,name=iPhone 17,OS=27.2"
+HTTP_MATRIX_ID = "AppHostedUITests/BrowserDownloadHTTPTests/originatingMatrix(profile:row:)"
+APP_HOSTED_EVIDENCE_TEST_IDENTITIES = (
+    "BrowserDownloadSceneEvidenceTests/testResizeHandleNormalizesMeasuredRotatedFrame",
+    "BrowserDownloadSceneEvidenceTests/testResizeHandleRejectsUnrelatedOffscreenFrame",
+    "BrowserDownloadSceneEvidenceTests/testResizeHandleUsesScreenSpaceOriginWithOffsetCard",
+    "BrowserDownloadSceneEvidenceTests/testResizeGestureDeltaMovesOutwardPerAvailableAxis",
+    "BrowserDownloadSceneEvidenceTests/testResizeGestureDeltaShrinksFullScreenCardOnBothAxes",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionAllowsVisibleNonKeyedAuxiliaryWindow",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionRejectsVisibleCover",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionRejectsZeroOrMultipleVisibleKeyedWindows",
+    "BrowserDownloadSceneEvidenceTests/testResizeSceneRequiresUniqueNewActiveSession",
+    "BrowserDownloadSceneEvidenceTests/testResizeTimeoutDiagnosticsReadOptionalValuesIndependently",
+    "BrowserDownloadSceneEvidenceTests/testPassiveSceneCensusSelectsNewestWindowSnapshot",
+    "BrowserDownloadSceneEvidenceTests/testPassiveSceneCensusRejectsConflictingSnapshotsAtSameTime",
+    "BrowserDownloadSceneEvidenceTests/testLatestFreshSafeRootsRequiresEveryRegistrationAndUsesMonotonicTime",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionAllowsSnapshotBetweenActivationAndCensus",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsSnapshotBeforeActivation",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsWrongRun",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsWrongGeneration",
+    "BrowserDownloadSceneEvidenceTests/testFinalCensusGenerationRejectsNewerUnsafeObservation",
+    "BrowserDownloadSceneEvidenceTests/testFinalCensusGenerationRejectsNewerObservationWithoutGeneration",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsSnapshotAfterCensus",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionAcceptsInclusiveBoundaries",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsNonFiniteTimestamps",
+    "BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionUsesLatestObservationWithinInterval",
+    "BrowserDownloadSceneEvidenceTests/testReactivationAvailabilityRejectsMismatchWithFinalRegisteredScenes",
+    "BrowserDownloadSceneEvidenceTests/testResizeGestureMarkerSelectsExactNewSceneRegistrationAndRun",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessAcceptsMarkerOnlyLatestObservation",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessRejectsCoverInCurrentCensus",
+    "BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy",
+    "BrowserDownloadSceneEvidenceTests/testInitialMountedSceneWaitsForCoherentRegistrationsWhileProofIsPending",
+    "BrowserDownloadSceneEvidenceTests/testReactivationRequiresMatchingLiveRevisionForEveryOriginalSceneRegistration",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootAcceptsMatchingConfirmationAfterPendingCensus",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsUnmatchedOrMalformedLiveRows",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresCurrentRetainedDownloadCounts",
+    "BrowserDownloadSceneEvidenceTests/testRetainedAllocationRejectsEveryRecordedRemovalOutcome",
+    "BrowserDownloadSceneEvidenceTests/testRetainedAllocationRemovalAtCensusBoundaryPreventsAcceptance",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsMissingOrMismatchedConfirmation",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsSupersededOrUnpairedProof",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresCoverAndNativeBarrierAbsence",
+    "BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresProofBeforeOriginalDeadline",
+    "BrowserDownloadSceneEvidenceTests/testPendingLiveRootCannotQualifyAfterDeadline",
+    "BrowserDownloadTransferWitnessTests/testDelayedHandoffParserRequiresNativeCallbacksAfterLock",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessAcceptsCorrelatedNativeProgress",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsMissingHandoffOrProgress",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsServerEvidenceAfterReadiness",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsEarlyTerminalAndCleanupFailure",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsPrematureCleanupWithoutFixtureRequest",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessIgnoresPrematureCleanupForAnotherOperation",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessIgnoresPrematureCleanupFromAnotherRun",
+    "BrowserDownloadTransferWitnessTests/testContinuationAcceptsFiniteResponseAndNativeFinish",
+    "BrowserDownloadTransferWitnessTests/testContinuationRejectsMissingNativeOrTransportWitness",
+    "BrowserDownloadTransferWitnessTests/testContinuationRejectsCancellationFailureAndPrematureCleanup",
+    "BrowserDownloadTransferWitnessTests/testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion",
+    "BrowserDownloadTransferWitnessTests/testSlowKnownWitnessDiagnosticsAreRedactedAndBounded",
+    "BrowserDownloadObservationReceiptTests/passiveReaderAcceptsAvailableMilestoneBeforeWaiting",
+    "BrowserDownloadObservationReceiptTests/passiveReaderPollsUntilMilestoneAppears",
+    "BrowserDownloadObservationReceiptTests/passiveReaderRejectsUnchangedMilestone",
+    "BrowserDownloadObservationReceiptTests/passiveReaderRejectsWrongProcessRunAndContext",
+    "BrowserDownloadObservationReceiptTests/passiveReaderPreservesInvalidatedMalformedAndMissing",
+    "BrowserDownloadObservationReceiptTests/passiveReaderRejectsMilestoneAtAndAfterDeadline",
+    "BrowserDownloadObservationReceiptTests/passiveReaderChecksDeadlineAfterWaiterCompletes",
+    "BrowserDownloadObservationReceiptTests/passiveReaderPreservesInterruption",
+    "BrowserDownloadObservationReceiptTests/passiveReaderMapsPendingTimeoutToOriginalDeadline",
+)
+MULTI_SCENE_TEST_IDENTITIES = (
+    "BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene",
+    "BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable",
+    "BrowserDownloadMultiSceneUITests/testPassiveAccessibilityReadsRefreshCensusWithoutPublishingRootEvents",
+    "BrowserDownloadMultiSceneUITests/testHostedRootUpdatePublishesCurrentRevisionWithoutReadFeedback",
+)
+QUALIFICATION_TEST_IDENTITIES = (
+    "BrowserDownloadQualificationUITests/testAcceptedPolicyHandoffAfterLockCompletesHiddenUntilFreshAuthentication",
+    "BrowserDownloadQualificationUITests/testQuickLookHomeRevokesAndFreshDownloadRecovers",
+    "BrowserDownloadQualificationUITests/testShareHomeRevokesAndFreshDownloadRecovers",
+    "BrowserDownloadQualificationUITests/testNormalQualificationModeReturnsToAuthenticatedBrowserAfterHome",
+    "BrowserDownloadQualificationUITests/testActiveDownloadQualificationModeAutoLocksAfterRealHomeTransition",
+    "BrowserDownloadQualificationUITests/testSlowKnownDownloadControlIsAccessibleOnMountedBrowser",
+    "BrowserDownloadQualificationUITests/testActiveDiscardFailureRetryAndAuthenticationLoss",
+    "BrowserDownloadQualificationUITests/testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset",
+    "BrowserDownloadQualificationUITests/testRepeatedPNGDownloadSkipsDuplicateAndRetainsCanonicalIdentity",
+    "BrowserDownloadQualificationUITests/testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation",
+    "BrowserDownloadQualificationUITests/testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch",
+    "BrowserDownloadQualificationUITests/testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible",
+    "BrowserDownloadQualificationUITests/testPassiveEventHistoryReadsTheRealMountedBrowserBridge",
+)
+AUTOMATED_DOWNLOAD_TEST_IDENTITIES = MULTI_SCENE_TEST_IDENTITIES + QUALIFICATION_TEST_IDENTITIES
 
 # Only process boundaries are replaced. The resolver, shell entry point, and
 # Make recipes run unchanged against these inventories and command recordings.
@@ -42,11 +170,47 @@ elif tool == "xcrun":
             print((root / "runtimes.json").read_text())
         else:
             print("iOS 27.2 (27.2 - 24B8117) - com.apple.CoreSimulator.SimRuntime.iOS-27-2")
-    elif args[:4] == ["xcresulttool", "get", "test-results", "summary"]:
+    elif args[:3] == ["xcresulttool", "get", "test-results"]:
         bundle = pathlib.Path(args[args.index("--path") + 1])
-        summary = bundle / "summary.json"
-        print(summary.read_text() if summary.exists() else '{"totalTestCount": 3}')
-        if os.environ.get("SCENARIO") == "summary-error": sys.exit(2)
+        plan_path = root / "result-plan.json"
+        plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+        if plan_path.exists() and not (bundle / "fixture-completed.json").exists():
+            sys.exit("Incomplete fixture result bundle")
+        method = args[3]
+        if method == "summary" and (bundle / "summary.json").is_file():
+            print((bundle / "summary.json").read_text())
+        else:
+            inventory = json.loads((root / "test-cases.json").read_text())
+            cases = inventory[bundle.name]
+            if bundle.name == "BrowserDownloadMultiScene.xcresult":
+                if plan.get("omit_ui_identity"):
+                    cases.pop()
+                if plan.get("skip_ui_identity"):
+                    cases[0]["result"] = "Skipped"
+            if plan.get("omit_case"):
+                cases = [case for case in cases if case["nodeIdentifier"] != plan["omit_case"]]
+            for case in cases:
+                if case["nodeIdentifier"] == plan.get("skip_case"):
+                    case["result"] = "Skipped"
+            if method == "tests":
+                print(json.dumps({"testNodes": [{"nodeType": "Test Plan", "children": cases}]}))
+            elif method == "summary":
+                ipad = bundle.name in {"BrowserDownloadMultiScene.xcresult", "App-iPadPrivacy.xcresult"}
+                device_id = ("22222222-2222-4222-8222-222222222222" if ipad else
+                             "11111111-1111-4111-8111-111111111111")
+                print(json.dumps({
+                    "result": "Passed", "totalTestCount": len(cases),
+                    "passedTests": sum(case["result"] == "Passed" for case in cases),
+                    "failedTests": 0, "expectedFailures": 0,
+                    "skippedTests": sum(case["result"] == "Skipped" for case in cases),
+                    "devicesAndConfigurations": [{"device": {
+                        "deviceId": device_id, "deviceName": "iPad Pro 11-inch (M5)" if ipad else "iPhone 17",
+                        "osVersion": "27.2", "platform": "iOS Simulator",
+                    }}],
+                }))
+            else:
+                sys.exit("Unexpected result method: " + method)
+        if method == "summary" and os.environ.get("SCENARIO") == "summary-error": sys.exit(2)
     elif args[:3] == ["xcresulttool", "export", "attachments"]:
         bundle = pathlib.Path(args[args.index("--path") + 1])
         output = pathlib.Path(args[args.index("--output-path") + 1])
@@ -69,6 +233,11 @@ elif tool == "xcodebuild":
         if "-resultBundlePath" in args:
             if os.environ.get("SCENARIO") == "missing-bundle": sys.exit(0)
             bundle = pathlib.Path(args[args.index("-resultBundlePath") + 1])
+            plan_path = root / "result-plan.json"
+            plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+            phase = len((root / "executed.jsonl").read_text().splitlines())
+            if phase == plan.get("missing_on"):
+                sys.exit(0)
             bundle.mkdir(parents=True)
             if os.environ.get("TEST_RUNNER_NATIVE_SNAPSHOT_QUALIFICATION") == "1":
                 with (root / "environment.jsonl").open("a") as stream:
@@ -122,18 +291,42 @@ elif tool == "xcodebuild":
                 (exports / "manifest.json").write_text("{" if scenario == "bad-manifest" else json.dumps(manifest))
                 if scenario == "no-manifest": (exports / "manifest.json").unlink()
                 if scenario == "xcode-failure" and not hosted: sys.exit(65)
+            else:
+                (bundle / "fixture-partial").write_text("result writer started")
+                if phase == plan.get("wait_on"):
+                    import signal
+                    ignore = plan.get("ignore_signals", False)
+                    for event in (signal.SIGINT, signal.SIGTERM):
+                        signal.signal(event, signal.SIG_IGN if ignore else
+                                      lambda number, frame: sys.exit(128 + number))
+                    # Signal only after the partial result and handlers exist.
+                    fd = int(os.environ["FIXTURE_READY_FD"])
+                    os.write(fd, (json.dumps({"bundle": str(bundle)}) + "\n").encode())
+                    os.close(fd)
+                    while True:
+                        signal.pause()
+                if phase != plan.get("partial_on"):
+                    (bundle / "fixture-completed.json").write_text(json.dumps({
+                        "phase": phase,
+                        "result": "Failed" if phase == plan.get("fail_on") else "Passed",
+                    }))
+                if phase == plan.get("fail_on"):
+                    sys.exit(65)
 else:
     sys.exit("Unexpected tool: " + tool)
 '''
 
 
-class DestinationTests(unittest.TestCase):
+class DestinationFixture:
     def setUp(self):
+        self.python = _select_fixture_python()
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
+        # Apple's shim reads the fake developer path, so pin env-based shebangs.
+        (self.bin / "python3").symlink_to(self.python)
         for name in ("xcrun", "xcodebuild", "swift"):
             path = self.bin / name
             path.write_text(TOOL)
@@ -142,13 +335,18 @@ class DestinationTests(unittest.TestCase):
         self.wrapper.write_text('#!/usr/bin/env bash\nexec "$@"\n')
         self.wrapper.chmod(0o755)
         self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}",
-                        DEVELOPER_DIR="/fixture/Xcode", FIXTURE_ROOT=str(self.root),
+                        DEVELOPER_DIR=FIXTURE_DEVELOPER_DIR, FIXTURE_ROOT=str(self.root),
                         GITHUB_OUTPUT=str(self.root / "outputs"), PYTHONDONTWRITEBYTECODE="1")
         self.devices = {"devices": {RUNTIME: [self.device()]}}
         self.runtimes = {"runtimes": [{"identifier": RUNTIME, "version": "27.2",
                                       "buildversion": "24B8117", "isAvailable": True}]}
         self.destinations = [self.destination()]
         (self.root / "ineligible.txt").write_text("")
+        self.http_matrix_arguments = [
+            {"nodeType": "Arguments", "name": f".{profile}, .{row}", "result": "Passed"}
+            for profile in ("persistentPrivate", "ephemeral")
+            for row in ("attachment", "inline", "octet", "redirect", "protected", "post", "blob", "attribute")
+        ]
 
     def device(self, name=NAME, udid=UDID, available=True):
         return {"name": name, "udid": udid, "isAvailable": available, "state": "Shutdown"}
@@ -160,6 +358,36 @@ class DestinationTests(unittest.TestCase):
         (self.root / "devices.json").write_text(json.dumps(self.devices))
         (self.root / "runtimes.json").write_text(json.dumps(self.runtimes))
         (self.root / "destinations.txt").write_text("\n".join(self.destinations))
+        self.write_result_cases(AUTOMATED_DOWNLOAD_TEST_IDENTITIES)
+
+    def write_result_cases(self, browser_identities):
+        physical = ("AppHostedUITests/BrowserDownloadPersistenceIsolationTests/"
+                    "completedFilesRetainProtectionAndBackupExclusion()")
+        suites = {
+            "App.xcresult": [
+                physical,
+                *(identity + "()" for identity in APP_HOSTED_EVIDENCE_TEST_IDENTITIES),
+            ],
+            "ApplicationFoundation.xcresult": [
+                "VaultFeatureTests/globalLockFencesPendingBrowserProfileTransition()",
+                "RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification()",
+            ],
+            "App-iPadPrivacy.xcresult": [
+                "AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)",
+            ],
+            "BrowserDownloadMultiScene.xcresult": [identity + "()" for identity in browser_identities],
+        }
+        cases = {
+            name: [{"nodeType": "Test Case", "nodeIdentifier": identity,
+                    "result": "Skipped" if identity == physical else "Passed"} for identity in identities]
+            for name, identities in suites.items()
+        }
+        cases["App.xcresult"].append({
+            "nodeType": "Test Case", "nodeIdentifier": HTTP_MATRIX_ID,
+            "name": "Native HTTP classification and request ownership", "result": "Passed",
+            "children": self.http_matrix_arguments,
+        })
+        (self.root / "test-cases.json").write_text(json.dumps(cases))
 
     def verify(self, expected="", destination=NAME, execute=False):
         self.write_inventory()
@@ -172,16 +400,48 @@ class DestinationTests(unittest.TestCase):
         path = self.root / "executed.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    def run_multi_scene_result_check(self, observed_identities):
+        self.write_inventory()
+        self.write_result_cases(observed_identities)
+        command = [
+            self.python,
+            str(ROOT / "Scripts/assert-xcresult-tests.py"),
+            "--bundle",
+            str(self.root / "BrowserDownloadMultiScene.xcresult"),
+            "--expected-device-id",
+            OTHER_UDID,
+            "--expected-device-name",
+            "iPad Pro 11-inch (M5)",
+            "--expected-os-version",
+            "27.2",
+        ]
+        for identity in AUTOMATED_DOWNLOAD_TEST_IDENTITIES:
+            command.extend(("--expected-test", identity))
+        return subprocess.run(command, cwd=ROOT, env=self.env, text=True, capture_output=True)
+
     def assert_rejected(self, **kwargs):
         result = self.verify(**kwargs)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.executions(), [])
 
+
+class DestinationTests(DestinationFixture, unittest.TestCase):
     def test_exact_valid_device_returns_verified_udid(self):
         result = self.verify()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.splitlines()[-1], UDID)
         self.assertIn(f"simulator_udid={UDID}", (self.root / "outputs").read_text())
+
+    def test_minimal_path_uses_verified_python_for_resolver_and_tools(self):
+        self.env["PATH"] = f"{self.bin}:{FIXTURE_SYSTEM_PATH}"
+        result = self.verify(execute=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        executed = self.executions()
+        self.assertEqual(len(executed), 1)
+        self.assertEqual(
+            executed[0][executed[0].index("-destination") + 1],
+            f"platform=iOS Simulator,id={UDID}",
+        )
 
     def test_similar_name_suffix_is_rejected(self):
         self.devices["devices"][RUNTIME] = [self.device(name="iPhone 17 Pro")]
@@ -268,6 +528,54 @@ class DestinationTests(unittest.TestCase):
         self.assertEqual(executed[executed.index("-destination") + 1],
                          "platform=iOS Simulator,id=11111111-1111-4111-8111-111111111111")
 
+    def test_test_destination_preflight_exports_both_verified_devices(self):
+        ipad_name = "iPad Pro 11-inch (M5)"
+        self.devices = {"devices": {RUNTIME: [
+            self.device(name=NAME, udid=UDID),
+            self.device(name=ipad_name, udid=OTHER_UDID),
+        ]}}
+        self.destinations = [
+            self.destination(name=NAME, udid=UDID),
+            self.destination(name=ipad_name, udid=OTHER_UDID),
+        ]
+        self.write_inventory()
+
+        result = subprocess.run(
+            [MAKE, "verify-test-destination", f"XCODE_WRAPPER={self.wrapper}",
+             f"VERIFIED_SIMULATOR_UDID={UDID}",
+             f"VERIFIED_IPAD_SIMULATOR_UDID={OTHER_UDID}",
+             f"PATH={self.env['PATH']}"],
+            cwd=ROOT,
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        outputs = (self.root / "outputs").read_text().splitlines()
+        self.assertIn(f"simulator_udid={UDID}", outputs)
+        self.assertIn(f"ipad_simulator_udid={OTHER_UDID}", outputs)
+
+    def test_xcresult_assertion_rejects_inexact_multi_scene_test_identities(self):
+        missing_identity = AUTOMATED_DOWNLOAD_TEST_IDENTITIES[:-1]
+        unexpected_identity = AUTOMATED_DOWNLOAD_TEST_IDENTITIES + (
+            "BrowserDownloadMultiSceneUITests/testUnexpectedFixtureIdentity",
+        )
+        mismatched_identity = (
+            "BrowserDownloadMultiSceneUITests/testMismatchedFixtureIdentity",
+            *AUTOMATED_DOWNLOAD_TEST_IDENTITIES[1:],
+        )
+
+        for label, observed in (
+            ("missing", missing_identity),
+            ("unexpected", unexpected_identity),
+            ("mismatched", mismatched_identity),
+        ):
+            with self.subTest(label=label):
+                result = self.run_multi_scene_result_check(observed)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("test identities differ", result.stderr)
+
     def test_make_binds_each_invocation_to_its_expected_destination(self):
         checkout = self.root / "checkout"
         checkout.mkdir()
@@ -286,8 +594,9 @@ class DestinationTests(unittest.TestCase):
                         self.destination(name=NAME, udid=UDID),
                         self.destination(name=ipad_name, udid=ipad_udid),
                     ]
-                    expected_schemes = ["App", "ApplicationFoundation-Package", "App"]
-                    expected_udids = [UDID, UDID, ipad_udid]
+                    expected_schemes = ["App", "ApplicationFoundation-Package", "App",
+                                        "BrowserTabOverviewUITests"]
+                    expected_udids = [UDID, UDID, ipad_udid, ipad_udid]
                 else:
                     self.devices = {"devices": {RUNTIME: [self.device(name=ipad_name)]}}
                     self.destinations = [self.destination(name=ipad_name)]
@@ -296,7 +605,9 @@ class DestinationTests(unittest.TestCase):
                 self.write_inventory()
                 (self.root / "executed.jsonl").unlink(missing_ok=True)
                 result = subprocess.run([MAKE, target, f"XCODE_WRAPPER={self.wrapper}",
-                                         f"VERIFIED_SIMULATOR_UDID={UDID}", f"PATH={self.env['PATH']}"],
+                                         f"VERIFIED_SIMULATOR_UDID={UDID}",
+                                         f"VERIFIED_IPAD_SIMULATOR_UDID={ipad_udid if target == 'test' else ''}",
+                                         f"PATH={self.env['PATH']}"],
                                         cwd=checkout, env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 commands = self.executions()
@@ -304,8 +615,418 @@ class DestinationTests(unittest.TestCase):
                                  expected_schemes)
                 self.assertEqual([args[args.index("-destination") + 1].rsplit("=", 1)[-1]
                                   for args in commands], expected_udids)
+                if target == "test":
+                    multi_scene_command = commands[-1]
+                    self.assertEqual(
+                        [argument for argument in multi_scene_command
+                         if argument.startswith("-only-testing:")],
+                        [
+                            "-only-testing:BrowserTabOverviewUITests/" + identity
+                            for identity in AUTOMATED_DOWNLOAD_TEST_IDENTITIES
+                        ],
+                    )
 
 
+    def test_xcode_wrapper_keeps_xcresulttool_json_stdout_clean_and_fails_closed(self):
+        script_directory = self.root / "wrapper"
+        script_directory.mkdir()
+        wrapper = script_directory / "with-xcode-27.2.sh"
+        shutil.copy2(ROOT / "Scripts/with-xcode-27.2.sh", wrapper)
+        selector = script_directory / "select-xcode-27.2.sh"
+        shutil.copy2(ROOT / "Scripts/select-xcode-27.2.sh", selector)
+        preflight = script_directory / "ensure-ios-27.2-runtime.sh"
+        preflight.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'Verified simulator runtime: fixture\\n'\n"
+            "if [[ \"${FIXTURE_FAIL_RUNTIME_PREFLIGHT:-0}\" == 1 ]]; then\n"
+            "  printf 'fixture preflight failure\\n' >&2\n"
+            "  exit 19\n"
+            "fi\n"
+        )
+        preflight.chmod(0o755)
+
+        marker = self.root / "wrapped-xcresulttool-ran"
+        command_tool = self.bin / "xcresulttool"
+        command_tool.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, pathlib\n"
+            "pathlib.Path('" + str(marker) + "').write_text('ran')\n"
+            "print(json.dumps({'fixture': 'xcresulttool'}))\n"
+        )
+        command_tool.chmod(0o755)
+        command = [str(wrapper), str(command_tool), "get", "test-results", "summary"]
+        env = dict(__import__('os').environ)
+        env.pop("DEVELOPER_DIR", None)
+        result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '{"fixture": "xcresulttool"}\n')
+        self.assertEqual(json.loads(result.stdout), {"fixture": "xcresulttool"})
+        self.assertIn("Verified simulator runtime: fixture", result.stderr)
+        self.assertTrue(marker.is_file())
+
+        marker.unlink()
+        failure_env = dict(env, FIXTURE_FAIL_RUNTIME_PREFLIGHT="1")
+        result = subprocess.run(command, cwd=ROOT, env=failure_env, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fixture preflight failure", result.stderr)
+        self.assertFalse(marker.exists())
+
+
+class ResultRetentionTests(unittest.TestCase):
+    """Run real Make recipes; replace only native process and result-reader boundaries."""
+
+    def setUp(self):
+        self.fixture = DestinationTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.checkout = self.fixture.root / "checkout with spaces"
+        self.checkout.mkdir()
+        shutil.copy2(ROOT / "Makefile", self.checkout / "Makefile")
+        (self.checkout / "Scripts").symlink_to(ROOT / "Scripts", target_is_directory=True)
+        self.build_root = self.fixture.root / "build products"
+        self.results_root = self.fixture.root / "retained results"
+        for directory in (self.build_root, self.results_root, self.checkout / ".build"):
+            directory.mkdir(exist_ok=True)
+            (directory / "unrelated-sentinel").write_text("owner data")
+
+    def command(self, target, plan, retained=True):
+        ipad = "iPad Pro 11-inch (M5)"
+        self.fixture.devices = {"devices": {RUNTIME: [
+            self.fixture.device(name=NAME, udid=UDID),
+            self.fixture.device(name=ipad, udid=OTHER_UDID),
+        ]}}
+        self.fixture.destinations = [
+            self.fixture.destination(name=NAME, udid=UDID),
+            self.fixture.destination(name=ipad, udid=OTHER_UDID),
+        ]
+        self.fixture.write_inventory()
+        (self.fixture.root / "result-plan.json").write_text(json.dumps(plan))
+        (self.fixture.root / "executed.jsonl").unlink(missing_ok=True)
+        return [MAKE, target, f"XCODE_WRAPPER={self.fixture.wrapper}",
+                f"VERIFIED_SIMULATOR_UDID={OTHER_UDID if target == 'test-snapshots' else UDID}",
+                f"VERIFIED_IPAD_SIMULATOR_UDID={OTHER_UDID}",
+                f"XCODE_BUILD_ROOT={self.build_root}",
+                f"TEST_RESULTS_DIRECTORY={self.results_root if retained else ''}",
+                f"PATH={self.fixture.env['PATH']}"]
+
+    def run_make(self, target, plan=None, retained=True):
+        return subprocess.run(self.command(target, plan or {}, retained),
+                              cwd=self.checkout, env=self.fixture.env,
+                              text=True, capture_output=True, timeout=30)
+
+    def bundles(self):
+        return sorted(self.results_root.glob("*/*.xcresult"))
+
+    def assert_owner_data_intact(self):
+        for directory in (self.build_root, self.results_root, self.checkout / ".build"):
+            self.assertEqual((directory / "unrelated-sentinel").read_text(), "owner data")
+
+    def assert_builds_cleaned(self):
+        self.assertEqual(list(self.build_root.glob("xcodebuild-*")), [])
+        self.assert_owner_data_intact()
+
+    def stop_during_phase(self, target, abrupt):
+        """The readiness pipe avoids timing guesses and signals only this fixture session."""
+        read_fd, write_fd = os.pipe()
+        process = None
+        stopped = False
+        try:
+            env = dict(self.fixture.env, FIXTURE_READY_FD=str(write_fd))
+            process = subprocess.Popen(
+                self.command(target, {"wait_on": 2, "ignore_signals": abrupt}),
+                cwd=self.checkout, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True, pass_fds=(write_fd,),
+            )
+            os.close(write_fd)
+            write_fd = None
+            ready, _, _ = select.select([read_fd], [], [], 10)
+            self.assertTrue(ready, "Fixture did not reach its partial-result barrier")
+            message = os.read(read_fd, 4096)
+            self.assertTrue(message, "Fixture exited before its partial-result barrier")
+            partial = Path(json.loads(message)["bundle"])
+            self.assertTrue((partial / "fixture-partial").is_file())
+            os.killpg(process.pid, signal.SIGKILL if abrupt else signal.SIGTERM)
+            output, errors = process.communicate(timeout=10)
+            stopped = True
+            self.assertNotEqual(process.returncode, 0, (output + errors).decode())
+        finally:
+            if write_fd is not None:
+                os.close(write_fd)
+            os.close(read_fd)
+            if process is not None and not stopped:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.communicate(timeout=10)
+
+    def test_success_preserves_all_bundles_at_native_result_paths_with_spaces(self):
+        for target, names in (
+            ("test", ("App.xcresult", "ApplicationFoundation.xcresult",
+                      "App-iPadPrivacy.xcresult", "BrowserDownloadMultiScene.xcresult")),
+            ("test-snapshots", ("App.xcresult", "ApplicationFoundation.xcresult")),
+        ):
+            with self.subTest(target=target):
+                result = self.run_make(target)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                current = [Path(args[args.index("-resultBundlePath") + 1])
+                           for args in self.fixture.executions()]
+                self.assertEqual({bundle.name for bundle in current}, set(names))
+                self.assertEqual(len({bundle.parent for bundle in current}), 1)
+                for bundle in current:
+                    self.assertTrue(bundle.is_relative_to(self.results_root))
+                    self.assertEqual(json.loads((bundle / "fixture-completed.json").read_text())
+                                     ["result"], "Passed")
+                self.assert_builds_cleaned()
+
+    def test_later_failure_retains_earlier_completed_bundle_and_failure_status(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                result = self.run_make(target, {"fail_on": 2})
+                self.assertNotEqual(result.returncode, 0)
+                paths = [Path(args[args.index("-resultBundlePath") + 1])
+                         for args in self.fixture.executions()]
+                expected_names = ["App.xcresult", "ApplicationFoundation.xcresult"]
+                expected_results = ["Passed", "Failed"]
+                if target == "test":
+                    expected_names += ["App-iPadPrivacy.xcresult", "BrowserDownloadMultiScene.xcresult"]
+                    expected_results += ["Passed", "Passed"]
+                self.assertEqual([path.name for path in paths], expected_names)
+                for path in paths:
+                    self.assertTrue(path.is_dir(), f"Native result path was removed: {path}")
+                self.assertEqual([json.loads((path / "fixture-completed.json").read_text())
+                                  ["result"] for path in paths], expected_results)
+                self.assert_builds_cleaned()
+
+    def test_functional_failure_collects_command_and_validation_errors_and_runs_later_lanes(self):
+        result = self.run_make("test", {"fail_on": 1, "partial_on": 1, "missing_on": 2})
+        self.assertNotEqual(result.returncode, 0)
+        paths = [Path(args[args.index("-resultBundlePath") + 1])
+                 for args in self.fixture.executions()]
+        self.assertEqual([path.name for path in paths], [
+            "App.xcresult", "ApplicationFoundation.xcresult", "App-iPadPrivacy.xcresult",
+            "BrowserDownloadMultiScene.xcresult",
+        ])
+        self.assertTrue((paths[0] / "fixture-partial").is_file())
+        self.assertFalse(paths[1].exists())
+        self.assertTrue(all((path / "fixture-completed.json").is_file() for path in paths[2:]))
+        self.assertIn("App-xcodebuild=65", result.stderr)
+        self.assertIn("App-validation=1", result.stderr)
+        self.assertIn("ApplicationFoundation-validation=1", result.stderr)
+        self.assertIn("Error 65", result.stderr)
+        self.assert_builds_cleaned()
+
+    def test_functional_identity_validation_rejects_missing_and_skipped_required_ui_tests(self):
+        for plan, reason in (({"omit_ui_identity": True}, "test identities differ"),
+                             ({"skip_ui_identity": True}, "skipped")):
+            with self.subTest(plan=plan):
+                result = self.run_make("test", plan)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(reason, result.stderr)
+                self.assertIn("BrowserDownloadMultiScene-validation=1", result.stderr)
+                self.assertEqual(len(self.fixture.executions()), 4)
+                self.assert_builds_cleaned()
+
+    def test_functional_suites_reject_missing_required_cases_and_unexpected_skips(self):
+        privacy = "AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)"
+        for mutation, identity, label in (
+            ("omit_case", HTTP_MATRIX_ID, "App"),
+            ("omit_case", "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances()", "App"),
+            ("skip_case", "RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification()", "ApplicationFoundation"),
+            ("skip_case", privacy, "App-iPadPrivacy"),
+        ):
+            with self.subTest(mutation=mutation, identity=identity):
+                result = self.run_make("test", {mutation: identity})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(label + "-validation=1", result.stderr)
+                self.assertEqual(len(self.fixture.executions()), 4)
+                self.assert_builds_cleaned()
+
+    def test_passing_http_parent_requires_each_argument_pair_to_pass_once(self):
+        passing = self.fixture.http_matrix_arguments
+        attachment = next(row for row in passing if row["name"] == ".persistentPrivate, .attachment")
+        other_rows = [row for row in passing if row != attachment]
+        skipped = dict(attachment, result="Skipped")
+        unknown = dict(attachment, name=".persistentPrivate, .unknown")
+        for scenario, rows, diagnostic in (
+            ("parent only", [], attachment["name"]),
+            ("missing attachment", other_rows, attachment["name"]),
+            ("skipped attachment", [*other_rows, skipped], '"result":"Skipped"'),
+            ("substituted row", [*other_rows, unknown], unknown["name"]),
+            ("duplicate instead of attachment", [*other_rows, other_rows[0]], other_rows[0]["name"]),
+            ("extra copy of attachment", [*passing, attachment], attachment["name"]),
+        ):
+            with self.subTest(scenario=scenario):
+                self.fixture.http_matrix_arguments = rows
+                result = self.run_make("test")
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("App HTTP matrix", result.stderr)
+                self.assertIn(diagnostic, result.stderr)
+                self.assertIn("App-validation=1", result.stderr)
+                paths = [Path(args[args.index("-resultBundlePath") + 1])
+                         for args in self.fixture.executions()]
+                self.assertEqual([path.name for path in paths], [
+                    "App.xcresult", "ApplicationFoundation.xcresult", "App-iPadPrivacy.xcresult",
+                    "BrowserDownloadMultiScene.xcresult",
+                ])
+                self.assertEqual([json.loads((path / "fixture-completed.json").read_text())["result"]
+                                  for path in paths], ["Passed"] * 4)
+                self.assert_builds_cleaned()
+
+    def test_snapshot_app_failure_still_runs_package_and_remains_failed(self):
+        result = self.run_make("test-snapshots", {"fail_on": 1})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.fixture.executions()), 2)
+        self.assertEqual({path.name for path in self.bundles()},
+                         {"App.xcresult", "ApplicationFoundation.xcresult"})
+        self.assert_builds_cleaned()
+
+    def test_graceful_termination_preserves_completed_and_partial_bundles(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                self.stop_during_phase(target, abrupt=False)
+                current = [Path(args[args.index("-resultBundlePath") + 1])
+                           for args in self.fixture.executions()]
+                self.assertEqual(len(current), 2)
+                self.assertTrue((current[0] / "fixture-completed.json").is_file())
+                self.assertTrue((current[1] / "fixture-partial").is_file())
+                self.assertFalse((current[1] / "fixture-completed.json").exists())
+                self.assert_builds_cleaned()
+
+    def test_abrupt_termination_retains_evidence_without_exit_traps(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                self.stop_during_phase(target, abrupt=True)
+                current = [Path(args[args.index("-resultBundlePath") + 1])
+                           for args in self.fixture.executions()]
+                self.assertEqual(len(current), 2)
+                for bundle in current:
+                    self.assertTrue(bundle.is_relative_to(self.results_root))
+                    self.assertTrue((bundle / "fixture-partial").is_file())
+                self.assertTrue((current[0] / "fixture-completed.json").is_file())
+                self.assertFalse((current[1] / "fixture-completed.json").exists())
+                self.assert_owner_data_intact()
+
+    def test_partial_bundle_is_retained_but_never_qualifies_as_complete(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                result = self.run_make(target, {"partial_on": 1})
+                self.assertNotEqual(result.returncode, 0)
+                first = Path(self.fixture.executions()[0][
+                    self.fixture.executions()[0].index("-resultBundlePath") + 1])
+                self.assertTrue((first / "fixture-partial").is_file())
+                self.assertFalse((first / "fixture-completed.json").exists())
+                self.assert_builds_cleaned()
+
+    def test_repeated_invocations_leave_separate_evidence_unchanged(self):
+        for target in ("test", "test-snapshots"):
+            with self.subTest(target=target):
+                result = self.run_make(target)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                old = {path: (path / "fixture-completed.json").read_bytes()
+                       for path in self.bundles()}
+                previous_directories = {path.parent for path in self.bundles()}
+                result = self.run_make(target)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                current = [Path(args[args.index("-resultBundlePath") + 1])
+                           for args in self.fixture.executions()]
+                self.assertFalse(previous_directories.intersection(path.parent for path in current))
+                for path, content in old.items():
+                    self.assertEqual((path / "fixture-completed.json").read_bytes(), content)
+                self.assert_builds_cleaned()
+
+    def test_partial_required_ui_bundle_cannot_pass_the_identity_checker(self):
+        result = self.run_make("test", {"partial_on": 4})
+        self.assertNotEqual(result.returncode, 0)
+        commands = self.fixture.executions()
+        self.assertEqual(len(commands), 4)
+        bundle = Path(commands[-1][commands[-1].index("-resultBundlePath") + 1])
+        self.assertEqual(bundle.name, "BrowserDownloadMultiScene.xcresult")
+        self.assertTrue((bundle / "fixture-partial").is_file())
+        self.assertFalse((bundle / "fixture-completed.json").exists())
+        self.assert_builds_cleaned()
+
+    def test_unconfigured_results_keep_temporary_cleanup_behavior(self):
+        for target in ("test", "test-snapshots"):
+            for failure in (False, True):
+                with self.subTest(target=target, failure=failure):
+                    result = self.run_make(target, {"fail_on": 2} if failure else {},
+                                           retained=False)
+                    self.assertEqual(result.returncode == 0, not failure,
+                                     result.stdout + result.stderr)
+                    self.assertEqual(self.bundles(), [])
+                    for args in self.fixture.executions():
+                        bundle = Path(args[args.index("-resultBundlePath") + 1])
+                        self.assertTrue(bundle.is_relative_to(self.build_root))
+                        self.assertFalse(bundle.exists())
+                    self.assert_builds_cleaned()
+
+
+class WorkflowEvidenceTests(unittest.TestCase):
+    @staticmethod
+    def steps():
+        source = (ROOT / ".github/workflows/tests.yml").read_text()
+        return re.split(r"(?m)^(?:      - name: |  [\w-]+:\s*$)", source)[1:]
+
+    @staticmethod
+    def render(source, run_id, attempt):
+        values = {"run_id": run_id, "run_attempt": attempt}
+        return re.sub(r"\$\{\{\s*github\.(run_id|run_attempt)\s*\}\}",
+                      lambda match: values[match[1]], source)
+
+    def test_upload_names_preserve_every_gate_and_run_attempt(self):
+        uploads = [step for step in self.steps() if "uses: actions/upload-artifact@" in step]
+        self.assertEqual(len(uploads), 3)
+        names = []
+        for step in uploads:
+            self.assertRegex(step, r"(?m)^        if: always\(\)$")
+            self.assertNotRegex(step, r"(?m)^          overwrite: true$")
+            match = re.search(r"(?m)^          name: (.+)$", step)
+            self.assertIsNotNone(match)
+            for run_id in ("7001", "7002"):
+                for attempt in ("1", "2"):
+                    name = self.render(match[1], run_id, attempt)
+                    self.assertIn(run_id, name)
+                    self.assertIn(attempt, name.rsplit(run_id, 1)[-1])
+                    self.assertNotIn("${{", name)
+                    names.append(name)
+        self.assertEqual(len(set(names)), 12)
+
+    def test_snapshot_failure_reporting_names_the_attempt_without_claiming_pass(self):
+        report = next(step for step in self.steps()
+                      if step.startswith("Report snapshot qualification status\n"))
+        script = textwrap.dedent(report.split("        run: |\n", 1)[1])
+        artifact_step = next(step for step in self.steps()
+                             if step.startswith("Upload 2x iPad snapshot evidence\n"))
+        artifact = re.search(r"(?m)^          name: (.+)$", artifact_step)[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            executable = directory / "make"
+            executable.write_text('#!/bin/sh\nprintf unexpected > "$FIXTURE_MAKE_MARKER"\nexit 99\n')
+            executable.chmod(0o755)
+            marker = directory / "unexpected-command"
+            for outcome in ("failure", "cancelled"):
+                with self.subTest(outcome=outcome):
+                    summary = Path(temporary) / outcome
+                    result = subprocess.run(
+                        ["bash", "-e", "-o", "pipefail", "-c", self.render(script, "7001", "2")],
+                        env=dict(os.environ, SNAPSHOT_OUTCOME=outcome, UPLOAD_OUTCOME="success",
+                                 GITHUB_STEP_SUMMARY=str(summary), FIXTURE_MAKE_MARKER=str(marker),
+                                 PATH=str(directory) + os.pathsep + os.environ["PATH"]),
+                        cwd=directory, text=True, capture_output=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    text = summary.read_text()
+                    self.assertFalse(marker.exists(), "Markdown command must remain literal")
+                    self.assertIn("| Command | `make test-snapshots` |", text)
+                    self.assertIn(self.render(artifact, "7001", "2"), text)
+                    self.assertIn("| Snapshot step outcome | " + outcome + " |", text)
+                    status = "failed" if outcome == "failure" else "did not complete"
+                    self.assertIn("| Qualification status | " + status + " |", text)
+                    self.assertNotIn("| Qualification status | automated snapshot success", text)
+
+
+class NativeSnapshotRecipeTests(DestinationFixture, unittest.TestCase):
     def native_run(self, scenario="", scale="3", **overrides):
         checkout = self.root / "native-checkout"
         checkout.mkdir(exist_ok=True)

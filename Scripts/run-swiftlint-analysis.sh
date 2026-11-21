@@ -7,7 +7,7 @@ repository_root=$(cd -- "$script_directory/.." && pwd)
 xcode_wrapper="$script_directory/with-xcode-27.2.sh"
 swift_tools_adapter="$script_directory/swift-tools.sh"
 swift_tools_local_config="$script_directory/swift-tools-local.sh"
-compiler_log_directory="$repository_root/.build/swiftlint"
+compiler_log_directory="${SWIFTLINT_BUILD_ROOT:-$repository_root/.build/swiftlint}"
 # Reuse the package checkout cache the Makefile maintains so every gate clones
 # dependencies once; only compiler and build products live in the per-run
 # analyzer directory below.
@@ -57,7 +57,9 @@ mkdir -p "$compiler_log_directory"
 # trap, so bound how long an abandoned run directory can survive. Only this
 # script's own run.* directories are pruned; caches, package checkouts and
 # unrelated build artifacts are never touched.
-find "$compiler_log_directory" -maxdepth 1 -type d -name 'run.*' -mtime +0 -exec rm -rf -- {} +
+if [[ -z "${SWIFTLINT_BUILD_ROOT:-}" ]]; then
+	find "$compiler_log_directory" -maxdepth 1 -type d -name 'run.*' -mtime +0 -exec rm -rf -- {} +
+fi
 analysis_directory=$(mktemp -d "$compiler_log_directory/run.XXXXXX")
 trap 'rm -rf -- "$analysis_directory"' EXIT
 trap 'exit 143' INT TERM

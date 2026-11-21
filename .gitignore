@@ -1,5 +1,8 @@
 .DS_Store
 
+# Xcode-generated Clang module cache written into the project directory
+/App.xcodeproj/-Xcc/
+
 ### Swift ###
 # Xcode
 #

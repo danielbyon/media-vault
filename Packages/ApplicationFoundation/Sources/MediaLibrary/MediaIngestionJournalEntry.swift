@@ -100,7 +100,7 @@ struct MediaIngestionJournalSnapshot: Sendable {
 
 /// Persists journal state in the vault database without exposing transitions to callers.
 actor SQLiteMediaLibraryIngestionJournal {
-    private let database: any DatabaseWriter
+    let database: any DatabaseWriter
     private var beforeAcceptanceWriteForTesting: @Sendable () async -> Void = {}
 
     init(database: any DatabaseWriter) {
@@ -291,44 +291,46 @@ actor SQLiteMediaLibraryIngestionJournal {
     func snapshot() async throws -> MediaIngestionJournalSnapshot {
         do {
             try await prepareSchema()
-            let rows = try await database.read { db in
-                let statement = try db.makeStatement(sql: """
-                SELECT id, resource_id, state, source_filename, imported_at,
-                       source_uti, byte_count, sha256, captured_at
-                FROM media_ingestion_journal
-                ORDER BY imported_at, id
-                """)
-                return try Row.fetchAll(statement).map(DecodedJournalRow.init)
-            }
-
-            var entries: [MediaIngestionJournalEntry] = []
-            var unreadableAssetIDs = Set<UUID>()
-            var hasUnidentifiedAssetRows = false
-            var knownResourceIDs = Set<UUID>()
-            for row in rows {
-                if let resourceID = row.resourceID {
-                    knownResourceIDs.insert(resourceID)
-                }
-                guard let assetID = row.assetID else {
-                    hasUnidentifiedAssetRows = true
-                    continue
-                }
-                guard let entry = row.entry else {
-                    unreadableAssetIDs.insert(assetID)
-                    continue
-                }
-
-                entries.append(entry)
-            }
-            return MediaIngestionJournalSnapshot(
-                entries: entries,
-                unreadableAssetIDs: unreadableAssetIDs,
-                hasUnidentifiedAssetRows: hasUnidentifiedAssetRows,
-                knownResourceIDs: knownResourceIDs,
-            )
+            return try await database.read(Self.readSnapshot)
         } catch {
             throw MediaLibraryStoreError.unavailable
         }
+    }
+
+    static func readSnapshot(_ db: Database) throws -> MediaIngestionJournalSnapshot {
+        let statement = try db.makeStatement(sql: """
+        SELECT id, resource_id, state, source_filename, imported_at,
+               source_uti, byte_count, sha256, captured_at
+        FROM media_ingestion_journal
+        ORDER BY imported_at, id
+        """)
+        let rows = try Row.fetchAll(statement).map(DecodedJournalRow.init)
+
+        var entries: [MediaIngestionJournalEntry] = []
+        var unreadableAssetIDs = Set<UUID>()
+        var hasUnidentifiedAssetRows = false
+        var knownResourceIDs = Set<UUID>()
+        for row in rows {
+            if let resourceID = row.resourceID {
+                knownResourceIDs.insert(resourceID)
+            }
+            guard let assetID = row.assetID else {
+                hasUnidentifiedAssetRows = true
+                continue
+            }
+            guard let entry = row.entry else {
+                unreadableAssetIDs.insert(assetID)
+                continue
+            }
+
+            entries.append(entry)
+        }
+        return MediaIngestionJournalSnapshot(
+            entries: entries,
+            unreadableAssetIDs: unreadableAssetIDs,
+            hasUnidentifiedAssetRows: hasUnidentifiedAssetRows,
+            knownResourceIDs: knownResourceIDs,
+        )
     }
 
     private struct DecodedJournalRow: Sendable {

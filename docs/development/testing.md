@@ -27,14 +27,22 @@ pixel-perfect full-window images.
 invocations skip root-surface snapshots, hosted presentation snapshots, and
 the five package snapshot suites. A separate App invocation on the canonical
 iPad runs `rootPrivacyCoverSynchronouslyOccludesPrivateSentinel`; on iPad that
-test exercises both the compact and regular fixtures. Shell navigation and
-Lock-control UI tests run separately in the `BrowserTabOverviewUITests`
-scheme. `make test-snapshots` runs Layer C and the repository's other exact
-visual suites. UIKit protection is checked through state, accessibility,
-hit-testing, and synthetic private-pixel occlusion assertions.
+test exercises both the compact and regular fixtures. The same gate runs 30
+simulator-safe `BrowserDownloadMultiSceneUITests` selectors through the
+diagnostic `BrowserTabOverviewUITests` scheme on the canonical iPad. The
+result check requires exact test identities, destination, and pass/fail/skip
+counts. `testSystemResizeChangesActualSceneGeometry` is excluded from this
+unattended simulator suite and remains under its existing separate
+qualification scope.
+This host-only coverage does not enable multiple scenes in the shipping app
+or replace physical scene/privacy qualification. Shell navigation and
+Lock-control UI tests remain separate. `make test-snapshots` runs Layer C and
+the repository's other exact visual suites. UIKit protection is checked
+through state, accessibility, hit-testing, and synthetic private-pixel
+occlusion assertions.
 
 The hosted privacy behavior tests cover compact and regular fixtures in
-`make test`. Shell-control UI tests run in the separate
+`make test`. The remaining shell-control UI tests run in the separate
 `BrowserTabOverviewUITests` scheme.
 
 Layer B privacy fixtures use 320x568 compact and 1024x1366 regular dimensions.
@@ -167,8 +175,8 @@ which navigates among Collections, Browser, and Library;
 checks the persistent Lock control in selected authenticated destinations; and
 `testSettingsLockReturnsToCalculatorFromTopLevelAndBrowserSettings`, which
 checks the Settings Lock action from top-level Settings and Browser Settings.
-These UI tests are outside `make test`; they do not prove the two-layout
-fixture matrix or PAC-1/TAC-5, which remain deferred to Issue #59.
+These three shell UI tests are outside `make test`; they do not prove the
+two-layout fixture matrix or PAC-1/TAC-5, which remain deferred to Issue #59.
 The hosted Layer C selector is:
 
 `-only-testing:'AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates()'`
@@ -369,10 +377,30 @@ Interrupted runs can leave partial evidence; partial evidence does not qualify.
 
 ## 3. Result bundles and failure handling
 
-`make test` and `make test-snapshots` treat `TEST_RESULTS_DIRECTORY` as optional.
-When set, each test invocation writes an `xcresult` bundle below the temporary
-test root and copies it into the external directory before the temporary root is removed. When unset, result bundles stay
-inside the temporary root and are deleted with the rest of the build artifacts.
+`TEST_RESULTS_DIRECTORY` is optional. For `make test` and `make test-snapshots`,
+each invocation creates a unique subdirectory below it and points `xcodebuild`
+at those `.xcresult` paths. Xcode writes bundles there directly, so completed
+and partial results remain available after success, failure, cancellation, and
+cleanup. Each test command requires a readable bundle with a positive test count.
+
+`XCODE_BUILD_ROOT` selects temporary DerivedData and build-product storage for
+`make build`, `make test`, and `make test-snapshots`. Cleanup removes the
+invocation's generated build root and preserves the caller's result directory
+and unrelated files. Without `TEST_RESULTS_DIRECTORY`, bundles stay in the
+temporary root and are removed during normal cleanup.
+
+`make test-native-snapshots` writes result bundles, summary output, exported
+attachments, and validation logs to a unique `native-snapshots.*` directory
+under `TEST_RESULTS_DIRECTORY`. Without that setting, it writes under
+`NATIVE_SNAPSHOT_BUILD_DIRECTORY/TestResults`. The target removes its temporary
+build root after the run.
+
+`make destination-test` exercises these ownership rules with disposable process
+fixtures. It covers completed and partial results, later failures, graceful and
+abrupt termination, repeated invocations, paths with spaces, cleanup boundaries,
+and artifact-name/report consistency. Abrupt-termination tests signal only
+their own mock process groups, exercising cleanup without launching Xcode or
+simulators.
 
 After each `xcodebuild test` invocation, the Makefile reads that scheme's own
 bundle with `xcresulttool get test-results summary --path <bundle> --compact`.
@@ -417,39 +445,53 @@ replaces a tracked reference.
    workflow.
 
 3. `native-snapshot-qualification`, named
-   `Native snapshot qualification (3x iPhone)`, runs the focused native target
+   `Native snapshot qualification (3x iPhone)`, runs `make test-native-snapshots`
    with a 60-minute job timeout and a 45-minute test-step timeout. It uses the
-   same pinned `xcode-27` runner, Xcode/runtime preflight, and package cache.
-   A failed command blocks the workflow. An `always()` upload preserves the
-   bundles and exported evidence under
-   `native-3x-iphone-snapshot-evidence-run-<run>-attempt-<attempt>`.
+   pinned `xcode-27` runner, toolchain preflight, and package cache. A failed
+   command blocks the workflow.
 
-The functional job passes `TEST_RESULTS_DIRECTORY` so both iPhone bundles survive
-the run, and an `if: always()` step uploads them as the `iphone-test-evidence`
-artifact. A missing bundle is reported as a warning, and an upload failure does
-not change the test step outcome or the blocking gate.
+The blocking iOS job writes four result bundles under its unique
+`TEST_RESULTS_DIRECTORY` subdirectory: App, ApplicationFoundation, iPad privacy,
+and browser UI qualification. An `if: always()` step attempts to upload
+available files as `ios-test-evidence-run-<run_id>-attempt-<run_attempt>`. Missing
+files produce a warning, and upload status does not change the test outcome.
 
-The jobs are separate so their time budgets are independent. The snapshot
-job has a 60-minute job timeout and a 45-minute timeout on the test step, so a
-hung snapshot run cannot consume the iPhone job's time budget, and the snapshot
-outcome is visible on its own job. The snapshot job is also a required gate. A
-failed command can mean a reference mismatch, a build error, an unavailable
-simulator destination, or a timeout; inspect its artifact or job log before
-attributing a cause. The job's final step reports the observed step outcomes to
-the workflow run summary and deliberately stays cause-neutral.
+The 2x iPad job uploads available snapshot results from `.build/TestResults` as
+`2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Its `if: always()`
+step preserves evidence after test failure, and the final step reports command
+and upload outcomes in the workflow summary.
 
-A passing snapshot command confirms that the committed 2x references match in
-the automated run and that both schemes recorded positive test counts. It does
-not constitute final owner visual approval; that approval is a separate
-acceptance decision.
+The native 3x iPhone job writes evidence under `.build/NativeSnapshotResults`.
+Its `if: always()` upload uses
+`native-3x-iphone-snapshot-evidence-run-<run_id>-attempt-<run_attempt>` and
+preserves result bundles and exported scale receipts.
 
-The snapshot job preserves evidence on failure. The test step passes
-`TEST_RESULTS_DIRECTORY` so each `xcresult` bundle is copied out of the
-temporary test root, and the upload step runs with `if: always()` to publish the
-`2x-ipad-snapshot-evidence` artifact. The step timeout is shorter than the job
-timeout so a hung test run still reaches that upload step. A missing artifact is
-reported as a warning, and a skipped job or missing artifact must not be read as
-snapshot qualification.
+Each snapshot job has a 60-minute job timeout and a 45-minute test-step limit.
+Separate jobs give the snapshot runs independent time budgets, and both jobs are
+required gates. The 2x job's final step reports command and upload outcomes in
+the workflow summary. A failed command can indicate a reference mismatch, build
+error, unavailable simulator destination, or timeout. Check that job's artifact
+or logs before assigning a cause.
+
+A passing 2x snapshot command confirms that the committed 2x references match
+in the automated run and both schemes record positive test counts. The owner
+reviews visual results separately.
+
+The 2x job writes its App and ApplicationFoundation result bundles to a unique
+`xcodebuild-snapshot-test.*` subdirectory below `TEST_RESULTS_DIRECTORY`. Its
+`if: always()` upload uses
+`2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. The native 3x job
+stores its results under `.build/NativeSnapshotResults` and uploads them with
+`native-3x-iphone-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Each
+artifact name includes GitHub's run ID and attempt number, so retries preserve
+earlier evidence under its original name.
+
+The snapshot step timeout remains shorter than the job timeout so the upload
+step has time to run. A runner loss or forced cancellation can still prevent an
+upload; direct result ownership cannot guarantee delivery after infrastructure
+loss. A skipped job, missing artifact, partial bundle, or successful upload must
+not be read as snapshot qualification. Failure and cancellation remain distinct
+from artifact-upload success.
 
 If the `xcode-27` runner does not have the iPad Pro 11-inch (M5) iOS 27.2
 destination, the snapshot job fails and therefore the `Tests` workflow fails.
@@ -540,3 +582,84 @@ The correction changed no snapshot references. CI run `42774304680` applies to
 the pre-correction SHA `636bf7687f9fca95fa3dce94b23e874144f4a1b7`; it does not
 qualify this correction. Corrective logs and result bundles are preserved in
 the Qwizlab corrective-review evidence directory.
+
+## Download continuation across privacy lock
+
+Download transfer authority begins at an authenticated WebKit navigation-action or
+navigation-response decision accepting a download. The single-use capability belongs
+to the exact policy association, originating WebView, tab lifetime, and browsing profile.
+An ordinary navigation or user tap does not grant this authority. A matching native
+handoff may arrive after Lock without gaining content-access authority.
+
+Privacy transitions synchronously conceal metadata and native presentations, revoke
+content grants, and deny new admission. Pending and active admitted transfers continue
+within their original authority. Reauthentication can reconcile retained work through
+fresh verified grants; it cannot replay a stale presentation or resurrect a cancelled
+transfer. Explicit cancellation, tab closure, confirmed profile replacement, and genuine
+failures remain terminal boundaries.
+
+Production scratch and ingestion staging retain Complete file protection and backup
+exclusion. Completion verification waits when protected data is unavailable. The
+[owner-approved protection boundary](https://github.com/danielbyon/media-vault/pull/111#issuecomment-6908629367)
+permits durable acceptance while the app is privacy-locked and protected data remains
+available. Actual device-lock protection may prevent native writing, verification, or
+acceptance. Completion and acceptance are not guaranteed during that interval.
+
+Only verified, durably accepted content receives a restart-recovery guarantee. A native
+completion callback retained only in memory, an admission reservation, and a partial file
+do not establish durable acceptance. Recovery must preserve accepted staging and resume
+processing after authentication. A fresh process starts with an empty Downloads list.
+Issue #123 owns any later investigation of Complete Unless Open protection; it is outside
+this contract and is not a merge blocker under the approved protection boundary.
+
+Supported ordinary downloads enter the shared ingestion pipeline automatically. Actual
+content validation, exact-duplicate comparison, quota decisions, and final commit require
+authentication. Duplicate downloads default to the existing canonical asset. Lock and an
+operation-specific final commit claim have one atomic ordering: Lock prevents an unclaimed
+commit, while a transaction claimed before Lock may finish its authorized disk work.
+
+Capacity accounting separates four pending/active/cancelling writers, eight temporary
+operations, and lightweight session Downloads rows. Accepted pending storage is limited to
+2 GiB in total and 512 MiB per item, with a 512 MiB free-space admission floor. Native
+cancellation is best effort, so qualification records any temporary write overshoot.
+Imported rows release temporary-byte capacity and reference the canonical asset; discarding
+such a row must never delete Library content. Cleanup failures never restore access.
+
+Native Preview and Share use a protected temporary export when the accepted resource's
+opaque storage name cannot identify its type. The export retains a suitable filename
+extension, uses Complete protection and backup exclusion, and consumes temporary storage
+capacity. It is created only for a currently authorized presentation. The accepted or
+canonical source stays unchanged; session-row retention does not retain an export copy.
+Lock revokes the presentation URL immediately. An export acquired by UIKit remains private
+until native absence is confirmed, then cleanup releases its capacity. Unacquired exports
+can be removed without waiting for a native controller. Failed cleanup retains ownership
+and capacity for retry.
+
+Qualification must prove actual byte progress or completion after the privacy transition,
+as well as the absence of application-requested cancellation. Deterministic capability
+tests do not qualify physical WebKit execution. Finite UIKit assertions provide limited
+execution time; they do not guarantee completion during suspension or after termination.
+A separate finite-response fixture releases its remaining bytes after the real Root
+background action locks the session. Its oracle correlates the policy capability, native
+transfer, fixture connection, post-lock progress, finish, and hidden retained allocation.
+The existing slow-known fixture keeps its original deadline and behavior.
+
+`make test` selects 26 simulator-safe `BrowserDownloadQualificationUITests` cases
+alongside the 30 multi-scene cases. The strict result checker requires all 56 exact
+identities on the canonical iPad destination with no failures or skips. The physical
+continuation selector and system-resize test are excluded. Simulator delayed-handoff
+coverage uses a real accepted WebKit policy callback to Lock Root before native handoff;
+it qualifies that callback ordering, not physical background execution.
+
+Automatic-ingestion cases cover ordinary PNG completion, duplicate skip with a stable
+canonical identity, PDF exclusion with native presentation, and accepted pending PNG
+recovery after authenticated relaunch. A separate cold-authentication case checks the
+DEBUG diagnostic readout's accessibility lifecycle without a download. Its subtree may
+remount when credential visibility changes; the production Root and credential surfaces
+keep their identities and concealment rules.
+
+The earlier cancellation-based physical failures remain historical failures. Native
+continuation, device-lock behavior, and protected-data recovery require source-bound
+qualification on the revised implementation. A test-only Complete Unless Open experiment
+cannot establish approval for a production protection change. Existing accessibility and
+system-resize qualification dispositions remain separate.

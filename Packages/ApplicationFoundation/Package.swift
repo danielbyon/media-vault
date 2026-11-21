@@ -82,6 +82,7 @@ let package = Package(
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "DependenciesMacros", package: "swift-dependencies"),
                 "PresentationSupport",
+                "MediaLibrary",
             ],
         ),
         .target(
@@ -176,6 +177,8 @@ let package = Package(
             name: "BrowserFeatureTests",
             dependencies: [
                 "BrowserFeature",
+                "MediaLibrary",
+                "PersistenceSupport",
                 "FoundationTestSupport",
                 .product(
                     name: "ComposableArchitecture",
