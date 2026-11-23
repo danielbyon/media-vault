@@ -124,9 +124,6 @@ private final class BrowserDownloadProductionQualificationProcess {
     let adapter: BrowserWebKitAdapter
     let coordinator: BrowserDownloadNativeCoordinator
     let evidence: BrowserDownloadProductionEvidence
-    #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-    private let diagnosticRecorder = BrowserDownloadHostDiagnosticRecorder()
-    #endif
     let fault: BrowserDownloadQualificationRemovalFault
     let pendingAllocation: BrowserDownloadQualificationPendingAllocation
     let securitySentinel: BrowserDownloadSecuritySentinel
@@ -144,17 +141,21 @@ private final class BrowserDownloadProductionQualificationProcess {
     @ObservationIgnored
     private var phaseRevision: UInt64 = 0
     @ObservationIgnored
-    private lazy var sceneActivity = BrowserDownloadQualificationSceneActivity { [weak self] sceneLabel in
-        self?.updateLibrarySample(sceneLabel: sceneLabel)
+    private lazy var sceneActivity = BrowserDownloadQualificationSceneActivity { [weak self] in
+        self?.updateLibrarySample()
     }
+
     private var activeScene: Bool {
         sceneActivity.isObservationEligible
     }
+
     @ObservationIgnored
     private var storageObservation = BrowserDownloadStorageObservationState()
+
     private var storageAvailable: Bool {
         storageObservation.isAvailable(in: observationContext)
     }
+
     @ObservationIgnored
     private var storageFailure: BrowserDownloadLibraryObservation?
     let usesCompatibilityReadout = !ProcessInfo.processInfo
@@ -240,15 +241,7 @@ private final class BrowserDownloadProductionQualificationProcess {
             discardedEventCount: evidence.discardedEventCount,
             library: currentLibrarySample,
         )
-        #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-        let readout = BrowserDownloadObservationReadout(
-            observation: sample,
-            hostDiagnostics: diagnosticRecorder.snapshot,
-        )
-        let data = try? JSONEncoder().encode(readout)
-        #else
         let data = try? JSONEncoder().encode(sample)
-        #endif
         guard let data else {
             return nil
         }
@@ -528,9 +521,6 @@ private final class BrowserDownloadProductionQualificationProcess {
         } else if let context, context == observationContext {
             storageFailure = .init(context: context, outcome: .unavailable, fields: [:])
         }
-        #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-        recordDiagnosticEligibility()
-        #endif
         updateLibrarySample()
     }
 
@@ -540,58 +530,15 @@ private final class BrowserDownloadProductionQualificationProcess {
         }
 
         reconciledContext = context
-        #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-        recordDiagnosticEligibility()
-        #endif
         updateLibrarySample()
     }
 
-    #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-    /// Inspect after normal product storage work. Reading the accessibility value never starts work.
-    private var diagnosticRootPhase: BrowserDownloadHostDiagnosticRecord.RootPhase {
-        switch store.vault.phase {
-        case .authentication:
-            .authentication
-        case .locked:
-            .locked
-        case .authenticated:
-            .authenticated
-        default:
-            .other
-        }
-    }
-
-    func makeDiagnosticSceneLabel() -> String {
-        diagnosticRecorder.makeSceneLabel()
-    }
-
-    private func recordDiagnosticEligibility(sceneLabel: String? = nil) {
-        diagnosticRecorder.recordEligibility(
-            sceneLabel: sceneLabel,
-            activeScene: activeScene,
-            storageAvailable: storageAvailable,
-            rootPhase: diagnosticRootPhase,
-            readEligible: currentLibraryRead != nil,
-        )
-    }
-    #endif
-
-    private func updateLibrarySample(sceneLabel: String? = nil) {
+    private func updateLibrarySample() {
         let key = currentLibraryRead
-        #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-        let readSceneLabel = sceneLabel
-        recordDiagnosticEligibility(sceneLabel: sceneLabel)
-        #endif
         guard libraryKey != key else {
             return
         }
 
-        if libraryTask != nil {
-            #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-            let contextMatches = libraryKey.map { $0.context == observationContext }
-            diagnosticRecorder.cancelActiveLibraryRead(contextMatches: contextMatches)
-            #endif
-        }
         libraryTask?.cancel()
         libraryTask = nil
         libraryKey = key
@@ -600,9 +547,6 @@ private final class BrowserDownloadProductionQualificationProcess {
             return
         }
 
-        #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-        let readTicket = diagnosticRecorder.scheduleLibraryRead(sceneLabel: readSceneLabel)
-        #endif
         libraryTask = Task { [weak self] in
             guard let self else {
                 return
@@ -625,41 +569,12 @@ private final class BrowserDownloadProductionQualificationProcess {
                 outcome = .failed
             }
             guard !Task.isCancelled, libraryKey == key, currentLibraryRead == key else {
-                #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-                let contextMatches = key.context == observationContext
-                diagnosticRecorder.recordContextInvalidated(for: readTicket, contextMatches: contextMatches)
-                diagnosticRecorder.recordReadOutcome(
-                    .invalidated,
-                    for: readTicket,
-                    contextMatches: contextMatches,
-                )
-                #endif
                 if libraryKey == key {
                     libraryTask = nil
                 }
                 return
             }
 
-            #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-            let diagnosticOutcome: BrowserDownloadHostDiagnosticRecord.Outcome =
-                switch outcome {
-                case .complete:
-                    .complete
-                case .unavailable:
-                    .unavailable
-                case .invalidated:
-                    .invalidated
-                case .failed:
-                    .failed
-                }
-            #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-            diagnosticRecorder.recordReadOutcome(
-                diagnosticOutcome,
-                for: readTicket,
-                contextMatches: key.context == observationContext,
-            )
-            #endif
-            #endif
             let sample = BrowserDownloadLibraryObservation(context: key.context, outcome: outcome, fields: fields)
             evidence.recordLibrary(
                 sample,
@@ -980,9 +895,6 @@ private final class BrowserDownloadProductionQualificationProcess {
                 }
 
                 self.phaseRevision += 1
-                #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-                self.recordDiagnosticEligibility()
-                #endif
                 Task { @MainActor [weak self] in self?.updateLibrarySample() }
             }
         }
@@ -1157,46 +1069,35 @@ private final class BrowserDownloadProductionQualificationProcess {
     func registerQualificationScene(
         registration: BrowserDownloadQualificationSceneRegistration,
         active: Bool,
-        sceneLabel: String,
     ) {
         _ = sceneActivity.register(registration: registration, active: active)
     }
 
     func disconnectQualificationScene(
         registration: BrowserDownloadQualificationSceneRegistration,
-        sceneLabel: String,
     ) {
-        _ = sceneActivity.disconnect(registration: registration, sceneLabel: sceneLabel)
+        _ = sceneActivity.disconnect(registration: registration)
     }
 
     @discardableResult
     func applyQualificationScenePhase(
         _ phase: String,
         applicationPhase: VaultApplicationScenePhase,
-        sceneLabel: String,
         registration: BrowserDownloadQualificationSceneRegistration,
     ) -> Bool {
         let generationBefore = owner.snapshot.generation
         guard let eligibilityChanged = sceneActivity.applyPhaseChange(
             active: phase == "active",
             registration: registration,
-            sceneLabel: sceneLabel,
             applyApplicationPhase: {
                 store.send(.applicationPhaseChanged(applicationPhase))
-                #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-                diagnosticRecorder.recordScenePhase(
-                    BrowserDownloadHostDiagnosticRecord.ScenePhase(rawValue: phase) ?? .other,
-                    sceneLabel: sceneLabel,
-                )
-                recordDiagnosticEligibility(sceneLabel: sceneLabel)
-                #endif
             },
         ) else {
             return false
         }
 
         if !eligibilityChanged {
-            updateLibrarySample(sceneLabel: sceneLabel)
+            updateLibrarySample()
         }
         let snapshot = owner.snapshot
         guard let run = slowKnownRun else {
@@ -1881,8 +1782,6 @@ private struct BrowserDownloadProductionQualificationRoot: View {
     @State
     private var browserHostingContext: BrowserQualificationWebKitHostingContext
     @State
-    private var diagnosticSceneLabel: String
-    @State
     private var qualificationSceneRegistration = BrowserDownloadQualificationSceneRegistration()
 
     init(process: BrowserDownloadProductionQualificationProcess) {
@@ -1890,7 +1789,6 @@ private struct BrowserDownloadProductionQualificationRoot: View {
         _browserHostingContext = State(initialValue: BrowserQualificationWebKitHostingContext(
             adapter: process.adapter,
         ))
-        _diagnosticSceneLabel = State(initialValue: process.makeDiagnosticSceneLabel())
     }
 
     var body: some View {
@@ -2036,7 +1934,6 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                 process.registerQualificationScene(
                     registration: qualificationSceneRegistration,
                     active: scenePhase == .active,
-                    sceneLabel: diagnosticSceneLabel,
                 )
                 applyQualificationScenePhase(scenePhase)
             }
@@ -2047,7 +1944,6 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                 || BrowserDownloadProductionQualification.automaticIngestionEnabled {
                 process.disconnectQualificationScene(
                     registration: qualificationSceneRegistration,
-                    sceneLabel: diagnosticSceneLabel,
                 )
             }
             qualificationSceneRegistration = BrowserDownloadQualificationSceneRegistration()
@@ -2120,7 +2016,6 @@ private struct BrowserDownloadProductionQualificationRoot: View {
         _ = process.applyQualificationScenePhase(
             phase,
             applicationPhase: applicationPhase,
-            sceneLabel: diagnosticSceneLabel,
             registration: qualificationSceneRegistration,
         )
     }

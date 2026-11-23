@@ -6,11 +6,10 @@ running a command and stops if either is missing. It does not download simulator
 runtimes. CI also records the runner image, source revision, and selected
 simulator UDID.
 
-Three test commands run as blocking CI gates. `make test` checks functional
-behavior on iPhone and the hosted privacy sentinel on iPad.
-`make test-snapshots` compares visual snapshots against the canonical 2x iPad
-baseline. `make test-native-snapshots` qualifies the focused root and hosted
-snapshots at the destination's native scale, defaulting to the 3x iPhone.
+CI runs four functional test lanes and two snapshot qualification jobs.
+`make test` runs the four functional Make targets locally. The 2x iPad job
+compares visual snapshots against the canonical baseline, and the 3x iPhone job
+qualifies focused root and hosted snapshots at the destination's native scale.
 
 ## Privacy test layers
 
@@ -23,17 +22,18 @@ pixel-perfect full-window images.
 | B. UIKit protection behavior | App-hosted `ScenePrivacyCoverTests` exercise the real `RootView`, TCA store, scene, primary window, calculator decoy, and separate cover window. The hosted suites check attachment, occlusion, hit-test and accessibility isolation, reveal ordering, expiry, and cleanup without golden full-window snapshot comparisons. The sentinel-occlusion test runs on both the iPhone and canonical iPad destinations to exercise compact and regular fixtures. `BrowserTabOverviewUITests/BrowserTabOverviewScrollUITests.testAuthenticatedShellTabsAreAccessibleAndChangeDestinations` checks Collections, Browser, and Library navigation in the simulator's default layout; it does not establish the two-layout privacy fixture matrix. | `make test` for hosted behavior; separate `BrowserTabOverviewUITests` selectors below |
 | C. Native presentation snapshots | SnapshotTesting compares production calculator and Library content at compact and regular sizes. Locked and expired states share calculator references; authenticated and resumed states share Library references. The shell's rendered controls are covered by Layer B. Separate calculator snapshots cover the overlay's glyphs, keys, colors, and layout. Comparisons are exact. | `make test-snapshots`; focused root/hosted native-scale checks use `make test-native-snapshots` |
 
-`make test` runs Layer A and the app-hosted part of Layer B. The iPhone
-invocations skip root-surface snapshots, hosted presentation snapshots, and
-the five package snapshot suites. A separate App invocation on the canonical
-iPad runs `rootPrivacyCoverSynchronouslyOccludesPrivateSentinel`; on iPad that
-test exercises both the compact and regular fixtures. The same gate runs 30
-simulator-safe `BrowserDownloadMultiSceneUITests` selectors through the
-diagnostic `BrowserTabOverviewUITests` scheme on the canonical iPad. The
-result check requires exact test identities, destination, and pass/fail/skip
-counts. `testSystemResizeChangesActualSceneGeometry` is excluded from this
-unattended simulator suite and remains under its existing separate
-qualification scope.
+`make test` runs Layer A and the app-hosted part of Layer B through four
+functional targets. The iPhone targets skip root-surface snapshots, hosted
+presentation snapshots, and the five package snapshot suites. A separate App
+invocation on the canonical iPad runs
+`rootPrivacyCoverSynchronouslyOccludesPrivateSentinel`; that test exercises
+both compact and regular fixtures. The browser UI target runs 15 simulator-safe
+selectors through the `BrowserTabOverviewUITests` scheme on the canonical iPad:
+four multi-scene cases and eleven qualification cases. Result checks require
+the expected test identities and destination. All selected cases must pass;
+the iPhone App lane alone permits its specifically identified physical-only
+skip. `testSystemResizeChangesActualSceneGeometry` remains outside this
+unattended suite under its existing qualification scope.
 This host-only coverage does not enable multiple scenes in the shipping app
 or replace physical scene/privacy qualification. Shell navigation and
 Lock-control UI tests remain separate. `make test-snapshots` runs Layer C and
@@ -105,18 +105,21 @@ green run used the migrated selectors after those references were removed.
 
 ## 1. Functional test gate
 
-Run `make test`. The command uses `IPHONE_DESTINATION`, which defaults to
-`platform=iOS Simulator,name=iPhone 17,OS=27.2`.
+Run `make test` to invoke the four functional targets locally. It runs each
+target even if an earlier one fails, then exits nonzero if any target failed.
+The targets use the Makefile's verified iPhone and iPad destinations, which
+default to iPhone 17 and iPad Pro 11-inch (M5) on iOS 27.2.
 
-The App scheme includes the `AppTests` and `AppHostedTests` test bundles.
-The iPhone App invocation skips the root-surface snapshot suite and hosted
-presentation snapshot. Their selectors are:
+`make test-app` runs the App scheme's `AppTests` and `AppHostedTests` bundles on
+iPhone. It skips the root-surface snapshot suite, hosted presentation snapshot,
+and HTTP test suite; the HTTP matrix runs in a separate App invocation. The
+snapshot selectors are:
 
 - `-skip-testing:AppTests/RootSurfaceSnapshotTests`
 - `-skip-testing:'AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates()'`
 
-The ApplicationFoundation package scheme runs every test target except these
-five snapshot suites:
+`make test-application-foundation` runs the package scheme except for these five
+snapshot suites:
 
 1. `AppFeatureTests/VaultFeatureViewSnapshotTests`
 2. `CalculatorFeatureTests/CalculatorViewSnapshotTests`
@@ -125,12 +128,20 @@ five snapshot suites:
 5. `PresentationSupportTests/ScenePrivacyCoverCalculatorSnapshotTests`
 
 The original functional-gate baseline recorded 77 passing App tests and 446
-passing ApplicationFoundation tests. These are baseline counts, not results
-for the current candidate. `make test` also runs the sentinel-occlusion test
-on `IPAD_DESTINATION`, which defaults to the canonical iPad Pro 11-inch (M5).
-Set `VERIFIED_IPAD_SIMULATOR_UDID` to select a verified device explicitly.
-Check every generated `xcresult` for a positive test count; a selector that
-matches no tests can still exit successfully.
+passing ApplicationFoundation tests. Those are historical baseline counts,
+not results for the current candidate. `make test-ipad-privacy` runs the
+hosted `rootPrivacyCoverSynchronouslyOccludesPrivateSentinel` test on the
+canonical iPad; it checks both compact and regular fixtures.
+
+`make test-browser-download-ui` runs 15 exact selectors on the canonical iPad:
+four `BrowserDownloadMultiSceneUITests` cases and eleven
+`BrowserDownloadQualificationUITests` cases. The result checker requires every
+selected identity to pass on the expected destination. All four targets
+validate their result bundles and reject missing, unreadable, or empty results.
+The only allowed App skip is
+`AppHostedUITests/BrowserDownloadPersistenceIsolationTests/completedFilesRetainProtectionAndBackupExclusion()`;
+it is a physical-only test and remains recorded as skipped, not passed.
+ApplicationFoundation, iPad privacy, and browser UI require zero skipped tests.
 
 `make all` runs `lint`, `build`, and `test`, including the iPad sentinel test.
 It does not run snapshot suites. Snapshot evidence comes from
@@ -377,14 +388,17 @@ Interrupted runs can leave partial evidence; partial evidence does not qualify.
 
 ## 3. Result bundles and failure handling
 
-`TEST_RESULTS_DIRECTORY` is optional. For `make test` and `make test-snapshots`,
-each invocation creates a unique subdirectory below it and points `xcodebuild`
-at those `.xcresult` paths. Xcode writes bundles there directly, so completed
-and partial results remain available after success, failure, cancellation, and
-cleanup. Each test command requires a readable bundle with a positive test count.
+`TEST_RESULTS_DIRECTORY` is optional. Each functional target and
+`make test-snapshots` creates a unique subdirectory below it and directs
+`xcodebuild` to write result bundles there. Xcode writes bundles directly, so
+completed and partial results remain after success, failure, cancellation, and
+build cleanup. The local `make test` aggregate gives each target its own unique
+result subdirectory. CI uses a separate parent directory for each matrix lane
+and uploads that lane's result bundles, captured Make log, and
+`source-identity.json`.
 
 `XCODE_BUILD_ROOT` selects temporary DerivedData and build-product storage for
-`make build`, `make test`, and `make test-snapshots`. Cleanup removes the
+`make build`, the functional targets, and `make test-snapshots`. Cleanup removes the
 invocation's generated build root and preserves the caller's result directory
 and unrelated files. Without `TEST_RESULTS_DIRECTORY`, bundles stay in the
 temporary root and are removed during normal cleanup.
@@ -402,11 +416,16 @@ and artifact-name/report consistency. Abrupt-termination tests signal only
 their own mock process groups, exercising cleanup without launching Xcode or
 simulators.
 
-After each `xcodebuild test` invocation, the Makefile reads that scheme's own
-bundle with `xcresulttool get test-results summary --path <bundle> --compact`.
-A missing or unreadable bundle, a summary without `totalTestCount`, and a zero
-count each produce a distinct explicit diagnostic and mark the command as
-failed. `make test` stops at its first failure.
+The functional targets check exact test identities, expected simulator
+destinations, and result counts with `Scripts/assert-xcresult-tests.py`.
+The App and ApplicationFoundation targets derive their expected identities from
+Xcode test enumeration. The App check allows only the named physical-only skip;
+all required App tests and every selected HTTP matrix case must pass. The other
+three targets require every selected test to pass with no skips. A missing,
+unreadable, or empty result bundle fails its target.
+
+`make test` attempts all four targets so one lane's failure does not hide the
+results from the others. It exits nonzero if any target fails.
 
 `make test-snapshots` runs both schemes even when the first scheme fails. It
 records each scheme's `xcodebuild` status and result-bundle validation status
@@ -416,12 +435,11 @@ exits nonzero when any status fails; a later passing scheme cannot clear an
 earlier failure. Preserved `xcresult` bundles remain the source for the
 per-scheme executed counts.
 
-`make test` validates each bundle immediately after that scheme's test
-command, so a validation failure stops the target before the second scheme
-starts. `make test-snapshots` also validates each bundle immediately after its
-scheme's test command, but a validation failure does not stop the second scheme;
-it records the failure and continues. The target reports every failure it
-observed.
+The functional targets validate each bundle after its test command. The App
+target attempts its HTTP invocation and validates its results even if an
+earlier App check failed. `make test-snapshots` validates each bundle after its
+scheme's test command; a validation failure does not stop the second scheme,
+and the target reports every failure it observed.
 
 Both snapshot `xcodebuild test` commands set
 `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never`. `TEST_RUNNER_` is Xcode's
@@ -434,92 +452,81 @@ replaces a tracked reference.
 
 ## 4. Continuous integration
 
-`.github/workflows/tests.yml` defines three jobs.
+`.github/workflows/tests.yml` runs four functional matrix copies, an `iOS tests`
+aggregate, and the two snapshot qualification jobs.
 
-1. `test`, named `iOS tests`, is the blocking gate. It runs `make test` on the
-   iPhone destination and has no `continue-on-error` setting.
-2. `snapshot-qualification`, named
-   `Snapshot qualification (2x iPad)`, runs `make test-snapshots` on the 2x iPad
-   destination. It has no `continue-on-error` setting, so a snapshot mismatch,
-   build failure, simulator failure, or timeout fails the job and the `Tests`
-   workflow.
+1. `functional-tests` has four matrix entries: `App`, `ApplicationFoundation`,
+   `iPad privacy`, and `Browser download UI`. Each entry calls its fixed Make
+   target: `test-app`, `test-application-foundation`, `test-ipad-privacy`, or
+   `test-browser-download-ui`. The matrix sets `fail-fast: false`, so one failed
+   lane does not cancel the other three. Each copy runs on `xcode-27` with a
+   90-minute timeout, the Xcode 27.2 toolchain, destination verification, and
+   the Swift package cache. The iPhone App and package targets receive the
+   verified iPhone and iPad simulator IDs; the two iPad targets use the verified
+   canonical iPad ID. The destination-resolver and clean-target mock checks run
+   once in the App copy; simulator verification remains in every copy.
 
-3. `native-snapshot-qualification`, named
-   `Native snapshot qualification (3x iPhone)`, runs `make test-native-snapshots`
-   with a 60-minute job timeout and a 45-minute test-step timeout. It uses the
-   pinned `xcode-27` runner, toolchain preflight, and package cache. A failed
-   command blocks the workflow.
+2. Every matrix copy writes to its own
+   `.build/TestResults/<lane>` directory. It retains the Make output log,
+   `source-identity.json`, and the target's result bundles in that directory.
+   The identity file records the workflow event SHA, checked-out commit and
+   parents, and, for pull requests, the exact head SHA, base SHA, and integration
+   SHA. The step saves this identity before failing if the checked-out commit
+   does not match the event SHA. The upload artifact name includes the lane,
+   GitHub run ID, and attempt number. Upload runs after success or failure and
+   is advisory: missing files produce a warning, and an upload action failure
+   does not change the functional lane conclusion. Check the job step and log
+   when the artifact is missing or its upload did not succeed.
 
-The blocking iOS job writes four result bundles under its unique
-`TEST_RESULTS_DIRECTORY` subdirectory: App, ApplicationFoundation, iPad privacy,
-and browser UI qualification. An `if: always()` step attempts to upload
-available files as `ios-test-evidence-run-<run_id>-attempt-<run_attempt>`. Missing
-files produce a warning, and upload status does not change the test outcome.
+3. Job `test`, named exactly `iOS tests`, has `if: always()` and depends on the
+   functional matrix. It succeeds only when the matrix job conclusion is
+   exactly `success`. Failure, cancellation, skipping, or any other conclusion
+   fails the aggregate. Every copy runs its target without `continue-on-error`;
+   only the evidence-upload step uses advisory `continue-on-error`. No matrix
+   copy has a job-level skip condition. The two snapshot jobs remain
+   separate workflow checks; they are not folded into the `iOS tests` aggregate.
 
-The 2x iPad job uploads available snapshot results from `.build/TestResults` as
-`2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Its `if: always()`
-step preserves evidence after test failure, and the final step reports command
-and upload outcomes in the workflow summary.
+4. `snapshot-qualification`, named `Snapshot qualification (2x iPad)`, runs
+   `make test-snapshots` on the canonical 2x iPad. Its result bundles remain
+   under `.build/TestResults`, and the always-run upload uses
+   `2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Its final
+   step reports command and upload outcomes.
 
-The native 3x iPhone job writes evidence under `.build/NativeSnapshotResults`.
-Its `if: always()` upload uses
-`native-3x-iphone-snapshot-evidence-run-<run_id>-attempt-<run_attempt>` and
-preserves result bundles and exported scale receipts.
+5. `native-snapshot-qualification`, named
+   `Native snapshot qualification (3x iPhone)`, runs
+   `make test-native-snapshots` with a 60-minute job timeout and a 45-minute
+   test-step timeout. It uses the pinned `xcode-27` runner, toolchain preflight,
+   and package cache. Results remain under `.build/NativeSnapshotResults`, and
+   the always-run upload uses
+   `native-3x-iphone-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`.
 
-Each snapshot job has a 60-minute job timeout and a 45-minute test-step limit.
-Separate jobs give the snapshot runs independent time budgets, and both jobs are
-required gates. The 2x job's final step reports command and upload outcomes in
-the workflow summary. A failed command can indicate a reference mismatch, build
-error, unavailable simulator destination, or timeout. Check that job's artifact
-or logs before assigning a cause.
+The two snapshot jobs keep their existing job names, destinations, timeouts,
+commands, status summaries, and artifact paths. Each remains an independent
+workflow check. A failed snapshot command can indicate a reference mismatch,
+build error, unavailable simulator, or timeout; inspect that job's artifact or
+log before assigning a cause. A passing 2x command confirms that the committed
+references match in the automated run and both schemes recorded positive test
+counts. Owner visual review remains separate.
 
-A passing 2x snapshot command confirms that the committed 2x references match
-in the automated run and both schemes record positive test counts. The owner
-reviews visual results separately.
+Each test job resolves simulator IDs through `make verify-test-destination`
+or `make verify-snapshot-destination`. The Makefile owns the expected device
+names and OS versions. The resolver reads structured simulator inventories,
+requires an available device with the complete expected name in the pinned
+runtime and build, and checks that the App scheme lists its UDID as an available
+destination. Duplicate names fail unless `VERIFIED_SIMULATOR_UDID` selects one
+valid device explicitly.
 
-The 2x job writes its App and ApplicationFoundation result bundles to a unique
-`xcodebuild-snapshot-test.*` subdirectory below `TEST_RESULTS_DIRECTORY`. Its
-`if: always()` upload uses
-`2x-ipad-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. The native 3x job
-stores its results under `.build/NativeSnapshotResults` and uploads them with
-`native-3x-iphone-snapshot-evidence-run-<run_id>-attempt-<run_attempt>`. Each
-artifact name includes GitHub's run ID and attempt number, so retries preserve
-earlier evidence under its original name.
+The functional matrix passes both preflight IDs as
+`VERIFIED_SIMULATOR_UDID` and `VERIFIED_IPAD_SIMULATOR_UDID`. Each Make target
+rechecks the destinations it uses before invoking `xcodebuild` with the verified
+UDID. The logs record the expected and resolved names, runtime identifier and
+build, UDID, and executed command. A device that becomes unavailable causes the
+invocation to fail.
 
-The snapshot step timeout remains shorter than the job timeout so the upload
-step has time to run. A runner loss or forced cancellation can still prevent an
-upload; direct result ownership cannot guarantee delivery after infrastructure
-loss. A skipped job, missing artifact, partial bundle, or successful upload must
-not be read as snapshot qualification. Failure and cancellation remain distinct
-from artifact-upload success.
-
-If the `xcode-27` runner does not have the iPad Pro 11-inch (M5) iOS 27.2
-destination, the snapshot job fails and therefore the `Tests` workflow fails.
-The preflight also requires Xcode 27.2 build `27B52` and runtime build
-`24B8117`. Its logs and result bundle are preserved for diagnosis.
-
-Each CI job resolves its own simulator UDID through `make verify-test-destination`
-or `make verify-snapshot-destination`. The Makefile owns the expected device names
-and OS versions. The resolver reads structured simulator inventories, requires an
-available device with the complete expected name in the pinned runtime and build,
-and checks that the App scheme lists its UDID as an available destination. Duplicate
-names fail unless `VERIFIED_SIMULATOR_UDID` selects one valid device explicitly.
-
-For `make test`, CI passes the preflight iPhone UDID as `VERIFIED_SIMULATOR_UDID`.
-The iPad privacy sentinel resolves separately using `IPAD_DESTINATION`, which
-defaults to the canonical iPad. `VERIFIED_IPAD_SIMULATOR_UDID` can pin a specific
-eligible device. Local runs resolve both destinations at the start of the target.
-The snapshot target uses `VERIFIED_SIMULATOR_UDID` for its canonical iPad
-destination.
-Before each test invocation, the helper checks the intended scheme's destinations
-and rechecks simulator availability, then executes
-`xcodebuild -destination 'platform=iOS Simulator,id=<verified-UDID>'`. Its log records
-the expected and resolved names, runtime identifier and build, UDID, and executed
-command. A device that becomes unavailable causes that invocation to fail.
-
-Run `make destination-test` for the host regression suite. It uses synthetic
-inventories and records the commands received at the execution boundary, including
-all three Make test targets. It does not create, erase, or modify simulators.
+The App matrix copy runs `make destination-test` and `make clean-test` for the
+host regression suites. The destination suite uses synthetic inventories and
+records commands received at the execution boundary, including all four
+functional Make targets. Neither suite creates, erases, or modifies simulators.
 
 ## 5. Changing the selection
 
@@ -644,11 +651,12 @@ background action locks the session. Its oracle correlates the policy capability
 transfer, fixture connection, post-lock progress, finish, and hidden retained allocation.
 The existing slow-known fixture keeps its original deadline and behavior.
 
-`make test` selects 26 simulator-safe `BrowserDownloadQualificationUITests` cases
-alongside the 30 multi-scene cases. The strict result checker requires all 56 exact
-identities on the canonical iPad destination with no failures or skips. The physical
-continuation selector and system-resize test are excluded. Simulator delayed-handoff
-coverage uses a real accepted WebKit policy callback to Lock Root before native handoff;
+`make test-browser-download-ui` selects 15 simulator-safe cases on the canonical
+iPad: four `BrowserDownloadMultiSceneUITests` cases and eleven
+`BrowserDownloadQualificationUITests` cases. The result checker requires all 15
+exact identities to pass with no failures or skips. The physical continuation
+selector and system-resize test are excluded. Simulator delayed-handoff coverage
+uses a real accepted WebKit policy callback to Lock Root before native handoff;
 it qualifies that callback ordering, not physical background execution.
 
 Automatic-ingestion cases cover ordinary PNG completion, duplicate skip with a stable

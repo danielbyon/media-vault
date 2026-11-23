@@ -1382,7 +1382,7 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
 
         XCTAssertEqual(activity.register(registration: activeRoot, active: true), true)
         XCTAssertEqual(activity.register(registration: inactiveRoot, active: false), false)
-        XCTAssertEqual(activity.disconnect(registration: activeRoot, sceneLabel: "active-root"), true)
+        XCTAssertEqual(activity.disconnect(registration: activeRoot), true)
 
         XCTAssertFalse(activity.isObservationEligible)
         XCTAssertNil(activity.isActive(registration: activeRoot))
@@ -1390,24 +1390,24 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
 
     func testRotatedUnregisteredRootCallbackDoesNotPreemptRegistration() {
         var events: [String] = []
-        let activity = BrowserDownloadQualificationSceneActivity { events.append("library:\($0)") }
+        let activity = BrowserDownloadQualificationSceneActivity { events.append("library") }
         let originalRegistration = BrowserDownloadQualificationSceneRegistration()
         let rotatedRegistration = BrowserDownloadQualificationSceneRegistration()
 
+        XCTAssertNotEqual(originalRegistration.rootID, rotatedRegistration.rootID)
         XCTAssertEqual(activity.register(registration: originalRegistration, active: true), true)
-        XCTAssertTrue(activity.disconnect(registration: originalRegistration, sceneLabel: "original-root"))
-        XCTAssertEqual(events, ["library:original-root"])
+        XCTAssertTrue(activity.disconnect(registration: originalRegistration))
+        XCTAssertEqual(events, ["library"])
 
         XCTAssertNil(activity.setActive(true, registration: rotatedRegistration))
         XCTAssertNil(
             activity.applyPhaseChange(
                 active: true,
                 registration: rotatedRegistration,
-                sceneLabel: "rotated-root",
                 applyApplicationPhase: { events.append("phase:rotated-root") },
             ),
         )
-        XCTAssertEqual(events, ["library:original-root"])
+        XCTAssertEqual(events, ["library"])
         XCTAssertNil(activity.isActive(registration: rotatedRegistration))
         XCTAssertFalse(activity.isObservationEligible)
         XCTAssertNil(activity.register(registration: originalRegistration, active: true))
@@ -1437,7 +1437,7 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
         let currentRoot = BrowserDownloadQualificationSceneRegistration()
 
         XCTAssertEqual(activity.register(registration: disconnectedRoot, active: true), true)
-        XCTAssertTrue(activity.disconnect(registration: disconnectedRoot, sceneLabel: "disconnected-root"))
+        XCTAssertTrue(activity.disconnect(registration: disconnectedRoot))
         XCTAssertNil(activity.register(registration: disconnectedRoot, active: true))
         XCTAssertNil(activity.setActive(true, registration: disconnectedRoot))
 
@@ -1463,10 +1463,11 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
 
     func testFirstAndLastActiveRootTransitionsRefreshLibrarySampling() {
         var events: [String] = []
-        let activity = BrowserDownloadQualificationSceneActivity { events.append("library:\($0)") }
+        let activity = BrowserDownloadQualificationSceneActivity { events.append("library") }
         let firstRoot = BrowserDownloadQualificationSceneRegistration()
         let secondRoot = BrowserDownloadQualificationSceneRegistration()
 
+        XCTAssertNotEqual(firstRoot.rootID, secondRoot.rootID)
         XCTAssertEqual(activity.register(registration: firstRoot, active: false), false)
         XCTAssertTrue(events.isEmpty)
 
@@ -1474,35 +1475,32 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
             activity.applyPhaseChange(
                 active: true,
                 registration: firstRoot,
-                sceneLabel: "first-active",
                 applyApplicationPhase: { events.append("phase:first-active") },
             ),
             true,
         )
-        XCTAssertEqual(events, ["phase:first-active", "library:first-active"])
+        XCTAssertEqual(events, ["phase:first-active", "library"])
 
         XCTAssertEqual(activity.register(registration: secondRoot, active: true), false)
-        XCTAssertEqual(events, ["phase:first-active", "library:first-active"])
+        XCTAssertEqual(events, ["phase:first-active", "library"])
 
         XCTAssertEqual(
             activity.applyPhaseChange(
                 active: false,
                 registration: firstRoot,
-                sceneLabel: "one-root-remains",
                 applyApplicationPhase: { events.append("phase:one-root-remains") },
             ),
             false,
         )
         XCTAssertEqual(
             events,
-            ["phase:first-active", "library:first-active", "phase:one-root-remains"],
+            ["phase:first-active", "library", "phase:one-root-remains"],
         )
 
         XCTAssertEqual(
             activity.applyPhaseChange(
                 active: false,
                 registration: secondRoot,
-                sceneLabel: "last-active",
                 applyApplicationPhase: { events.append("phase:last-active") },
             ),
             true,
@@ -1511,17 +1509,17 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
             events,
             [
                 "phase:first-active",
-                "library:first-active",
+                "library",
                 "phase:one-root-remains",
                 "phase:last-active",
-                "library:last-active",
+                "library",
             ],
         )
     }
 
     func testDisconnectingLastActiveRootInvalidatesLibrarySampling() {
         var events: [String] = []
-        let activity = BrowserDownloadQualificationSceneActivity { events.append("library:\($0)") }
+        let activity = BrowserDownloadQualificationSceneActivity { events.append("library") }
         let registration = BrowserDownloadQualificationSceneRegistration()
 
         XCTAssertEqual(activity.register(registration: registration, active: false), false)
@@ -1529,18 +1527,17 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
             activity.applyPhaseChange(
                 active: true,
                 registration: registration,
-                sceneLabel: "root-active",
                 applyApplicationPhase: { events.append("phase:root-active") },
             ),
             true,
         )
-        XCTAssertEqual(events, ["phase:root-active", "library:root-active"])
+        XCTAssertEqual(events, ["phase:root-active", "library"])
 
-        XCTAssertTrue(activity.disconnect(registration: registration, sceneLabel: "root-disconnected"))
-        XCTAssertEqual(events, ["phase:root-active", "library:root-active", "library:root-disconnected"])
+        XCTAssertTrue(activity.disconnect(registration: registration))
+        XCTAssertEqual(events, ["phase:root-active", "library", "library"])
         XCTAssertFalse(activity.isObservationEligible)
         XCTAssertNil(activity.setActive(true, registration: registration))
-        XCTAssertEqual(events, ["phase:root-active", "library:root-active", "library:root-disconnected"])
+        XCTAssertEqual(events, ["phase:root-active", "library", "library"])
     }
 
     func testStaleStorageSuccessCannotEnableReadsForCurrentContext() {

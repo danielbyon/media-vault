@@ -16,12 +16,31 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    name: iOS tests
+  functional-tests:
+    name: ${{ matrix.name }}
     runs-on: xcode-27
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: App
+            lane: app
+            target: test-app
+          - name: ApplicationFoundation
+            lane: application-foundation
+            target: test-application-foundation
+          - name: iPad privacy
+            lane: ipad-privacy
+            target: test-ipad-privacy
+          - name: Browser download UI
+            lane: browser-download-ui
+            target: test-browser-download-ui
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      FUNCTIONAL_LANE: ${{ matrix.lane }}
+      FUNCTIONAL_TARGET: ${{ matrix.target }}
+      TEST_RESULTS_DIRECTORY: .build/TestResults/${{ matrix.lane }}
 
     steps:
       - name: Check out repository
@@ -29,13 +48,63 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Record source identity
+        run: |
+          mkdir -p "$TEST_RESULTS_DIRECTORY"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          pull_request = event.get("pull_request") or {}
+          commit = subprocess.check_output(
+              ["git", "rev-list", "--parents", "-n", "1", "HEAD"], text=True
+          ).strip().split()
+          event_sha = os.environ["GITHUB_SHA"]
+          head = pull_request.get("head") or {}
+          base = pull_request.get("base") or {}
+          identity = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "event_name": os.environ["GITHUB_EVENT_NAME"],
+              "ref": os.environ["GITHUB_REF"],
+              "event_sha": event_sha,
+              "checkout_sha": commit[0],
+              "checkout_parent_shas": commit[1:],
+              "lane": os.environ["FUNCTIONAL_LANE"],
+              "target": os.environ["FUNCTIONAL_TARGET"],
+              "pull_request_number": event.get("number"),
+              "pull_request_head_sha": head.get("sha"),
+              "pull_request_head_ref": head.get("ref"),
+              "pull_request_base_sha": base.get("sha"),
+              "pull_request_base_ref": base.get("ref"),
+              "source_head_sha": head.get("sha") or event_sha,
+              "source_base_sha": base.get("sha"),
+              "integration_sha": os.environ["GITHUB_SHA"] if pull_request else None,
+          }
+          output = Path(os.environ["TEST_RESULTS_DIRECTORY"]) / "source-identity.json"
+          output.write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
+          if commit[0] != event_sha:
+              raise SystemExit(
+                  f"checkout SHA {commit[0]} does not match event SHA {event_sha}"
+              )
+          PY
+
       - name: Verify toolchain and simulator
         id: toolchain
         run: make verify-test-destination
 
       - name: Test destination resolver
+        if: ${{ matrix.lane == 'app' }}
         run: make destination-test
+
       - name: Test clean target
+        if: ${{ matrix.lane == 'app' }}
         run: make clean-test
 
       # Swift tooling bootstraps Mint packages under .tools/mint. Keep compiled
@@ -59,24 +128,45 @@ jobs:
           restore-keys: |
             swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-
 
-      - name: Run tests
-        run: make test VERIFIED_SIMULATOR_UDID="${{ steps.toolchain.outputs.simulator_udid }}" VERIFIED_IPAD_SIMULATOR_UDID="${{ steps.toolchain.outputs.ipad_simulator_udid }}" TEST_RESULTS_DIRECTORY="$GITHUB_WORKSPACE/.build/TestResults"
+      - name: Run functional tests
+        run: |
+          set -o pipefail
+          make "$FUNCTIONAL_TARGET" \
+            VERIFIED_SIMULATOR_UDID="${{ steps.toolchain.outputs.simulator_udid }}" \
+            VERIFIED_IPAD_SIMULATOR_UDID="${{ steps.toolchain.outputs.ipad_simulator_udid }}" \
+            TEST_RESULTS_DIRECTORY="$TEST_RESULTS_DIRECTORY" \
+            2>&1 | tee "$TEST_RESULTS_DIRECTORY/$FUNCTIONAL_TARGET.log"
 
-      # Preserve the iPhone and iPad result bundles for diagnosis. The upload is
-      # advisory: a missing bundle is a warning and an upload failure must not
-      # change the test step outcome or the blocking gate.
-      - name: Upload iOS test evidence
-        id: upload_ios_evidence
+      - name: Upload functional test evidence
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: ios-test-evidence-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
-          path: .build/TestResults
+          name: ios-test-${{ matrix.lane }}-evidence-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: .build/TestResults/${{ matrix.lane }}
           if-no-files-found: warn
+          include-hidden-files: true
+
+  test:
+    name: iOS tests
+    if: ${{ always() }}
+    needs:
+      - functional-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every functional lane to succeed
+        env:
+          FUNCTIONAL_RESULT: ${{ needs.functional-tests.result }}
+        run: |
+          printf 'functional-tests matrix: %s\n' "$FUNCTIONAL_RESULT"
+          if [[ "$FUNCTIONAL_RESULT" != success ]]; then
+            echo "iOS tests requires the functional matrix conclusion to be success."
+            exit 1
+          fi
+          echo "All four functional lane conclusions are success."
 
   # Visual snapshot qualification runs in its own job so its duration and result
-  # are independent of the required iPhone test job. The committed 2x references
+  # are independent of the required iOS test aggregate. The committed 2x references
   # are the automated baseline for this comparison. A PNG mismatch, build error,
   # unavailable simulator destination, or timeout fails this job and the Tests
   # workflow. The job keeps its own timeout and preserves evidence for every

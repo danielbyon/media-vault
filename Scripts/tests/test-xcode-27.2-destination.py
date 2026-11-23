@@ -2,6 +2,7 @@
 """Exercise destination selection and Make's execution boundary without simulators."""
 
 import json
+import io
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -58,6 +60,24 @@ def _select_fixture_python():
 NAME = "iPhone 17"
 DESTINATION = "platform=iOS Simulator,name=iPhone 17,OS=27.2"
 HTTP_MATRIX_ID = "AppHostedUITests/BrowserDownloadHTTPTests/originatingMatrix(profile:row:)"
+HTTP_CANCELLATION_ID = "AppHostedUITests/BrowserDownloadHTTPTests/slowCancellation(profile:knownLength:)"
+HTTP_TEST_METHODS = (
+    "activePollingBudgetChargesWorkAndDiscountsSleepOverrun",
+    "slowPredicateCannotSatisfyActiveBudget",
+    "activePollingPropagatesCancellation",
+    "failureEvidenceIsSanitizedAndLossless",
+    "failureEvidenceIsDeterministicallyCapped",
+    "commandAndNativeErrorEvidenceIsDeterministicallyCapped",
+    "requestEvidenceUsesPlainFixtureLabels",
+    "adapterCommitEvidenceRequiresPostBaselineEvent",
+    "navigationCommitEvidenceRequiresOperationIdentity",
+    "dispatchReadinessRequiresExactNewGET",
+    "nonRootAdapterCommitsFirstPageAtRootGeometry",
+    "initialPageCommits",
+    "originatingMatrix(profile:row:)",
+    "priorPageHistorySurvivesNativeDownloadConversion(profile:)",
+    "slowCancellation(profile:knownLength:)",
+)
 APP_HOSTED_EVIDENCE_TEST_IDENTITIES = (
     "BrowserDownloadSceneEvidenceTests/testResizeHandleNormalizesMeasuredRotatedFrame",
     "BrowserDownloadSceneEvidenceTests/testResizeHandleRejectsUnrelatedOffscreenFrame",
@@ -136,14 +156,12 @@ QUALIFICATION_TEST_IDENTITIES = (
     "BrowserDownloadQualificationUITests/testShareHomeRevokesAndFreshDownloadRecovers",
     "BrowserDownloadQualificationUITests/testNormalQualificationModeReturnsToAuthenticatedBrowserAfterHome",
     "BrowserDownloadQualificationUITests/testActiveDownloadQualificationModeAutoLocksAfterRealHomeTransition",
-    "BrowserDownloadQualificationUITests/testSlowKnownDownloadControlIsAccessibleOnMountedBrowser",
     "BrowserDownloadQualificationUITests/testActiveDiscardFailureRetryAndAuthenticationLoss",
     "BrowserDownloadQualificationUITests/testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset",
     "BrowserDownloadQualificationUITests/testRepeatedPNGDownloadSkipsDuplicateAndRetainsCanonicalIdentity",
     "BrowserDownloadQualificationUITests/testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation",
     "BrowserDownloadQualificationUITests/testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch",
     "BrowserDownloadQualificationUITests/testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible",
-    "BrowserDownloadQualificationUITests/testPassiveEventHistoryReadsTheRealMountedBrowserBridge",
 )
 AUTOMATED_DOWNLOAD_TEST_IDENTITIES = MULTI_SCENE_TEST_IDENTITIES + QUALIFICATION_TEST_IDENTITIES
 
@@ -193,7 +211,54 @@ elif tool == "xcrun":
                 if case["nodeIdentifier"] == plan.get("skip_case"):
                     case["result"] = "Skipped"
             if method == "tests":
-                print(json.dumps({"testNodes": [{"nodeType": "Test Plan", "children": cases}]}))
+                plan_name, bundle_target, bundle_type = {
+                    "App.xcresult": ("App", "AppHostedTests", "Unit test bundle"),
+                    "AppHTTP.xcresult": ("App", "AppHostedTests", "Unit test bundle"),
+                    "ApplicationFoundation.xcresult": (
+                        "ApplicationFoundation", "AppFeatureTests", "Unit test bundle"),
+                    "App-iPadPrivacy.xcresult": ("App", "AppHostedTests", "Unit test bundle"),
+                    "BrowserDownloadMultiScene.xcresult": (
+                        "BrowserTabOverviewUITests", "BrowserTabOverviewUITests", "UI test bundle"),
+                }[bundle.name]
+                if plan.get("wrong_http_target") and bundle.name == "AppHTTP.xcresult":
+                    bundle_target = "OtherHostedTests"
+                bundle_url = f"test://com.apple.xcode/{plan_name}/{bundle_target}"
+                bundle_node = {
+                    "nodeType": bundle_type,
+                    "name": bundle_target,
+                    "nodeIdentifierURL": bundle_url,
+                    "children": [],
+                }
+                plan_node = {
+                    "nodeType": "Test Plan",
+                    "name": plan_name,
+                    "children": [bundle_node],
+                }
+                for case in cases:
+                    identity_parts = case["nodeIdentifier"].split("/")
+                    if len(identity_parts) < 2:
+                        sys.exit("Fixture test identity must contain a suite and method")
+                    current = bundle_node
+                    prefix = []
+                    for part in identity_parts[:-1]:
+                        prefix.append(part)
+                        suite_url = bundle_url + "/" + "/".join(prefix)
+                        suite_node = next((child for child in current["children"]
+                                           if child.get("nodeType") == "Test Suite" and
+                                           child.get("nodeIdentifierURL") == suite_url), None)
+                        if suite_node is None:
+                            suite_node = {
+                                "nodeType": "Test Suite",
+                                "name": part,
+                                "nodeIdentifierURL": suite_url,
+                                "children": [],
+                            }
+                            current["children"].append(suite_node)
+                        current = suite_node
+                    case_node = dict(case)
+                    case_node["nodeIdentifierURL"] = bundle_url + "/" + case["nodeIdentifier"]
+                    current["children"].append(case_node)
+                print(json.dumps({"testNodes": [plan_node]}))
             elif method == "summary":
                 ipad = bundle.name in {"BrowserDownloadMultiScene.xcresult", "App-iPadPrivacy.xcresult"}
                 device_id = ("22222222-2222-4222-8222-222222222222" if ipad else
@@ -221,12 +286,30 @@ elif tool == "xcrun":
 elif tool == "xcodebuild":
     if args == ["-version"]:
         print("Xcode 27.2\nBuild version 27B52")
+    elif "-enumerate-tests" in args:
+        output_path = pathlib.Path(args[args.index("-test-enumeration-output-path") + 1])
+        lane = output_path.stem.removesuffix("-enumeration")
+        identities = json.loads((root / "enumeration-identities.json").read_text())[lane]
+        output_path.write_text(json.dumps({
+            "errors": [],
+            "values": [{
+                "testPlan": lane,
+                "enabledTests": [{"identifier": identity} for identity in identities],
+                "disabledTests": [],
+            }],
+        }))
+        with (root / "enumerated.jsonl").open("a") as stream:
+            stream.write(json.dumps(args) + "\n")
+        print("Command line invocation: enumeration output is written to the requested path")
     elif "-showdestinations" in args:
         scheme = args[args.index("-scheme") + 1]
         print('Destinations compatible with the "' + scheme + '" scheme:')
         print((root / "destinations.txt").read_text())
         print('Destinations incompatible with the "' + scheme + '" scheme:')
         print((root / "ineligible.txt").read_text())
+    elif "build-for-testing" in args:
+        with (root / "builds.jsonl").open("a") as stream:
+            stream.write(json.dumps(args) + "\n")
     else:
         with (root / "executed.jsonl").open("a") as stream:
             stream.write(json.dumps(args) + "\n")
@@ -347,6 +430,11 @@ class DestinationFixture:
             for profile in ("persistentPrivate", "ephemeral")
             for row in ("attachment", "inline", "octet", "redirect", "protected", "post", "blob", "attribute")
         ]
+        self.http_cancellation_arguments = [
+            {"nodeType": "Arguments", "name": f".{profile}, {known_length}", "result": "Passed"}
+            for profile in ("persistentPrivate", "ephemeral")
+            for known_length in ("true", "false")
+        ]
 
     def device(self, name=NAME, udid=UDID, available=True):
         return {"name": name, "udid": udid, "isAvailable": available, "state": "Shutdown"}
@@ -368,6 +456,11 @@ class DestinationFixture:
                 physical,
                 *(identity + "()" for identity in APP_HOSTED_EVIDENCE_TEST_IDENTITIES),
             ],
+            "AppHTTP.xcresult": [
+                "AppHostedUITests/BrowserDownloadHTTPTests/" +
+                (method if "(" in method else method + "()")
+                for method in HTTP_TEST_METHODS
+            ],
             "ApplicationFoundation.xcresult": [
                 "VaultFeatureTests/globalLockFencesPendingBrowserProfileTransition()",
                 "RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification()",
@@ -382,11 +475,21 @@ class DestinationFixture:
                     "result": "Skipped" if identity == physical else "Passed"} for identity in identities]
             for name, identities in suites.items()
         }
-        cases["App.xcresult"].append({
-            "nodeType": "Test Case", "nodeIdentifier": HTTP_MATRIX_ID,
-            "name": "Native HTTP classification and request ownership", "result": "Passed",
-            "children": self.http_matrix_arguments,
-        })
+        matrix_case = next(case for case in cases["AppHTTP.xcresult"] if case["nodeIdentifier"] == HTTP_MATRIX_ID)
+        matrix_case["name"] = "Native HTTP classification and request ownership"
+        matrix_case["children"] = self.http_matrix_arguments
+        cancellation_case = next(case for case in cases["AppHTTP.xcresult"] if case["nodeIdentifier"] == HTTP_CANCELLATION_ID)
+        cancellation_case["children"] = self.http_cancellation_arguments
+        (self.root / "enumeration-identities.json").write_text(json.dumps({
+            "App": ["AppHostedTests/" + case["nodeIdentifier"]
+                    for case in cases["App.xcresult"]],
+            "AppHTTP": ["AppHostedTests/" + case["nodeIdentifier"]
+                        for case in cases["AppHTTP.xcresult"]],
+            "ApplicationFoundation": [
+                "AppFeatureTests/" + case["nodeIdentifier"]
+                for case in cases["ApplicationFoundation.xcresult"]
+            ],
+        }))
         (self.root / "test-cases.json").write_text(json.dumps(cases))
 
     def verify(self, expected="", destination=NAME, execute=False):
@@ -594,9 +697,9 @@ class DestinationTests(DestinationFixture, unittest.TestCase):
                         self.destination(name=NAME, udid=UDID),
                         self.destination(name=ipad_name, udid=ipad_udid),
                     ]
-                    expected_schemes = ["App", "ApplicationFoundation-Package", "App",
+                    expected_schemes = ["App", "App", "ApplicationFoundation-Package", "App",
                                         "BrowserTabOverviewUITests"]
-                    expected_udids = [UDID, UDID, ipad_udid, ipad_udid]
+                    expected_udids = [UDID, UDID, UDID, ipad_udid, ipad_udid]
                 else:
                     self.devices = {"devices": {RUNTIME: [self.device(name=ipad_name)]}}
                     self.destinations = [self.destination(name=ipad_name)]
@@ -761,7 +864,7 @@ class ResultRetentionTests(unittest.TestCase):
 
     def test_success_preserves_all_bundles_at_native_result_paths_with_spaces(self):
         for target, names in (
-            ("test", ("App.xcresult", "ApplicationFoundation.xcresult",
+            ("test", ("App.xcresult", "AppHTTP.xcresult", "ApplicationFoundation.xcresult",
                       "App-iPadPrivacy.xcresult", "BrowserDownloadMultiScene.xcresult")),
             ("test-snapshots", ("App.xcresult", "ApplicationFoundation.xcresult")),
         ):
@@ -771,11 +874,50 @@ class ResultRetentionTests(unittest.TestCase):
                 current = [Path(args[args.index("-resultBundlePath") + 1])
                            for args in self.fixture.executions()]
                 self.assertEqual({bundle.name for bundle in current}, set(names))
-                self.assertEqual(len({bundle.parent for bundle in current}), 1)
+                self.assertEqual(len({bundle.parent for bundle in current}),
+                                 4 if target == "test" else 1)
                 for bundle in current:
                     self.assertTrue(bundle.is_relative_to(self.results_root))
                     self.assertEqual(json.loads((bundle / "fixture-completed.json").read_text())
                                      ["result"], "Passed")
+                if target == "test":
+                    evidence_roots = [Path(path) for path in re.findall(
+                        r"(?m)^functional test evidence: (.+)$", result.stdout)]
+                    self.assertEqual(len(evidence_roots), 4)
+                    self.assertTrue((evidence_roots[0] / "App-enumeration.json").is_file())
+                    self.assertTrue((evidence_roots[0] / "AppHTTP-enumeration.json").is_file())
+                    self.assertTrue((evidence_roots[1] / "ApplicationFoundation-enumeration.json").is_file())
+                    self.assertTrue(all(any(evidence_root.glob("*.log")) for evidence_root in evidence_roots))
+                    http_enumeration = json.loads(
+                        (evidence_roots[0] / "AppHTTP-enumeration.json").read_text())
+                    http_identities = [entry["identifier"]
+                                       for value in http_enumeration["values"]
+                                       for entry in value["enabledTests"]]
+                    self.assertEqual(len(http_identities), 15)
+                    self.assertIn(
+                        "AppHostedTests/AppHostedUITests/BrowserDownloadHTTPTests/"
+                        "priorPageHistorySurvivesNativeDownloadConversion(profile:)",
+                        http_identities,
+                    )
+                    self.assertIn("HTTP matrix rows for originatingMatrix(profile:row:): 16",
+                                  result.stdout)
+                    self.assertIn("HTTP matrix rows for slowCancellation(profile:knownLength:): 4",
+                                  result.stdout)
+                    for row in (
+                        ".persistentPrivate, .attachment", ".persistentPrivate, .inline",
+                        ".persistentPrivate, .octet", ".persistentPrivate, .redirect",
+                        ".persistentPrivate, .protected", ".persistentPrivate, .post",
+                        ".persistentPrivate, .blob", ".persistentPrivate, .attribute",
+                        ".ephemeral, .attachment", ".ephemeral, .inline", ".ephemeral, .octet",
+                        ".ephemeral, .redirect", ".ephemeral, .protected", ".ephemeral, .post",
+                        ".ephemeral, .blob", ".ephemeral, .attribute",
+                        ".persistentPrivate, true", ".persistentPrivate, false",
+                        ".ephemeral, true", ".ephemeral, false",
+                    ):
+                        self.assertIn(
+                            f"HTTP matrix row: arguments='{row}' result=Passed",
+                            result.stdout,
+                        )
                 self.assert_builds_cleaned()
 
     def test_later_failure_retains_earlier_completed_bundle_and_failure_status(self):
@@ -785,11 +927,15 @@ class ResultRetentionTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 paths = [Path(args[args.index("-resultBundlePath") + 1])
                          for args in self.fixture.executions()]
-                expected_names = ["App.xcresult", "ApplicationFoundation.xcresult"]
+                expected_names = ["App.xcresult", "AppHTTP.xcresult", "ApplicationFoundation.xcresult"]
                 expected_results = ["Passed", "Failed"]
                 if target == "test":
+                    expected_results = ["Passed", "Failed", "Passed"]
                     expected_names += ["App-iPadPrivacy.xcresult", "BrowserDownloadMultiScene.xcresult"]
                     expected_results += ["Passed", "Passed"]
+                else:
+                    expected_names = ["App.xcresult", "ApplicationFoundation.xcresult"]
+                    expected_results = ["Passed", "Failed"]
                 self.assertEqual([path.name for path in paths], expected_names)
                 for path in paths:
                     self.assertTrue(path.is_dir(), f"Native result path was removed: {path}")
@@ -803,15 +949,14 @@ class ResultRetentionTests(unittest.TestCase):
         paths = [Path(args[args.index("-resultBundlePath") + 1])
                  for args in self.fixture.executions()]
         self.assertEqual([path.name for path in paths], [
-            "App.xcresult", "ApplicationFoundation.xcresult", "App-iPadPrivacy.xcresult",
-            "BrowserDownloadMultiScene.xcresult",
+            "App.xcresult", "AppHTTP.xcresult", "ApplicationFoundation.xcresult",
+            "App-iPadPrivacy.xcresult", "BrowserDownloadMultiScene.xcresult",
         ])
         self.assertTrue((paths[0] / "fixture-partial").is_file())
         self.assertFalse(paths[1].exists())
         self.assertTrue(all((path / "fixture-completed.json").is_file() for path in paths[2:]))
         self.assertIn("App-xcodebuild=65", result.stderr)
-        self.assertIn("App-validation=1", result.stderr)
-        self.assertIn("ApplicationFoundation-validation=1", result.stderr)
+        self.assertIn("AppHTTP-exact-identities=1", result.stderr)
         self.assertIn("Error 65", result.stderr)
         self.assert_builds_cleaned()
 
@@ -821,24 +966,26 @@ class ResultRetentionTests(unittest.TestCase):
             with self.subTest(plan=plan):
                 result = self.run_make("test", plan)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn(reason, result.stderr)
-                self.assertIn("BrowserDownloadMultiScene-validation=1", result.stderr)
-                self.assertEqual(len(self.fixture.executions()), 4)
+                combined_output = result.stdout + result.stderr
+                self.assertIn(reason, combined_output)
+                self.assertIn("BrowserDownloadMultiScene-validation=1", combined_output)
+                self.assertEqual(len(self.fixture.executions()), 5)
                 self.assert_builds_cleaned()
 
     def test_functional_suites_reject_missing_required_cases_and_unexpected_skips(self):
         privacy = "AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)"
         for mutation, identity, label in (
-            ("omit_case", HTTP_MATRIX_ID, "App"),
-            ("omit_case", "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances()", "App"),
-            ("skip_case", "RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification()", "ApplicationFoundation"),
-            ("skip_case", privacy, "App-iPadPrivacy"),
+            ("omit_case", HTTP_MATRIX_ID, "AppHTTP-exact-identities"),
+            ("omit_case", "BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances()", "App-exact-identities"),
+            ("skip_case", "RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification()", "ApplicationFoundation-exact-identities"),
+            ("skip_case", privacy, "App-iPadPrivacy-validation"),
         ):
             with self.subTest(mutation=mutation, identity=identity):
                 result = self.run_make("test", {mutation: identity})
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn(label + "-validation=1", result.stderr)
-                self.assertEqual(len(self.fixture.executions()), 4)
+                combined_output = result.stdout + result.stderr
+                self.assertIn(label + "=1", combined_output)
+                self.assertEqual(len(self.fixture.executions()), 5)
                 self.assert_builds_cleaned()
 
     def test_passing_http_parent_requires_each_argument_pair_to_pass_once(self):
@@ -850,7 +997,7 @@ class ResultRetentionTests(unittest.TestCase):
         for scenario, rows, diagnostic in (
             ("parent only", [], attachment["name"]),
             ("missing attachment", other_rows, attachment["name"]),
-            ("skipped attachment", [*other_rows, skipped], '"result":"Skipped"'),
+            ("skipped attachment", [*other_rows, skipped], "Skipped"),
             ("substituted row", [*other_rows, unknown], unknown["name"]),
             ("duplicate instead of attachment", [*other_rows, other_rows[0]], other_rows[0]["name"]),
             ("extra copy of attachment", [*passing, attachment], attachment["name"]),
@@ -859,18 +1006,29 @@ class ResultRetentionTests(unittest.TestCase):
                 self.fixture.http_matrix_arguments = rows
                 result = self.run_make("test")
                 self.assertNotEqual(result.returncode, 0, result.stdout)
-                self.assertIn("App HTTP matrix", result.stderr)
-                self.assertIn(diagnostic, result.stderr)
-                self.assertIn("App-validation=1", result.stderr)
+                combined_output = result.stdout + result.stderr
+                self.assertIn("App HTTP parameter rows differ for originatingMatrix(profile:row:)", combined_output)
+                self.assertIn(diagnostic, combined_output)
+                self.assertIn("AppHTTP-exact-identities=1", combined_output)
                 paths = [Path(args[args.index("-resultBundlePath") + 1])
                          for args in self.fixture.executions()]
                 self.assertEqual([path.name for path in paths], [
-                    "App.xcresult", "ApplicationFoundation.xcresult", "App-iPadPrivacy.xcresult",
-                    "BrowserDownloadMultiScene.xcresult",
+                    "App.xcresult", "AppHTTP.xcresult", "ApplicationFoundation.xcresult",
+                    "App-iPadPrivacy.xcresult", "BrowserDownloadMultiScene.xcresult",
                 ])
                 self.assertEqual([json.loads((path / "fixture-completed.json").read_text())["result"]
-                                  for path in paths], ["Passed"] * 4)
+                                  for path in paths], ["Passed"] * 5)
                 self.assert_builds_cleaned()
+
+    def test_http_matrix_rejects_rows_from_another_test_bundle_target(self):
+        result = self.run_make("test-app", {"wrong_http_target": True})
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "App HTTP matrix parent target identity is missing or duplicated: "
+            "AppHostedTests/AppHostedUITests/BrowserDownloadHTTPTests/"
+            "originatingMatrix(profile:row:) (count 0)",
+            result.stdout + result.stderr,
+        )
 
     def test_snapshot_app_failure_still_runs_package_and_remains_failed(self):
         result = self.run_make("test-snapshots", {"fail_on": 1})
@@ -935,30 +1093,51 @@ class ResultRetentionTests(unittest.TestCase):
                 self.assert_builds_cleaned()
 
     def test_partial_required_ui_bundle_cannot_pass_the_identity_checker(self):
-        result = self.run_make("test", {"partial_on": 4})
+        result = self.run_make("test", {"partial_on": 5})
         self.assertNotEqual(result.returncode, 0)
         commands = self.fixture.executions()
-        self.assertEqual(len(commands), 4)
+        self.assertEqual(len(commands), 5)
         bundle = Path(commands[-1][commands[-1].index("-resultBundlePath") + 1])
         self.assertEqual(bundle.name, "BrowserDownloadMultiScene.xcresult")
         self.assertTrue((bundle / "fixture-partial").is_file())
         self.assertFalse((bundle / "fixture-completed.json").exists())
         self.assert_builds_cleaned()
 
-    def test_unconfigured_results_keep_temporary_cleanup_behavior(self):
-        for target in ("test", "test-snapshots"):
-            for failure in (False, True):
-                with self.subTest(target=target, failure=failure):
-                    result = self.run_make(target, {"fail_on": 2} if failure else {},
-                                           retained=False)
-                    self.assertEqual(result.returncode == 0, not failure,
-                                     result.stdout + result.stderr)
-                    self.assertEqual(self.bundles(), [])
-                    for args in self.fixture.executions():
-                        bundle = Path(args[args.index("-resultBundlePath") + 1])
-                        self.assertTrue(bundle.is_relative_to(self.build_root))
-                        self.assertFalse(bundle.exists())
-                    self.assert_builds_cleaned()
+    def test_functional_default_results_are_retained_after_failure(self):
+        result = self.run_make("test-app", {"fail_on": 1}, retained=False)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        evidence_line = re.search(r"(?m)^functional test evidence: (.+)$", result.stdout)
+        self.assertIsNotNone(evidence_line, result.stdout)
+        evidence_root = Path(evidence_line[1])
+        self.assertTrue(evidence_root.resolve().is_relative_to(
+            (self.checkout / ".build" / "TestResults").resolve()))
+        self.assertTrue(evidence_root.is_dir())
+        self.assertNotEqual(evidence_root, self.build_root)
+        paths = [Path(args[args.index("-resultBundlePath") + 1])
+                 for args in self.fixture.executions()]
+        self.assertEqual([path.name for path in paths], ["App.xcresult", "AppHTTP.xcresult"])
+        self.assertTrue(all(path.parent == evidence_root and path.is_dir() for path in paths))
+        self.assertEqual(json.loads((paths[0] / "fixture-completed.json").read_text())["result"], "Failed")
+        self.assertEqual(json.loads((paths[1] / "fixture-completed.json").read_text())["result"], "Passed")
+        self.assertTrue((evidence_root / "App-xcodebuild.log").is_file())
+        self.assertTrue((evidence_root / "AppHTTP-xcodebuild.log").is_file())
+        self.assertTrue((evidence_root / "App-enumeration.json").is_file())
+        self.assertTrue((evidence_root / "AppHTTP-enumeration.json").is_file())
+        self.assert_builds_cleaned()
+
+    def test_unconfigured_snapshot_results_keep_temporary_cleanup_behavior(self):
+        for failure in (False, True):
+            with self.subTest(failure=failure):
+                result = self.run_make("test-snapshots", {"fail_on": 2} if failure else {},
+                                       retained=False)
+                self.assertEqual(result.returncode == 0, not failure,
+                                 result.stdout + result.stderr)
+                self.assertEqual(self.bundles(), [])
+                for args in self.fixture.executions():
+                    bundle = Path(args[args.index("-resultBundlePath") + 1])
+                    self.assertTrue(bundle.is_relative_to(self.build_root))
+                    self.assertFalse(bundle.exists())
+                self.assert_builds_cleaned()
 
 
 class WorkflowEvidenceTests(unittest.TestCase):
@@ -968,10 +1147,13 @@ class WorkflowEvidenceTests(unittest.TestCase):
         return re.split(r"(?m)^(?:      - name: |  [\w-]+:\s*$)", source)[1:]
 
     @staticmethod
-    def render(source, run_id, attempt):
+    def render(source, run_id, attempt, lane=None):
         values = {"run_id": run_id, "run_attempt": attempt}
-        return re.sub(r"\$\{\{\s*github\.(run_id|run_attempt)\s*\}\}",
-                      lambda match: values[match[1]], source)
+        rendered = re.sub(r"\$\{\{\s*github\.(run_id|run_attempt)\s*\}\}",
+                          lambda match: values[match[1]], source)
+        if lane is not None:
+            rendered = re.sub(r"\$\{\{\s*matrix\.lane\s*\}\}", lane, rendered)
+        return rendered
 
     def test_upload_names_preserve_every_gate_and_run_attempt(self):
         uploads = [step for step in self.steps() if "uses: actions/upload-artifact@" in step]
@@ -982,14 +1164,17 @@ class WorkflowEvidenceTests(unittest.TestCase):
             self.assertNotRegex(step, r"(?m)^          overwrite: true$")
             match = re.search(r"(?m)^          name: (.+)$", step)
             self.assertIsNotNone(match)
-            for run_id in ("7001", "7002"):
-                for attempt in ("1", "2"):
-                    name = self.render(match[1], run_id, attempt)
-                    self.assertIn(run_id, name)
-                    self.assertIn(attempt, name.rsplit(run_id, 1)[-1])
-                    self.assertNotIn("${{", name)
-                    names.append(name)
-        self.assertEqual(len(set(names)), 12)
+            lanes = ("app", "application-foundation", "ipad-privacy", "browser-download-ui") \
+                if "${{ matrix.lane }}" in match[1] else (None,)
+            for lane in lanes:
+                for run_id in ("7001", "7002"):
+                    for attempt in ("1", "2"):
+                        name = self.render(match[1], run_id, attempt, lane)
+                        self.assertIn(run_id, name)
+                        self.assertIn(attempt, name.rsplit(run_id, 1)[-1])
+                        self.assertNotIn("${{", name)
+                        names.append(name)
+        self.assertEqual(len(set(names)), 24)
 
     def test_snapshot_failure_reporting_names_the_attempt_without_claiming_pass(self):
         report = next(step for step in self.steps()
@@ -1131,6 +1316,130 @@ class NativeSnapshotRecipeTests(DestinationFixture, unittest.TestCase):
         result = self.native_run(scale="4")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.executions(), [])
+
+
+class XcodeEnumerationTests(unittest.TestCase):
+    def validator_namespace(self):
+        path = ROOT / "Scripts/assert-xcresult-tests.py"
+        namespace = {"__name__": "xcresult_validator_test"}
+        exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)
+        return namespace
+
+    def test_flat_json_reads_only_enabled_identifier_records(self):
+        validator = self.validator_namespace()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "enumeration.json"
+            enabled = "AppHostedTests/AppHostedUITests/BrowserDownloadHTTPTests/originatingMatrix(profile:row:)"
+            disabled = "AppHostedTests/AppHostedUITests/BrowserDownloadHTTPTests/disabledTest()"
+            path.write_text(json.dumps({
+                "errors": [],
+                "values": [{
+                    "testPlan": "App",
+                    "enabledTests": [{"identifier": enabled}],
+                    "disabledTests": [{"identifier": disabled}],
+                }],
+            }))
+            self.assertEqual(validator["enumerated_test_identifiers"](path), [enabled])
+
+    def test_flat_json_rejects_reported_errors_and_malformed_values(self):
+        validator = self.validator_namespace()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "enumeration.json"
+            for document in (
+                {"errors": ["scheme unavailable"], "values": []},
+                {"errors": [], "values": [{"enabledTests": [], "disabledTests": []}]},
+            ):
+                with self.subTest(document=document):
+                    path.write_text(json.dumps(document))
+                    with self.assertRaises(ValueError):
+                        validator["enumerated_test_identifiers"](path)
+
+    def test_duplicate_full_identities_reject_terminal_parenthesis_aliases(self):
+        validator = self.validator_namespace()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "enumeration.json"
+            identity = "TargetOne/Namespace/Suite/testExample"
+            path.write_text(json.dumps({
+                "errors": [],
+                "values": [{
+                    "testPlan": "App",
+                    "enabledTests": [
+                        {"identifier": identity + "()"},
+                        {"identifier": identity},
+                    ],
+                    "disabledTests": [],
+                }],
+            }))
+            arguments = [
+                "assert-xcresult-tests.py", "--bundle", str(Path(directory) / "unused.xcresult"),
+                "--expected-device-id", UDID, "--expected-device-name", NAME,
+                "--expected-os-version", "27.2", "--expected-tests-file", str(path),
+            ]
+            with patch.object(sys, "argv", arguments), patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    validator["main"]()
+            self.assertEqual(raised.exception.code, 2)
+
+    def test_enumerated_identity_rejects_same_method_from_another_target(self):
+        validator = self.validator_namespace()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "enumeration.json"
+            path.write_text(json.dumps({
+                "errors": [],
+                "values": [{
+                    "testPlan": "TestPlan",
+                    "enabledTests": [{
+                        "identifier": "TargetOne/Namespace/Suite/testExample()",
+                    }],
+                    "disabledTests": [],
+                }],
+            }))
+            target_url = "test://com.apple.xcode/TestPlan/TargetTwo"
+            case_url = target_url + "/Namespace/Suite/testExample()"
+            report = {"testNodes": [{
+                "nodeType": "Test Plan",
+                "name": "TestPlan",
+                "children": [{
+                    "nodeType": "Unit test bundle",
+                    "name": "TargetTwo",
+                    "nodeIdentifierURL": target_url,
+                    "children": [{
+                        "nodeType": "Test Suite",
+                        "name": "Namespace",
+                        "nodeIdentifierURL": target_url + "/Namespace",
+                        "children": [{
+                            "nodeType": "Test Suite",
+                            "name": "Suite",
+                            "nodeIdentifierURL": target_url + "/Namespace/Suite",
+                            "children": [{
+                                "nodeType": "Test Case",
+                                "name": "testExample()",
+                                "nodeIdentifier": "Namespace/Suite/testExample()",
+                                "nodeIdentifierURL": case_url,
+                                "result": "Passed",
+                            }],
+                        }],
+                    }],
+                }],
+            }]}
+            summary = {
+                "result": "Passed", "totalTestCount": 1, "passedTests": 1,
+                "failedTests": 0, "skippedTests": 0, "expectedFailures": 0,
+                "devicesAndConfigurations": [{"device": {
+                    "deviceId": UDID, "deviceName": NAME, "osVersion": "27.2",
+                    "platform": "iOS Simulator",
+                }}],
+            }
+            validator["xcresult_json"] = lambda _bundle, command: (
+                summary if command == "summary" else report)
+            arguments = [
+                "assert-xcresult-tests.py", "--bundle", str(Path(directory) / "unused.xcresult"),
+                "--expected-device-id", UDID, "--expected-device-name", NAME,
+                "--expected-os-version", "27.2", "--expected-tests-file", str(path),
+            ]
+            with patch.object(sys, "argv", arguments), patch("sys.stdout", io.StringIO()), \
+                    patch("sys.stderr", io.StringIO()):
+                self.assertEqual(validator["main"](), 1)
 
 
 if __name__ == "__main__":
