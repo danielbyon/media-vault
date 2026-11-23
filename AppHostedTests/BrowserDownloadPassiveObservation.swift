@@ -21,6 +21,158 @@ struct BrowserDownloadObservationContext: Codable, Equatable, Sendable {
     var phaseRevision: UInt64 = 0
 }
 
+/// Ties callbacks to one qualification root and becomes invalid when that root disconnects.
+@MainActor
+final class BrowserDownloadQualificationSceneRegistration {
+    let rootID: UUID
+    private(set) var isConnected = false
+    private(set) var isDisconnected = false
+
+    init(rootID: UUID = UUID()) {
+        self.rootID = rootID
+    }
+
+    fileprivate func connect() -> Bool {
+        guard !isConnected, !isDisconnected else {
+            return false
+        }
+
+        isConnected = true
+        return true
+    }
+
+    fileprivate func disconnect() {
+        isConnected = false
+        isDisconnected = true
+    }
+}
+
+/// Tracks connected roots and reports when their activity changes Library sampling eligibility.
+@MainActor
+final class BrowserDownloadQualificationSceneActivity {
+    private struct RootActivity {
+        let registration: BrowserDownloadQualificationSceneRegistration
+        var isActive: Bool
+    }
+
+    private var activeByRoot: [UUID: RootActivity] = [:]
+    private let refreshLibrarySample: @MainActor (String) -> Void
+
+    init(refreshLibrarySample: @escaping @MainActor (String) -> Void = { _ in }) {
+        self.refreshLibrarySample = refreshLibrarySample
+    }
+
+    var isObservationEligible: Bool {
+        activeByRoot.values.contains(where: \.isActive)
+    }
+
+    func isActive(registration: BrowserDownloadQualificationSceneRegistration) -> Bool? {
+        guard let root = activeByRoot[registration.rootID], root.registration === registration else {
+            return nil
+        }
+
+        return root.isActive
+    }
+
+    /// Registers a root once and reports whether it changed aggregate eligibility.
+    func register(
+        registration: BrowserDownloadQualificationSceneRegistration,
+        active: Bool,
+    ) -> Bool? {
+        if let root = activeByRoot[registration.rootID] {
+            return root.registration === registration ? false : nil
+        }
+        guard registration.connect() else {
+            return nil
+        }
+
+        let wasEligible = isObservationEligible
+        activeByRoot[registration.rootID] = RootActivity(registration: registration, isActive: active)
+        return wasEligible != isObservationEligible
+    }
+
+    /// Applies phase changes only to the current root connection.
+    func setActive(_ active: Bool, registration: BrowserDownloadQualificationSceneRegistration) -> Bool? {
+        guard registration.isConnected,
+              var root = activeByRoot[registration.rootID],
+              root.registration === registration else {
+            return nil
+        }
+
+        let wasEligible = isObservationEligible
+        root.isActive = active
+        activeByRoot[registration.rootID] = root
+        return wasEligible != isObservationEligible
+    }
+
+    /// Disconnects a root and invalidates its token so late callbacks are ignored.
+    func disconnect(
+        registration: BrowserDownloadQualificationSceneRegistration,
+        sceneLabel: String,
+    ) -> Bool {
+        let wasEligible = isObservationEligible
+        registration.disconnect()
+        guard let root = activeByRoot[registration.rootID], root.registration === registration else {
+            return false
+        }
+
+        activeByRoot.removeValue(forKey: registration.rootID)
+        let eligibilityChanged = wasEligible != isObservationEligible
+        refreshLibrarySampleIfEligibilityChanged(eligibilityChanged, sceneLabel: sceneLabel)
+        return eligibilityChanged
+    }
+
+    /// Applies the Store phase before sampling after an aggregate eligibility change.
+    func applyPhaseChange(
+        active: Bool,
+        registration: BrowserDownloadQualificationSceneRegistration,
+        sceneLabel: String,
+        applyApplicationPhase: @MainActor () -> Void,
+    ) -> Bool? {
+        guard let eligibilityChanged = setActive(active, registration: registration) else {
+            return nil
+        }
+
+        applyApplicationPhase()
+        refreshLibrarySampleIfEligibilityChanged(eligibilityChanged, sceneLabel: sceneLabel)
+        return eligibilityChanged
+    }
+
+    /// Refreshes Library sampling when the first root becomes active or the last becomes inactive.
+    private func refreshLibrarySampleIfEligibilityChanged(_ eligibilityChanged: Bool?, sceneLabel: String) {
+        guard eligibilityChanged == true else {
+            return
+        }
+
+        refreshLibrarySample(sceneLabel)
+    }
+}
+
+/// Keeps storage availability tied to the context that produced the observation.
+struct BrowserDownloadStorageObservationState {
+    private(set) var context: BrowserDownloadObservationContext?
+    private(set) var available = false
+
+    @discardableResult
+    mutating func record(
+        available: Bool,
+        from observedContext: BrowserDownloadObservationContext?,
+        current currentContext: BrowserDownloadObservationContext,
+    ) -> Bool {
+        guard let observedContext, observedContext == currentContext else {
+            return false
+        }
+
+        context = observedContext
+        self.available = available
+        return true
+    }
+
+    func isAvailable(in currentContext: BrowserDownloadObservationContext) -> Bool {
+        available && context == currentContext
+    }
+}
+
 struct BrowserDownloadObservationSnapshot: Codable, Equatable, Sendable {
     let events: [[String: String]]
 

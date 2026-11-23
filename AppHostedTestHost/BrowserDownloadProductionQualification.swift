@@ -144,9 +144,17 @@ private final class BrowserDownloadProductionQualificationProcess {
     @ObservationIgnored
     private var phaseRevision: UInt64 = 0
     @ObservationIgnored
-    private var activeScene = false
+    private lazy var sceneActivity = BrowserDownloadQualificationSceneActivity { [weak self] sceneLabel in
+        self?.updateLibrarySample(sceneLabel: sceneLabel)
+    }
+    private var activeScene: Bool {
+        sceneActivity.isObservationEligible
+    }
     @ObservationIgnored
-    private var storageAvailable = false
+    private var storageObservation = BrowserDownloadStorageObservationState()
+    private var storageAvailable: Bool {
+        storageObservation.isAvailable(in: observationContext)
+    }
     @ObservationIgnored
     private var storageFailure: BrowserDownloadLibraryObservation?
     let usesCompatibilityReadout = !ProcessInfo.processInfo
@@ -507,11 +515,17 @@ private final class BrowserDownloadProductionQualificationProcess {
     }
 
     private func didReadStorage(in context: BrowserDownloadObservationContext?, available: Bool) {
+        guard storageObservation.record(
+            available: available,
+            from: context,
+            current: observationContext,
+        ) else {
+            return
+        }
+
         if available {
-            storageAvailable = true
             storageFailure = nil
         } else if let context, context == observationContext {
-            storageAvailable = false
             storageFailure = .init(context: context, outcome: .unavailable, fields: [:])
         }
         #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
@@ -1140,25 +1154,53 @@ private final class BrowserDownloadProductionQualificationProcess {
         ])
     }
 
+    func registerQualificationScene(
+        registration: BrowserDownloadQualificationSceneRegistration,
+        active: Bool,
+        sceneLabel: String,
+    ) {
+        _ = sceneActivity.register(registration: registration, active: active)
+    }
+
+    func disconnectQualificationScene(
+        registration: BrowserDownloadQualificationSceneRegistration,
+        sceneLabel: String,
+    ) {
+        _ = sceneActivity.disconnect(registration: registration, sceneLabel: sceneLabel)
+    }
+
+    @discardableResult
     func applyQualificationScenePhase(
         _ phase: String,
         applicationPhase: VaultApplicationScenePhase,
         sceneLabel: String,
-    ) {
+        registration: BrowserDownloadQualificationSceneRegistration,
+    ) -> Bool {
         let generationBefore = owner.snapshot.generation
-        store.send(.applicationPhaseChanged(applicationPhase))
-        activeScene = phase == "active"
-        #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
-        diagnosticRecorder.recordScenePhase(
-            BrowserDownloadHostDiagnosticRecord.ScenePhase(rawValue: phase) ?? .other,
+        guard let eligibilityChanged = sceneActivity.applyPhaseChange(
+            active: phase == "active",
+            registration: registration,
             sceneLabel: sceneLabel,
-        )
-        recordDiagnosticEligibility(sceneLabel: sceneLabel)
-        #endif
-        updateLibrarySample(sceneLabel: sceneLabel)
+            applyApplicationPhase: {
+                store.send(.applicationPhaseChanged(applicationPhase))
+                #if DEBUG && BROWSER_DOWNLOAD_STANDALONE_QUALIFICATION
+                diagnosticRecorder.recordScenePhase(
+                    BrowserDownloadHostDiagnosticRecord.ScenePhase(rawValue: phase) ?? .other,
+                    sceneLabel: sceneLabel,
+                )
+                recordDiagnosticEligibility(sceneLabel: sceneLabel)
+                #endif
+            },
+        ) else {
+            return false
+        }
+
+        if !eligibilityChanged {
+            updateLibrarySample(sceneLabel: sceneLabel)
+        }
         let snapshot = owner.snapshot
         guard let run = slowKnownRun else {
-            return
+            return true
         }
 
         evidence.record("qualificationScenePhaseChanged", [
@@ -1199,6 +1241,7 @@ private final class BrowserDownloadProductionQualificationProcess {
                 "released": String(released),
             ])
         }
+        return true
     }
 
     /// Owner events describe actual policy admission and native delegate callbacks.
@@ -1839,6 +1882,8 @@ private struct BrowserDownloadProductionQualificationRoot: View {
     private var browserHostingContext: BrowserQualificationWebKitHostingContext
     @State
     private var diagnosticSceneLabel: String
+    @State
+    private var qualificationSceneRegistration = BrowserDownloadQualificationSceneRegistration()
 
     init(process: BrowserDownloadProductionQualificationProcess) {
         self.process = process
@@ -1985,32 +2030,30 @@ private struct BrowserDownloadProductionQualificationRoot: View {
             }
         }
         .task { await process.start() }
-        .onAppear { process.refreshSceneCensus() }
-        .onChange(of: scenePhase, initial: true) { _, newPhase in
-            let phase: String
-            let applicationPhase: VaultApplicationScenePhase
-            switch newPhase {
-            case .active:
-                phase = "active"
-                applicationPhase = .active
-            case .inactive:
-                phase = "inactive"
-                applicationPhase = .inactive
-            case .background:
-                phase = "background"
-                applicationPhase = .background
-            @unknown default:
-                phase = "unknown"
-                applicationPhase = .unknown
-            }
+        .onAppear {
             if BrowserDownloadProductionQualification.activeDownloadHomeEnabled
                 || BrowserDownloadProductionQualification.automaticIngestionEnabled {
-                process.applyQualificationScenePhase(
-                    phase,
-                    applicationPhase: applicationPhase,
+                process.registerQualificationScene(
+                    registration: qualificationSceneRegistration,
+                    active: scenePhase == .active,
+                    sceneLabel: diagnosticSceneLabel,
+                )
+                applyQualificationScenePhase(scenePhase)
+            }
+            process.refreshSceneCensus()
+        }
+        .onDisappear {
+            if BrowserDownloadProductionQualification.activeDownloadHomeEnabled
+                || BrowserDownloadProductionQualification.automaticIngestionEnabled {
+                process.disconnectQualificationScene(
+                    registration: qualificationSceneRegistration,
                     sceneLabel: diagnosticSceneLabel,
                 )
             }
+            qualificationSceneRegistration = BrowserDownloadQualificationSceneRegistration()
+        }
+        .onChange(of: scenePhase, initial: false) { _, newPhase in
+            applyQualificationScenePhase(newPhase)
 
             guard BrowserDownloadProductionQualification.passiveSceneCensusEnabled else {
                 return
@@ -2049,6 +2092,37 @@ private struct BrowserDownloadProductionQualificationRoot: View {
                 .accessibilityIdentifier(identifier)
                 .accessibilityValue(lastRefresh())
         }
+    }
+
+    private func applyQualificationScenePhase(_ newPhase: ScenePhase) {
+        let phase: String
+        let applicationPhase: VaultApplicationScenePhase
+        switch newPhase {
+        case .active:
+            phase = "active"
+            applicationPhase = .active
+        case .inactive:
+            phase = "inactive"
+            applicationPhase = .inactive
+        case .background:
+            phase = "background"
+            applicationPhase = .background
+        @unknown default:
+            phase = "unknown"
+            applicationPhase = .unknown
+        }
+
+        guard BrowserDownloadProductionQualification.activeDownloadHomeEnabled
+            || BrowserDownloadProductionQualification.automaticIngestionEnabled else {
+            return
+        }
+
+        _ = process.applyQualificationScenePhase(
+            phase,
+            applicationPhase: applicationPhase,
+            sceneLabel: diagnosticSceneLabel,
+            registration: qualificationSceneRegistration,
+        )
     }
 }
 
