@@ -39,6 +39,7 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
             app,
             milestone: "actual WebKit handoff after accepted-policy Lock and hidden native finish",
             expectedPhase: "locked",
+            diagnosticWait: .delayedHandoff,
         ) { observation in
             completion = SlowKnownWitnessContract.delayedHandoffEvidence(observation.events)
             return completion != nil
@@ -185,6 +186,8 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
             app,
             milestone: "durably accepted PNG under app privacy Lock",
             expectedPhase: "locked",
+            diagnosticWait: .lockedPNG,
+            diagnosticBaseline: baseline,
         ) { sample in
             guard let operation = sample.finishedOperation(after: baseline, route: "image", locked: true),
                   let proof = try sample.library?.completedFields() else {
@@ -284,7 +287,7 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         #endif
         try launchQualificationApplication(app)
         defer { app.terminate() }
-        let locked = try lockedStartup(app)
+        let locked = try lockedStartup(app, diagnosticWait: .coldStartup)
         XCTAssertEqual(locked["authenticated"], "false")
         XCTAssertEqual(locked["stagingEmpty"], "true")
         XCTAssertEqual(locked["contentEmpty"], "true")
@@ -297,11 +300,15 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         XCTAssertFalse(events.contains { $0["event"] == "nativeDownloadHandoff" })
     }
 
-    private func lockedStartup(_ app: XCUIApplication) throws -> Observation {
+    private func lockedStartup(
+        _ app: XCUIApplication,
+        diagnosticWait: BrowserDownloadWaitFailureDiagnostics.Wait? = nil,
+    ) throws -> Observation {
         let sample = try waitForPassiveObservation(
             app,
             milestone: "current locked Library startup",
             expectedPhase: "locked",
+            diagnosticWait: diagnosticWait,
         ) {
             try $0.library?.completedFields()["event"] == "libraryStartup"
         }
@@ -914,11 +921,15 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         _ app: XCUIApplication,
         milestone: String,
         expectedPhase: String? = nil,
+        diagnosticWait: BrowserDownloadWaitFailureDiagnostics.Wait? = nil,
+        diagnosticBaseline: BrowserDownloadPassiveObservation? = nil,
         matching condition: @escaping @MainActor (BrowserDownloadPassiveObservation) throws -> Bool,
     ) throws -> BrowserDownloadPassiveObservation {
         let failures = testRun?.totalFailureCount
+        var readerForDiagnostics: BrowserDownloadPassiveReader?
         do {
             let reader = try XCTUnwrap(passiveReader)
+            readerForDiagnostics = reader
             return try reader.read(
                 now: { ProcessInfo.processInfo.systemUptime },
                 interrupted: { self.testRun?.totalFailureCount != failures },
@@ -943,6 +954,33 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
                 }
             }
         } catch {
+            if let diagnosticWait,
+               let reader = readerForDiagnostics,
+               let diagnosticError = error as? BrowserDownloadObservationError {
+                let diagnostic = reader.lastPollDiagnosticSnapshot.map { poll in
+                    BrowserDownloadWaitFailureDiagnostics.summarize(
+                        wait: diagnosticWait,
+                        poll: poll,
+                        baseline: diagnosticBaseline,
+                        expectedPhase: expectedPhase,
+                        expectedProcessNonce: reader.expectedProcessNonce,
+                    )
+                } ?? BrowserDownloadWaitFailureDiagnostics.summarize(
+                    wait: diagnosticWait,
+                    sample: nil,
+                    baseline: diagnosticBaseline,
+                    sampleReadMissing: false,
+                    matcherMatched: nil,
+                    expectedPhase: expectedPhase,
+                    expectedProcessNonce: reader.expectedProcessNonce,
+                )
+                if let data = BrowserDownloadWaitFailureDiagnostics.attachmentData(
+                    for: diagnosticError,
+                    diagnostic: diagnostic,
+                ) {
+                    attachWaitFailureDiagnostics(data)
+                }
+            }
             capture(app, milestone: "FAILED \(milestone)")
             XCTFail("Passive observation failed: \(milestone): \(error)")
             throw error
@@ -1006,6 +1044,13 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
         default:
             "Wait failed (result \(result.rawValue)): \(milestone)"
         }
+    }
+
+    private func attachWaitFailureDiagnostics(_ data: Data) {
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "Browser download wait diagnostics"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func capture(_ app: XCUIApplication, milestone: String) {
