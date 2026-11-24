@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest.mock import patch
 
@@ -397,6 +398,22 @@ elif tool == "xcodebuild":
             else:
                 (bundle / "fixture-partial").write_text("result writer started")
                 if phase == plan.get("wait_on"):
+                    pressure_bytes = int(os.environ.get("FIXTURE_PRE_BARRIER_OUTPUT_BYTES", "0"))
+                    remaining = [pressure_bytes, pressure_bytes]
+                    markers = (b"\x00", b"\x01")
+                    streams = (sys.stdout.buffer, sys.stderr.buffer)
+                    while remaining[0] or remaining[1]:
+                        for index, stream in enumerate(streams):
+                            if remaining[index]:
+                                size = min(4096, remaining[index])
+                                stream.write(markers[index] * size)
+                                stream.flush()
+                                remaining[index] -= size
+                    if pressure_bytes:
+                        (root / "pre-barrier-output.json").write_text(json.dumps({
+                            "stdout_bytes": pressure_bytes,
+                            "stderr_bytes": pressure_bytes,
+                        }))
                     import signal
                     ignore = plan.get("ignore_signals", False)
                     for event in (signal.SIGINT, signal.SIGTERM):
@@ -807,11 +824,23 @@ class ResultRetentionTests(unittest.TestCase):
         (self.checkout / "Scripts").symlink_to(ROOT / "Scripts", target_is_directory=True)
         self.build_root = self.fixture.root / "build products"
         self.results_root = self.fixture.root / "retained results"
+        self.invocation_roots = []
         for directory in (self.build_root, self.results_root, self.checkout / ".build"):
             directory.mkdir(exist_ok=True)
             (directory / "unrelated-sentinel").write_text("owner data")
 
-    def command(self, target, plan, retained=True):
+    def invocation_roots_for(self, name):
+        build_root = self.fixture.root / f"{name} build products"
+        results_root = self.fixture.root / f"{name} retained results"
+        for directory in (build_root, results_root):
+            directory.mkdir()
+            (directory / "unrelated-sentinel").write_text("owner data")
+        self.invocation_roots.append((build_root, results_root))
+        return build_root, results_root
+
+    def command(self, target, plan, retained=True, build_root=None, results_root=None):
+        build_root = build_root or self.build_root
+        results_root = results_root or self.results_root
         ipad = "iPad Pro 11-inch (M5)"
         self.fixture.devices = {"devices": {RUNTIME: [
             self.fixture.device(name=NAME, udid=UDID),
@@ -827,8 +856,8 @@ class ResultRetentionTests(unittest.TestCase):
         return [MAKE, target, f"XCODE_WRAPPER={self.fixture.wrapper}",
                 f"VERIFIED_SIMULATOR_UDID={OTHER_UDID if target == 'test-snapshots' else UDID}",
                 f"VERIFIED_IPAD_SIMULATOR_UDID={OTHER_UDID}",
-                f"XCODE_BUILD_ROOT={self.build_root}",
-                f"TEST_RESULTS_DIRECTORY={self.results_root if retained else ''}",
+                f"XCODE_BUILD_ROOT={build_root}",
+                f"TEST_RESULTS_DIRECTORY={results_root if retained else ''}",
                 f"PATH={self.fixture.env['PATH']}"]
 
     def run_make(self, target, plan=None, retained=True):
@@ -840,47 +869,84 @@ class ResultRetentionTests(unittest.TestCase):
         return sorted(self.results_root.glob("*/*.xcresult"))
 
     def assert_owner_data_intact(self):
-        for directory in (self.build_root, self.results_root, self.checkout / ".build"):
+        directories = [self.build_root, self.results_root, self.checkout / ".build"]
+        for build_root, results_root in self.invocation_roots:
+            directories.extend((build_root, results_root))
+        for directory in directories:
             self.assertEqual((directory / "unrelated-sentinel").read_text(), "owner data")
 
-    def assert_builds_cleaned(self):
-        self.assertEqual(list(self.build_root.glob("xcodebuild-*")), [])
+    def assert_builds_cleaned(self, build_root=None):
+        build_root = build_root or self.build_root
+        self.assertEqual(list(build_root.glob("xcodebuild-*")), [])
         self.assert_owner_data_intact()
 
-    def stop_during_phase(self, target, abrupt):
-        """The readiness pipe avoids timing guesses and signals only this fixture session."""
-        read_fd, write_fd = os.pipe()
-        process = None
-        stopped = False
-        try:
-            env = dict(self.fixture.env, FIXTURE_READY_FD=str(write_fd))
-            process = subprocess.Popen(
-                self.command(target, {"wait_on": 2, "ignore_signals": abrupt}),
-                cwd=self.checkout, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                start_new_session=True, pass_fds=(write_fd,),
-            )
-            os.close(write_fd)
-            write_fd = None
-            ready, _, _ = select.select([read_fd], [], [], 10)
-            self.assertTrue(ready, "Fixture did not reach its partial-result barrier")
-            message = os.read(read_fd, 4096)
-            self.assertTrue(message, "Fixture exited before its partial-result barrier")
-            partial = Path(json.loads(message)["bundle"])
-            self.assertTrue((partial / "fixture-partial").is_file())
-            os.killpg(process.pid, signal.SIGKILL if abrupt else signal.SIGTERM)
-            output, errors = process.communicate(timeout=10)
-            stopped = True
-            self.assertNotEqual(process.returncode, 0, (output + errors).decode())
-        finally:
-            if write_fd is not None:
+    def stop_during_phase(self, target, abrupt, output_pressure_bytes=0,
+                          build_root=None, results_root=None):
+        """Keep readiness on its own FD and write command output to temporary files."""
+
+        def log_tail(stream):
+            size = os.fstat(stream.fileno()).st_size
+            tail = os.pread(stream.fileno(), 2048, max(0, size - 2048))
+            return f"{size} bytes; tail={tail.decode(errors='replace')}"
+
+        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+            read_fd, write_fd = os.pipe()
+            process = None
+            stopped = False
+            try:
+                env = dict(self.fixture.env, FIXTURE_READY_FD=str(write_fd),
+                           FIXTURE_PRE_BARRIER_OUTPUT_BYTES=str(output_pressure_bytes))
+                process = subprocess.Popen(
+                    self.command(target, {"wait_on": 2, "ignore_signals": abrupt},
+                                 build_root=build_root, results_root=results_root),
+                    cwd=self.checkout, env=env, stdout=stdout_file, stderr=stderr_file,
+                    start_new_session=True, pass_fds=(write_fd,),
+                )
                 os.close(write_fd)
-            os.close(read_fd)
-            if process is not None and not stopped:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.communicate(timeout=10)
+                write_fd = None
+                ready, _, _ = select.select([read_fd], [], [], 10)
+                if not ready:
+                    status = process.poll()
+                    state = f"exited with status {status}" if status is not None else "still running"
+                    self.fail(
+                        f"Fixture did not reach its partial-result barrier within 10 seconds; "
+                        f"process {state}; stdout {log_tail(stdout_file)}; "
+                        f"stderr {log_tail(stderr_file)}"
+                    )
+                message = os.read(read_fd, 4096)
+                if not message:
+                    self.fail(
+                        f"Fixture exited before its partial-result barrier "
+                        f"with status {process.poll()}; stdout {log_tail(stdout_file)}; "
+                        f"stderr {log_tail(stderr_file)}"
+                    )
+                partial = Path(json.loads(message)["bundle"])
+                self.assertTrue((partial / "fixture-partial").is_file())
+                shutdown_deadline = time.monotonic() + 10
+                os.killpg(process.pid, signal.SIGKILL if abrupt else signal.SIGTERM)
+                process.wait(timeout=max(0, shutdown_deadline - time.monotonic()))
+                while True:
+                    try:
+                        os.killpg(process.pid, 0)
+                    except ProcessLookupError:
+                        break
+                    remaining = shutdown_deadline - time.monotonic()
+                    if remaining <= 0:
+                        self.fail("Fixture process group did not exit within 10 seconds")
+                    time.sleep(min(0.05, remaining))
+                stopped = True
+                diagnostic = f"stdout {log_tail(stdout_file)}; stderr {log_tail(stderr_file)}"
+                self.assertNotEqual(process.returncode, 0, diagnostic)
+            finally:
+                if write_fd is not None:
+                    os.close(write_fd)
+                os.close(read_fd)
+                if process is not None and not stopped:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=10)
 
     def test_success_preserves_all_bundles_at_native_result_paths_with_spaces(self):
         for target, names in (
@@ -1145,31 +1211,48 @@ class ResultRetentionTests(unittest.TestCase):
                          {"App.xcresult", "ApplicationFoundation.xcresult"})
         self.assert_builds_cleaned()
 
+    def test_readiness_barrier_survives_large_mock_output(self):
+        output_pressure_bytes = 256 * 1024
+        build_root, results_root = self.invocation_roots_for("readiness pressure")
+        self.stop_during_phase(
+            "test", abrupt=False, output_pressure_bytes=output_pressure_bytes,
+            build_root=build_root, results_root=results_root,
+        )
+        pressure = json.loads((self.fixture.root / "pre-barrier-output.json").read_text())
+        self.assertEqual(pressure, {
+            "stdout_bytes": output_pressure_bytes,
+            "stderr_bytes": output_pressure_bytes,
+        })
+
     def test_graceful_termination_preserves_completed_and_partial_bundles(self):
         for target in ("test", "test-snapshots"):
             with self.subTest(target=target):
-                self.stop_during_phase(target, abrupt=False)
+                build_root, results_root = self.invocation_roots_for(f"graceful {target}")
+                self.stop_during_phase(target, abrupt=False, build_root=build_root,
+                                       results_root=results_root)
                 current = [Path(args[args.index("-resultBundlePath") + 1])
                            for args in self.fixture.executions()]
                 self.assertEqual(len(current), 2)
                 self.assertTrue((current[0] / "fixture-completed.json").is_file())
                 self.assertTrue((current[1] / "fixture-partial").is_file())
                 self.assertFalse((current[1] / "fixture-completed.json").exists())
-                self.assert_builds_cleaned()
+                self.assert_builds_cleaned(build_root)
 
     def test_abrupt_termination_retains_evidence_without_exit_traps(self):
         for target in ("test", "test-snapshots"):
             with self.subTest(target=target):
-                self.stop_during_phase(target, abrupt=True)
+                build_root, results_root = self.invocation_roots_for(f"abrupt {target}")
+                self.stop_during_phase(target, abrupt=True, build_root=build_root,
+                                       results_root=results_root)
                 current = [Path(args[args.index("-resultBundlePath") + 1])
                            for args in self.fixture.executions()]
                 self.assertEqual(len(current), 2)
                 for bundle in current:
-                    self.assertTrue(bundle.is_relative_to(self.results_root))
+                    self.assertTrue(bundle.is_relative_to(results_root))
                     self.assertTrue((bundle / "fixture-partial").is_file())
                 self.assertTrue((current[0] / "fixture-completed.json").is_file())
                 self.assertFalse((current[1] / "fixture-completed.json").exists())
-                self.assert_owner_data_intact()
+        self.assert_owner_data_intact()
 
     def test_partial_bundle_is_retained_but_never_qualifies_as_complete(self):
         for target in ("test", "test-snapshots"):
