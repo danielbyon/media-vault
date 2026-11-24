@@ -190,6 +190,7 @@ test:
 	done; \
 	exit "$$first_failure"
 
+# App enumeration reads the single test-run specification produced by its build.
 test-functional-lane:
 	@set -euo pipefail; \
 	simulator_udid=""; ipad_simulator_udid=""; \
@@ -229,7 +230,16 @@ test-functional-lane:
 	}; \
 	if [[ "$(FUNCTIONAL_TEST_LANE)" == App ]]; then \
 		run_check App-build-for-testing $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" build-for-testing; \
-		run_check App-enumeration $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' -skip-testing:$(APP_HOSTED_HTTP_TEST_SUITE) -enumerate-tests -test-enumeration-style flat -test-enumeration-format json -test-enumeration-output-path "$$result_root/App-enumeration.json" test; \
+		app_xctestruns=(); \
+		for candidate in "$$test_root/App/Build/Products"/App_iphonesimulator*.xctestrun; do \
+			if [[ -f "$$candidate" && ! -L "$$candidate" ]]; then app_xctestruns+=("$$candidate"); fi; \
+		done; \
+		reject_app_enumeration_spec() { printf 'Expected exactly one App_iphonesimulator*.xctestrun; found %s\n' "$$1" >&2; return 1; }; \
+		if [[ $${#app_xctestruns[@]} -eq 1 ]]; then \
+			run_check App-enumeration $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild -xctestrun "$${app_xctestruns[0]}" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' -skip-testing:$(APP_HOSTED_HTTP_TEST_SUITE) -enumerate-tests -test-enumeration-style flat -test-enumeration-format json -test-enumeration-output-path "$$result_root/App-enumeration.json" -resultBundlePath "$$result_root/App-enumeration.xcresult" test-without-building; \
+		else \
+			run_check App-enumeration reject_app_enumeration_spec "$${#app_xctestruns[@]}"; \
+		fi; \
 		run_check AppHTTP-enumeration $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -only-testing:$(APP_HOSTED_HTTP_TEST_SUITE) -enumerate-tests -test-enumeration-style flat -test-enumeration-format json -test-enumeration-output-path "$$result_root/AppHTTP-enumeration.json" test; \
 		run_check App-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/App.xcresult" -parallel-testing-enabled NO -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' -skip-testing:$(APP_HOSTED_HTTP_TEST_SUITE) test-without-building; \
 		run_check AppHTTP-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/AppHTTP.xcresult" -parallel-testing-enabled NO -only-testing:$(APP_HOSTED_HTTP_TEST_SUITE) test-without-building; \

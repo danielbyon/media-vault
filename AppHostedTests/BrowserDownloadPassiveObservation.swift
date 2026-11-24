@@ -167,6 +167,20 @@ struct BrowserDownloadStorageObservationState {
     func isAvailable(in currentContext: BrowserDownloadObservationContext) -> Bool {
         available && context == currentContext
     }
+
+    /// Locked staging inspection checks storage directly. Authenticated reads still require current owner evidence.
+    func permitsLibraryRead(in currentContext: BrowserDownloadObservationContext) -> Bool {
+        currentContext.phase == "locked" || isAvailable(in: currentContext)
+    }
+
+    /// Recovery can finish while an inspection is still returning an unavailable result.
+    static func shouldRetryAfterRecovery(
+        phase: String?,
+        inspectionInFlight: Bool,
+        outcome: BrowserDownloadLibraryObservation.Outcome?,
+    ) -> Bool {
+        phase == "locked" && (inspectionInFlight || outcome == .unavailable)
+    }
 }
 
 struct BrowserDownloadObservationSnapshot: Codable, Equatable, Sendable {

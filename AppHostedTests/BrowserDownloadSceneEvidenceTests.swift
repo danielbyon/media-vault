@@ -1553,6 +1553,67 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
         XCTAssertTrue(storage.isAvailable(in: earlierContext))
     }
 
+    func testLockedLibraryReadCanStartAfterStaleStorageSuccess() {
+        var storage = BrowserDownloadStorageObservationState()
+        let capturedContext = observationContext(phaseRevision: 0, authorizationGeneration: 1)
+        let currentContext = observationContext(phaseRevision: 0, authorizationGeneration: 2)
+        let activity = BrowserDownloadQualificationSceneActivity()
+        let root = BrowserDownloadQualificationSceneRegistration()
+        _ = activity.register(registration: root, active: false)
+
+        XCTAssertFalse(storage.record(available: true, from: capturedContext, current: currentContext))
+        XCTAssertFalse(storage.isAvailable(in: currentContext))
+        XCTAssertEqual(activity.setActive(true, registration: root), true)
+        XCTAssertTrue(activity.isObservationEligible)
+        XCTAssertTrue(storage.permitsLibraryRead(in: currentContext))
+    }
+
+    func testRecoveryAllowsSameKeyLockedReadAfterUnavailableOutcome() {
+        XCTAssertTrue(
+            BrowserDownloadStorageObservationState.shouldRetryAfterRecovery(
+                phase: "locked",
+                inspectionInFlight: false,
+                outcome: .unavailable,
+            ),
+        )
+        XCTAssertFalse(
+            BrowserDownloadStorageObservationState.shouldRetryAfterRecovery(
+                phase: "locked",
+                inspectionInFlight: false,
+                outcome: .complete,
+            ),
+        )
+    }
+
+    func testRecoveryAllowsSameKeyLockedReadWhenPriorInspectionIsInFlight() {
+        XCTAssertTrue(
+            BrowserDownloadStorageObservationState.shouldRetryAfterRecovery(
+                phase: "locked",
+                inspectionInFlight: true,
+                outcome: nil,
+            ),
+        )
+        XCTAssertFalse(
+            BrowserDownloadStorageObservationState.shouldRetryAfterRecovery(
+                phase: "authenticated",
+                inspectionInFlight: true,
+                outcome: nil,
+            ),
+        )
+    }
+
+    func testAuthenticatedLibraryReadRequiresCurrentStorageSuccess() {
+        var storage = BrowserDownloadStorageObservationState()
+        let earlier = observationContext(phaseRevision: 0, phase: "authenticated")
+        let current = observationContext(phaseRevision: 0, authorizationGeneration: 2, phase: "authenticated")
+
+        XCTAssertFalse(storage.permitsLibraryRead(in: current))
+        XCTAssertFalse(storage.record(available: true, from: earlier, current: current))
+        XCTAssertFalse(storage.permitsLibraryRead(in: current))
+        XCTAssertTrue(storage.record(available: true, from: current, current: current))
+        XCTAssertTrue(storage.permitsLibraryRead(in: current))
+    }
+
     func testStaleStorageFailureCannotInvalidateNewerSuccess() {
         var storage = BrowserDownloadStorageObservationState()
         let earlierContext = observationContext(phaseRevision: 1)
@@ -1593,14 +1654,18 @@ final class BrowserDownloadQualificationHostStateTests: XCTestCase {
         XCTAssertFalse(storage.isAvailable(in: context))
     }
 
-    private func observationContext(phaseRevision: UInt64) -> BrowserDownloadObservationContext {
+    private func observationContext(
+        phaseRevision: UInt64,
+        authorizationGeneration: UInt64 = 1,
+        phase: String = "locked",
+    ) -> BrowserDownloadObservationContext {
         BrowserDownloadObservationContext(
             processNonce: processNonce,
             runID: "qualification-host-state-test",
-            authorizationGeneration: 1,
+            authorizationGeneration: authorizationGeneration,
             resourceGeneration: 2,
             ingestionGeneration: 3,
-            phase: "locked",
+            phase: phase,
             phaseRevision: phaseRevision,
         )
     }

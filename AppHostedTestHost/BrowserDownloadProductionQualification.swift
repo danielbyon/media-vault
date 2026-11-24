@@ -152,10 +152,6 @@ private final class BrowserDownloadProductionQualificationProcess {
     @ObservationIgnored
     private var storageObservation = BrowserDownloadStorageObservationState()
 
-    private var storageAvailable: Bool {
-        storageObservation.isAvailable(in: observationContext)
-    }
-
     @ObservationIgnored
     private var storageFailure: BrowserDownloadLibraryObservation?
     let usesCompatibilityReadout = !ProcessInfo.processInfo
@@ -472,19 +468,22 @@ private final class BrowserDownloadProductionQualificationProcess {
             return nil
         }
 
-        if let storageFailure, storageFailure.context == observationContext {
+        if store.vault.phase != .locked, let storageFailure, storageFailure.context == observationContext {
             return storageFailure
         }
         return libraryKey == currentLibraryRead ? librarySample : nil
     }
 
     private var currentLibraryRead: LibraryRead? {
-        guard BrowserDownloadProductionQualification.automaticIngestionEnabled, activeScene,
-              storageAvailable else {
+        guard BrowserDownloadProductionQualification.automaticIngestionEnabled, activeScene else {
             return nil
         }
 
         let context = observationContext
+        guard storageObservation.permitsLibraryRead(in: context) else {
+            return nil
+        }
+
         let snapshot = owner.snapshot
         switch store.vault.phase {
         case .locked:
@@ -508,20 +507,22 @@ private final class BrowserDownloadProductionQualificationProcess {
     }
 
     private func didReadStorage(in context: BrowserDownloadObservationContext?, available: Bool) {
-        guard storageObservation.record(
+        let current = observationContext
+        let accepted = storageObservation.record(
             available: available,
             from: context,
-            current: observationContext,
-        ) else {
+            current: current,
+        )
+        if accepted {
+            storageFailure = available ? nil : .init(context: current, outcome: .unavailable, fields: [:])
+        }
+
+        // A stale success can prompt a fresh locked inspection without changing current availability.
+        guard accepted || (available && current.phase == "locked") else {
             return
         }
 
-        if available {
-            storageFailure = nil
-        } else if let context, context == observationContext {
-            storageFailure = .init(context: context, outcome: .unavailable, fields: [:])
-        }
-        updateLibrarySample()
+        updateLibrarySample(afterStorageRecovery: available)
     }
 
     private func didReconcile(_ context: BrowserDownloadObservationContext?, generation: UInt64) {
@@ -533,9 +534,14 @@ private final class BrowserDownloadProductionQualificationProcess {
         updateLibrarySample()
     }
 
-    private func updateLibrarySample() {
+    private func updateLibrarySample(afterStorageRecovery: Bool = false) {
         let key = currentLibraryRead
-        guard libraryKey != key else {
+        let retry = afterStorageRecovery && BrowserDownloadStorageObservationState.shouldRetryAfterRecovery(
+            phase: key?.context.phase,
+            inspectionInFlight: libraryTask != nil,
+            outcome: librarySample?.outcome,
+        )
+        guard libraryKey != key || retry else {
             return
         }
 
@@ -568,7 +574,11 @@ private final class BrowserDownloadProductionQualificationProcess {
             } catch {
                 outcome = .failed
             }
-            guard !Task.isCancelled, libraryKey == key, currentLibraryRead == key else {
+            // Recovery can replace a task with another task for the same key.
+            guard !Task.isCancelled else {
+                return
+            }
+            guard libraryKey == key, currentLibraryRead == key else {
                 if libraryKey == key {
                     libraryTask = nil
                 }

@@ -287,6 +287,10 @@ elif tool == "xcodebuild":
     if args == ["-version"]:
         print("Xcode 27.2\nBuild version 27B52")
     elif "-enumerate-tests" in args:
+        if "-xctestrun" in args:
+            xctestrun = pathlib.Path(args[args.index("-xctestrun") + 1])
+            if not xctestrun.is_file():
+                sys.exit("The requested xctestrun file does not exist")
         output_path = pathlib.Path(args[args.index("-test-enumeration-output-path") + 1])
         lane = output_path.stem.removesuffix("-enumeration")
         identities = json.loads((root / "enumeration-identities.json").read_text())[lane]
@@ -300,6 +304,12 @@ elif tool == "xcodebuild":
         }))
         with (root / "enumerated.jsonl").open("a") as stream:
             stream.write(json.dumps(args) + "\n")
+        if "-resultBundlePath" in args:
+            bundle = pathlib.Path(args[args.index("-resultBundlePath") + 1])
+            bundle.mkdir(parents=True)
+            (bundle / "fixture-enumeration.json").write_text(json.dumps({"testRuns": 0}))
+            (bundle / "fixture-completed.json").write_text(
+                json.dumps({"result": "Passed", "testRuns": 0}))
         print("Command line invocation: enumeration output is written to the requested path")
     elif "-showdestinations" in args:
         scheme = args[args.index("-scheme") + 1]
@@ -310,6 +320,16 @@ elif tool == "xcodebuild":
     elif "build-for-testing" in args:
         with (root / "builds.jsonl").open("a") as stream:
             stream.write(json.dumps(args) + "\n")
+        if args[args.index("-scheme") + 1] == "App":
+            plan_path = root / "result-plan.json"
+            plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+            products = pathlib.Path(args[args.index("-derivedDataPath") + 1]) / "Build" / "Products"
+            products.mkdir(parents=True)
+            mode = plan.get("xctestrun")
+            if mode != "missing":
+                (products / "App_iphonesimulator27.2-arm64.xctestrun").write_text("fixture specification")
+            if mode == "ambiguous":
+                (products / "App_iphonesimulator-extra.xctestrun").write_text("second fixture specification")
     else:
         with (root / "executed.jsonl").open("a") as stream:
             stream.write(json.dumps(args) + "\n")
@@ -918,6 +938,93 @@ class ResultRetentionTests(unittest.TestCase):
                             f"HTTP matrix row: arguments='{row}' result=Passed",
                             result.stdout,
                         )
+                self.assert_builds_cleaned()
+
+    def test_app_enumeration_uses_the_built_spec_and_records_zero_test_runs(self):
+        result = self.run_make("test-app")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        enumerations_path = self.fixture.root / "enumerated.jsonl"
+        enumerations = [json.loads(line) for line in enumerations_path.read_text().splitlines()]
+        app_enumerations = [args for args in enumerations
+                            if Path(args[args.index("-test-enumeration-output-path") + 1]).name
+                            == "App-enumeration.json"]
+        self.assertEqual(len(app_enumerations), 1)
+        app = app_enumerations[0]
+        builds_path = self.fixture.root / "builds.jsonl"
+        builds = [json.loads(line) for line in builds_path.read_text().splitlines()]
+        app_builds = [args for args in builds if "build-for-testing" in args and
+                      args[args.index("-scheme") + 1] == "App"]
+        self.assertEqual(len(app_builds), 1)
+        app_derived_data = Path(app_builds[0][app_builds[0].index("-derivedDataPath") + 1])
+        expected_xctestrun = (app_derived_data / "Build" / "Products" /
+                              "App_iphonesimulator27.2-arm64.xctestrun")
+        self.assertEqual(app[app.index("-xctestrun") + 1], str(expected_xctestrun))
+        self.assertEqual(app[app.index("-destination") + 1],
+                         f"platform=iOS Simulator,id={UDID}")
+        for build_option in ("-workspace", "-scheme", "-configuration",
+                             "-clonedSourcePackagesDirPath", "-derivedDataPath",
+                             "-skipMacroValidation"):
+            self.assertNotIn(build_option, app)
+        self.assertEqual([arg for arg in app if arg.startswith("-skip-testing:")], [
+            "-skip-testing:AppTests/RootSurfaceSnapshotTests",
+            "-skip-testing:AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/"
+            "rootPresentationSnapshotsCoverPrimaryShellStates()",
+            "-skip-testing:AppHostedTests/AppHostedUITests/BrowserDownloadHTTPTests",
+        ])
+        enumeration_flags = [
+            "-enumerate-tests", "-test-enumeration-style", "flat",
+            "-test-enumeration-format", "json", "-test-enumeration-output-path",
+            str(Path(app[app.index("-test-enumeration-output-path") + 1])),
+        ]
+        app_without_destination = app[app.index("-enumerate-tests"):]
+        self.assertEqual(app_without_destination[:len(enumeration_flags)], enumeration_flags)
+        self.assertEqual(app[-1], "test-without-building")
+        evidence_root = Path(re.search(
+            r"(?m)^functional test evidence: (.+)$", result.stdout).group(1))
+        enumeration_bundle = Path(app[app.index("-resultBundlePath") + 1])
+        self.assertEqual(enumeration_bundle, evidence_root / "App-enumeration.xcresult")
+        self.assertEqual(json.loads(
+            (enumeration_bundle / "fixture-enumeration.json").read_text()), {"testRuns": 0})
+
+        http_enumeration = next(args for args in enumerations
+                                if Path(args[args.index("-test-enumeration-output-path") + 1]).name
+                                == "AppHTTP-enumeration.json")
+        self.assertNotIn("-xctestrun", http_enumeration)
+        self.assertEqual(http_enumeration[http_enumeration.index("-destination") + 1],
+                         f"platform=iOS Simulator,id={UDID}")
+        self.assertEqual(http_enumeration[-1], "test")
+        executions = self.fixture.executions()
+        self.assertEqual(len(executions), 2)
+        self.assertTrue(all("-enumerate-tests" not in args for args in executions))
+
+    def test_app_enumeration_rejects_missing_or_ambiguous_specs_and_runs_http(self):
+        for mode, count in (("missing", 0), ("ambiguous", 2)):
+            with self.subTest(mode=mode):
+                (self.fixture.root / "enumerated.jsonl").unlink(missing_ok=True)
+                result = self.run_make("test-app", {"xctestrun": mode})
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                combined_output = result.stdout + result.stderr
+                self.assertIn(f"Expected exactly one App_iphonesimulator*.xctestrun; found {count}",
+                              combined_output)
+                self.assertIn("App-enumeration=1", combined_output)
+                self.assertNotIn("AppHTTP-exact-identities=", combined_output)
+
+                enumerations_path = self.fixture.root / "enumerated.jsonl"
+                enumerations = [json.loads(line) for line in enumerations_path.read_text().splitlines()]
+                self.assertEqual(
+                    [Path(args[args.index("-test-enumeration-output-path") + 1]).name
+                     for args in enumerations], ["AppHTTP-enumeration.json"])
+                executions = self.fixture.executions()
+                self.assertEqual(len(executions), 2)
+                self.assertTrue(any(args[-1] == "test-without-building" and
+                                    "-only-testing:AppHostedTests/AppHostedUITests/BrowserDownloadHTTPTests"
+                                    in args for args in executions))
+                evidence_root = Path(re.search(
+                    r"(?m)^functional test evidence: (.+)$", result.stdout).group(1))
+                self.assertFalse((evidence_root / "App-enumeration.xcresult").exists())
+                self.assertTrue((evidence_root / "AppHTTP.xcresult" /
+                                 "fixture-completed.json").is_file())
                 self.assert_builds_cleaned()
 
     def test_later_failure_retains_earlier_completed_bundle_and_failure_status(self):
