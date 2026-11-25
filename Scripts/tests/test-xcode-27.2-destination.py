@@ -422,7 +422,7 @@ elif tool == "xcodebuild":
                     # Signal only after the partial result and handlers exist.
                     fd = int(os.environ["FIXTURE_READY_FD"])
                     os.write(fd, (json.dumps({"bundle": str(bundle)}) + "\n").encode())
-                    os.close(fd)
+                    # Keep this write end open so EOF marks this evidence producer's exit.
                     while True:
                         signal.pause()
                 if phase != plan.get("partial_on"):
@@ -892,7 +892,7 @@ class ResultRetentionTests(unittest.TestCase):
         with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
             read_fd, write_fd = os.pipe()
             process = None
-            stopped = False
+            completion_eof_observed = False
             try:
                 env = dict(self.fixture.env, FIXTURE_READY_FD=str(write_fd),
                            FIXTURE_PRE_BARRIER_OUTPUT_BYTES=str(output_pressure_bytes))
@@ -906,42 +906,50 @@ class ResultRetentionTests(unittest.TestCase):
                 write_fd = None
                 ready, _, _ = select.select([read_fd], [], [], 10)
                 if not ready:
-                    status = process.poll()
-                    state = f"exited with status {status}" if status is not None else "still running"
                     self.fail(
                         f"Fixture did not reach its partial-result barrier within 10 seconds; "
-                        f"process {state}; stdout {log_tail(stdout_file)}; "
+                        f"stdout {log_tail(stdout_file)}; "
                         f"stderr {log_tail(stderr_file)}"
                     )
                 message = os.read(read_fd, 4096)
                 if not message:
                     self.fail(
                         f"Fixture exited before its partial-result barrier "
-                        f"with status {process.poll()}; stdout {log_tail(stdout_file)}; "
+                        f"stdout {log_tail(stdout_file)}; "
                         f"stderr {log_tail(stderr_file)}"
                     )
                 partial = Path(json.loads(message)["bundle"])
                 self.assertTrue((partial / "fixture-partial").is_file())
                 shutdown_deadline = time.monotonic() + 10
                 os.killpg(process.pid, signal.SIGKILL if abrupt else signal.SIGTERM)
-                process.wait(timeout=max(0, shutdown_deadline - time.monotonic()))
-                while True:
+                remaining = max(0, shutdown_deadline - time.monotonic())
+                ready, _, _ = select.select([read_fd], [], [], remaining)
+                if not ready:
+                    self.fail(
+                        "Fixture evidence writer did not close its readiness pipe within "
+                        f"10 seconds; stdout {log_tail(stdout_file)}; "
+                        f"stderr {log_tail(stderr_file)}"
+                    )
+                if os.read(read_fd, 1):
+                    self.fail("Fixture wrote unexpected data after its readiness message")
+                completion_eof_observed = True
+                try:
+                    process.wait(timeout=max(0, shutdown_deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    # A timed-out wait leaves the direct child unreaped.
                     try:
-                        os.killpg(process.pid, 0)
+                        process.kill()
                     except ProcessLookupError:
-                        break
-                    remaining = shutdown_deadline - time.monotonic()
-                    if remaining <= 0:
-                        self.fail("Fixture process group did not exit within 10 seconds")
-                    time.sleep(min(0.05, remaining))
-                stopped = True
+                        pass
+                    process.wait(timeout=10)
+                    self.fail("Make leader did not exit within the 10-second shutdown deadline")
                 diagnostic = f"stdout {log_tail(stdout_file)}; stderr {log_tail(stderr_file)}"
                 self.assertNotEqual(process.returncode, 0, diagnostic)
             finally:
                 if write_fd is not None:
                     os.close(write_fd)
                 os.close(read_fd)
-                if process is not None and not stopped:
+                if process is not None and not completion_eof_observed:
                     try:
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
@@ -1223,6 +1231,53 @@ class ResultRetentionTests(unittest.TestCase):
             "stdout_bytes": output_pressure_bytes,
             "stderr_bytes": output_pressure_bytes,
         })
+
+    def test_termination_does_not_probe_or_signal_after_leader_reap(self):
+        original_wait = subprocess.Popen.wait
+        original_killpg = os.killpg
+
+        class PostReapGroupCall(PermissionError):
+            pass
+
+        class WaitReapedThenRaised(RuntimeError):
+            pass
+
+        for raises_after_reap in (False, True):
+            with self.subTest(raises_after_reap=raises_after_reap):
+                build_root, results_root = self.invocation_roots_for(
+                    f"reap ordering {raises_after_reap}")
+                reaped = set()
+                post_reap_calls = []
+
+                def tracked_wait(process, *args, **kwargs):
+                    result = original_wait(process, *args, **kwargs)
+                    reaped.add(process.pid)
+                    if raises_after_reap:
+                        raise WaitReapedThenRaised("simulated exception after wait reaped leader")
+                    return result
+
+                def reject_post_reap_group_calls(process_group, sig):
+                    if process_group in reaped:
+                        post_reap_calls.append(sig)
+                        raise PostReapGroupCall(1, "simulated EPERM after leader reap")
+                    return original_killpg(process_group, sig)
+
+                wait_error_seen = False
+                with patch.object(subprocess.Popen, "wait", tracked_wait), \
+                        patch.object(os, "killpg", reject_post_reap_group_calls):
+                    try:
+                        self.stop_during_phase(
+                            "test-snapshots", abrupt=True, build_root=build_root,
+                            results_root=results_root,
+                        )
+                    except PostReapGroupCall:
+                        pass
+                    except WaitReapedThenRaised:
+                        wait_error_seen = True
+
+                self.assertEqual(post_reap_calls, [],
+                                 f"post-reap killpg calls: {post_reap_calls}")
+                self.assertEqual(wait_error_seen, raises_after_reap)
 
     def test_graceful_termination_preserves_completed_and_partial_bundles(self):
         for target in ("test", "test-snapshots"):

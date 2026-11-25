@@ -99,10 +99,6 @@ jobs:
         id: toolchain
         run: make verify-test-destination
 
-      - name: Test destination resolver
-        if: ${{ matrix.lane == 'app' }}
-        run: make destination-test
-
       - name: Test clean target
         if: ${{ matrix.lane == 'app' }}
         run: make clean-test
@@ -129,6 +125,7 @@ jobs:
             swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-
 
       - name: Run functional tests
+        id: native_tests
         run: |
           set -o pipefail
           make "$FUNCTIONAL_TARGET" \
@@ -136,6 +133,10 @@ jobs:
             VERIFIED_IPAD_SIMULATOR_UDID="${{ steps.toolchain.outputs.ipad_simulator_udid }}" \
             TEST_RESULTS_DIRECTORY="$TEST_RESULTS_DIRECTORY" \
             2>&1 | tee "$TEST_RESULTS_DIRECTORY/$FUNCTIONAL_TARGET.log"
+
+      - name: Test destination resolver
+        if: ${{ !cancelled() && matrix.lane == 'app' && (steps.native_tests.outcome == 'success' || steps.native_tests.outcome == 'failure') }}
+        run: make destination-test
 
       - name: Upload functional test evidence
         if: always()
