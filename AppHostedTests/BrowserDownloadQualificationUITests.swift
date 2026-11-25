@@ -628,10 +628,33 @@ final class BrowserDownloadQualificationUITests: XCTestCase {
                     return false
                 }
 
-                return probe.label == "Browser download transfer probe" && !probe.frame.isEmpty
-                    && !document.frame.isEmpty && !preview.frame.isEmpty
-                    && probe.frame.intersects(document.frame) && probe.frame.intersects(preview.frame)
-                    && probe.frame.intersects(app.frame)
+                let probeLabel = probe.label
+                guard probeLabel == "Browser download transfer probe" else {
+                    return false
+                }
+
+                let probeFrame = probe.frame
+                guard !probeFrame.isEmpty else {
+                    return false
+                }
+
+                let documentFrame = document.frame
+                guard !documentFrame.isEmpty else {
+                    return false
+                }
+
+                let previewFrame = preview.frame
+                guard !previewFrame.isEmpty else {
+                    return false
+                }
+                guard probeFrame.intersects(documentFrame) else {
+                    return false
+                }
+                guard probeFrame.intersects(previewFrame) else {
+                    return false
+                }
+
+                return probeFrame.intersects(app.frame)
             }
             let pixels = XCTAttachment(screenshot: document.screenshot())
             pixels.name = "rendered native PDF before Home"
