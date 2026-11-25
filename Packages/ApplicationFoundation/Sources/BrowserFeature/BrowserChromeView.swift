@@ -314,6 +314,7 @@ struct BrowserChromeView: View {
             Button("Start Page", systemImage: "house") { store.send(.showStartPageTapped) }
         }
         Button("History", systemImage: "clock") { store.send(.libraryPresented(.history)) }
+        Button("Downloads", systemImage: "arrow.down.circle") { store.send(.downloadsPresented(true)) }
         if hasPageActions {
             if let bookmarkID = BrowserTabPresentation.bookmarkID(
                 for: store.selectedTab,

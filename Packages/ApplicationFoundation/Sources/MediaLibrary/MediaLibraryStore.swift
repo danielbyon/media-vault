@@ -63,10 +63,10 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
     public func loadAssets() async throws -> [MediaAsset] {
         do {
             try await prepareSchema()
-            let assetRows = try await loadAssetRows()
-            let resourceRows = try await loadResourceRows()
-            let resourcesByAsset = try makeResourcesByAsset(from: resourceRows)
-            return try makeAssets(from: assetRows, resourcesByAsset: resourcesByAsset)
+            let assetRows = try await database.read(Self.loadAssetRows)
+            let resourceRows = try await database.read(Self.loadResourceRows)
+            let resourcesByAsset = try Self.makeResourcesByAsset(from: resourceRows)
+            return try Self.makeAssets(from: assetRows, resourcesByAsset: resourcesByAsset)
         } catch let error as MediaLibraryStoreError {
             throw error
         } catch {
@@ -142,33 +142,38 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
         (hasActiveDurableOperation, durableOperationWaiters.count)
     }
 
-    private func loadAssetRows() async throws -> [(String, String, Double, Double?)] {
-        try await database.read { db in
-            try #sql(
-                """
-                SELECT id, kind, imported_at, captured_at
-                FROM media_assets
-                ORDER BY imported_at, id
-                """,
-                as: (String, String, Double, Double?).self,
-            ).fetchAll(db)
-        }
+    private static func loadAssetRows(_ db: Database) throws -> [(String, String, Double, Double?)] {
+        try #sql(
+            """
+            SELECT id, kind, imported_at, captured_at
+            FROM media_assets
+            ORDER BY imported_at, id
+            """,
+            as: (String, String, Double, Double?).self,
+        ).fetchAll(db)
     }
 
-    private func loadResourceRows() async throws -> [(String, String, String, String, String, String, Int64, String)] {
-        try await database.read { db in
-            try #sql(
-                """
-                SELECT id, asset_id, role, relative_path, source_filename, source_uti, byte_count, sha256
-                FROM media_resources
-                ORDER BY asset_id, id
-                """,
-                as: (String, String, String, String, String, String, Int64, String).self,
-            ).fetchAll(db)
-        }
+    private static func loadResourceRows(_ db: Database) throws -> [(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Int64,
+        String,
+    )] {
+        try #sql(
+            """
+            SELECT id, asset_id, role, relative_path, source_filename, source_uti, byte_count, sha256
+            FROM media_resources
+            ORDER BY asset_id, id
+            """,
+            as: (String, String, String, String, String, String, Int64, String).self,
+        ).fetchAll(db)
     }
 
-    private func makeResourcesByAsset(
+    private static func makeResourcesByAsset(
         from rows: [(String, String, String, String, String, String, Int64, String)],
     ) throws -> [String: [MediaResource]] {
         var resourcesByAsset: [String: [MediaResource]] = [:]
@@ -193,7 +198,7 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
         return resourcesByAsset
     }
 
-    private func makeAssets(
+    private static func makeAssets(
         from rows: [(String, String, Double, Double?)],
         resourcesByAsset: [String: [MediaResource]],
     ) throws -> [MediaAsset] {
@@ -218,6 +223,82 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
             )
         }
     }
+
+    #if DEBUG
+    /// Reads the committed rows and their ownership records from the same existing database snapshot.
+    func downloadInspectionRows(
+        includingAssets: Bool,
+        isCurrent: @escaping @Sendable () -> Bool,
+    ) async throws -> DownloadInspectionRows {
+        do {
+            return try await database.read { db in
+                guard isCurrent() else {
+                    throw CancellationError()
+                }
+
+                let journal = try SQLiteMediaLibraryIngestionJournal.readSnapshot(db)
+                guard !journal.hasUnidentifiedAssetRows, journal.unreadableAssetIDs.isEmpty else {
+                    throw MediaLibraryStoreError.corrupt
+                }
+
+                let records = try SQLiteMediaLibraryIngestionJournal.inspectionDownloadRecords(db)
+                guard !records.contains(where: { $0.status == "adopting" }) else {
+                    // Only normal ownership recovery can determine the disposition of an unfinished rename.
+                    throw MediaLibraryStoreError.unavailable
+                }
+
+                let assets: [MediaAsset]
+                let canonicalPaths: Set<String>
+                if includingAssets {
+                    guard isCurrent() else {
+                        throw CancellationError()
+                    }
+
+                    let assetRows = try Self.loadAssetRows(db)
+                    let resources = try Self.makeResourcesByAsset(from: Self.loadResourceRows(db))
+                    guard Set(resources.keys) == Set(assetRows.map(\.0)) else {
+                        throw MediaLibraryStoreError.corrupt
+                    }
+
+                    assets = try Self.makeAssets(from: assetRows, resourcesByAsset: resources)
+                    canonicalPaths = try MediaLibraryImporter.canonicalPaths(for: assets)
+                } else {
+                    assets = []
+                    canonicalPaths = try Self.readCommittedPaths(db)
+                }
+                return DownloadInspectionRows(
+                    assets: assets,
+                    canonicalPaths: canonicalPaths,
+                    entries: journal.entries,
+                    downloads: records,
+                )
+            }
+        } catch let error as MediaLibraryStoreError {
+            throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // A new or older database can lack a required table or column until normal setup runs.
+            throw MediaLibraryStoreError.unavailable
+        }
+    }
+
+    /// Locked inventory needs only the opaque canonical paths to exclude from temporary capacity.
+    private static func readCommittedPaths(_ db: Database) throws -> Set<String> {
+        let owners = try String.fetchAll(db, sql: "SELECT id FROM media_assets")
+        let resources = try #sql(
+            "SELECT id, asset_id, relative_path FROM media_resources",
+            as: (String, String, String).self,
+        ).fetchAll(db)
+        guard owners.allSatisfy({ UUID(uuidString: $0) != nil }),
+              Set(owners) == Set(resources.map(\.1)),
+              resources.allSatisfy({ UUID(uuidString: $0.0)?.uuidString.lowercased() == $0.2 }) else {
+            throw MediaLibraryStoreError.corrupt
+        }
+
+        return Set(resources.map(\.2))
+    }
+    #endif
 
     private func acquireDurableOperation() async throws {
         try Task.checkCancellation()

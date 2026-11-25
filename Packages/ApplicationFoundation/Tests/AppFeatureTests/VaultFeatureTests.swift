@@ -370,13 +370,41 @@ struct VaultFeatureTests {
         browserState.settings.copiedLinkSuggestionsEnabled = false
         browserState.omniboxDraft = "synthetic private draft"
         browserState.focusedField = .chrome
+        var preLockDownloads = BrowserDownloadSnapshot()
+        preLockDownloads.revision = 10
+        preLockDownloads.generation = 1
+        preLockDownloads.isAvailable = true
+        preLockDownloads.records = [
+            BrowserDownloadRecord(
+                id: BrowserDownloadID(),
+                tabID: tabID,
+                filename: "private-document.pdf",
+                receivedBytes: 8,
+                expectedBytes: 8,
+                isReady: true,
+            ),
+        ]
+        browserState.downloads = preLockDownloads
+        browserState.downloadsArePresented = true
         initialState.shell.browser = browserState
 
         let savedSettings = LockIsolated<[BrowserSettings]>([])
         let executedCommands = LockIsolated<[BrowserWebKitCommand]>([])
+        let downloadInvalidationCount = LockIsolated(0)
+        let revokedDownloadSnapshot = {
+            var snapshot = BrowserDownloadSnapshot()
+            snapshot.revision = 11
+            snapshot.generation = 2
+            snapshot.notice = .unauthorized
+            return snapshot
+        }()
         let fence = BrowserWebKitProfileConfigurationFence()
         let deferredLockEffect = withDependencies {
             $0.uuid = .incrementing
+            $0.browserDownloads.invalidateAuthorization = {
+                downloadInvalidationCount.withValue { $0 += 1 }
+                return revokedDownloadSnapshot
+            }
             $0.browserProfileConfigurationFence = BrowserProfileConfigurationFenceClient(
                 advance: { fence.advance(to: $0) },
             )
@@ -384,15 +412,19 @@ struct VaultFeatureTests {
             VaultFeature().reduce(into: &initialState, action: .lock)
         }
 
+        #expect(downloadInvalidationCount.value == 1)
         #expect(initialState.phase == .locked)
         #expect(initialState.shell.isSessionLocked)
         #expect(initialState.shell.library.isSessionLocked)
         #expect(initialState.shell.browser.isSessionLocked)
+        #expect(initialState.shell.browser.downloads == revokedDownloadSnapshot)
+        #expect(!initialState.shell.browser.downloadsArePresented)
 
         let store = TestStore(initialState: initialState) {
             VaultFeature()
         } withDependencies: {
             $0.uuid = .incrementing
+            $0.vaultCredential.verify = { _ in .succeeded }
             $0.browserSettings.saveRevisioned = { settings, _ in
                 savedSettings.withValue { $0.append(settings) }
             }
@@ -452,11 +484,61 @@ struct VaultFeatureTests {
 
             return generation
         } == [1])
+
+        await store.send(.beginAuthentication) {
+            $0.phase = .authentication
+            $0.sessionGeneration = 2
+        }
+        await store.send(.authenticationCredentialChanged("test credential")) {
+            $0.credentialInput = "test credential"
+        }
+        await store.send(.submitAuthentication) {
+            $0.isWorking = true
+            $0.authenticationRequestGeneration = 2
+        }
+        await store.receive(.authenticationCompleted(
+            sessionGeneration: 2,
+            requestGeneration: 2,
+            result: .succeeded,
+        )) {
+            $0.phase = .authenticated
+            $0.isWorking = false
+            $0.credentialInput = ""
+            $0.shell.isSessionLocked = false
+            $0.shell.library.isSessionLocked = false
+            $0.shell.browser.isSessionLocked = false
+        }
+
+        var delayedPreLockSnapshot = BrowserDownloadSnapshot()
+        delayedPreLockSnapshot.revision = 12
+        delayedPreLockSnapshot.generation = 1
+        delayedPreLockSnapshot.isAvailable = true
+        delayedPreLockSnapshot.records = [
+            BrowserDownloadRecord(
+                id: BrowserDownloadID(),
+                tabID: tabID,
+                filename: "private-document.pdf",
+                receivedBytes: 8,
+                expectedBytes: 8,
+                isReady: true,
+            ),
+        ]
+        await store.send(.shell(.browser(.downloadsChanged(delayedPreLockSnapshot))))
+
+        #expect(store.state.phase == .authenticated)
+        #expect(!store.state.shell.browser.isSessionLocked)
+        #expect(store.state.shell.browser.downloads == revokedDownloadSnapshot)
+        #expect(!store.state.shell.browser.downloadsArePresented)
     }
 
     @Test("Global vault lock fences pending profile configuration before child cleanup", .timeLimit(.minutes(1)))
     @MainActor
     func globalLockFencesPendingBrowserProfileTransition() async throws {
+        try await TransitionAwaitEvidence.observe(#function, assertPendingProfileTransitionIsFenced)
+    }
+
+    @MainActor
+    private func assertPendingProfileTransitionIsFenced(_ waits: TransitionAwaitEvidence) async throws {
         let tabID = BrowserTabID(UUID(84))
         var initialState = VaultFeature.State(phase: .authenticated)
         initialState.shell.browser = BrowserFeature.State(initialTabID: tabID)
@@ -466,7 +548,9 @@ struct VaultFeatureTests {
 
         let fence = BrowserWebKitProfileConfigurationFence()
         let adapter = BrowserWebKitAdapter(profileConfigurationFence: fence)
+        waits.mark("webView.ensure")
         _ = adapter.ensureContext(for: tabID)
+        waits.mark("webView.created")
         #expect(adapter.hasContext(for: tabID))
         let originalWebView = try #require(adapter.webView(for: tabID))
         let originalDataStore = originalWebView.configuration.websiteDataStore
@@ -485,13 +569,19 @@ struct VaultFeatureTests {
                 executedCommands.withValue { $0.append(command) }
                 if case let .configureProfileForGeneration(_, _, generation) = command,
                    generation == 1 {
+                    waits.mark("profile.start.yield")
                     startedContinuation.yield(())
+                    waits.mark("profile.release.wait")
                     for await _ in release {
                         break
                     }
+                    waits.mark("profile.release.returned")
                 }
+                waits.mark("adapter.execute")
                 await adapter.execute(command)
+                waits.mark("adapter.returned")
                 if command == .invalidateProfileConfiguration(generation: 2) {
+                    waits.mark("invalidation.yield")
                     invalidationContinuation.yield(())
                 }
             },
@@ -513,9 +603,13 @@ struct VaultFeatureTests {
         }
         transitionStore.exhaustivity = .off(showSkippedAssertions: false)
 
+        waits.mark("profile.request.send")
         await transitionStore.send(.shell(.browser(.profileChangeRequested(.ephemeral))))
+        waits.mark("profile.confirm.send")
         await transitionStore.send(.shell(.browser(.profileChangeConfirmed)))
+        waits.mark("profile.start.wait")
         let transitionStarted: Void? = await startedIterator.next()
+        waits.mark("profile.start.returned")
         #expect(transitionStarted != nil)
         #expect(executedCommands.value.contains(.configureProfileForGeneration(
             profile: .ephemeral,
@@ -523,7 +617,9 @@ struct VaultFeatureTests {
             generation: 1,
         )))
 
+        waits.mark("lock.send")
         await transitionStore.send(.lock)
+        waits.mark("lock.returned")
 
         #expect(transitionStore.state.phase == .locked)
         #expect(transitionStore.state.shell.browser.isSessionLocked)
@@ -536,6 +632,7 @@ struct VaultFeatureTests {
         #expect(profileTransitionIsStillPending)
         #expect(transitionStore.state.shell.browser.profileConfigurationGeneration == 2)
 
+        waits.mark("staleProfile.execute")
         await adapter.execute(.configureProfileForGeneration(
             profile: .ephemeral,
             retiringTabIDs: [tabID],
@@ -545,15 +642,20 @@ struct VaultFeatureTests {
         #expect(adapter.webView(for: tabID) === originalWebView)
         #expect(originalWebView.configuration.websiteDataStore === originalDataStore)
 
+        waits.mark("sessionLocked.receive")
         await transitionStore.receive(.shell(.browser(.sessionLocked)))
+        waits.mark("sessionLocked.returned")
         #expect(transitionStore.state.shell.browser.profileLifecycle == .notStarted)
         #expect(transitionStore.state.shell.browser.profileConfigurationGeneration == 2)
         #expect(transitionStore.state.shell.browser.omniboxDraft.isEmpty)
         #expect(transitionStore.state.shell.browser.focusedField == .none)
 
+        waits.mark("profile.release.yield")
         releaseContinuation.yield(())
         releaseContinuation.finish()
+        waits.mark("lock.finish")
         await transitionStore.finish()
+        waits.mark("lock.finished")
 
         #expect(adapter.hasContext(for: tabID))
         #expect(adapter.webView(for: tabID) === originalWebView)
@@ -563,7 +665,9 @@ struct VaultFeatureTests {
         #expect(transitionStore.state.shell.browser.profileConfigurationGeneration == 2)
         #expect(transitionStore.state.shell.browser.omniboxDraft.isEmpty)
         #expect(transitionStore.state.shell.browser.focusedField == .none)
+        waits.mark("invalidation.wait")
         let invalidationDidComplete: Void? = await invalidationIterator.next()
+        waits.mark("invalidation.returned")
         #expect(invalidationDidComplete != nil)
         let invalidatedGenerations = executedCommands.value.compactMap { command -> UInt64? in
             guard case let .invalidateProfileConfiguration(generation) = command else {
@@ -574,7 +678,9 @@ struct VaultFeatureTests {
         }
         #expect(invalidatedGenerations == [2])
 
+        waits.mark("repeatedLock.send")
         await transitionStore.send(.lock)
+        waits.mark("repeatedLock.finish")
         await transitionStore.finish()
         let invalidatedGenerationsAfterRepeatedLock = executedCommands.value.compactMap { command -> UInt64? in
             guard case let .invalidateProfileConfiguration(generation) = command else {
@@ -585,11 +691,15 @@ struct VaultFeatureTests {
         }
         #expect(invalidatedGenerationsAfterRepeatedLock == [2])
 
+        waits.mark("authentication.begin")
         await transitionStore.send(.beginAuthentication)
+        waits.mark("authentication.credential.send")
         await transitionStore.send(.authenticationCredentialChanged("synthetic credential"))
+        waits.mark("authentication.submit")
         await transitionStore.send(.submitAuthentication)
         let authenticationSessionGeneration = transitionStore.state.sessionGeneration
         let authenticationRequestGeneration = transitionStore.state.authenticationRequestGeneration
+        waits.mark("authentication.receive")
         await transitionStore.receive(.authenticationCompleted(
             sessionGeneration: authenticationSessionGeneration,
             requestGeneration: authenticationRequestGeneration,
@@ -599,8 +709,10 @@ struct VaultFeatureTests {
         #expect(transitionStore.state.phase == .authenticated)
         #expect(!transitionStore.state.shell.browser.isSessionLocked)
 
+        waits.mark("profile.initialize.send")
         await transitionStore.send(.shell(.browser(.profileInitializationRequested)))
         let profileRequestID = try #require(transitionStore.state.shell.browser.profileConfigurationRequestID)
+        waits.mark("profile.loaded.receive")
         await transitionStore.receive(.shell(.browser(.loaded(
             settings: BrowserSettings(browsingProfile: .ephemeral),
             bookmarks: [],
@@ -619,12 +731,14 @@ struct VaultFeatureTests {
         )))
         #expect(!adapter.hasContext(for: tabID))
         let reauthenticatedTabID = BrowserTabID(UUID(85))
+        waits.mark("reauthenticatedWebView.ensure")
         let reauthenticatedWebView = adapter.ensureContext(for: reauthenticatedTabID)
         #expect(reauthenticatedWebView.configuration.websiteDataStore !== WKWebsiteDataStore.default())
         adapter.destroyContext(for: reauthenticatedTabID)
 
         startedContinuation.finish()
         invalidationContinuation.finish()
+        waits.mark("body.finished")
     }
 
     @Test("A locked vault rejects retained authenticated shell actions")

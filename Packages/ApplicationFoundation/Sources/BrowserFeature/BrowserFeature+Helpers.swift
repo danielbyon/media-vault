@@ -225,7 +225,14 @@ extension BrowserFeature {
             }
         case let .navigationStarted(tabID):
             state.lazyRestoredWebTabURLs.removeValue(forKey: tabID)
-            invalidatePreview(for: tabID, state: &state, operation: nil)
+            let origin = state.previewState.operation(for: tabID) == nil
+                ? state.tabs.first(where: { $0.id == tabID })
+                : state.previewState.navigationOrigin(for: tabID)
+            invalidatePreview(for: tabID, state: &state, operation: nil, navigationOrigin: origin)
+        case let .navigationCommitted(tabID, metadata, correlation):
+            handleCommittedPresentation(tabID: tabID, metadata: metadata, correlation: correlation, state: &state)
+        case let .navigationConvertedToDownload(tabID, correlation):
+            handleDownloadConversion(tabID: tabID, correlation: correlation, state: &state)
         case let .metadata(tabID, metadata, correlation):
             handleMetadata(
                 tabID: tabID,
@@ -277,6 +284,52 @@ extension BrowserFeature {
         return .none
     }
 
+    /// Advances conversion recovery only from a matching delegate-confirmed document commit.
+    /// Same-URL reloads establish fresh title/history metadata without consuming loading ownership.
+    private func handleCommittedPresentation(
+        tabID: BrowserTabID,
+        metadata: BrowserTab.Metadata,
+        correlation: BrowserWebKitEventCorrelation,
+        state: inout State,
+    ) {
+        guard var tab = state.tabs.first(where: { $0.id == tabID }),
+              state.previewState.navigationOrigin(for: tabID) != nil,
+              acceptsNavigationEvent(operationID: correlation.operationID, for: tabID, state: state),
+              correlation.operationID != nil || state.previewState.operation(for: tabID) == nil,
+              let committedURL = metadata.committedURL
+        else {
+            return
+        }
+
+        tab.content = .web(requestedURL: committedURL)
+        tab.metadata = metadata
+        state.previewState.updateNavigationOrigin(tab, for: tabID)
+    }
+
+    /// Restores only the document presentation owned by the matching conversion operation.
+    private func handleDownloadConversion(
+        tabID: BrowserTabID,
+        correlation: BrowserWebKitEventCorrelation,
+        state: inout State,
+    ) {
+        guard let index = state.tabs.firstIndex(where: { $0.id == tabID }),
+              acceptsNavigationEvent(operationID: correlation.operationID, for: tabID, state: state),
+              correlation.operationID != nil || state.previewState.operation(for: tabID) == nil,
+              let origin = state.previewState.navigationOrigin(for: tabID)
+        else {
+            return
+        }
+
+        if let operationID = correlation.operationID {
+            _ = consumeNavigationOperation(operationID, for: tabID, state: &state)
+        }
+        state.previewState.clearNavigationOrigin(for: tabID)
+        state.tabs[index].content = origin.content
+        state.tabs[index].metadata = origin.metadata
+        state.tabs[index].metadata.isLoading = false
+        state.tabs[index].metadata.estimatedProgress = 0
+    }
+
     private func handleMetadata(
         tabID: BrowserTabID,
         metadata: BrowserTab.Metadata,
@@ -305,6 +358,9 @@ extension BrowserFeature {
         }
 
         state.tabs[index].metadata = metadata
+        if !metadata.isLoading {
+            state.previewState.clearNavigationOrigin(for: tabID)
+        }
         let representsCompletedOperation = operationID != nil && !metadata.isLoading
         if representsCompletedOperation, let operationID {
             _ = consumeNavigationOperation(
@@ -355,6 +411,7 @@ extension BrowserFeature {
         }
         state.tabs[index].metadata.isLoading = false
         state.tabs[index].content = .error(error)
+        state.previewState.clearNavigationOrigin(for: tabID)
     }
 
     private func acceptsNavigationEvent(
@@ -434,10 +491,13 @@ extension BrowserFeature {
         state: inout State,
     ) -> BrowserNavigationOperationID {
         let operationID = BrowserNavigationOperationID()
+        let origin = state.previewState.navigationOrigin(for: tabID)
+            ?? state.tabs.first(where: { $0.id == tabID })
         invalidatePreview(
             for: tabID,
             state: &state,
             operation: operationID,
+            navigationOrigin: origin,
         )
         return operationID
     }
@@ -447,12 +507,13 @@ extension BrowserFeature {
         for tabID: BrowserTabID,
         state: inout State,
         operation: BrowserNavigationOperationID? = nil,
+        navigationOrigin: BrowserTab? = nil,
     ) {
         guard state.tabs.contains(where: { $0.id == tabID }) else {
             return
         }
 
-        state.previewState.invalidate(tabID: tabID, operation: operation)
+        state.previewState.invalidate(tabID: tabID, operation: operation, navigationOrigin: navigationOrigin)
     }
 
     private func isWebContent(_ content: BrowserTab.Content) -> Bool {

@@ -42,5 +42,5 @@ case "$selected_swift" in
     ;;
 esac
 
-"$script_directory/ensure-ios-27.2-runtime.sh"
+"$script_directory/ensure-ios-27.2-runtime.sh" >&2
 exec "$@"

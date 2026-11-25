@@ -22,16 +22,117 @@ NATIVE_SNAPSHOT_BUILD_DIRECTORY ?= $(CURDIR)/.build
 APP_SNAPSHOT_SUITE := AppTests/RootSurfaceSnapshotTests
 APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPresentationSnapshotsCoverPrimaryShellStates
 APP_HOSTED_PRIVACY_OCCLUSION_TEST := AppHostedTests/AppHostedUITests/ScenePrivacyCoverTests/rootPrivacyCoverSynchronouslyOccludesPrivateSentinel(_:)
+APP_HOSTED_HTTP_TEST_SUITE := AppHostedTests/AppHostedUITests/BrowserDownloadHTTPTests
+APP_HOSTED_HTTP_TEST_IDENTITIES := \
+	activePollingBudgetChargesWorkAndDiscountsSleepOverrun \
+	slowPredicateCannotSatisfyActiveBudget \
+	activePollingPropagatesCancellation \
+	failureEvidenceIsSanitizedAndLossless \
+	failureEvidenceIsDeterministicallyCapped \
+	commandAndNativeErrorEvidenceIsDeterministicallyCapped \
+	requestEvidenceUsesPlainFixtureLabels \
+	adapterCommitEvidenceRequiresPostBaselineEvent \
+	navigationCommitEvidenceRequiresOperationIdentity \
+	dispatchReadinessRequiresExactNewGET \
+	nonRootAdapterCommitsFirstPageAtRootGeometry \
+	initialPageCommits \
+	originatingMatrix(profile:row:) \
+	priorPageHistorySurvivesNativeDownloadConversion(profile:) \
+	slowCancellation(profile:knownLength:)
+APP_HOSTED_DOWNLOAD_EVIDENCE_TESTS := \
+	BrowserDownloadSceneEvidenceTests/testResizeHandleNormalizesMeasuredRotatedFrame \
+	BrowserDownloadSceneEvidenceTests/testResizeHandleRejectsUnrelatedOffscreenFrame \
+	BrowserDownloadSceneEvidenceTests/testResizeHandleUsesScreenSpaceOriginWithOffsetCard \
+	BrowserDownloadSceneEvidenceTests/testResizeGestureDeltaMovesOutwardPerAvailableAxis \
+	BrowserDownloadSceneEvidenceTests/testResizeGestureDeltaShrinksFullScreenCardOnBothAxes \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionAllowsVisibleNonKeyedAuxiliaryWindow \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionRejectsVisibleCover \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowSelectionRejectsZeroOrMultipleVisibleKeyedWindows \
+	BrowserDownloadSceneEvidenceTests/testResizeSceneRequiresUniqueNewActiveSession \
+	BrowserDownloadSceneEvidenceTests/testResizeTimeoutDiagnosticsReadOptionalValuesIndependently \
+	BrowserDownloadSceneEvidenceTests/testPassiveSceneCensusSelectsNewestWindowSnapshot \
+	BrowserDownloadSceneEvidenceTests/testPassiveSceneCensusRejectsConflictingSnapshotsAtSameTime \
+	BrowserDownloadSceneEvidenceTests/testLatestFreshSafeRootsRequiresEveryRegistrationAndUsesMonotonicTime \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionAllowsSnapshotBetweenActivationAndCensus \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsSnapshotBeforeActivation \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsWrongRun \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsWrongGeneration \
+	BrowserDownloadSceneEvidenceTests/testFinalCensusGenerationRejectsNewerUnsafeObservation \
+	BrowserDownloadSceneEvidenceTests/testFinalCensusGenerationRejectsNewerObservationWithoutGeneration \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsSnapshotAfterCensus \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionAcceptsInclusiveBoundaries \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionRejectsNonFiniteTimestamps \
+	BrowserDownloadSceneEvidenceTests/testReactivationOwnerSelectionUsesLatestObservationWithinInterval \
+	BrowserDownloadSceneEvidenceTests/testReactivationAvailabilityRejectsMismatchWithFinalRegisteredScenes \
+	BrowserDownloadSceneEvidenceTests/testResizeGestureMarkerSelectsExactNewSceneRegistrationAndRun \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessAcceptsMarkerOnlyLatestObservation \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessRejectsCoverInCurrentCensus \
+	BrowserDownloadSceneEvidenceTests/testResizeWindowWitnessPreservesSelectedWindowGeometryAndPrivacy \
+	BrowserDownloadSceneEvidenceTests/testInitialMountedSceneWaitsForCoherentRegistrationsWhileProofIsPending \
+	BrowserDownloadSceneEvidenceTests/testReactivationRequiresMatchingLiveRevisionForEveryOriginalSceneRegistration \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootAcceptsMatchingConfirmationAfterPendingCensus \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsCachedConfirmationAfterLiveRevisionAdvances \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsUnmatchedOrMalformedLiveRows \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresCurrentRetainedDownloadCounts \
+	BrowserDownloadSceneEvidenceTests/testRetainedAllocationRejectsEveryRecordedRemovalOutcome \
+	BrowserDownloadSceneEvidenceTests/testRetainedAllocationRemovalAtCensusBoundaryPreventsAcceptance \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsMissingOrMismatchedConfirmation \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRejectsSupersededOrUnpairedProof \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresCoverAndNativeBarrierAbsence \
+	BrowserDownloadSceneEvidenceTests/testPassiveRootRequiresProofBeforeOriginalDeadline \
+	BrowserDownloadSceneEvidenceTests/testPendingLiveRootCannotQualifyAfterDeadline \
+	BrowserDownloadTransferWitnessTests/testDelayedHandoffParserRequiresNativeCallbacksAfterLock \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessAcceptsCorrelatedNativeProgress \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsMissingHandoffOrProgress \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsStaleRunOrUnrelatedOperation \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsServerEvidenceAfterReadiness \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsEarlyTerminalAndCleanupFailure \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessRejectsPrematureCleanupWithoutFixtureRequest \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessIgnoresPrematureCleanupForAnotherOperation \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessIgnoresPrematureCleanupFromAnotherRun \
+	BrowserDownloadTransferWitnessTests/testContinuationAcceptsFiniteResponseAndNativeFinish \
+	BrowserDownloadTransferWitnessTests/testContinuationRejectsMissingNativeOrTransportWitness \
+	BrowserDownloadTransferWitnessTests/testContinuationRejectsCancellationFailureAndPrematureCleanup \
+	BrowserDownloadTransferWitnessTests/testContinuationRejectsWrongCorrelationEarlyReleaseAndVisibleCompletion \
+	BrowserDownloadTransferWitnessTests/testSlowKnownWitnessDiagnosticsAreRedactedAndBounded \
+	BrowserDownloadObservationReceiptTests/passiveReaderAcceptsAvailableMilestoneBeforeWaiting \
+	BrowserDownloadObservationReceiptTests/passiveReaderPollsUntilMilestoneAppears \
+	BrowserDownloadObservationReceiptTests/passiveReaderRejectsUnchangedMilestone \
+	BrowserDownloadObservationReceiptTests/passiveReaderRejectsWrongProcessRunAndContext \
+	BrowserDownloadObservationReceiptTests/passiveReaderPreservesInvalidatedMalformedAndMissing \
+	BrowserDownloadObservationReceiptTests/passiveReaderRejectsMilestoneAtAndAfterDeadline \
+	BrowserDownloadObservationReceiptTests/passiveReaderChecksDeadlineAfterWaiterCompletes \
+	BrowserDownloadObservationReceiptTests/passiveReaderPreservesInterruption \
+	BrowserDownloadObservationReceiptTests/passiveReaderMapsPendingTimeoutToOriginalDeadline
+BROWSER_DOWNLOAD_MULTI_SCENE_TESTS := \
+	BrowserDownloadMultiSceneUITests/testRequestCreatesNewMountedWindowGroupScene \
+	BrowserDownloadMultiSceneUITests/testSceneRequestRevokesCompletedDownloadAndKeepsActiveRootUsable \
+	BrowserDownloadMultiSceneUITests/testPassiveAccessibilityReadsRefreshCensusWithoutPublishingRootEvents \
+	BrowserDownloadMultiSceneUITests/testHostedRootUpdatePublishesCurrentRevisionWithoutReadFeedback
+# Real scenario actions and passive accessibility reads use the qualification host on iPad.
+BROWSER_DOWNLOAD_QUALIFICATION_TESTS := \
+	BrowserDownloadQualificationUITests/testAcceptedPolicyHandoffAfterLockCompletesHiddenUntilFreshAuthentication \
+	BrowserDownloadQualificationUITests/testQuickLookHomeRevokesAndFreshDownloadRecovers \
+	BrowserDownloadQualificationUITests/testShareHomeRevokesAndFreshDownloadRecovers \
+	BrowserDownloadQualificationUITests/testNormalQualificationModeReturnsToAuthenticatedBrowserAfterHome \
+	BrowserDownloadQualificationUITests/testActiveDownloadQualificationModeAutoLocksAfterRealHomeTransition \
+	BrowserDownloadQualificationUITests/testActiveDiscardFailureRetryAndAuthenticationLoss \
+	BrowserDownloadQualificationUITests/testOrdinaryPNGDownloadAutomaticallyCommitsCanonicalAsset \
+	BrowserDownloadQualificationUITests/testRepeatedPNGDownloadSkipsDuplicateAndRetainsCanonicalIdentity \
+	BrowserDownloadQualificationUITests/testPDFDownloadRemainsOutsideLibraryAndKeepsNativePresentation \
+	BrowserDownloadQualificationUITests/testAcceptedPNGWhileLockedReconcilesAfterAuthenticatedRelaunch \
+	BrowserDownloadQualificationUITests/testColdLockedAuthenticationKeepsDiagnosticReadoutAccessible
 PACKAGE_SNAPSHOT_SUITES := \
 	AppFeatureTests/VaultFeatureViewSnapshotTests \
 	CalculatorFeatureTests/CalculatorViewSnapshotTests \
 	MediaLibraryTests/MediaLibrarySnapshotTests \
 	BrowserFeatureTests/BrowserViewSnapshotTests \
 	PresentationSupportTests/ScenePrivacyCoverCalculatorSnapshotTests
-# Optional external directory for preserving xcresult bundles. Each test
-# invocation writes a bundle below its temporary test root; the bundle is
-# copied here before the temporary root is removed.
+# Functional result bundles, test enumerations, and command logs remain under
+# .build/TestResults by default. Set this to choose another evidence directory.
 TEST_RESULTS_DIRECTORY ?=
+# Temporary Xcode build and test roots; use task-specific storage when needed.
+XCODE_BUILD_ROOT ?= $(CURDIR)/.build
 # Xcode generates this aggregate scheme and its test action from Package.swift.
 PACKAGE_WORKSPACE := Packages/ApplicationFoundation/.swiftpm/xcode/package.xcworkspace
 PACKAGE_SCHEME := ApplicationFoundation-Package
@@ -45,7 +146,7 @@ SOURCE_PACKAGES_DIRECTORY := $(CURDIR)/.build/SourcePackages
 # cleanup helper rejects invocation outside its owning checkout before
 # inspecting any artifact.
 
-.PHONY: all build clean clean-test destination-test format lint lint-analyze test test-snapshots test-native-snapshots tools verify-test-destination verify-snapshot-destination
+.PHONY: all build clean clean-test destination-test format lint lint-analyze test test-app test-application-foundation test-ipad-privacy test-browser-download-ui test-functional-lane test-snapshots test-native-snapshots tools verify-test-destination verify-snapshot-destination
 
 all: lint build test
 
@@ -60,67 +161,107 @@ format: tools
 # a killed run is preserved for inspection and is not inferred to be Make-owned.
 build:
 	@set -euo pipefail; \
-	mkdir -p "$(CURDIR)/.build"; \
-	derived_data=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-build.XXXXXX"); \
+	mkdir -p "$(CURDIR)/.build" "$(XCODE_BUILD_ROOT)"; \
+	derived_data=$$(mktemp -d "$(XCODE_BUILD_ROOT)/xcodebuild-build.XXXXXX"); \
 	trap 'rm -rf -- "$$derived_data"' EXIT; \
 	trap 'exit 143' TERM INT; \
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" build; \
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Release -destination '$(IPHONE_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" build; \
 	$(XCODE_WRAPPER) xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -destination '$(IPAD_DESTINATION)' -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$derived_data" build
 
+test-app: FUNCTIONAL_TEST_LANE := App
+test-app: test-functional-lane
+test-application-foundation: FUNCTIONAL_TEST_LANE := ApplicationFoundation
+test-application-foundation: test-functional-lane
+test-ipad-privacy: FUNCTIONAL_TEST_LANE := App-iPadPrivacy
+test-ipad-privacy: test-functional-lane
+test-browser-download-ui: FUNCTIONAL_TEST_LANE := BrowserDownloadMultiScene
+test-browser-download-ui: test-functional-lane
+
+# Each functional lane has its own runner job in CI. The local aggregate invokes
+# them independently so a failure in one lane does not prevent the remaining
+# lanes from producing results.
 test:
+	@set +e; \
+	first_failure=0; \
+	for lane in test-app test-application-foundation test-ipad-privacy test-browser-download-ui; do \
+		printf '\n==> %s\n' "$$lane"; \
+		$(MAKE) --no-print-directory "$$lane" || { code=$$?; if (( first_failure == 0 )); then first_failure=$$code; fi; }; \
+	done; \
+	exit "$$first_failure"
+
+# App enumeration reads the single test-run specification produced by its build.
+test-functional-lane:
 	@set -euo pipefail; \
-	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
-	ipad_simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' '$(VERIFIED_IPAD_SIMULATOR_UDID)' | tail -n 1); \
-	mkdir -p "$(CURDIR)/.build"; \
-	test_root=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-test.XXXXXX"); \
-	test_results=""; \
+	simulator_udid=""; ipad_simulator_udid=""; \
+	case "$(FUNCTIONAL_TEST_LANE)" in \
+		App|ApplicationFoundation) simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1) ;; \
+		App-iPadPrivacy|BrowserDownloadMultiScene) ipad_simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' '$(VERIFIED_IPAD_SIMULATOR_UDID)' | tail -n 1) ;; \
+		*) printf 'unknown functional test lane: %s\n' '$(FUNCTIONAL_TEST_LANE)' >&2; exit 2 ;; \
+	esac; \
+	mkdir -p "$(CURDIR)/.build" "$(XCODE_BUILD_ROOT)"; \
+	test_root=$$(mktemp -d "$(XCODE_BUILD_ROOT)/xcodebuild-test.XXXXXX"); \
+	result_parent="$(CURDIR)/.build/TestResults"; \
 	if [[ -n "$(TEST_RESULTS_DIRECTORY)" ]]; then \
-		mkdir -p "$(TEST_RESULTS_DIRECTORY)"; \
-		test_results=$$(mktemp -d "$(TEST_RESULTS_DIRECTORY)/xcodebuild-test.XXXXXX"); \
+		result_parent="$(TEST_RESULTS_DIRECTORY)"; \
 	fi; \
-	preserve_results() { \
+	mkdir -p "$$result_parent"; \
+	result_root=$$(mktemp -d "$$result_parent/xcodebuild-test.XXXXXX"); \
+	printf 'functional test evidence: %s\n' "$$result_root"; \
+	cleanup_test_build() { \
 		status=$$?; \
-		if [[ -n "$$test_results" ]]; then \
-			for result in "$$test_root"/*.xcresult; do \
-				[[ -d "$$result" ]] || continue; \
-				cp -R "$$result" "$$test_results/" || printf 'failed to preserve %s\n' "$$result" >&2; \
-			done; \
-		fi; \
 		rm -rf -- "$$test_root"; \
 		trap - EXIT; \
 		exit "$$status"; \
 	}; \
-	trap preserve_results EXIT; \
+	trap cleanup_test_build EXIT; \
 	trap 'exit 143' TERM INT; \
-	assert_tests_ran() { \
-		label="$$1"; bundle="$$2"; \
-		if [[ ! -d "$$bundle" ]]; then \
-			printf 'test results bundle missing for %s: %s\n' "$$label" "$$bundle" >&2; \
-			return 1; \
-		fi; \
-		if ! summary=$$($(XCODE_WRAPPER) xcrun xcresulttool get test-results summary --path "$$bundle" --compact 2>&1); then \
-			printf 'test results summary unreadable for %s: %s\n' "$$label" "$$bundle" >&2; \
-			printf '%s\n' "$$summary" >&2; \
-			return 1; \
-		fi; \
-		count=$$(printf '%s\n' "$$summary" | sed -n 's/.*"totalTestCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n 1); \
-		if [[ -z "$$count" ]]; then \
-			printf 'test results summary missing totalTestCount for %s: %s\n' "$$label" "$$bundle" >&2; \
-			return 1; \
-		fi; \
-		if [[ ! "$$count" =~ ^[1-9][0-9]*$$ ]]; then \
-			printf 'zero tests recorded for %s: %s totalTestCount=%s\n' "$$label" "$$bundle" "$$count" >&2; \
-			return 1; \
-		fi; \
-		printf '%s: %s tests\n' "$$label" "$$count"; \
+	first_failure=0; \
+	failure_summary=""; \
+	run_check() { \
+		local label="$$1" code; shift; \
+		local -a pipeline_status; \
+		if "$$@" 2>&1 | tee "$$result_root/$$label.log"; then return 0; else pipeline_status=("$${PIPESTATUS[@]}"); fi; \
+		code=$${pipeline_status[0]}; \
+		if (( code == 0 )); then code=1; fi; \
+		failure_summary+="$$label=$$code "; \
+		if (( first_failure == 0 )); then first_failure=$$code; fi; \
+		return 0; \
 	}; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test; \
-	assert_tests_ran App "$$test_root/App.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test; \
-	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult"; \
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$test_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
-	assert_tests_ran App-iPad-privacy "$$test_root/App-iPadPrivacy.xcresult"
+	if [[ "$(FUNCTIONAL_TEST_LANE)" == App ]]; then \
+		run_check App-build-for-testing $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" build-for-testing; \
+		app_xctestruns=(); \
+		for candidate in "$$test_root/App/Build/Products"/App_iphonesimulator*.xctestrun; do \
+			if [[ -f "$$candidate" && ! -L "$$candidate" ]]; then app_xctestruns+=("$$candidate"); fi; \
+		done; \
+		reject_app_enumeration_spec() { printf 'Expected exactly one App_iphonesimulator*.xctestrun; found %s\n' "$$1" >&2; return 1; }; \
+		if [[ $${#app_xctestruns[@]} -eq 1 ]]; then \
+			run_check App-enumeration $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild -xctestrun "$${app_xctestruns[0]}" -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' -skip-testing:$(APP_HOSTED_HTTP_TEST_SUITE) -enumerate-tests -test-enumeration-style flat -test-enumeration-format json -test-enumeration-output-path "$$result_root/App-enumeration.json" -resultBundlePath "$$result_root/App-enumeration.xcresult" test-without-building; \
+		else \
+			run_check App-enumeration reject_app_enumeration_spec "$${#app_xctestruns[@]}"; \
+		fi; \
+		run_check AppHTTP-enumeration $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -only-testing:$(APP_HOSTED_HTTP_TEST_SUITE) -enumerate-tests -test-enumeration-style flat -test-enumeration-format json -test-enumeration-output-path "$$result_root/AppHTTP-enumeration.json" test; \
+		run_check App-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/App.xcresult" -parallel-testing-enabled NO -skip-testing:$(APP_SNAPSHOT_SUITE) -skip-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' -skip-testing:$(APP_HOSTED_HTTP_TEST_SUITE) test-without-building; \
+		run_check AppHTTP-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/AppHTTP.xcresult" -parallel-testing-enabled NO -only-testing:$(APP_HOSTED_HTTP_TEST_SUITE) test-without-building; \
+		run_check App-exact-identities $(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/App.xcresult" --expected-device-id "$$simulator_udid" --expected-device-name 'iPhone 17' --expected-os-version 27.2 --expected-tests-file "$$result_root/App-enumeration.json" --allow-known-physical-skip $(foreach test,$(APP_HOSTED_DOWNLOAD_EVIDENCE_TESTS),--required-test AppHostedUITests/$(test)); \
+		run_check AppHTTP-exact-identities $(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/AppHTTP.xcresult" --expected-device-id "$$simulator_udid" --expected-device-name 'iPhone 17' --expected-os-version 27.2 --expected-tests-file "$$result_root/AppHTTP-enumeration.json" --http-matrix $(foreach test,$(APP_HOSTED_HTTP_TEST_IDENTITIES),--required-test 'AppHostedUITests/BrowserDownloadHTTPTests/$(test)'); \
+	fi; \
+	if [[ "$(FUNCTIONAL_TEST_LANE)" == ApplicationFoundation ]]; then \
+		run_check ApplicationFoundation-build-for-testing $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" build-for-testing; \
+		run_check ApplicationFoundation-enumeration $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) -enumerate-tests -test-enumeration-style flat -test-enumeration-format json -test-enumeration-output-path "$$result_root/ApplicationFoundation-enumeration.json" test; \
+		run_check ApplicationFoundation-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$result_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-skip-testing:$(suite)) test-without-building; \
+		run_check ApplicationFoundation-exact-identities $(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/ApplicationFoundation.xcresult" --expected-device-id "$$simulator_udid" --expected-device-name 'iPhone 17' --expected-os-version 27.2 --expected-tests-file "$$result_root/ApplicationFoundation-enumeration.json" --required-test VaultFeatureTests/globalLockFencesPendingBrowserProfileTransition --required-test RootFeatureTests/backgroundReturnCancelsPendingHiddenVerification; \
+	fi; \
+	if [[ "$(FUNCTIONAL_TEST_LANE)" == App-iPadPrivacy ]]; then \
+		run_check App-iPadPrivacy-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App-iPadPrivacy" -resultBundlePath "$$result_root/App-iPadPrivacy.xcresult" -parallel-testing-enabled NO -only-testing:'$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)' test; \
+		run_check App-iPadPrivacy-validation $(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/App-iPadPrivacy.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 --expected-test '$(APP_HOSTED_PRIVACY_OCCLUSION_TEST)'; \
+	fi; \
+	if [[ "$(FUNCTIONAL_TEST_LANE)" == BrowserDownloadMultiScene ]]; then \
+		run_check BrowserDownloadMultiScene-xcodebuild $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' "$$ipad_simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme BrowserTabOverviewUITests -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/BrowserDownloadMultiScene" -resultBundlePath "$$result_root/BrowserDownloadMultiScene.xcresult" -parallel-testing-enabled NO $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),-only-testing:BrowserTabOverviewUITests/$(test)) test; \
+		run_check BrowserDownloadMultiScene-validation $(XCODE_WRAPPER) python3 ./Scripts/assert-xcresult-tests.py --bundle "$$result_root/BrowserDownloadMultiScene.xcresult" --expected-device-id "$$ipad_simulator_udid" --expected-device-name 'iPad Pro 11-inch (M5)' --expected-os-version 27.2 $(foreach test,$(BROWSER_DOWNLOAD_MULTI_SCENE_TESTS) $(BROWSER_DOWNLOAD_QUALIFICATION_TESTS),--expected-test $(test)); \
+	fi; \
+	if [[ -n "$$failure_summary" ]]; then printf 'test failures: %s\n' "$$failure_summary" >&2; fi; \
+	exit "$$first_failure"
 
 # Exercise the native presentation snapshot suites on the canonical 2x iPad.
 # UIKit lifecycle protection remains covered by behavioral tests in `make test`.
@@ -130,26 +271,20 @@ test:
 test-snapshots:
 	@set -euo pipefail; \
 	simulator_udid=$$($(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
-	mkdir -p "$(CURDIR)/.build"; \
-	test_root=$$(mktemp -d "$(CURDIR)/.build/xcodebuild-snapshot-test.XXXXXX"); \
-	test_results=""; \
+	mkdir -p "$(CURDIR)/.build" "$(XCODE_BUILD_ROOT)"; \
+	test_root=$$(mktemp -d "$(XCODE_BUILD_ROOT)/xcodebuild-snapshot-test.XXXXXX"); \
+	result_root="$$test_root"; \
 	if [[ -n "$(TEST_RESULTS_DIRECTORY)" ]]; then \
 		mkdir -p "$(TEST_RESULTS_DIRECTORY)"; \
-		test_results=$$(mktemp -d "$(TEST_RESULTS_DIRECTORY)/xcodebuild-snapshot-test.XXXXXX"); \
+		result_root=$$(mktemp -d "$(TEST_RESULTS_DIRECTORY)/xcodebuild-snapshot-test.XXXXXX"); \
 	fi; \
-	preserve_results() { \
+	cleanup_test_build() { \
 		status=$$?; \
-		if [[ -n "$$test_results" ]]; then \
-			for result in "$$test_root"/*.xcresult; do \
-				[[ -d "$$result" ]] || continue; \
-				cp -R "$$result" "$$test_results/" || printf 'failed to preserve %s\n' "$$result" >&2; \
-			done; \
-		fi; \
 		rm -rf -- "$$test_root"; \
 		trap - EXIT; \
 		exit "$$status"; \
 	}; \
-	trap preserve_results EXIT; \
+	trap cleanup_test_build EXIT; \
 	trap 'exit 143' TERM INT; \
 	status=0; \
 	failure_summary=""; \
@@ -190,15 +325,15 @@ test-snapshots:
 		printf '%s: %s tests\n' "$$label" "$$count"; \
 	}; \
 	app_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$test_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace App.xcworkspace -scheme App -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/App" -resultBundlePath "$$result_root/App.xcresult" -only-testing:$(APP_SNAPSHOT_SUITE) -only-testing:'$(APP_HOSTED_ROOT_PRESENTATION_SNAPSHOT_TEST)()' test || app_xcode_status=$$?; \
 	app_count_status=0; \
-	assert_tests_ran App "$$test_root/App.xcresult" || app_count_status=$$?; \
+	assert_tests_ran App "$$result_root/App.xcresult" || app_count_status=$$?; \
 	remember_failure App-xcodebuild "$$app_xcode_status"; \
 	remember_failure App-test-count "$$app_count_status"; \
 	package_xcode_status=0; \
-	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$test_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-only-testing:$(suite)) test || package_xcode_status=$$?; \
+	TEST_RUNNER_SNAPSHOT_TESTING_RECORD=never $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' "$$simulator_udid" -- xcodebuild $(XCODEBUILD_OPTIONS) -workspace $(PACKAGE_WORKSPACE) -scheme $(PACKAGE_SCHEME) -configuration Debug -clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIRECTORY)" -derivedDataPath "$$test_root/ApplicationFoundation" -resultBundlePath "$$result_root/ApplicationFoundation.xcresult" $(foreach suite,$(PACKAGE_SNAPSHOT_SUITES),-only-testing:$(suite)) test || package_xcode_status=$$?; \
 	package_count_status=0; \
-	assert_tests_ran ApplicationFoundation "$$test_root/ApplicationFoundation.xcresult" || package_count_status=$$?; \
+	assert_tests_ran ApplicationFoundation "$$result_root/ApplicationFoundation.xcresult" || package_count_status=$$?; \
 	remember_failure ApplicationFoundation-xcodebuild "$$package_xcode_status"; \
 	remember_failure ApplicationFoundation-test-count "$$package_count_status"; \
 	if [[ -n "$$failure_summary" ]]; then \
@@ -346,7 +481,14 @@ clean-test:
 
 # Read canonical destinations from Make for both CI preflight and local checks.
 verify-test-destination:
-	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)'
+	@set -euo pipefail; \
+	simulator_udid=$$(GITHUB_OUTPUT= $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPHONE_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)' | tail -n 1); \
+	ipad_simulator_udid=$$(GITHUB_OUTPUT= $(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(IPAD_DESTINATION)' '$(VERIFIED_IPAD_SIMULATOR_UDID)' | tail -n 1); \
+	printf 'Verified iPhone simulator: %s\n' "$$simulator_udid"; \
+	printf 'Verified iPad simulator: %s\n' "$$ipad_simulator_udid"; \
+	if [[ -n "$${GITHUB_OUTPUT:-}" ]]; then \
+		printf 'simulator_udid=%s\nipad_simulator_udid=%s\n' "$$simulator_udid" "$$ipad_simulator_udid" >> "$$GITHUB_OUTPUT"; \
+	fi
 
 verify-snapshot-destination:
 	$(XCODE_WRAPPER) $(DESTINATION_VERIFIER) '$(SNAPSHOT_DESTINATION)' '$(VERIFIED_SIMULATOR_UDID)'
