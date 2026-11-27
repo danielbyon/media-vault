@@ -18,19 +18,19 @@ func hasValidJournalOutcome(
 ) -> Bool {
     switch duplicateDecision {
     case .pending:
-        return state == .awaitingUserDecision && (quotaAdmission == nil || quotaAdmission == .pending)
+        return state == .awaitingUserDecision && quotaAdmission == .pending
     case .skipped:
-        return state == .cancelled && (quotaAdmission == nil || quotaAdmission == .pending)
+        return state == .cancelled && quotaAdmission == .pending
     case .overridden:
         switch state {
         case .duplicateCheck:
-            return quotaAdmission == nil || quotaAdmission == .pending
+            return quotaAdmission == .pending
         case .ready,
              .committing,
              .complete:
-            return quotaAdmission == nil || quotaAdmission == .admitted
+            return quotaAdmission == .admitted
         case .failed:
-            return true
+            return quotaAdmission != nil
         case .received,
              .validating,
              .awaitingUserDecision,

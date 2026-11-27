@@ -591,6 +591,10 @@ public actor MediaLibraryImporter {
         sessionGeneration: UInt64?,
     ) async throws -> MediaIngestionJournalEntry {
         guard let quotaAdmission = entry.quotaAdmission else {
+            guard entry.duplicateDecision == nil else {
+                throw MediaLibraryStoreError.corrupt
+            }
+
             try requireCurrentSession(sessionGeneration)
             return try await store.ingestionJournal.transition(entry, to: .ready)
         }

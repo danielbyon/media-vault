@@ -2250,6 +2250,81 @@ struct MediaLibraryImportTests {
         #expect(try Data(contentsOf: cancelledStageURL) == environment.sourceBytes)
     }
 
+    @Test("Duplicate decisions require explicit quota admission")
+    func rejectsDuplicateDecisionsWithoutQuotaAdmission() {
+        #expect(!hasValidJournalOutcome(
+            state: .awaitingUserDecision,
+            duplicateDecision: .pending,
+            quotaAdmission: nil,
+        ))
+        #expect(!hasValidJournalOutcome(
+            state: .cancelled,
+            duplicateDecision: .skipped,
+            quotaAdmission: nil,
+        ))
+        #expect(!hasValidJournalOutcome(
+            state: .duplicateCheck,
+            duplicateDecision: .overridden,
+            quotaAdmission: nil,
+        ))
+        #expect(!hasValidJournalOutcome(
+            state: .ready,
+            duplicateDecision: .overridden,
+            quotaAdmission: nil,
+        ))
+        #expect(!hasValidJournalOutcome(
+            state: .failed,
+            duplicateDecision: .overridden,
+            quotaAdmission: nil,
+        ))
+        #expect(hasValidJournalOutcome(
+            state: .failed,
+            duplicateDecision: .overridden,
+            quotaAdmission: .denied,
+        ))
+        #expect(hasValidJournalOutcome(
+            state: .duplicateCheck,
+            duplicateDecision: nil,
+            quotaAdmission: nil,
+        ))
+    }
+
+    @Test("Recovery blocks overridden duplicates without quota admission")
+    func recoveryRejectsOverriddenDuplicateWithoutQuotaAdmission() async throws {
+        let environment = try makeEnvironment()
+        _ = try await environment.store.ingestionJournal.snapshot()
+        let resourceID = UUID()
+        let inspection = ImageInspection(
+            uti: "public.png",
+            byteCount: Int64(environment.sourceBytes.count),
+            sha256: SHA256.hash(data: environment.sourceBytes).hexString,
+            capturedAt: nil,
+        )
+        let entry = MediaIngestionJournalEntry(
+            id: UUID(),
+            resourceID: resourceID,
+            state: .duplicateCheck,
+            sourceFilename: "overridden-duplicate.png",
+            importedAt: TestFixtures.importedAt,
+            sourceUTI: inspection.uti,
+            byteCount: inspection.byteCount,
+            sha256: inspection.sha256,
+            capturedAt: inspection.capturedAt,
+            duplicateDecision: .overridden,
+            quotaAdmission: nil,
+        )
+        let stagingURL = environment.resources.stagingURL(for: resourceID)
+        try environment.sourceBytes.write(to: stagingURL)
+        try environment.resources.protectStaging(for: resourceID)
+        try await insertJournalEntry(entry, into: environment.database)
+
+        await #expect(throws: MediaImportError.persistenceFailed) {
+            try await environment.importer.importFileOutcome(at: environment.sourceURL)
+        }
+        #expect(try await environment.store.logicalAssetCount() == 0)
+        #expect(try Data(contentsOf: stagingURL) == environment.sourceBytes)
+    }
+
     @Test("The journal enforces every legal and illegal state transition")
     func validatesJournalTransitions() async throws {
         let environment = try makeEnvironment()
