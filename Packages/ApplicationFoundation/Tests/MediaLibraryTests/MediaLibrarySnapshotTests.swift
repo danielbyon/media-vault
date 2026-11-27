@@ -50,6 +50,51 @@ struct MediaLibrarySnapshotTests {
         )
     }
 
+    @Test("Compound duplicate identity has a stable structural snapshot and equality invariants")
+    func compoundDuplicateIdentity() throws {
+        func resource(_ id: String, filename: String, digest: String) -> MediaResource {
+            MediaResource(
+                id: requiredUUID(id),
+                role: .original,
+                relativePath: id,
+                sourceFilename: filename,
+                sourceUTI: "public.png",
+                byteCount: 1,
+                sha256: digest,
+            )
+        }
+
+        let digestA = String(repeating: "a", count: 64)
+        let digestB = String(repeating: "b", count: 64)
+        let resourceA = resource(
+            "00000000-0000-0000-0000-000000000050",
+            filename: "first.png",
+            digest: digestA.uppercased(),
+        )
+        let resourceB = resource(
+            "00000000-0000-0000-0000-000000000051",
+            filename: "second.png",
+            digest: digestB,
+        )
+        let identity = try #require(MediaAssetDuplicateIdentity(resources: [resourceB, resourceA]))
+        let reorderedIdentity = try #require(MediaAssetDuplicateIdentity(resources: [resourceA, resourceB]))
+        let repeatedIdentity = try #require(
+            MediaAssetDuplicateIdentity(resources: [resourceB, resourceA, resourceA]),
+        )
+
+        #expect(identity == reorderedIdentity)
+        #expect(identity != repeatedIdentity)
+        #expect(identity.components == [
+            .init(role: MediaResourceRole.original.rawValue, sha256: digestA),
+            .init(role: MediaResourceRole.original.rawValue, sha256: digestB),
+        ])
+
+        assertSnapshot(
+            of: identity,
+            as: .customDump,
+        )
+    }
+
     @Test("The persisted domain mapping has a stable structural snapshot")
     func persistedDomainMapping() async throws {
         let database = try PersistenceStore.makeInMemory()
@@ -87,7 +132,11 @@ struct MediaLibrarySnapshotTests {
             to: .duplicateCheck,
             inspection: inspection,
         )
-        let ready = try await store.ingestionJournal.transition(duplicateCheck, to: .ready)
+        let ready = try await store.ingestionJournal.transition(
+            duplicateCheck,
+            to: .ready,
+            quotaAdmission: .admitted,
+        )
         let persisted = try #require(try await store.ingestionJournal.snapshot().entries.first)
 
         assertSnapshot(

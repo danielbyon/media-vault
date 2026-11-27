@@ -105,7 +105,15 @@ public struct MediaLibraryFeature {
         /// Contextual Pro purchase or restore progress shown at the asset cap.
         public var entitlementStatus: MediaLibraryEntitlementStatus
 
+        /// Duplicate prompts retained until the user resolves them.
+        public var pendingDuplicateDecisions: [MediaDuplicateDecisionRequest]
+
+        /// Whether the first pending duplicate prompt is visible.
+        public var isDuplicatePromptPresented: Bool
+
         fileprivate var hasLoaded: Bool
+        fileprivate var duplicateDecisionGeneration: UInt64?
+        fileprivate var dismissedDuplicatePrompt: Bool
 
         /// Creates an empty or preloaded Library state.
         public init(assets: [MediaAsset] = []) {
@@ -117,7 +125,11 @@ public struct MediaLibraryFeature {
             isSessionLocked = false
             error = nil
             entitlementStatus = .available
+            pendingDuplicateDecisions = []
+            isDuplicatePromptPresented = false
             hasLoaded = !assets.isEmpty
+            duplicateDecisionGeneration = nil
+            dismissedDuplicatePrompt = false
         }
 
         /// Clears cached preview bytes and marks durable resources for reload after authentication.
@@ -127,7 +139,11 @@ public struct MediaLibraryFeature {
             isPickerPresented = false
             isImporting = false
             resourceData.removeAll()
+            pendingDuplicateDecisions.removeAll()
+            isDuplicatePromptPresented = false
             hasLoaded = false
+            duplicateDecisionGeneration = nil
+            dismissedDuplicatePrompt = false
             switch entitlementStatus {
             case .purchasing,
                  .restoring,
@@ -157,6 +173,8 @@ public struct MediaLibraryFeature {
                 && lhs.isSessionLocked == rhs.isSessionLocked
                 && lhs.error == rhs.error
                 && lhs.entitlementStatus == rhs.entitlementStatus
+                && lhs.pendingDuplicateDecisions == rhs.pendingDuplicateDecisions
+                && lhs.isDuplicatePromptPresented == rhs.isDuplicatePromptPresented
         }
     }
 
@@ -180,6 +198,12 @@ public struct MediaLibraryFeature {
             result: Result<[MediaAsset], MediaLibraryStoreError>,
         )
 
+        /// Delivers committed assets and duplicate prompts from one durable snapshot.
+        case librarySnapshotLoadCompleted(
+            generation: UInt64,
+            result: Result<MediaLibrarySnapshot, MediaLibraryStoreError>,
+        )
+
         /// Delivers a canonical asset refresh after quota denial.
         case assetsRefreshedAfterQuotaDenial(
             generation: UInt64,
@@ -190,6 +214,25 @@ public struct MediaLibraryFeature {
         case importCompleted(
             generation: UInt64,
             result: Result<MediaAsset, MediaImportError>,
+        )
+
+        /// Delivers a committed import or a duplicate prompt.
+        case importOutcomeCompleted(
+            generation: UInt64,
+            result: Result<MediaImportOutcome, MediaImportError>,
+        )
+
+        /// Resolves one staged duplicate with the user's explicit choice.
+        case duplicateDecisionTapped(id: UUID, choice: MediaDuplicateDecisionChoice)
+
+        /// Hides the prompt while leaving its journal row pending.
+        case duplicatePromptDismissed
+
+        /// Delivers the result of a persisted duplicate decision.
+        case duplicateDecisionCompleted(
+            id: UUID,
+            generation: UInt64,
+            result: Result<MediaDuplicateResolutionResult, MediaImportError>,
         )
 
         /// Delivers a resource result correlated with the authenticated read generation.
@@ -248,6 +291,15 @@ public struct MediaLibraryFeature {
                 state.resourceData.removeAll()
                 state.hasLoaded = false
                 return .none
+            case let .librarySnapshotLoadCompleted(_, result):
+                let assetResult = result.map(\.assets)
+                _ = handleAssetsLoaded(assetResult, state: &state)
+                state.pendingDuplicateDecisions.removeAll()
+                state.isDuplicatePromptPresented = false
+                state.duplicateDecisionGeneration = nil
+                state.resourceData.removeAll()
+                state.hasLoaded = false
+                return .none
             case let .importCompleted(generation, result):
                 _ = handleImportCompleted(
                     result,
@@ -255,6 +307,46 @@ public struct MediaLibraryFeature {
                     state: &state,
                     shouldLoadResources: false,
                 )
+                state.resourceData.removeAll()
+                state.hasLoaded = false
+                return .none
+            case let .importOutcomeCompleted(generation, result):
+                switch result {
+                case let .success(.imported(asset)):
+                    _ = handleImportCompleted(
+                        .success(asset),
+                        generation: generation,
+                        state: &state,
+                        shouldLoadResources: false,
+                    )
+                case .success(.duplicatePending):
+                    state.isImporting = false
+                case let .failure(error):
+                    _ = handleImportCompleted(
+                        .failure(error),
+                        generation: generation,
+                        state: &state,
+                        shouldLoadResources: false,
+                    )
+                }
+                state.pendingDuplicateDecisions.removeAll()
+                state.isDuplicatePromptPresented = false
+                state.duplicateDecisionGeneration = nil
+                state.resourceData.removeAll()
+                state.hasLoaded = false
+                return .none
+            case let .duplicateDecisionCompleted(_, _, result):
+                if case let .success(.imported(asset)) = result {
+                    if let index = state.assets.firstIndex(where: { $0.id == asset.id }) {
+                        state.assets[index] = asset
+                    } else {
+                        state.assets.append(asset)
+                    }
+                }
+                state.isImporting = false
+                state.pendingDuplicateDecisions.removeAll()
+                state.isDuplicatePromptPresented = false
+                state.duplicateDecisionGeneration = nil
                 state.resourceData.removeAll()
                 state.hasLoaded = false
                 return .none
@@ -278,6 +370,13 @@ public struct MediaLibraryFeature {
             }
 
             return handleAssetsLoaded(result, state: &state)
+        case let .librarySnapshotLoadCompleted(generation, result):
+            guard mediaLibrary.currentResourceLoadGeneration == generation else {
+                state.hasLoaded = false
+                return .send(.task)
+            }
+
+            return handleLibrarySnapshotLoaded(result, generation: generation, state: &state)
         case let .assetsRefreshedAfterQuotaDenial(generation, result):
             return handleAssetsRefreshedAfterQuotaDenial(
                 result,
@@ -286,6 +385,19 @@ public struct MediaLibraryFeature {
             )
         case let .importCompleted(generation, result):
             return handleImportCompleted(result, generation: generation, state: &state)
+        case let .importOutcomeCompleted(generation, result):
+            return handleImportOutcomeCompleted(result, generation: generation, state: &state)
+        case let .duplicateDecisionTapped(id, choice):
+            return handleDuplicateDecisionTapped(id: id, choice: choice, state: &state)
+        case .duplicatePromptDismissed:
+            return handleDuplicatePromptDismissed(state: &state)
+        case let .duplicateDecisionCompleted(id, generation, result):
+            return handleDuplicateDecisionCompleted(
+                id: id,
+                generation: generation,
+                result: result,
+                state: &state,
+            )
         case let .resourceLoadCompleted(resourceID, generation, result):
             guard mediaLibrary.currentResourceLoadGeneration == generation else {
                 return .none
@@ -322,21 +434,27 @@ public struct MediaLibraryFeature {
     }
 
     private func handleTask(state: inout State) -> Effect<Action> {
-        guard !state.hasLoaded, !state.isLoading else {
+        guard !state.isLoading,
+              !state.hasLoaded || state.dismissedDuplicatePrompt
+        else {
             return .none
         }
 
+        state.dismissedDuplicatePrompt = false
         state.isLoading = true
         let loadGeneration = mediaLibrary.currentResourceLoadGeneration
-        let loadAssets = mediaLibrary.loadAssets
+        let loadLibrarySnapshot = mediaLibrary.loadLibrarySnapshot
         return .run { send in
             do {
-                let assets = try await loadAssets()
-                await send(.assetsLoadCompleted(generation: loadGeneration, result: .success(assets)))
+                let snapshot = try await loadLibrarySnapshot()
+                await send(.librarySnapshotLoadCompleted(generation: loadGeneration, result: .success(snapshot)))
             } catch let error as MediaLibraryStoreError {
-                await send(.assetsLoadCompleted(generation: loadGeneration, result: .failure(error)))
+                await send(.librarySnapshotLoadCompleted(generation: loadGeneration, result: .failure(error)))
             } catch {
-                await send(.assetsLoadCompleted(generation: loadGeneration, result: .failure(.unavailable)))
+                await send(.librarySnapshotLoadCompleted(
+                    generation: loadGeneration,
+                    result: .failure(.unavailable),
+                ))
             }
         }
     }
@@ -365,17 +483,20 @@ public struct MediaLibraryFeature {
         state.error = nil
         state.entitlementStatus = .available
         let generation = mediaLibrary.currentResourceLoadGeneration
-        let importFile = mediaLibrary.importFileIfCurrent
+        let importOutcome = mediaLibrary.importFileOutcomeIfCurrent
         return .run { send in
             do {
-                let asset = try await importFile(url, generation)
-                await send(.importCompleted(generation: generation, result: .success(asset)))
+                let outcome = try await importOutcome(url, generation)
+                await send(.importOutcomeCompleted(generation: generation, result: .success(outcome)))
             } catch let error as MediaImportError {
-                await send(.importCompleted(generation: generation, result: .failure(error)))
+                await send(.importOutcomeCompleted(generation: generation, result: .failure(error)))
             } catch is CancellationError {
                 return
             } catch {
-                await send(.importCompleted(generation: generation, result: .failure(.persistenceFailed)))
+                await send(.importOutcomeCompleted(
+                    generation: generation,
+                    result: .failure(.persistenceFailed),
+                ))
             }
         }
         .cancellable(id: CancelID.importOperations)
@@ -401,8 +522,180 @@ public struct MediaLibraryFeature {
             return loadResourceEffects(for: assets)
         case .failure:
             state.isLoading = false
+            state.hasLoaded = false
+            state.isDuplicatePromptPresented = false
             state.error = .resourceUnavailable
             return .none
+        }
+    }
+
+    private func handleLibrarySnapshotLoaded(
+        _ result: Result<MediaLibrarySnapshot, MediaLibraryStoreError>,
+        generation: UInt64,
+        state: inout State,
+    ) -> Effect<Action> {
+        switch result {
+        case let .success(snapshot):
+            state.isLoading = false
+            state.hasLoaded = true
+            if state.error != .assetLimitReached {
+                state.error = nil
+            }
+            state.assets = snapshot.assets
+            state.pendingDuplicateDecisions = snapshot.pendingDuplicateDecisions
+            state.duplicateDecisionGeneration = generation
+            state.isDuplicatePromptPresented =
+                !snapshot.pendingDuplicateDecisions.isEmpty && !state.dismissedDuplicatePrompt
+            return loadResourceEffects(for: snapshot.assets)
+        case .failure:
+            state.isLoading = false
+            state.error = .resourceUnavailable
+            return .none
+        }
+    }
+
+    private func handleImportOutcomeCompleted(
+        _ result: Result<MediaImportOutcome, MediaImportError>,
+        generation: UInt64,
+        state: inout State,
+    ) -> Effect<Action> {
+        guard mediaLibrary.currentResourceLoadGeneration == generation else {
+            state.hasLoaded = false
+            return .send(.task)
+        }
+
+        switch result {
+        case let .success(.imported(asset)):
+            return handleImportCompleted(.success(asset), generation: generation, state: &state)
+        case let .success(.duplicatePending(decision)):
+            state.isImporting = false
+            state.error = nil
+            state.entitlementStatus = .available
+            if !state.pendingDuplicateDecisions.contains(where: { $0.id == decision.id }) {
+                state.pendingDuplicateDecisions.append(decision)
+                state.pendingDuplicateDecisions.sort {
+                    if $0.importedAt == $1.importedAt {
+                        return $0.id.uuidString < $1.id.uuidString
+                    }
+                    return $0.importedAt < $1.importedAt
+                }
+            }
+            state.duplicateDecisionGeneration = generation
+            state.dismissedDuplicatePrompt = false
+            state.isDuplicatePromptPresented = !state.pendingDuplicateDecisions.isEmpty
+            return .none
+        case let .failure(error):
+            state.isImporting = false
+            state.error = featureError(for: error)
+            state.entitlementStatus = .available
+            guard error == .assetLimitReached else {
+                return .none
+            }
+
+            return refreshLibrarySnapshot(generation: generation)
+        }
+    }
+
+    private func handleDuplicateDecisionTapped(
+        id: UUID,
+        choice: MediaDuplicateDecisionChoice,
+        state: inout State,
+    ) -> Effect<Action> {
+        guard !state.isImporting,
+              state.pendingDuplicateDecisions.first?.id == id,
+              let generation = state.duplicateDecisionGeneration,
+              generation == mediaLibrary.currentResourceLoadGeneration
+        else {
+            return .none
+        }
+
+        state.isImporting = true
+        state.isDuplicatePromptPresented = false
+        state.dismissedDuplicatePrompt = false
+        let resolve = mediaLibrary.resolveDuplicateDecisionIfCurrent
+        return .run { send in
+            do {
+                let result = try await resolve(id, choice, generation)
+                await send(.duplicateDecisionCompleted(id: id, generation: generation, result: .success(result)))
+            } catch let error as MediaImportError {
+                await send(.duplicateDecisionCompleted(id: id, generation: generation, result: .failure(error)))
+            } catch is CancellationError {
+                return
+            } catch {
+                await send(.duplicateDecisionCompleted(
+                    id: id,
+                    generation: generation,
+                    result: .failure(.persistenceFailed),
+                ))
+            }
+        }
+        .cancellable(id: CancelID.importOperations)
+    }
+
+    private func handleDuplicatePromptDismissed(state: inout State) -> Effect<Action> {
+        guard state.isDuplicatePromptPresented else {
+            return .none
+        }
+
+        state.isDuplicatePromptPresented = false
+        state.dismissedDuplicatePrompt = true
+        return .none
+    }
+
+    private func handleDuplicateDecisionCompleted(
+        id: UUID,
+        generation: UInt64,
+        result: Result<MediaDuplicateResolutionResult, MediaImportError>,
+        state: inout State,
+    ) -> Effect<Action> {
+        guard mediaLibrary.currentResourceLoadGeneration == generation else {
+            state.isImporting = false
+            state.hasLoaded = false
+            return .send(.task)
+        }
+
+        switch result {
+        case let .success(resolution):
+            state.isImporting = false
+            state.pendingDuplicateDecisions.removeAll { $0.id == id }
+            state.dismissedDuplicatePrompt = false
+            state.isDuplicatePromptPresented = !state.pendingDuplicateDecisions.isEmpty
+            switch resolution {
+            case .skipped:
+                return .none
+            case let .imported(asset):
+                state.error = nil
+                state.entitlementStatus = .available
+                if let index = state.assets.firstIndex(where: { $0.id == asset.id }) {
+                    state.assets[index] = asset
+                } else {
+                    state.assets.append(asset)
+                }
+                return loadResourceEffects(for: [asset])
+            }
+        case let .failure(error):
+            state.isImporting = false
+            state.error = featureError(for: error)
+            state.entitlementStatus = .available
+            state.isDuplicatePromptPresented = false
+            return refreshLibrarySnapshot(generation: generation)
+        }
+    }
+
+    private func refreshLibrarySnapshot(generation: UInt64) -> Effect<Action> {
+        let load = mediaLibrary.loadLibrarySnapshot
+        return .run { send in
+            do {
+                let snapshot = try await load()
+                await send(.librarySnapshotLoadCompleted(generation: generation, result: .success(snapshot)))
+            } catch let error as MediaLibraryStoreError {
+                await send(.librarySnapshotLoadCompleted(generation: generation, result: .failure(error)))
+            } catch {
+                await send(.librarySnapshotLoadCompleted(
+                    generation: generation,
+                    result: .failure(.unavailable),
+                ))
+            }
         }
     }
 
@@ -731,6 +1024,7 @@ public struct MediaLibraryFeature {
             .unsupportedMedia
         case .sourceAccessFailed,
              .finalizationFailed,
+             .duplicateDecisionRequired,
              .persistenceFailed:
             .importFailed
         }

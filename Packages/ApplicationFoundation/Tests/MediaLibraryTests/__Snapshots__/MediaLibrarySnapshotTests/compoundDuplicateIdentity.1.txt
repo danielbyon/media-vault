@@ -1,0 +1,12 @@
+MediaAssetDuplicateIdentity(
+  components: [
+    [0]: MediaAssetDuplicateIdentity.Component(
+      role: "original",
+      sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ),
+    [1]: MediaAssetDuplicateIdentity.Component(
+      role: "original",
+      sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    )
+  ]
+)

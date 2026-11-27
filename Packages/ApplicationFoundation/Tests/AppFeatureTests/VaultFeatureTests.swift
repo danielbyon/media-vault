@@ -811,7 +811,7 @@ struct VaultFeatureTests {
         await store.send(.shell(.library(.fileSelected(URL(fileURLWithPath: "/provider/new.jpg"))))) {
             $0.shell.library.isImporting = true
         }
-        await store.receive(.shell(.library(.importCompleted(
+        await store.receive(.shell(.library(.importOutcomeCompleted(
             generation: 0,
             result: .failure(.assetLimitReached),
         )))) {
@@ -849,17 +849,17 @@ struct VaultFeatureTests {
         }
 
         staleLoadContinuation.yield(.success([retainedAsset, staleAsset]))
-        await store.receive(.shell(.library(.assetsRefreshedAfterQuotaDenial(
+        await store.receive(.shell(.library(.librarySnapshotLoadCompleted(
             generation: 0,
-            result: .success([retainedAsset, staleAsset]),
+            result: .success(MediaLibrarySnapshot(assets: [retainedAsset, staleAsset])),
         ))))
         await store.receive(.shell(.library(.task))) {
             $0.shell.library.isLoading = true
         }
         #expect(await loadStartedIterator.next() == 1)
-        await store.receive(.shell(.library(.assetsLoadCompleted(
+        await store.receive(.shell(.library(.librarySnapshotLoadCompleted(
             generation: 1,
-            result: .success([retainedAsset]),
+            result: .success(MediaLibrarySnapshot(assets: [retainedAsset])),
         )))) {
             $0.shell.library.isLoading = false
             $0.shell.library.assets = [retainedAsset]
@@ -955,9 +955,9 @@ struct VaultFeatureTests {
         await store.send(.lock)
         await store.receive(.shell(.browser(.sessionLocked)))
         loadedAssetsContinuation.yield([existingAsset])
-        await store.receive(.shell(.library(.assetsLoadCompleted(
+        await store.receive(.shell(.library(.librarySnapshotLoadCompleted(
             generation: 0,
-            result: .success([existingAsset]),
+            result: .success(MediaLibrarySnapshot(assets: [existingAsset])),
         ))))
         #expect(store.state.shell.library.resourceData.isEmpty)
         #expect(resourceReads.value.isEmpty)
@@ -992,9 +992,9 @@ struct VaultFeatureTests {
             $0.shell.library.isLoading = true
         }
         #expect(await loadStartedIterator.next() == 1)
-        await store.receive(.shell(.library(.assetsLoadCompleted(
+        await store.receive(.shell(.library(.librarySnapshotLoadCompleted(
             generation: 1,
-            result: .success([existingAsset, importedAsset]),
+            result: .success(MediaLibrarySnapshot(assets: [existingAsset, importedAsset])),
         )))) {
             $0.shell.library.isLoading = false
             $0.shell.library.assets = [existingAsset, importedAsset]
@@ -1187,9 +1187,9 @@ struct VaultFeatureTests {
         await store.send(.shell(.library(.task))) {
             $0.shell.library.isLoading = true
         }
-        await store.receive(.shell(.library(.assetsLoadCompleted(
+        await store.receive(.shell(.library(.librarySnapshotLoadCompleted(
             generation: 1,
-            result: .success([asset]),
+            result: .success(MediaLibrarySnapshot(assets: [asset])),
         )))) {
             $0.shell.library.isLoading = false
             $0.shell.library.assets = [asset]
@@ -1302,23 +1302,31 @@ struct VaultFeatureTests {
         }
         #expect(await loadStartedIterator.next() == 1)
         freshLoadContinuation.yield(.success([freshAsset]))
-        await store.receive(.shell(.library(.assetsLoadCompleted(
+        await store.receive(.shell(.library(.librarySnapshotLoadCompleted(
             generation: 1,
-            result: .success([freshAsset]),
+            result: .success(MediaLibrarySnapshot(assets: [freshAsset])),
         )))) {
             $0.shell.library.isLoading = false
             $0.shell.library.assets = [freshAsset]
         }
 
         staleLoadContinuation.yield(.success([staleAsset]))
-        await store.receive(.shell(.library(.assetsLoadCompleted(
+        await store.receive(.shell(.library(.librarySnapshotLoadCompleted(
             generation: 0,
-            result: .success([staleAsset]),
+            result: .success(MediaLibrarySnapshot(assets: [staleAsset])),
         ))))
-        await store.send(.shell(.library(.assetsLoadCompleted(
-            generation: 0,
-            result: .failure(.unavailable),
-        ))))
+        await store.receive(.shell(.library(.task))) {
+            $0.shell.library.isLoading = true
+        }
+        #expect(await loadStartedIterator.next() == 2)
+        freshLoadContinuation.yield(.success([freshAsset]))
+        await store.receive(.shell(.library(.librarySnapshotLoadCompleted(
+            generation: 1,
+            result: .success(MediaLibrarySnapshot(assets: [freshAsset])),
+        )))) {
+            $0.shell.library.isLoading = false
+            $0.shell.library.assets = [freshAsset]
+        }
 
         #expect(store.state.shell.library.assets == [freshAsset])
         #expect(store.state.shell.library.error == nil)

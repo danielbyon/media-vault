@@ -7,5 +7,7 @@ MediaIngestionJournalEntry(
   sourceUTI: "public.png",
   byteCount: 68,
   sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  capturedAt: Date(2024-08-30T06:23:20.000Z)
+  capturedAt: Date(2024-08-30T06:23:20.000Z),
+  duplicateDecision: nil,
+  quotaAdmission: .admitted
 )

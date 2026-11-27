@@ -76,6 +76,25 @@ public struct MediaLibraryView: View {
                 store.send(.pickerCancelled)
             }
         }
+        .confirmationDialog(
+            "Duplicate image",
+            isPresented: duplicateDecisionBinding,
+            titleVisibility: .visible,
+        ) {
+            if let decision = store.pendingDuplicateDecisions.first {
+                Button("Skip") {
+                    store.send(.duplicateDecisionTapped(id: decision.id, choice: .skip))
+                }
+                Button("Import Anyway") {
+                    store.send(.duplicateDecisionTapped(id: decision.id, choice: .importAnyway))
+                }
+            }
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            if let decision = store.pendingDuplicateDecisions.first {
+                Text("\(decision.sourceFilename) matches an image already saved in your Library.")
+            }
+        }
         .task {
             if loadsOnAppear {
                 await store.send(.task).finish()
@@ -89,6 +108,17 @@ public struct MediaLibraryView: View {
             set: { isPresented in
                 if !isPresented {
                     store.send(.pickerCancelled)
+                }
+            },
+        )
+    }
+
+    private var duplicateDecisionBinding: Binding<Bool> {
+        Binding(
+            get: { store.isDuplicatePromptPresented },
+            set: { isPresented in
+                if !isPresented {
+                    store.send(.duplicatePromptDismissed)
                 }
             },
         )
@@ -198,37 +228,25 @@ public struct MediaLibraryView: View {
             }
             .buttonStyle(.bordered)
         case .cancelled:
-            Text("The purchase or restore was cancelled. Nothing changed. Try again to add more assets.")
+            Text("The purchase or restore was cancelled. Pro status did not change.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             entitlementActionButtons
         case .activated:
-            Text("Pro is active. Choose the image again to retry the import.")
+            Text("Pro is active. The staged copy was not retried automatically.")
                 .font(.subheadline)
-            Button("Choose Image Again") {
-                store.send(.retryTapped)
-            }
-            .buttonStyle(.borderedProminent)
         case .notVerified:
             Text(
                 "Pro is not active or could not be verified for this Apple Account. " +
-                    "Restore purchases or choose the image to retry admission.",
+                    "Restore purchases to change the admission result.",
             )
             .font(.subheadline)
             entitlementActionButtons
-            Button("Choose Image Again") {
-                store.send(.retryTapped)
-            }
-            .buttonStyle(.bordered)
         case let .failed(error):
             Text(Self.entitlementFailureMessage(for: error))
                 .font(.subheadline)
                 .foregroundStyle(.red)
             entitlementActionButtons
-            Button("Choose Image Again") {
-                store.send(.retryTapped)
-            }
-            .buttonStyle(.bordered)
         }
     }
 
@@ -267,15 +285,15 @@ public struct MediaLibraryView: View {
         switch error {
         case .assetLimitReached:
             "Free includes \(MediaLibraryQuota.freeLogicalAssetLimit) Library items. " +
-                "One image is one logical asset. Saved assets stay available; Pro unlocks new imports."
+                "This accepted copy remains staged and was not added. Purchase or restore Pro to use Library imports."
         case .entitlementUnavailable:
-            "The importer could not verify Pro, so it did not add anything. Choose the image again to retry."
+            "Pro could not be verified. Retry Library recovery to continue any accepted imports."
         case .libraryUnavailable:
-            "Library could not count saved assets, so the importer stopped before copying. Choose the image again to retry."
+            "Library could not check the saved asset count. Retry Library recovery when the store is available."
         case .unsupportedMedia:
             "Choose one ordinary, renderable still image. Videos, animated images, RAW, and compound media are not supported here."
         case .importFailed:
-            "The image was not added to Library. Check that Files can provide the source and try again."
+            "No Library item was added. If the source bytes were accepted, they remain staged for recovery."
         case .resourceUnavailable:
             "The saved image could not be read from protected storage."
         }
