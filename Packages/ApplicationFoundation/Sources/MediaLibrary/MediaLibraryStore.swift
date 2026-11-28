@@ -326,20 +326,51 @@ public actor SQLiteMediaLibraryStore: MediaLibraryStore {
                     try Self.insertCanonicalRows(for: asset, in: db)
                 }
 
-                let journalState = try #sql(
-                    "SELECT state FROM media_ingestion_journal WHERE id = \(bind: assetID.uuidString)",
-                    as: String.self,
+                let journalRow = try #sql(
+                    """
+                    SELECT state, duplicate_decision, quota_admission
+                    FROM media_ingestion_journal
+                    WHERE id = \(bind: assetID.uuidString)
+                    """,
+                    as: (String, String?, String?).self,
                 ).fetchOne(db)
-                guard journalState == MediaIngestionState.committing.rawValue
-                    || journalState == MediaIngestionState.complete.rawValue
+                guard let journalRow,
+                      let journalState = MediaIngestionState(rawValue: journalRow.0),
+                      journalRow.1 == nil || journalRow.1.flatMap(MediaDuplicateDecision.init(rawValue:)) != nil,
+                      journalRow.2 == nil || journalRow.2.flatMap(MediaQuotaAdmission.init(rawValue:)) != nil
+                else {
+                    throw MediaLibraryStoreError.corrupt
+                }
+
+                let duplicateDecision = journalRow.1.flatMap(MediaDuplicateDecision.init(rawValue:))
+                let quotaAdmission = journalRow.2.flatMap(MediaQuotaAdmission.init(rawValue:))
+                guard journalState == .committing || journalState == .complete,
+                      hasValidJournalOutcome(
+                          state: journalState,
+                          duplicateDecision: duplicateDecision,
+                          quotaAdmission: quotaAdmission,
+                      )
                 else {
                     throw MediaLibraryStoreError.corrupt
                 }
 
                 try db.execute(
-                    sql: "UPDATE media_ingestion_journal SET state = ? WHERE id = ?",
-                    arguments: [MediaIngestionState.complete.rawValue, assetID.uuidString],
+                    sql: """
+                    UPDATE media_ingestion_journal SET state = ?
+                    WHERE id = ? AND state = ?
+                      AND duplicate_decision IS ? AND quota_admission IS ?
+                    """,
+                    arguments: [
+                        MediaIngestionState.complete.rawValue,
+                        assetID.uuidString,
+                        journalRow.0,
+                        journalRow.1,
+                        journalRow.2,
+                    ],
                 )
+                guard db.changesCount == 1 else {
+                    throw MediaLibraryStoreError.corrupt
+                }
             }
         } catch let error as MediaLibraryStoreError {
             throw error

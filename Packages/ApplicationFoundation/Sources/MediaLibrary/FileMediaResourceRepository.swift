@@ -317,6 +317,9 @@ public actor MediaLibraryImporter {
     }
 
     private var beforeJournalAcceptanceForTesting: @Sendable () async -> Void = {}
+    private var beforeQuotaAdmissionForTesting: @Sendable () async -> Void = {}
+    private var afterQuotaAdmissionForTesting: @Sendable () async -> Void = {}
+    private var afterDuplicateDecisionPersistenceForTesting: @Sendable () async -> Void = {}
 
     /// Lets import tests suspend journal acceptance at a deterministic point.
     func setJournalAcceptanceForTesting(
@@ -327,6 +330,18 @@ public actor MediaLibraryImporter {
 
     func setBeforeJournalAcceptanceForTesting(_ operation: @escaping @Sendable () async -> Void) {
         beforeJournalAcceptanceForTesting = operation
+    }
+
+    func setBeforeQuotaAdmissionForTesting(_ operation: @escaping @Sendable () async -> Void) {
+        beforeQuotaAdmissionForTesting = operation
+    }
+
+    func setAfterQuotaAdmissionForTesting(_ operation: @escaping @Sendable () async -> Void) {
+        afterQuotaAdmissionForTesting = operation
+    }
+
+    func setAfterDuplicateDecisionPersistenceForTesting(_ operation: @escaping @Sendable () async -> Void) {
+        afterDuplicateDecisionPersistenceForTesting = operation
     }
 
     /// Creates an importer with explicit storage and source-access seams.
@@ -374,57 +389,58 @@ public actor MediaLibraryImporter {
         self.now = now
     }
 
-    /// Recovers accepted imports before admitting and durably committing a new still image.
+    /// Imports one image or reports that it needs a duplicate decision.
+    public func importFileOutcome(at sourceURL: URL) async throws -> MediaImportOutcome {
+        try await store.withDurableOperation {
+            try await importFileOutcomeWhileGated(at: sourceURL, sessionGeneration: nil)
+        }
+    }
+
+    /// Recovers accepted work before staging a new image and returns its committed asset.
     public func importFile(at sourceURL: URL) async throws -> MediaAsset {
-        try await store.withDurableOperation {
-            try await importFileWhileGated(at: sourceURL, sessionGeneration: nil)
-        }
+        try await Self.requireCommittedAsset(from: importFileOutcome(at: sourceURL))
     }
 
+    /// Imports one image only while the authenticated session remains current.
     func importFile(at sourceURL: URL, sessionGeneration: UInt64) async throws -> MediaAsset {
+        try await Self.requireCommittedAsset(
+            from: importFileOutcome(at: sourceURL, sessionGeneration: sessionGeneration),
+        )
+    }
+
+    func importFileOutcome(
+        at sourceURL: URL,
+        sessionGeneration: UInt64,
+    ) async throws -> MediaImportOutcome {
         try await store.withDurableOperation {
-            try await importFileWhileGated(at: sourceURL, sessionGeneration: sessionGeneration)
+            try await importFileOutcomeWhileGated(at: sourceURL, sessionGeneration: sessionGeneration)
         }
     }
 
-    private func importFileWhileGated(
+    private static func requireCommittedAsset(from outcome: MediaImportOutcome) throws -> MediaAsset {
+        switch outcome {
+        case let .imported(asset):
+            return asset
+        case .duplicatePending:
+            throw MediaImportError.duplicateDecisionRequired
+        }
+    }
+
+    private func importFileOutcomeWhileGated(
         at sourceURL: URL,
         sessionGeneration: UInt64?,
-    ) async throws -> MediaAsset {
+    ) async throws -> MediaImportOutcome {
         try Task.checkCancellation()
 
         try await recoverAcceptedImportsBeforeAdmission()
         try Task.checkCancellation()
         try requireCurrentSession(sessionGeneration)
 
-        try await requireAdmissionForNewImport()
-        try Task.checkCancellation()
-        try requireCurrentSession(sessionGeneration)
-
         let assetID = id()
         let resourceID = id()
         let stagingFileURL = resources.stagingURL(for: resourceID)
-
-        do {
-            try source.copyToStaging(from: sourceURL, to: stagingFileURL)
-        } catch let error as MediaImportError {
-            resources.removeStagingIfPresent(at: stagingFileURL)
-            throw error
-        } catch {
-            resources.removeStagingIfPresent(at: stagingFileURL)
-            throw MediaImportError.sourceAccessFailed
-        }
-        do {
-            try resources.protectStaging(for: resourceID)
-            try Task.checkCancellation()
-            try requireCurrentSession(sessionGeneration)
-        } catch is CancellationError {
-            resources.removeStagingIfPresent(at: stagingFileURL)
-            throw CancellationError()
-        } catch {
-            resources.removeStagingIfPresent(at: stagingFileURL)
-            throw error
-        }
+        try copySourceToStaging(from: sourceURL, resourceID: resourceID)
+        try protectStagedSource(resourceID: resourceID, sessionGeneration: sessionGeneration)
 
         let entry = MediaIngestionJournalEntry(
             id: assetID,
@@ -466,11 +482,41 @@ public actor MediaLibraryImporter {
         try requireCurrentSession(sessionGeneration)
 
         do {
-            return try await resume(entry)
+            return try await resume(entry, sessionGeneration: sessionGeneration)
         } catch let error as MediaImportError {
             throw error
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw MediaImportError.persistenceFailed
+        }
+    }
+
+    private func copySourceToStaging(from sourceURL: URL, resourceID: UUID) throws {
+        let stagingFileURL = resources.stagingURL(for: resourceID)
+        do {
+            try source.copyToStaging(from: sourceURL, to: stagingFileURL)
+        } catch let error as MediaImportError {
+            resources.removeStagingIfPresent(at: stagingFileURL)
+            throw error
+        } catch {
+            resources.removeStagingIfPresent(at: stagingFileURL)
+            throw MediaImportError.sourceAccessFailed
+        }
+    }
+
+    private func protectStagedSource(resourceID: UUID, sessionGeneration: UInt64?) throws {
+        let stagingFileURL = resources.stagingURL(for: resourceID)
+        do {
+            try resources.protectStaging(for: resourceID)
+            try Task.checkCancellation()
+            try requireCurrentSession(sessionGeneration)
+        } catch is CancellationError {
+            resources.removeStagingIfPresent(at: stagingFileURL)
+            throw CancellationError()
+        } catch {
+            resources.removeStagingIfPresent(at: stagingFileURL)
+            throw error
         }
     }
 
@@ -515,6 +561,73 @@ public actor MediaLibraryImporter {
         }
     }
 
+    private func matchingAssets(for entry: MediaIngestionJournalEntry) async throws -> [MediaAsset] {
+        guard let candidateIdentity = MediaAssetDuplicateIdentity(resources: [resource(for: entry)]) else {
+            throw MediaLibraryStoreError.corrupt
+        }
+
+        let assets: [MediaAsset]
+        do {
+            assets = try await store.loadAssets()
+        } catch {
+            throw MediaImportError.libraryUnavailable
+        }
+
+        var matches: [MediaAsset] = []
+        for asset in assets where asset.id != entry.id {
+            guard let identity = MediaAssetDuplicateIdentity(resources: asset.resources) else {
+                throw MediaLibraryStoreError.corrupt
+            }
+
+            if identity == candidateIdentity {
+                matches.append(asset)
+            }
+        }
+        return matches
+    }
+
+    private func markReadyAfterQuotaAdmission(
+        _ entry: MediaIngestionJournalEntry,
+        sessionGeneration: UInt64?,
+    ) async throws -> MediaIngestionJournalEntry {
+        guard let quotaAdmission = entry.quotaAdmission else {
+            guard entry.duplicateDecision == nil else {
+                throw MediaLibraryStoreError.corrupt
+            }
+
+            try requireCurrentSession(sessionGeneration)
+            return try await store.ingestionJournal.transition(entry, to: .ready)
+        }
+        guard quotaAdmission == .pending else {
+            throw MediaLibraryStoreError.corrupt
+        }
+
+        await beforeQuotaAdmissionForTesting()
+        try Task.checkCancellation()
+
+        do {
+            try await requireAdmissionForNewImport()
+        } catch let error as MediaImportError where error == .assetLimitReached {
+            try requireCurrentSession(sessionGeneration)
+            _ = try await store.ingestionJournal.transition(
+                entry,
+                to: .failed,
+                quotaAdmission: .denied,
+            )
+            throw error
+        }
+
+        try requireCurrentSession(sessionGeneration)
+        let admitted = try await store.ingestionJournal.transition(
+            entry,
+            to: .ready,
+            quotaAdmission: .admitted,
+        )
+        await afterQuotaAdmissionForTesting()
+        try Task.checkCancellation()
+        return admitted
+    }
+
     /// Reconciles accepted journal work before a fresh import is counted or staged.
     private func recoverAcceptedImportsBeforeAdmission() async throws {
         let existingAssets: [MediaAsset]
@@ -543,12 +656,17 @@ public actor MediaLibraryImporter {
 
     /// Reconciles durable imports before returning canonical Library assets.
     public func loadAssets() async throws -> [MediaAsset] {
+        try await loadLibrarySnapshot().assets
+    }
+
+    /// Loads committed assets and valid duplicate decisions waiting for the user.
+    public func loadLibrarySnapshot() async throws -> MediaLibrarySnapshot {
         try await store.withDurableOperation {
-            try await loadAssetsWhileGated()
+            try await loadLibrarySnapshotWhileGated()
         }
     }
 
-    private func loadAssetsWhileGated() async throws -> [MediaAsset] {
+    private func loadLibrarySnapshotWhileGated() async throws -> MediaLibrarySnapshot {
         try Task.checkCancellation()
 
         let existingAssets = try await store.loadAssets()
@@ -557,16 +675,161 @@ public actor MediaLibraryImporter {
             snapshot = try await store.ingestionJournal.snapshot()
         } catch {
             // Journal read failures do not invalidate already committed assets.
-            return try await store.loadAssets()
+            return try await MediaLibrarySnapshot(assets: store.loadAssets())
         }
 
         guard !snapshot.hasUnidentifiedAssetRows else {
             // Unknown rows prevent recovery and admission, but do not hide valid committed assets.
-            return existingAssets.filter { !snapshot.unreadableAssetIDs.contains($0.id) }
+            return MediaLibrarySnapshot(
+                assets: existingAssets.filter { !snapshot.unreadableAssetIDs.contains($0.id) },
+                pendingDuplicateDecisions: pendingDuplicateDecisions(in: snapshot.entries),
+            )
         }
 
         let blockedIDs = await reconcile(snapshot: snapshot, using: existingAssets)
-        return try await store.loadAssets().filter { !blockedIDs.contains($0.id) }
+        let assets = try await store.loadAssets().filter { !blockedIDs.contains($0.id) }
+        let latestSnapshot: MediaIngestionJournalSnapshot
+        do {
+            latestSnapshot = try await store.ingestionJournal.snapshot()
+        } catch {
+            return MediaLibrarySnapshot(assets: assets)
+        }
+        return MediaLibrarySnapshot(
+            assets: assets,
+            pendingDuplicateDecisions: pendingDuplicateDecisions(in: latestSnapshot.entries),
+        )
+    }
+
+    private func pendingDuplicateDecisions(
+        in entries: [MediaIngestionJournalEntry],
+    ) -> [MediaDuplicateDecisionRequest] {
+        entries.compactMap { entry in
+            guard entry.state == .awaitingUserDecision,
+                  entry.duplicateDecision == .pending
+            else {
+                return nil
+            }
+
+            return MediaDuplicateDecisionRequest(
+                id: entry.id,
+                sourceFilename: entry.sourceFilename,
+                importedAt: entry.importedAt,
+            )
+        }
+    }
+
+    /// Resolves one pending duplicate decision under the durable-operation gate.
+    public func resolveDuplicateDecision(
+        for id: UUID,
+        choice: MediaDuplicateDecisionChoice,
+    ) async throws -> MediaDuplicateResolutionResult {
+        try await store.withDurableOperation {
+            try await resolveDuplicateDecisionWhileGated(
+                for: id,
+                choice: choice,
+                sessionGeneration: nil,
+            )
+        }
+    }
+
+    /// Resolves a duplicate decision only for the authenticated session that presented it.
+    func resolveDuplicateDecision(
+        for id: UUID,
+        choice: MediaDuplicateDecisionChoice,
+        sessionGeneration: UInt64,
+    ) async throws -> MediaDuplicateResolutionResult {
+        try await store.withDurableOperation {
+            try await resolveDuplicateDecisionWhileGated(
+                for: id,
+                choice: choice,
+                sessionGeneration: sessionGeneration,
+            )
+        }
+    }
+
+    private func resolveDuplicateDecisionWhileGated(
+        for id: UUID,
+        choice: MediaDuplicateDecisionChoice,
+        sessionGeneration: UInt64?,
+    ) async throws -> MediaDuplicateResolutionResult {
+        try Task.checkCancellation()
+        if let sessionGeneration {
+            guard let admission = sessionAdmission(sessionGeneration),
+                  admission.matches(sessionGeneration)
+            else {
+                throw CancellationError()
+            }
+        }
+
+        if choice == .importAnyway {
+            try await recoverAcceptedImportsBeforeAdmission()
+        }
+
+        let snapshot = try await store.ingestionJournal.snapshot()
+        guard !snapshot.hasUnidentifiedAssetRows,
+              !snapshot.unreadableAssetIDs.contains(id),
+              let entry = snapshot.entries.first(where: { $0.id == id })
+        else {
+            throw MediaLibraryStoreError.corrupt
+        }
+
+        if entry.state == .cancelled, entry.duplicateDecision == .skipped {
+            resources.removeStagingIfPresent(at: resources.stagingURL(for: entry.resourceID))
+            return .skipped
+        }
+        if entry.state == .failed,
+           entry.duplicateDecision == .overridden,
+           entry.quotaAdmission == .denied {
+            throw MediaImportError.assetLimitReached
+        }
+
+        switch choice {
+        case .skip:
+            guard entry.state == .awaitingUserDecision,
+                  entry.duplicateDecision == .pending
+            else {
+                throw MediaLibraryStoreError.corrupt
+            }
+
+            try requireCurrentSession(sessionGeneration)
+            let skipped = try await store.ingestionJournal.transition(
+                entry,
+                to: .cancelled,
+                duplicateDecision: .skipped,
+            )
+            await afterDuplicateDecisionPersistenceForTesting()
+            try Task.checkCancellation()
+            try requireCurrentSession(sessionGeneration)
+            resources.removeStagingIfPresent(at: resources.stagingURL(for: skipped.resourceID))
+            return .skipped
+        case .importAnyway:
+            let overridden: MediaIngestionJournalEntry
+            if entry.state == .awaitingUserDecision, entry.duplicateDecision == .pending {
+                try requireCurrentSession(sessionGeneration)
+                overridden = try await store.ingestionJournal.transition(
+                    entry,
+                    to: .duplicateCheck,
+                    duplicateDecision: .overridden,
+                )
+            } else if entry.duplicateDecision == .overridden,
+                      [.duplicateCheck, .ready, .committing, .complete].contains(entry.state) {
+                overridden = entry
+            } else {
+                throw MediaLibraryStoreError.corrupt
+            }
+
+            if entry.duplicateDecision == .pending {
+                await afterDuplicateDecisionPersistenceForTesting()
+            }
+            try Task.checkCancellation()
+            try requireCurrentSession(sessionGeneration)
+            switch try await resume(overridden, sessionGeneration: sessionGeneration) {
+            case let .imported(asset):
+                return .imported(asset)
+            case .duplicatePending:
+                throw MediaLibraryStoreError.corrupt
+            }
+        }
     }
 
     /// Resumes eligible imports without exposing journal transitions to clients.
@@ -630,22 +893,53 @@ public actor MediaLibraryImporter {
                 recordedAt: now(),
             )
         }
-        for entry in snapshot.entries {
-            // Rejected and cancelled entries are durable history, not pending recovery work.
-            if entry.state == .failed || entry.state == .cancelled {
-                continue
+        // Previously admitted rows must finish before pending work checks the remaining quota.
+        let orderedEntries = snapshot.entries.filter { $0.quotaAdmission != .pending }
+            + snapshot.entries.filter { $0.quotaAdmission == .pending }
+        var hasUnresolvedPriorAdmission = false
+        for entry in orderedEntries {
+            if entry.quotaAdmission == .pending {
+                // Do not spend quota while an earlier admitted import may still commit.
+                guard !hasUnresolvedPriorAdmission else {
+                    return blockedIDs
+                }
             }
 
-            do {
-                _ = try await resume(entry)
-            } catch {
-                let hasVerifiedTerminalState = await hasVerifiedTerminalRecoveryState(for: entry.id)
-                if !hasVerifiedTerminalState {
-                    blockedIDs.insert(entry.id)
-                }
+            if await reconcileEntry(entry) {
+                blockedIDs.insert(entry.id)
+                // This entry may have gained admission before recovery became blocked.
+                hasUnresolvedPriorAdmission = true
             }
         }
         return blockedIDs
+    }
+
+    /// Reconciles one journal entry and reports whether recovery remains blocked.
+    private func reconcileEntry(_ entry: MediaIngestionJournalEntry) async -> Bool {
+        if entry.state == .awaitingUserDecision,
+           entry.duplicateDecision == .pending {
+            return false
+        }
+
+        if entry.state == .cancelled {
+            if entry.duplicateDecision == .skipped {
+                resources.removeStagingIfPresent(at: resources.stagingURL(for: entry.resourceID))
+            }
+            return false
+        }
+
+        // Failed entries retain evidence and wait for an explicit recovery path.
+        guard entry.state != .failed else {
+            return false
+        }
+
+        do {
+            _ = try await resume(entry)
+            return false
+        } catch {
+            let hasVerifiedTerminalState = await hasVerifiedTerminalRecoveryState(for: entry.id)
+            return !hasVerifiedTerminalState
+        }
     }
 
     private func hasVerifiedTerminalRecoveryState(for assetID: UUID) async -> Bool {
@@ -664,36 +958,65 @@ public actor MediaLibraryImporter {
         }
     }
 
-    private func resume(_ initialEntry: MediaIngestionJournalEntry) async throws -> MediaAsset {
+    private func resume(
+        _ initialEntry: MediaIngestionJournalEntry,
+        sessionGeneration: UInt64? = nil,
+    ) async throws -> MediaImportOutcome {
         var entry = initialEntry
 
         while true {
+            try Task.checkCancellation()
             switch entry.state {
             case .received:
                 entry = try await store.ingestionJournal.transition(entry, to: .validating)
             case .validating:
-                let stageURL = resources.stagingURL(for: entry.resourceID)
-                let finalURL = resources.url(for: resource(for: entry))
-                let inspection: ImageInspection
-                do {
-                    if FileManager.default.fileExists(atPath: stageURL.path) {
-                        inspection = try await inspectStillImage(at: stageURL)
-                    } else if FileManager.default.fileExists(atPath: finalURL.path) {
-                        inspection = try await inspectStillImage(at: finalURL)
-                    } else {
-                        throw AcceptedResourceReadError()
-                    }
-                } catch let error as MediaImportError {
-                    _ = try await store.ingestionJournal.transition(entry, to: .failed)
-                    throw error
-                }
+                let inspection = try await inspectAcceptedResource(for: entry)
                 entry = try await store.ingestionJournal.transition(
                     entry,
                     to: .duplicateCheck,
                     inspection: inspection,
                 )
             case .duplicateCheck:
-                entry = try await store.ingestionJournal.transition(entry, to: .ready)
+                if entry.duplicateDecision == .overridden {
+                    entry = try await markReadyAfterQuotaAdmission(
+                        entry,
+                        sessionGeneration: sessionGeneration,
+                    )
+                    continue
+                }
+                guard entry.duplicateDecision == nil else {
+                    throw MediaLibraryStoreError.corrupt
+                }
+
+                let matches = try await matchingAssets(for: entry)
+                try requireCurrentSession(sessionGeneration)
+                if entry.quotaAdmission == nil {
+                    // Legacy rows passed quota admission before this metadata existed.
+                    entry = try await markReadyAfterQuotaAdmission(
+                        entry,
+                        sessionGeneration: sessionGeneration,
+                    )
+                    continue
+                }
+                if !matches.isEmpty {
+                    entry = try await store.ingestionJournal.transition(
+                        entry,
+                        to: .awaitingUserDecision,
+                        duplicateDecision: .pending,
+                    )
+                    return .duplicatePending(
+                        MediaDuplicateDecisionRequest(
+                            id: entry.id,
+                            sourceFilename: entry.sourceFilename,
+                            importedAt: entry.importedAt,
+                        ),
+                    )
+                }
+
+                entry = try await markReadyAfterQuotaAdmission(
+                    entry,
+                    sessionGeneration: sessionGeneration,
+                )
             case .ready:
                 entry = try await store.ingestionJournal.transition(entry, to: .committing)
             case .committing:
@@ -732,12 +1055,31 @@ public actor MediaLibraryImporter {
                 } catch {
                     // Verified canonical state remains visible if compaction can be retried later.
                 }
-                return asset
+                return .imported(asset)
             case .awaitingUserDecision,
                  .failed,
                  .cancelled:
                 throw MediaLibraryStoreError.corrupt
             }
+        }
+    }
+
+    private func inspectAcceptedResource(for entry: MediaIngestionJournalEntry) async throws -> ImageInspection {
+        let stageURL = resources.stagingURL(for: entry.resourceID)
+        let finalURL = resources.url(for: resource(for: entry))
+
+        do {
+            if FileManager.default.fileExists(atPath: stageURL.path) {
+                return try await inspectStillImage(at: stageURL)
+            }
+            if FileManager.default.fileExists(atPath: finalURL.path) {
+                return try await inspectStillImage(at: finalURL)
+            }
+
+            throw AcceptedResourceReadError()
+        } catch let error as MediaImportError {
+            _ = try await store.ingestionJournal.transition(entry, to: .failed)
+            throw error
         }
     }
 

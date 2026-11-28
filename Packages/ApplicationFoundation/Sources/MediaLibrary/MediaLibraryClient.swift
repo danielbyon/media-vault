@@ -63,15 +63,64 @@ public struct MediaLibraryClient: Sendable {
     /// Loads all assets committed to the vault store.
     public var loadAssets: @Sendable () async throws -> [MediaAsset]
 
+    private var loadLibrarySnapshotOperation: (@Sendable () async throws -> MediaLibrarySnapshot)?
+
+    /// Loads committed assets and unresolved duplicate prompts from one durable snapshot.
+    public var loadLibrarySnapshot: @Sendable () async throws -> MediaLibrarySnapshot {
+        get {
+            if let loadLibrarySnapshotOperation {
+                return loadLibrarySnapshotOperation
+            }
+            let loadAssetsOperation = loadAssets
+            return { try await MediaLibrarySnapshot(assets: loadAssetsOperation()) }
+        }
+        set { loadLibrarySnapshotOperation = newValue }
+    }
+
     /// Recovers accepted work, checks fresh-import admission, and returns after canonical commit.
     public var importFile: @Sendable (URL) async throws -> MediaAsset
+
+    private var importFileOutcomeOperation: (@Sendable (URL) async throws -> MediaImportOutcome)?
+
+    /// Imports an image or returns a prompt for a matching committed asset.
+    public var importFileOutcome: @Sendable (URL) async throws -> MediaImportOutcome {
+        get {
+            if let importFileOutcomeOperation {
+                return importFileOutcomeOperation
+            }
+            let importFileOperation = importFile
+            return { url in try await .imported(importFileOperation(url)) }
+        }
+        set { importFileOutcomeOperation = newValue }
+    }
+
+    private var resolveDuplicateDecisionOperation: (
+        @Sendable (UUID, MediaDuplicateDecisionChoice) async throws -> MediaDuplicateResolutionResult
+    )?
+
+    /// Persists a user's choice for a staged duplicate.
+    public var resolveDuplicateDecision: @Sendable (
+        UUID,
+        MediaDuplicateDecisionChoice,
+    ) async throws -> MediaDuplicateResolutionResult {
+        get {
+            if let resolveDuplicateDecisionOperation {
+                return resolveDuplicateDecisionOperation
+            }
+            return { _, _ in throw MediaImportError.persistenceFailed }
+        }
+        set { resolveDuplicateDecisionOperation = newValue }
+    }
 
     /// Loads exact canonical bytes for rendering a committed resource.
     public var resourceData: @Sendable (MediaResource) async throws -> Data
 
     private let resourceDataSynchronously: (@Sendable (MediaResource) throws -> Data)?
     private let resourceLoadFence: MediaLibraryResourceLoadFence
-    private let importFileForSession: (@Sendable (URL, UInt64) async throws -> MediaAsset)?
+    private let importFileOutcomeForSession: (@Sendable (URL, UInt64) async throws -> MediaImportOutcome)?
+    private let resolveDuplicateDecisionForSession: (
+        @Sendable (UUID, MediaDuplicateDecisionChoice, UInt64) async throws -> MediaDuplicateResolutionResult
+    )?
 
     /// The generation captured by resource-load effects before they start.
     public var currentResourceLoadGeneration: UInt64 {
@@ -84,32 +133,53 @@ public struct MediaLibraryClient: Sendable {
         importFile: @escaping @Sendable (URL) async throws -> MediaAsset,
         resourceData: @escaping @Sendable (MediaResource) async throws -> Data,
         resourceDataSynchronously: (@Sendable (MediaResource) throws -> Data)? = nil,
+        loadLibrarySnapshot: (@Sendable () async throws -> MediaLibrarySnapshot)? = nil,
+        importFileOutcome: (@Sendable (URL) async throws -> MediaImportOutcome)? = nil,
+        resolveDuplicateDecision: (
+            @Sendable (UUID, MediaDuplicateDecisionChoice) async throws -> MediaDuplicateResolutionResult
+        )? = nil,
     ) {
         let newResourceLoadFence = MediaLibraryResourceLoadFence()
         self.init(
             loadAssets: loadAssets,
+            loadLibrarySnapshot: loadLibrarySnapshot,
             importFile: importFile,
+            importFileOutcome: importFileOutcome,
+            resolveDuplicateDecision: resolveDuplicateDecision,
             resourceData: resourceData,
             resourceDataSynchronously: resourceDataSynchronously,
             resourceLoadFence: newResourceLoadFence,
-            importFileForSession: nil,
+            importFileOutcomeForSession: nil,
+            resolveDuplicateDecisionForSession: nil,
         )
     }
 
-    fileprivate init(
+    init(
         loadAssets: @escaping @Sendable () async throws -> [MediaAsset],
+        loadLibrarySnapshot: (@Sendable () async throws -> MediaLibrarySnapshot)?,
         importFile: @escaping @Sendable (URL) async throws -> MediaAsset,
+        importFileOutcome: (@Sendable (URL) async throws -> MediaImportOutcome)?,
+        resolveDuplicateDecision: (
+            @Sendable (UUID, MediaDuplicateDecisionChoice) async throws -> MediaDuplicateResolutionResult
+        )?,
         resourceData: @escaping @Sendable (MediaResource) async throws -> Data,
         resourceDataSynchronously: (@Sendable (MediaResource) throws -> Data)?,
         resourceLoadFence: MediaLibraryResourceLoadFence,
-        importFileForSession: (@Sendable (URL, UInt64) async throws -> MediaAsset)?,
+        importFileOutcomeForSession: (@Sendable (URL, UInt64) async throws -> MediaImportOutcome)?,
+        resolveDuplicateDecisionForSession: (
+            @Sendable (UUID, MediaDuplicateDecisionChoice, UInt64) async throws -> MediaDuplicateResolutionResult
+        )?,
     ) {
         self.loadAssets = loadAssets
+        loadLibrarySnapshotOperation = loadLibrarySnapshot
         self.importFile = importFile
+        importFileOutcomeOperation = importFileOutcome
+        resolveDuplicateDecisionOperation = resolveDuplicateDecision
         self.resourceData = resourceData
         self.resourceDataSynchronously = resourceDataSynchronously
         self.resourceLoadFence = resourceLoadFence
-        self.importFileForSession = importFileForSession
+        self.importFileOutcomeForSession = importFileOutcomeForSession
+        self.resolveDuplicateDecisionForSession = resolveDuplicateDecisionForSession
     }
 
     /// Advances the resource-read generation at the synchronous global-lock boundary.
@@ -122,14 +192,43 @@ public struct MediaLibraryClient: Sendable {
     /// The live importer checks again after serialized recovery and entitlement lookup, before it
     /// stages a new file.
     public func importFileIfCurrent(_ url: URL, generation: UInt64) async throws -> MediaAsset {
+        switch try await importFileOutcomeIfCurrent(url, generation: generation) {
+        case let .imported(asset):
+            return asset
+        case .duplicatePending:
+            throw MediaImportError.duplicateDecisionRequired
+        }
+    }
+
+    /// Imports an image while its starting authenticated session remains current.
+    public func importFileOutcomeIfCurrent(
+        _ url: URL,
+        generation: UInt64,
+    ) async throws -> MediaImportOutcome {
         guard resourceLoadFence.isCurrent(generation) else {
             throw CancellationError()
         }
-        guard let sessionAwareImport = importFileForSession else {
-            return try await importFile(url)
+        guard let sessionAwareImport = importFileOutcomeForSession else {
+            return try await importFileOutcome(url)
         }
 
         return try await sessionAwareImport(url, generation)
+    }
+
+    /// Resolves a duplicate prompt only for the session that presented it.
+    public func resolveDuplicateDecisionIfCurrent(
+        _ id: UUID,
+        choice: MediaDuplicateDecisionChoice,
+        generation: UInt64,
+    ) async throws -> MediaDuplicateResolutionResult {
+        guard resourceLoadFence.isCurrent(generation) else {
+            throw CancellationError()
+        }
+        guard let sessionAwareResolution = resolveDuplicateDecisionForSession else {
+            return try await resolveDuplicateDecision(id, choice)
+        }
+
+        return try await sessionAwareResolution(id, choice, generation)
     }
 
     /// Starts a resource read only when its captured session generation is still current.
@@ -207,12 +306,24 @@ extension MediaLibraryClient: DependencyKey {
 
             return Self(
                 loadAssets: { try await importer.loadAssets() },
+                loadLibrarySnapshot: { try await importer.loadLibrarySnapshot() },
                 importFile: { try await importer.importFile(at: $0) },
+                importFileOutcome: { try await importer.importFileOutcome(at: $0) },
+                resolveDuplicateDecision: { id, choice in
+                    try await importer.resolveDuplicateDecision(for: id, choice: choice)
+                },
                 resourceData: { try resources.data(for: $0) },
                 resourceDataSynchronously: { try resources.data(for: $0) },
                 resourceLoadFence: resourceLoadFence,
-                importFileForSession: { url, generation in
-                    try await importer.importFile(at: url, sessionGeneration: generation)
+                importFileOutcomeForSession: { url, generation in
+                    try await importer.importFileOutcome(at: url, sessionGeneration: generation)
+                },
+                resolveDuplicateDecisionForSession: { id, choice, generation in
+                    try await importer.resolveDuplicateDecision(
+                        for: id,
+                        choice: choice,
+                        sessionGeneration: generation,
+                    )
                 },
             )
         } catch {

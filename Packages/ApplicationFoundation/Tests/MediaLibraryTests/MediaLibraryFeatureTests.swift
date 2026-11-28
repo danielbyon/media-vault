@@ -6,6 +6,7 @@
 //
 
 import ComposableArchitecture
+import ConcurrencyExtras
 import Entitlement
 import Foundation
 import Testing
@@ -35,7 +36,7 @@ struct MediaLibraryFeatureTests {
             $0.isPickerPresented = false
             $0.isImporting = true
         }
-        await store.receive(.importCompleted(generation: 0, result: .success(asset))) {
+        await store.receive(.importOutcomeCompleted(generation: 0, result: .success(.imported(asset)))) {
             $0.isImporting = false
             $0.assets = [asset]
         }
@@ -74,7 +75,10 @@ struct MediaLibraryFeatureTests {
         await store.send(.task) {
             $0.isLoading = true
         }
-        await store.receive(.assetsLoadCompleted(generation: 0, result: .success([asset]))) {
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(MediaLibrarySnapshot(assets: [asset])),
+        )) {
             $0.isLoading = false
             $0.assets = [asset]
         }
@@ -88,7 +92,7 @@ struct MediaLibraryFeatureTests {
 
         importContinuation.yield(asset)
         importContinuation.finish()
-        await store.receive(.importCompleted(generation: 0, result: .success(asset))) {
+        await store.receive(.importOutcomeCompleted(generation: 0, result: .success(.imported(asset)))) {
             $0.isImporting = false
         }
         await store.receive(.resourceLoadCompleted(
@@ -116,7 +120,7 @@ struct MediaLibraryFeatureTests {
         await store.send(.fileSelected(URL(fileURLWithPath: "/provider/animated.gif"))) {
             $0.isImporting = true
         }
-        await store.receive(.importCompleted(generation: 0, result: .failure(.unsupportedMedia))) {
+        await store.receive(.importOutcomeCompleted(generation: 0, result: .failure(.unsupportedMedia))) {
             $0.isImporting = false
             $0.error = .unsupportedMedia
         }
@@ -141,7 +145,10 @@ struct MediaLibraryFeatureTests {
         await store.send(.task) {
             $0.isLoading = true
         }
-        await store.receive(.assetsLoadCompleted(generation: 0, result: .success([asset]))) {
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(MediaLibrarySnapshot(assets: [asset])),
+        )) {
             $0.isLoading = false
             $0.assets = [asset]
         }
@@ -154,6 +161,714 @@ struct MediaLibraryFeatureTests {
         }
         await store.send(.task)
         #expect(await loadCalls.value == 1)
+    }
+
+    @Test("A duplicate import shows a decision without adding a Library asset")
+    @MainActor
+    func duplicateImportShowsDecision() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                importFileOutcome: { _ in .duplicatePending(request) },
+            )
+        }
+
+        await store.send(.fileSelected(URL(fileURLWithPath: "/provider/holiday-photo.png"))) {
+            $0.isImporting = true
+        }
+        await store.receive(.importOutcomeCompleted(
+            generation: 0,
+            result: .success(.duplicatePending(request)),
+        )) {
+            $0.isImporting = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+
+        #expect(store.state.assets.isEmpty)
+    }
+
+    @Test("Skipping a duplicate clears its pending decision")
+    @MainActor
+    func skippingDuplicateDecisionClearsPendingRequest() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let probe = DuplicateDecisionCallProbe()
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                loadLibrarySnapshot: { snapshot },
+                resolveDuplicateDecision: { id, choice in
+                    await probe.record(id: id, choice: choice)
+                    return .skipped
+                },
+            )
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .skip)) {
+            $0.isImporting = true
+            $0.isDuplicatePromptPresented = false
+        }
+        await store.receive(.duplicateDecisionCompleted(
+            id: request.id,
+            generation: 0,
+            result: .success(.skipped),
+        )) {
+            $0.isImporting = false
+            $0.pendingDuplicateDecisions = []
+        }
+
+        #expect(await probe.calls() == [DuplicateDecisionCall(id: request.id, choice: .skip)])
+    }
+
+    @Test("Importing a duplicate adds its independent asset and loads its resource")
+    @MainActor
+    func importingDuplicateAddsAssetAndLoadsResource() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let probe = DuplicateDecisionCallProbe()
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                loadLibrarySnapshot: { snapshot },
+                resolveDuplicateDecision: { id, choice in
+                    await probe.record(id: id, choice: choice)
+                    return .imported(FeatureFixtures.importedAsset)
+                },
+            )
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .importAnyway)) {
+            $0.isImporting = true
+            $0.isDuplicatePromptPresented = false
+        }
+        await store.receive(.duplicateDecisionCompleted(
+            id: request.id,
+            generation: 0,
+            result: .success(.imported(FeatureFixtures.importedAsset)),
+        )) {
+            $0.isImporting = false
+            $0.pendingDuplicateDecisions = []
+            $0.assets = [FeatureFixtures.importedAsset]
+            $0.error = nil
+            $0.entitlementStatus = .available
+        }
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.importedResourceID,
+            generation: 0,
+            result: .success(FeatureFixtures.imageData),
+        )) {
+            $0.resourceData[FeatureFixtures.importedResourceID] = FeatureFixtures.imageData
+        }
+
+        #expect(await probe.calls() == [DuplicateDecisionCall(id: request.id, choice: .importAnyway)])
+        #expect(store.state.pendingDuplicateDecisions.isEmpty)
+    }
+
+    @Test("Unexpected duplicate resolver errors become import failures")
+    @MainActor
+    func unexpectedDuplicateDecisionErrorIsMappedAndRetained() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let probe = DuplicateDecisionCallProbe()
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                loadLibrarySnapshot: { snapshot },
+                resolveDuplicateDecision: { id, choice in
+                    await probe.record(id: id, choice: choice)
+                    throw UnexpectedDuplicateDecisionFailure.resolverUnavailable
+                },
+            )
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .importAnyway)) {
+            $0.isImporting = true
+            $0.isDuplicatePromptPresented = false
+        }
+        await store.receive(.duplicateDecisionCompleted(
+            id: request.id,
+            generation: 0,
+            result: .failure(.persistenceFailed),
+        )) {
+            $0.isImporting = false
+            $0.error = .importFailed
+            $0.entitlementStatus = .available
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.error = nil
+            $0.isDuplicatePromptPresented = true
+        }
+
+        #expect(store.state.pendingDuplicateDecisions == [request])
+        #expect(await probe.calls() == [DuplicateDecisionCall(id: request.id, choice: .importAnyway)])
+    }
+
+    @Test("A stale duplicate tap cannot resolve another session's request")
+    @MainActor
+    func staleDuplicateDecisionTapDoesNotResolveRequest() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let probe = DuplicateDecisionCallProbe()
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+            loadLibrarySnapshot: { snapshot },
+            resolveDuplicateDecision: { id, choice in
+                await probe.record(id: id, choice: choice)
+                return .skipped
+            },
+        )
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
+        mediaLibrary.advanceResourceLoadGeneration()
+
+        await store.send(.duplicateDecisionTapped(
+            id: request.id,
+            generation: staleGeneration,
+            choice: .importAnyway,
+        ))
+
+        #expect(!store.state.isImporting)
+        #expect(store.state.pendingDuplicateDecisions == [request])
+        #expect(store.state.isDuplicatePromptPresented)
+        #expect(await probe.calls().isEmpty)
+    }
+
+    @Test("A duplicate action from an earlier session cannot resolve the rediscovered request")
+    @MainActor
+    func staleDuplicateActionCannotResolveRediscoveredRequest() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let resolver = DuplicateDecisionSuspension()
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+            loadLibrarySnapshot: { snapshot },
+            resolveDuplicateDecision: { id, choice in
+                try await resolver.resolve(id: id, choice: choice)
+            },
+        )
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        store.exhaustivity = .off
+        let originalGeneration = mediaLibrary.currentResourceLoadGeneration
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: originalGeneration,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+
+        mediaLibrary.advanceResourceLoadGeneration()
+        let currentGeneration = mediaLibrary.currentResourceLoadGeneration
+        await store.send(.librarySnapshotLoadCompleted(
+            generation: currentGeneration,
+            result: .success(snapshot),
+        )) {
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+
+        await store.send(.duplicateDecisionTapped(
+            id: request.id,
+            generation: originalGeneration,
+            choice: .skip,
+        ))
+        await store.send(.duplicateDecisionTapped(
+            id: request.id,
+            generation: originalGeneration,
+            choice: .importAnyway,
+        ))
+
+        #expect(!store.state.isImporting)
+        #expect(store.state.isDuplicatePromptPresented)
+        #expect(store.state.pendingDuplicateDecisions == [request])
+        if store.state.isImporting {
+            await resolver.waitUntilCalled()
+            await resolver.resume(with: .skipped)
+            await store.receive(.duplicateDecisionCompleted(
+                id: request.id,
+                generation: currentGeneration,
+                result: .success(.skipped),
+            )) {
+                $0.isImporting = false
+                $0.pendingDuplicateDecisions = []
+                $0.isDuplicatePromptPresented = false
+            }
+        }
+        #expect(await resolver.calls().isEmpty)
+    }
+
+    @Test("A dismissal from an earlier session cannot hide a rediscovered prompt")
+    @MainActor
+    func staleDuplicateDismissalCannotHideRediscoveredPrompt() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+            loadLibrarySnapshot: { snapshot },
+        )
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        let originalGeneration = mediaLibrary.currentResourceLoadGeneration
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: originalGeneration,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+
+        mediaLibrary.advanceResourceLoadGeneration()
+        await store.send(.librarySnapshotLoadCompleted(
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success(snapshot),
+        ))
+
+        await store.send(.duplicatePromptDismissed(id: request.id, generation: originalGeneration))
+
+        #expect(store.state.pendingDuplicateDecisions == [request])
+        #expect(store.state.isDuplicatePromptPresented)
+    }
+
+    @Test("Conflicting duplicate choices cannot start a second resolution")
+    @MainActor
+    func conflictingDuplicateChoicesStartOnlyOneResolution() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let resolver = DuplicateDecisionSuspension()
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                loadLibrarySnapshot: { snapshot },
+                resolveDuplicateDecision: { id, choice in
+                    try await resolver.resolve(id: id, choice: choice)
+                },
+            )
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .skip)) {
+            $0.isImporting = true
+            $0.isDuplicatePromptPresented = false
+        }
+        await resolver.waitUntilCalled()
+
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .importAnyway))
+
+        #expect(store.state.isImporting)
+        #expect(!store.state.isDuplicatePromptPresented)
+        #expect(await resolver.calls() == [DuplicateDecisionCall(id: request.id, choice: .skip)])
+
+        await resolver.resume(with: .skipped)
+        await store.receive(.duplicateDecisionCompleted(
+            id: request.id,
+            generation: 0,
+            result: .success(.skipped),
+        )) {
+            $0.isImporting = false
+            $0.pendingDuplicateDecisions = []
+        }
+    }
+
+    @Test("Quota denial removes the duplicate prompt and retains entitlement controls")
+    @MainActor
+    func quotaDeniedDuplicateDecisionRemovesPromptAndKeepsEntitlementControls() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let pendingSnapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let deniedSnapshot = MediaLibrarySnapshot(assets: [])
+        let snapshots = LockIsolated([pendingSnapshot, deniedSnapshot])
+        let probe = DuplicateDecisionCallProbe()
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                loadLibrarySnapshot: { snapshots.withValue { $0.removeFirst() } },
+                resolveDuplicateDecision: { id, choice in
+                    await probe.record(id: id, choice: choice)
+                    throw MediaImportError.assetLimitReached
+                },
+            )
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(pendingSnapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .importAnyway)) {
+            $0.isImporting = true
+            $0.isDuplicatePromptPresented = false
+        }
+        await store.receive(.duplicateDecisionCompleted(
+            id: request.id,
+            generation: 0,
+            result: .failure(.assetLimitReached),
+        )) {
+            $0.isImporting = false
+            $0.error = .assetLimitReached
+            $0.entitlementStatus = .available
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(deniedSnapshot),
+        )) {
+            $0.pendingDuplicateDecisions = []
+            $0.isDuplicatePromptPresented = false
+        }
+
+        #expect(store.state.pendingDuplicateDecisions.isEmpty)
+        #expect(!store.state.isDuplicatePromptPresented)
+        #expect(store.state.error == .assetLimitReached)
+        #expect(store.state.entitlementStatus == .available)
+        #expect(await probe.calls() == [DuplicateDecisionCall(id: request.id, choice: .importAnyway)])
+    }
+
+    @Test("Dismissing a duplicate prompt leaves it pending and a later task shows it again")
+    @MainActor
+    func dismissingDuplicatePromptDoesNotResolveIt() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                loadLibrarySnapshot: { snapshot },
+            )
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+        await store.send(.duplicatePromptDismissed(id: request.id, generation: 0)) {
+            $0.isDuplicatePromptPresented = false
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+    }
+
+    @Test("Dismissal without a visible prompt does not hide a pending duplicate")
+    @MainActor
+    func dismissalWithoutVisiblePromptKeepsFuturePromptAvailable() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                loadLibrarySnapshot: { snapshot },
+            )
+        }
+
+        await store.send(.duplicatePromptDismissed(id: request.id, generation: 0))
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+    }
+
+    @Test("Stale duplicate results cannot restore a prompt after lock")
+    @MainActor
+    func staleDuplicateResultsStayHiddenAfterLock() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+        )
+        mediaLibrary.advanceResourceLoadGeneration()
+        var initialState = MediaLibraryFeature.State()
+        initialState.pendingDuplicateDecisions = [request]
+        initialState.isDuplicatePromptPresented = true
+        _ = initialState.commitSessionLock()
+        let store = TestStore(initialState: initialState) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        store.exhaustivity = .off
+
+        await store.send(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        ))
+        await store.send(.importOutcomeCompleted(
+            generation: 0,
+            result: .success(.duplicatePending(request)),
+        ))
+        await store.send(.duplicateDecisionCompleted(
+            id: request.id,
+            generation: 0,
+            result: .success(.skipped),
+        ))
+
+        #expect(store.state.isSessionLocked)
+        #expect(store.state.pendingDuplicateDecisions.isEmpty)
+        #expect(!store.state.isDuplicatePromptPresented)
+    }
+
+    @Test("Results from another authenticated session reload its duplicate snapshot")
+    @MainActor
+    func staleDuplicateResultsReloadCurrentSession() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "old-session.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let currentSnapshot = MediaLibrarySnapshot(assets: [])
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+            loadLibrarySnapshot: { currentSnapshot },
+        )
+        mediaLibrary.advanceResourceLoadGeneration()
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])),
+        ))
+        await store.receive(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 1,
+            result: .success(currentSnapshot),
+        )) {
+            $0.isLoading = false
+        }
+
+        await store.send(.importOutcomeCompleted(
+            generation: 0,
+            result: .success(.duplicatePending(request)),
+        ))
+        await store.receive(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 1,
+            result: .success(currentSnapshot),
+        )) {
+            $0.isLoading = false
+        }
+
+        await store.send(.duplicateDecisionCompleted(
+            id: request.id,
+            generation: 0,
+            result: .success(.skipped),
+        ))
+        await store.receive(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 1,
+            result: .success(currentSnapshot),
+        )) {
+            $0.isLoading = false
+        }
+
+        #expect(store.state.pendingDuplicateDecisions.isEmpty)
+        #expect(!store.state.isDuplicatePromptPresented)
     }
 
     @Test("Assets loaded while locked reload their resources after unlock")
@@ -224,9 +939,9 @@ struct MediaLibraryFeatureTests {
         #expect(resumedStore.state.isLoading)
         try #require(resumedStore.state.isLoading)
 
-        await resumedStore.receive(.assetsLoadCompleted(
+        await resumedStore.receive(.librarySnapshotLoadCompleted(
             generation: mediaLibrary.currentResourceLoadGeneration,
-            result: .success([FeatureFixtures.asset]),
+            result: .success(MediaLibrarySnapshot(assets: [FeatureFixtures.asset])),
         )) {
             $0.isLoading = false
             $0.assets = [FeatureFixtures.asset]
@@ -336,9 +1051,9 @@ struct MediaLibraryFeatureTests {
         #expect(resumedStore.state.isLoading)
         try #require(resumedStore.state.isLoading)
 
-        await resumedStore.receive(.assetsLoadCompleted(
+        await resumedStore.receive(.librarySnapshotLoadCompleted(
             generation: mediaLibrary.currentResourceLoadGeneration,
-            result: .success([FeatureFixtures.importedAsset]),
+            result: .success(MediaLibrarySnapshot(assets: [FeatureFixtures.importedAsset])),
         )) {
             $0.isLoading = false
             $0.assets = [FeatureFixtures.importedAsset]
@@ -402,9 +1117,9 @@ struct MediaLibraryFeatureTests {
         await store.receive(.task) {
             $0.isLoading = true
         }
-        await store.receive(.assetsLoadCompleted(
+        await store.receive(.librarySnapshotLoadCompleted(
             generation: mediaLibrary.currentResourceLoadGeneration,
-            result: .success([existingAsset, importedAsset]),
+            result: .success(MediaLibrarySnapshot(assets: [existingAsset, importedAsset])),
         )) {
             $0.isLoading = false
             $0.assets = [existingAsset, importedAsset]
@@ -475,7 +1190,10 @@ struct MediaLibraryFeatureTests {
         await store.send(.task) {
             $0.isLoading = true
         }
-        await store.receive(.assetsLoadCompleted(generation: 0, result: .success([]))) {
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(MediaLibrarySnapshot(assets: [])),
+        )) {
             $0.isLoading = false
         }
 
@@ -500,18 +1218,23 @@ struct MediaLibraryFeatureTests {
         await store.send(.fileSelected(URL(fileURLWithPath: "/provider/new-photo.png"))) {
             $0.isImporting = true
         }
-        await store.receive(.importCompleted(generation: 0, result: .failure(.assetLimitReached))) {
+        await store.receive(.importOutcomeCompleted(generation: 0, result: .failure(.assetLimitReached))) {
             $0.isImporting = false
             $0.error = .assetLimitReached
             $0.entitlementStatus = .available
         }
-        await store.receive(
-            .assetsRefreshedAfterQuotaDenial(
-                generation: 0,
-                result: .success([existingAsset, recoveredAsset]),
-            ),
-        ) {
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(MediaLibrarySnapshot(assets: [existingAsset, recoveredAsset])),
+        )) {
             $0.assets.append(recoveredAsset)
+        }
+        await store.receive(.resourceLoadCompleted(
+            resourceID: FeatureFixtures.resourceID,
+            generation: 0,
+            result: .success(FeatureFixtures.imageData),
+        )) {
+            $0.resourceData[FeatureFixtures.resourceID] = FeatureFixtures.imageData
         }
         await store.receive(.resourceLoadCompleted(
             resourceID: FeatureFixtures.recoveredResourceID,
@@ -558,9 +1281,9 @@ struct MediaLibraryFeatureTests {
         await store.receive(.task) {
             $0.isLoading = true
         }
-        await store.receive(.assetsLoadCompleted(
+        await store.receive(.librarySnapshotLoadCompleted(
             generation: mediaLibrary.currentResourceLoadGeneration,
-            result: .success([FeatureFixtures.asset]),
+            result: .success(MediaLibrarySnapshot(assets: [FeatureFixtures.asset])),
         )) {
             $0.isLoading = false
             $0.assets = [FeatureFixtures.asset]
@@ -963,13 +1686,13 @@ struct MediaLibraryFeatureTests {
         #expect(MediaLibraryView.entitlementFailureMessage(for: testCase.error) == testCase.message)
     }
 
-    @Test("Free limit copy uses the configured logical asset quota")
+    @Test("Free limit copy uses the configured Library quota")
     @MainActor
     func freeLimitCopyUsesConfiguredQuota() {
         let copy = MediaLibraryView.message(for: .assetLimitReached)
 
         #expect(copy.contains("\(MediaLibraryQuota.freeLogicalAssetLimit)"))
-        #expect(copy.contains("logical asset"))
+        #expect(copy.contains("Library items"))
     }
 
     @Test("An entitlement refresh failure remains retryable")
@@ -1028,7 +1751,7 @@ struct MediaLibraryFeatureTests {
             $0.isPickerPresented = false
             $0.isImporting = true
         }
-        await store.receive(.importCompleted(generation: 0, result: .failure(.sourceAccessFailed))) {
+        await store.receive(.importOutcomeCompleted(generation: 0, result: .failure(.sourceAccessFailed))) {
             $0.isImporting = false
             $0.error = .importFailed
         }
@@ -1054,17 +1777,23 @@ struct MediaLibraryFeatureTests {
             $0.mediaLibrary.resourceData = { _ in FeatureFixtures.imageData }
             $0.entitlement.currentState = { .entitled }
         }
+        store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.fileSelected(originalURL)) {
             $0.isPickerPresented = false
             $0.isImporting = true
             $0.error = nil
         }
-        await store.receive(.importCompleted(generation: 0, result: .failure(.assetLimitReached))) {
+        await store.receive(.importOutcomeCompleted(generation: 0, result: .failure(.assetLimitReached))) {
             $0.isImporting = false
             $0.error = .assetLimitReached
         }
-        await store.receive(.assetsRefreshedAfterQuotaDenial(generation: 0, result: .success([])))
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(MediaLibrarySnapshot(assets: [])),
+        ))
+        #expect(store.state.assets.isEmpty)
+        #expect(store.state.error == .assetLimitReached)
         await store.send(.purchaseResult(generation: 0, result: .alreadyEntitled)) {
             $0.entitlementStatus = .refreshing
         }
@@ -1083,8 +1812,13 @@ struct MediaLibraryFeatureTests {
             $0.isImporting = true
             $0.entitlementStatus = .available
         }
-        await store.receive(.importCompleted(generation: 0, result: .success(FeatureFixtures.asset))) {
+        await store.receive(.importOutcomeCompleted(
+            generation: 0,
+            result: .success(.imported(FeatureFixtures.asset)),
+        )) {
+            $0.assets = [FeatureFixtures.asset]
             $0.isImporting = false
+            $0.error = nil
             $0.entitlementStatus = .available
         }
         await store.receive(.resourceLoadCompleted(
@@ -1241,6 +1975,63 @@ private let entitlementErrorCopyCases = [
         message: "The App Store could not complete the request. Try again.",
     ),
 ]
+
+private enum UnexpectedDuplicateDecisionFailure: Error, Sendable {
+    case resolverUnavailable
+}
+
+private struct DuplicateDecisionCall: Equatable {
+    let id: UUID
+    let choice: MediaDuplicateDecisionChoice
+}
+
+private actor DuplicateDecisionSuspension {
+    private var recordedCalls: [DuplicateDecisionCall] = []
+    private var callWaiters: [CheckedContinuation<Void, Never>] = []
+    private var resultContinuation: CheckedContinuation<MediaDuplicateResolutionResult, Error>?
+
+    func resolve(id: UUID, choice: MediaDuplicateDecisionChoice) async throws -> MediaDuplicateResolutionResult {
+        try await withCheckedThrowingContinuation { continuation in
+            recordedCalls.append(DuplicateDecisionCall(id: id, choice: choice))
+            resultContinuation = continuation
+            let waiters = callWaiters
+            callWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    func waitUntilCalled() async {
+        guard recordedCalls.isEmpty else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            callWaiters.append(continuation)
+        }
+    }
+
+    func resume(with result: MediaDuplicateResolutionResult) {
+        let continuation = resultContinuation
+        resultContinuation = nil
+        continuation?.resume(returning: result)
+    }
+
+    func calls() -> [DuplicateDecisionCall] {
+        recordedCalls
+    }
+}
+
+private actor DuplicateDecisionCallProbe {
+    private var recordedCalls: [DuplicateDecisionCall] = []
+
+    func record(id: UUID, choice: MediaDuplicateDecisionChoice) {
+        recordedCalls.append(DuplicateDecisionCall(id: id, choice: choice))
+    }
+
+    func calls() -> [DuplicateDecisionCall] {
+        recordedCalls
+    }
+}
 
 private actor EntitlementCallProbe {
     private var purchases = 0

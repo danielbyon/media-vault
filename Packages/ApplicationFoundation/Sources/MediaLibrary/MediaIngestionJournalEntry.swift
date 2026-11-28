@@ -11,6 +11,50 @@ import SQLiteData
 import StructuredQueries
 import StructuredQueriesCore
 
+func hasValidJournalOutcome(
+    state: MediaIngestionState,
+    duplicateDecision: MediaDuplicateDecision?,
+    quotaAdmission: MediaQuotaAdmission?,
+) -> Bool {
+    switch duplicateDecision {
+    case .pending:
+        return state == .awaitingUserDecision && quotaAdmission == .pending
+    case .skipped:
+        return state == .cancelled && quotaAdmission == .pending
+    case .overridden:
+        switch state {
+        case .duplicateCheck:
+            return quotaAdmission == .pending
+        case .ready,
+             .committing,
+             .complete:
+            return quotaAdmission == .admitted
+        case .failed:
+            return quotaAdmission != nil
+        case .received,
+             .validating,
+             .awaitingUserDecision,
+             .cancelled:
+            return false
+        }
+    case nil:
+        guard state != .awaitingUserDecision else {
+            return false
+        }
+
+        switch quotaAdmission {
+        case .pending:
+            return [.received, .validating, .duplicateCheck, .failed, .cancelled].contains(state)
+        case .admitted:
+            return [.ready, .committing, .complete, .failed].contains(state)
+        case .denied:
+            return state == .failed
+        case nil:
+            return true
+        }
+    }
+}
+
 /// The durable record that connects accepted staging bytes to a canonical asset.
 ///
 /// A journal entry is stored in the same SQLite database as Library metadata.
@@ -44,6 +88,12 @@ public struct MediaIngestionJournalEntry: Equatable, Identifiable, Sendable {
     /// The capture time embedded in the original, when one is available.
     public let capturedAt: Date?
 
+    /// The duplicate choice recorded for this import, if it matched existing content.
+    let duplicateDecision: MediaDuplicateDecision?
+
+    /// The quota result recorded after duplicate comparison.
+    let quotaAdmission: MediaQuotaAdmission?
+
     init(
         id: UUID,
         resourceID: UUID,
@@ -54,6 +104,8 @@ public struct MediaIngestionJournalEntry: Equatable, Identifiable, Sendable {
         byteCount: Int64? = nil,
         sha256: String? = nil,
         capturedAt: Date? = nil,
+        duplicateDecision: MediaDuplicateDecision? = nil,
+        quotaAdmission: MediaQuotaAdmission? = .pending,
     ) {
         self.id = id
         self.resourceID = resourceID
@@ -64,11 +116,15 @@ public struct MediaIngestionJournalEntry: Equatable, Identifiable, Sendable {
         self.byteCount = byteCount
         self.sha256 = sha256
         self.capturedAt = capturedAt
+        self.duplicateDecision = duplicateDecision
+        self.quotaAdmission = quotaAdmission
     }
 
     func advancing(
         to state: MediaIngestionState,
         inspection: ImageInspection? = nil,
+        duplicateDecision: MediaDuplicateDecision? = nil,
+        quotaAdmission: MediaQuotaAdmission? = nil,
     ) -> Self {
         Self(
             id: id,
@@ -80,6 +136,8 @@ public struct MediaIngestionJournalEntry: Equatable, Identifiable, Sendable {
             byteCount: inspection?.byteCount ?? byteCount,
             sha256: inspection?.sha256 ?? sha256,
             capturedAt: inspection?.capturedAt ?? capturedAt,
+            duplicateDecision: duplicateDecision ?? self.duplicateDecision,
+            quotaAdmission: quotaAdmission ?? self.quotaAdmission,
         )
     }
 }
@@ -131,7 +189,9 @@ actor SQLiteMediaLibraryIngestionJournal {
         guard entry.state == .received,
               entry.sourceUTI == nil,
               entry.byteCount == nil,
-              entry.sha256 == nil
+              entry.sha256 == nil,
+              entry.duplicateDecision == nil,
+              entry.quotaAdmission == .pending
         else {
             throw MediaLibraryStoreError.corrupt
         }
@@ -144,8 +204,9 @@ actor SQLiteMediaLibraryIngestionJournal {
                     sql: """
                     INSERT INTO media_ingestion_journal (
                       id, resource_id, state, source_filename, imported_at,
-                      source_uti, byte_count, sha256, captured_at
-                    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
+                      source_uti, byte_count, sha256, captured_at,
+                      duplicate_decision, quota_admission
+                    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -153,6 +214,7 @@ actor SQLiteMediaLibraryIngestionJournal {
                         entry.state.rawValue,
                         entry.sourceFilename,
                         entry.importedAt.timeIntervalSince1970,
+                        MediaQuotaAdmission.pending.rawValue,
                     ],
                 )
             }
@@ -179,8 +241,9 @@ actor SQLiteMediaLibraryIngestionJournal {
                     sql: """
                     INSERT INTO media_ingestion_journal (
                       id, resource_id, state, source_filename, imported_at,
-                      source_uti, byte_count, sha256, captured_at
-                    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
+                      source_uti, byte_count, sha256, captured_at,
+                      duplicate_decision, quota_admission
+                    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -188,6 +251,7 @@ actor SQLiteMediaLibraryIngestionJournal {
                         entry.state.rawValue,
                         entry.sourceFilename,
                         entry.importedAt.timeIntervalSince1970,
+                        MediaQuotaAdmission.pending.rawValue,
                     ],
                 )
             }
@@ -200,74 +264,102 @@ actor SQLiteMediaLibraryIngestionJournal {
         _ entry: MediaIngestionJournalEntry,
         to state: MediaIngestionState,
         inspection: ImageInspection? = nil,
+        duplicateDecision: MediaDuplicateDecision? = nil,
+        quotaAdmission: MediaQuotaAdmission? = nil,
     ) async throws -> MediaIngestionJournalEntry {
         guard Self.canAdvance(from: entry.state, to: state) else {
             throw MediaLibraryStoreError.corrupt
         }
 
-        let updated = entry.advancing(to: state, inspection: inspection)
+        let updated = entry.advancing(
+            to: state,
+            inspection: inspection,
+            duplicateDecision: duplicateDecision,
+            quotaAdmission: quotaAdmission,
+        )
+        guard hasValidJournalOutcome(
+            state: updated.state,
+            duplicateDecision: updated.duplicateDecision,
+            quotaAdmission: updated.quotaAdmission,
+        ) else {
+            throw MediaLibraryStoreError.corrupt
+        }
 
         do {
             return try await database.write { db -> MediaIngestionJournalEntry in
-                let currentState = try #sql(
-                    "SELECT state FROM media_ingestion_journal WHERE id = \(bind: entry.id.uuidString)",
-                    as: String.self,
+                let row = try #sql(
+                    """
+                    SELECT id, resource_id, state, source_filename, imported_at,
+                           source_uti, byte_count, sha256, captured_at,
+                           duplicate_decision, quota_admission
+                    FROM media_ingestion_journal
+                    WHERE id = \(bind: entry.id.uuidString)
+                    """,
+                    as: (String, String, String, String, Double, String?, Int64?, String?, Double?, String?, String?)
+                        .self,
                 ).fetchOne(db)
-
-                if currentState == state.rawValue {
-                    let row = try #sql(
-                        """
-                        SELECT id, resource_id, state, source_filename, imported_at,
-                               source_uti, byte_count, sha256, captured_at
-                        FROM media_ingestion_journal
-                        WHERE id = \(bind: entry.id.uuidString)
-                        """,
-                        as: (String, String, String, String, Double, String?, Int64?, String?, Double?).self,
-                    ).fetchOne(db)
-                    guard let row,
-                          let persistedID = UUID(uuidString: row.0),
-                          let persistedResourceID = UUID(uuidString: row.1),
-                          let persistedState = MediaIngestionState(rawValue: row.2),
-                          persistedID == entry.id,
-                          persistedState == state,
-                          !row.3.isEmpty
-                    else {
-                        throw MediaLibraryStoreError.corrupt
-                    }
-
-                    let hasValidationMetadata = row.5 != nil && row.6 != nil && row.7 != nil
-                    let hasPartialValidationMetadata = row.5 != nil || row.6 != nil || row.7 != nil
-                    let requiresValidationMetadata = [.duplicateCheck, .ready, .committing, .complete]
-                        .contains(persistedState)
-                    guard !hasPartialValidationMetadata || hasValidationMetadata,
-                          !hasValidationMetadata || (row.6 ?? -1) >= 0,
-                          !hasValidationMetadata || row.7?.count == 64,
-                          !requiresValidationMetadata || hasValidationMetadata
-                    else {
-                        throw MediaLibraryStoreError.corrupt
-                    }
-
-                    return MediaIngestionJournalEntry(
-                        id: persistedID,
-                        resourceID: persistedResourceID,
-                        state: persistedState,
-                        sourceFilename: row.3,
-                        importedAt: Date(timeIntervalSince1970: row.4),
-                        sourceUTI: row.5,
-                        byteCount: row.6,
-                        sha256: row.7,
-                        capturedAt: row.8.map(Date.init(timeIntervalSince1970:)),
-                    )
+                guard let row,
+                      let persistedID = UUID(uuidString: row.0),
+                      let persistedResourceID = UUID(uuidString: row.1),
+                      let persistedState = MediaIngestionState(rawValue: row.2),
+                      row.9 == nil || row.9.flatMap(MediaDuplicateDecision.init(rawValue:)) != nil,
+                      row.10 == nil || row.10.flatMap(MediaQuotaAdmission.init(rawValue:)) != nil
+                else {
+                    throw MediaLibraryStoreError.corrupt
                 }
-                guard currentState == entry.state.rawValue else {
+
+                let persisted = MediaIngestionJournalEntry(
+                    id: persistedID,
+                    resourceID: persistedResourceID,
+                    state: persistedState,
+                    sourceFilename: row.3,
+                    importedAt: Date(timeIntervalSince1970: row.4),
+                    sourceUTI: row.5,
+                    byteCount: row.6,
+                    sha256: row.7,
+                    capturedAt: row.8.map(Date.init(timeIntervalSince1970:)),
+                    duplicateDecision: row.9.flatMap(MediaDuplicateDecision.init(rawValue:)),
+                    quotaAdmission: row.10.flatMap(MediaQuotaAdmission.init(rawValue:)),
+                )
+                let hasValidationMetadata = row.5 != nil && row.6 != nil && row.7 != nil
+                let hasPartialValidationMetadata = row.5 != nil || row.6 != nil || row.7 != nil
+                let requiresValidationMetadata = [.duplicateCheck, .ready, .committing, .complete]
+                    .contains(persistedState)
+                guard !row.3.isEmpty,
+                      !hasPartialValidationMetadata || hasValidationMetadata,
+                      !hasValidationMetadata || (row.6 ?? -1) >= 0,
+                      !hasValidationMetadata || row.7?.count == 64,
+                      !requiresValidationMetadata || hasValidationMetadata,
+                      hasValidJournalOutcome(
+                          state: persisted.state,
+                          duplicateDecision: persisted.duplicateDecision,
+                          quotaAdmission: persisted.quotaAdmission,
+                      )
+                else {
+                    throw MediaLibraryStoreError.corrupt
+                }
+
+                let sameJournalIdentity = persisted.id == entry.id
+                    && persisted.resourceID == entry.resourceID
+                    && persisted.sourceFilename == entry.sourceFilename
+                    && persisted.importedAt == entry.importedAt
+                if persisted.state == updated.state,
+                   persisted.duplicateDecision == updated.duplicateDecision,
+                   persisted.quotaAdmission == updated.quotaAdmission,
+                   sameJournalIdentity {
+                    return persisted
+                }
+                guard persisted == entry else {
                     throw MediaLibraryStoreError.corrupt
                 }
 
                 try db.execute(
                     sql: """
                     UPDATE media_ingestion_journal
-                    SET state = ?, source_uti = ?, byte_count = ?, sha256 = ?, captured_at = ?
+                    SET state = ?, source_uti = ?, byte_count = ?, sha256 = ?, captured_at = ?,
+                        duplicate_decision = ?, quota_admission = ?
                     WHERE id = ? AND state = ?
+                      AND duplicate_decision IS ? AND quota_admission IS ?
                     """,
                     arguments: [
                         state.rawValue,
@@ -275,10 +367,18 @@ actor SQLiteMediaLibraryIngestionJournal {
                         updated.byteCount,
                         updated.sha256,
                         updated.capturedAt?.timeIntervalSince1970,
+                        updated.duplicateDecision?.rawValue,
+                        updated.quotaAdmission?.rawValue,
                         entry.id.uuidString,
                         entry.state.rawValue,
+                        entry.duplicateDecision?.rawValue,
+                        entry.quotaAdmission?.rawValue,
                     ],
                 )
+                guard db.changesCount == 1 else {
+                    throw MediaLibraryStoreError.corrupt
+                }
+
                 return updated
             }
         } catch let error as MediaLibraryStoreError {
@@ -294,7 +394,8 @@ actor SQLiteMediaLibraryIngestionJournal {
             let rows = try await database.read { db in
                 let statement = try db.makeStatement(sql: """
                 SELECT id, resource_id, state, source_filename, imported_at,
-                       source_uti, byte_count, sha256, captured_at
+                       source_uti, byte_count, sha256, captured_at,
+                       duplicate_decision, quota_admission
                 FROM media_ingestion_journal
                 ORDER BY imported_at, id
                 """)
@@ -346,6 +447,8 @@ actor SQLiteMediaLibraryIngestionJournal {
             let byteCountValue: DatabaseValue = row[6]
             let sha256Value: DatabaseValue = row[7]
             let capturedAtValue: DatabaseValue = row[8]
+            let duplicateDecisionValue: DatabaseValue = row[9]
+            let quotaAdmissionValue: DatabaseValue = row[10]
 
             let decodedAssetID = Self.textValue(assetIDValue).flatMap { UUID(uuidString: $0) }
             let decodedResourceID = Self.textValue(resourceIDValue).flatMap { UUID(uuidString: $0) }
@@ -362,7 +465,9 @@ actor SQLiteMediaLibraryIngestionJournal {
                   Self.isOptionalText(sourceUTIValue),
                   Self.isOptionalInteger(byteCountValue),
                   Self.isOptionalText(sha256Value),
-                  Self.isOptionalNumber(capturedAtValue)
+                  Self.isOptionalNumber(capturedAtValue),
+                  Self.isOptionalText(duplicateDecisionValue),
+                  Self.isOptionalText(quotaAdmissionValue)
             else {
                 entry = nil
                 return
@@ -372,6 +477,10 @@ actor SQLiteMediaLibraryIngestionJournal {
             let byteCount = Self.integerValue(byteCountValue)
             let sha256 = Self.textValue(sha256Value)
             let capturedAt = Self.numberValue(capturedAtValue)
+            let duplicateDecisionRawValue = Self.textValue(duplicateDecisionValue)
+            let quotaAdmissionRawValue = Self.textValue(quotaAdmissionValue)
+            let duplicateDecision = duplicateDecisionRawValue.flatMap(MediaDuplicateDecision.init(rawValue:))
+            let quotaAdmission = quotaAdmissionRawValue.flatMap(MediaQuotaAdmission.init(rawValue:))
             let hasValidationMetadata = sourceUTI != nil && byteCount != nil && sha256 != nil
             let hasPartialValidationMetadata = sourceUTI != nil || byteCount != nil || sha256 != nil
             let requiresValidationMetadata =
@@ -387,7 +496,14 @@ actor SQLiteMediaLibraryIngestionJournal {
             guard !hasPartialValidationMetadata || hasValidationMetadata,
                   !hasValidationMetadata || (byteCount ?? -1) >= 0,
                   !hasValidationMetadata || sha256?.count == 64,
-                  !requiresValidationMetadata || hasValidationMetadata
+                  !requiresValidationMetadata || hasValidationMetadata,
+                  duplicateDecisionRawValue == nil || duplicateDecision != nil,
+                  quotaAdmissionRawValue == nil || quotaAdmission != nil,
+                  hasValidJournalOutcome(
+                      state: state,
+                      duplicateDecision: duplicateDecision,
+                      quotaAdmission: quotaAdmission,
+                  )
             else {
                 entry = nil
                 return
@@ -403,6 +519,8 @@ actor SQLiteMediaLibraryIngestionJournal {
                 byteCount: byteCount,
                 sha256: sha256,
                 capturedAt: capturedAt.map(Date.init(timeIntervalSince1970:)),
+                duplicateDecision: duplicateDecision,
+                quotaAdmission: quotaAdmission,
             )
         }
 
@@ -497,6 +615,12 @@ actor SQLiteMediaLibraryIngestionJournal {
                       byte_count INTEGER CHECK (byte_count IS NULL OR byte_count >= 0),
                       sha256 TEXT CHECK (sha256 IS NULL OR length(sha256) = 64),
                       captured_at REAL,
+                      duplicate_decision TEXT CHECK (
+                        duplicate_decision IS NULL OR duplicate_decision IN ('pending', 'skipped', 'overridden')
+                      ),
+                      quota_admission TEXT CHECK (
+                        quota_admission IS NULL OR quota_admission IN ('pending', 'admitted', 'denied')
+                      ),
                       CHECK (
                         (source_uti IS NULL AND byte_count IS NULL AND sha256 IS NULL)
                         OR (source_uti IS NOT NULL AND byte_count IS NOT NULL AND sha256 IS NOT NULL)
@@ -504,6 +628,28 @@ actor SQLiteMediaLibraryIngestionJournal {
                     )
                     """,
                 )
+
+                let columns = try Set(db.columns(in: "media_ingestion_journal").map(\.name))
+                if !columns.contains("duplicate_decision") {
+                    try db.execute(
+                        sql: """
+                        ALTER TABLE media_ingestion_journal
+                        ADD COLUMN duplicate_decision TEXT CHECK (
+                          duplicate_decision IS NULL OR duplicate_decision IN ('pending', 'skipped', 'overridden')
+                        )
+                        """,
+                    )
+                }
+                if !columns.contains("quota_admission") {
+                    try db.execute(
+                        sql: """
+                        ALTER TABLE media_ingestion_journal
+                        ADD COLUMN quota_admission TEXT CHECK (
+                          quota_admission IS NULL OR quota_admission IN ('pending', 'admitted', 'denied')
+                        )
+                        """,
+                    )
+                }
             }
         } catch {
             throw MediaLibraryStoreError.unavailable
@@ -519,6 +665,7 @@ actor SQLiteMediaLibraryIngestionJournal {
              (.validating, .duplicateCheck),
              (.duplicateCheck, .ready),
              (.duplicateCheck, .awaitingUserDecision),
+             (.awaitingUserDecision, .duplicateCheck),
              (.ready, .committing):
             true
         default:
