@@ -761,6 +761,10 @@ public actor MediaLibraryImporter {
             }
         }
 
+        if choice == .importAnyway {
+            try await recoverAcceptedImportsBeforeAdmission()
+        }
+
         let snapshot = try await store.ingestionJournal.snapshot()
         guard !snapshot.hasUnidentifiedAssetRows,
               !snapshot.unreadableAssetIDs.contains(id),
@@ -889,34 +893,53 @@ public actor MediaLibraryImporter {
                 recordedAt: now(),
             )
         }
-        for entry in snapshot.entries {
-            if entry.state == .awaitingUserDecision,
-               entry.duplicateDecision == .pending {
-                continue
-            }
-
-            if entry.state == .cancelled {
-                if entry.duplicateDecision == .skipped {
-                    resources.removeStagingIfPresent(at: resources.stagingURL(for: entry.resourceID))
+        // Previously admitted rows must finish before pending work checks the remaining quota.
+        let orderedEntries = snapshot.entries.filter { $0.quotaAdmission != .pending }
+            + snapshot.entries.filter { $0.quotaAdmission == .pending }
+        var hasUnresolvedPriorAdmission = false
+        for entry in orderedEntries {
+            if entry.quotaAdmission == .pending {
+                // Do not spend quota while an earlier admitted import may still commit.
+                guard !hasUnresolvedPriorAdmission else {
+                    return blockedIDs
                 }
-                continue
             }
 
-            // Failed entries retain evidence and wait for an explicit recovery path.
-            if entry.state == .failed {
-                continue
-            }
-
-            do {
-                _ = try await resume(entry)
-            } catch {
-                let hasVerifiedTerminalState = await hasVerifiedTerminalRecoveryState(for: entry.id)
-                if !hasVerifiedTerminalState {
-                    blockedIDs.insert(entry.id)
-                }
+            if await reconcileEntry(entry) {
+                blockedIDs.insert(entry.id)
+                // This entry may have gained admission before recovery became blocked.
+                hasUnresolvedPriorAdmission = true
             }
         }
         return blockedIDs
+    }
+
+    /// Reconciles one journal entry and reports whether recovery remains blocked.
+    private func reconcileEntry(_ entry: MediaIngestionJournalEntry) async -> Bool {
+        if entry.state == .awaitingUserDecision,
+           entry.duplicateDecision == .pending {
+            return false
+        }
+
+        if entry.state == .cancelled {
+            if entry.duplicateDecision == .skipped {
+                resources.removeStagingIfPresent(at: resources.stagingURL(for: entry.resourceID))
+            }
+            return false
+        }
+
+        // Failed entries retain evidence and wait for an explicit recovery path.
+        guard entry.state != .failed else {
+            return false
+        }
+
+        do {
+            _ = try await resume(entry)
+            return false
+        } catch {
+            let hasVerifiedTerminalState = await hasVerifiedTerminalRecoveryState(for: entry.id)
+            return !hasVerifiedTerminalState
+        }
     }
 
     private func hasVerifiedTerminalRecoveryState(for assetID: UUID) async -> Bool {
@@ -967,6 +990,14 @@ public actor MediaLibraryImporter {
 
                 let matches = try await matchingAssets(for: entry)
                 try requireCurrentSession(sessionGeneration)
+                if entry.quotaAdmission == nil {
+                    // Legacy rows passed quota admission before this metadata existed.
+                    entry = try await markReadyAfterQuotaAdmission(
+                        entry,
+                        sessionGeneration: sessionGeneration,
+                    )
+                    continue
+                }
                 if !matches.isEmpty {
                     entry = try await store.ingestionJournal.transition(
                         entry,

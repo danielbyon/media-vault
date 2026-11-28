@@ -81,12 +81,21 @@ public struct MediaLibraryView: View {
             isPresented: duplicateDecisionBinding,
             titleVisibility: .visible,
         ) {
-            if let decision = store.pendingDuplicateDecisions.first {
+            if let decision = store.pendingDuplicateDecisions.first,
+               let generation = store.duplicateDecisionGeneration {
                 Button("Skip") {
-                    store.send(.duplicateDecisionTapped(id: decision.id, choice: .skip))
+                    store.send(.duplicateDecisionTapped(
+                        id: decision.id,
+                        generation: generation,
+                        choice: .skip,
+                    ))
                 }
                 Button("Import Anyway") {
-                    store.send(.duplicateDecisionTapped(id: decision.id, choice: .importAnyway))
+                    store.send(.duplicateDecisionTapped(
+                        id: decision.id,
+                        generation: generation,
+                        choice: .importAnyway,
+                    ))
                 }
             }
             Button("Not Now", role: .cancel) {}
@@ -114,11 +123,13 @@ public struct MediaLibraryView: View {
     }
 
     private var duplicateDecisionBinding: Binding<Bool> {
-        Binding(
+        let decisionID = store.pendingDuplicateDecisions.first?.id
+        let generation = store.duplicateDecisionGeneration
+        return Binding(
             get: { store.isDuplicatePromptPresented },
             set: { isPresented in
-                if !isPresented {
-                    store.send(.duplicatePromptDismissed)
+                if !isPresented, let decisionID, let generation {
+                    store.send(.duplicatePromptDismissed(id: decisionID, generation: generation))
                 }
             },
         )

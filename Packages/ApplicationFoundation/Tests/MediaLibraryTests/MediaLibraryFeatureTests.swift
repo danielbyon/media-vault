@@ -232,7 +232,7 @@ struct MediaLibraryFeatureTests {
             $0.pendingDuplicateDecisions = [request]
             $0.isDuplicatePromptPresented = true
         }
-        await store.send(.duplicateDecisionTapped(id: request.id, choice: .skip)) {
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .skip)) {
             $0.isImporting = true
             $0.isDuplicatePromptPresented = false
         }
@@ -284,7 +284,7 @@ struct MediaLibraryFeatureTests {
             $0.pendingDuplicateDecisions = [request]
             $0.isDuplicatePromptPresented = true
         }
-        await store.send(.duplicateDecisionTapped(id: request.id, choice: .importAnyway)) {
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .importAnyway)) {
             $0.isImporting = true
             $0.isDuplicatePromptPresented = false
         }
@@ -347,7 +347,7 @@ struct MediaLibraryFeatureTests {
             $0.pendingDuplicateDecisions = [request]
             $0.isDuplicatePromptPresented = true
         }
-        await store.send(.duplicateDecisionTapped(id: request.id, choice: .importAnyway)) {
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .importAnyway)) {
             $0.isImporting = true
             $0.isDuplicatePromptPresented = false
         }
@@ -409,14 +409,202 @@ struct MediaLibraryFeatureTests {
             $0.pendingDuplicateDecisions = [request]
             $0.isDuplicatePromptPresented = true
         }
+        let staleGeneration = mediaLibrary.currentResourceLoadGeneration
         mediaLibrary.advanceResourceLoadGeneration()
 
-        await store.send(.duplicateDecisionTapped(id: request.id, choice: .importAnyway))
+        await store.send(.duplicateDecisionTapped(
+            id: request.id,
+            generation: staleGeneration,
+            choice: .importAnyway,
+        ))
 
         #expect(!store.state.isImporting)
         #expect(store.state.pendingDuplicateDecisions == [request])
         #expect(store.state.isDuplicatePromptPresented)
         #expect(await probe.calls().isEmpty)
+    }
+
+    @Test("A duplicate action from an earlier session cannot resolve the rediscovered request")
+    @MainActor
+    func staleDuplicateActionCannotResolveRediscoveredRequest() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let resolver = DuplicateDecisionSuspension()
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+            loadLibrarySnapshot: { snapshot },
+            resolveDuplicateDecision: { id, choice in
+                try await resolver.resolve(id: id, choice: choice)
+            },
+        )
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        store.exhaustivity = .off
+        let originalGeneration = mediaLibrary.currentResourceLoadGeneration
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: originalGeneration,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+
+        mediaLibrary.advanceResourceLoadGeneration()
+        let currentGeneration = mediaLibrary.currentResourceLoadGeneration
+        await store.send(.librarySnapshotLoadCompleted(
+            generation: currentGeneration,
+            result: .success(snapshot),
+        )) {
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+
+        await store.send(.duplicateDecisionTapped(
+            id: request.id,
+            generation: originalGeneration,
+            choice: .skip,
+        ))
+        await store.send(.duplicateDecisionTapped(
+            id: request.id,
+            generation: originalGeneration,
+            choice: .importAnyway,
+        ))
+
+        #expect(!store.state.isImporting)
+        #expect(store.state.isDuplicatePromptPresented)
+        #expect(store.state.pendingDuplicateDecisions == [request])
+        if store.state.isImporting {
+            await resolver.waitUntilCalled()
+            await resolver.resume(with: .skipped)
+            await store.receive(.duplicateDecisionCompleted(
+                id: request.id,
+                generation: currentGeneration,
+                result: .success(.skipped),
+            )) {
+                $0.isImporting = false
+                $0.pendingDuplicateDecisions = []
+                $0.isDuplicatePromptPresented = false
+            }
+        }
+        #expect(await resolver.calls().isEmpty)
+    }
+
+    @Test("A dismissal from an earlier session cannot hide a rediscovered prompt")
+    @MainActor
+    func staleDuplicateDismissalCannotHideRediscoveredPrompt() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let mediaLibrary = MediaLibraryClient(
+            loadAssets: { [] },
+            importFile: { _ in throw MediaImportError.persistenceFailed },
+            resourceData: { _ in FeatureFixtures.imageData },
+            loadLibrarySnapshot: { snapshot },
+        )
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = mediaLibrary
+        }
+        let originalGeneration = mediaLibrary.currentResourceLoadGeneration
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: originalGeneration,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+
+        mediaLibrary.advanceResourceLoadGeneration()
+        await store.send(.librarySnapshotLoadCompleted(
+            generation: mediaLibrary.currentResourceLoadGeneration,
+            result: .success(snapshot),
+        ))
+
+        await store.send(.duplicatePromptDismissed(id: request.id, generation: originalGeneration))
+
+        #expect(store.state.pendingDuplicateDecisions == [request])
+        #expect(store.state.isDuplicatePromptPresented)
+    }
+
+    @Test("Conflicting duplicate choices cannot start a second resolution")
+    @MainActor
+    func conflictingDuplicateChoicesStartOnlyOneResolution() async {
+        let request = MediaDuplicateDecisionRequest(
+            id: UUID(),
+            sourceFilename: "holiday-photo.png",
+            importedAt: Date(timeIntervalSince1970: 1_725_000_000),
+        )
+        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let resolver = DuplicateDecisionSuspension()
+        let store = TestStore(initialState: MediaLibraryFeature.State()) {
+            MediaLibraryFeature()
+        } withDependencies: {
+            $0.mediaLibrary = MediaLibraryClient(
+                loadAssets: { [] },
+                importFile: { _ in throw MediaImportError.persistenceFailed },
+                resourceData: { _ in FeatureFixtures.imageData },
+                loadLibrarySnapshot: { snapshot },
+                resolveDuplicateDecision: { id, choice in
+                    try await resolver.resolve(id: id, choice: choice)
+                },
+            )
+        }
+
+        await store.send(.task) {
+            $0.isLoading = true
+        }
+        await store.receive(.librarySnapshotLoadCompleted(
+            generation: 0,
+            result: .success(snapshot),
+        )) {
+            $0.isLoading = false
+            $0.pendingDuplicateDecisions = [request]
+            $0.isDuplicatePromptPresented = true
+        }
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .skip)) {
+            $0.isImporting = true
+            $0.isDuplicatePromptPresented = false
+        }
+        await resolver.waitUntilCalled()
+
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .importAnyway))
+
+        #expect(store.state.isImporting)
+        #expect(!store.state.isDuplicatePromptPresented)
+        #expect(await resolver.calls() == [DuplicateDecisionCall(id: request.id, choice: .skip)])
+
+        await resolver.resume(with: .skipped)
+        await store.receive(.duplicateDecisionCompleted(
+            id: request.id,
+            generation: 0,
+            result: .success(.skipped),
+        )) {
+            $0.isImporting = false
+            $0.pendingDuplicateDecisions = []
+        }
     }
 
     @Test("Quota denial keeps the duplicate available for a later decision")
@@ -455,7 +643,7 @@ struct MediaLibraryFeatureTests {
             $0.pendingDuplicateDecisions = [request]
             $0.isDuplicatePromptPresented = true
         }
-        await store.send(.duplicateDecisionTapped(id: request.id, choice: .importAnyway)) {
+        await store.send(.duplicateDecisionTapped(id: request.id, generation: 0, choice: .importAnyway)) {
             $0.isImporting = true
             $0.isDuplicatePromptPresented = false
         }
@@ -510,7 +698,7 @@ struct MediaLibraryFeatureTests {
             $0.pendingDuplicateDecisions = [request]
             $0.isDuplicatePromptPresented = true
         }
-        await store.send(.duplicatePromptDismissed) {
+        await store.send(.duplicatePromptDismissed(id: request.id, generation: 0)) {
             $0.isDuplicatePromptPresented = false
         }
 
@@ -547,7 +735,7 @@ struct MediaLibraryFeatureTests {
             )
         }
 
-        await store.send(.duplicatePromptDismissed)
+        await store.send(.duplicatePromptDismissed(id: request.id, generation: 0))
         await store.send(.task) {
             $0.isLoading = true
         }
@@ -1788,6 +1976,42 @@ private enum UnexpectedDuplicateDecisionFailure: Error, Sendable {
 private struct DuplicateDecisionCall: Equatable {
     let id: UUID
     let choice: MediaDuplicateDecisionChoice
+}
+
+private actor DuplicateDecisionSuspension {
+    private var recordedCalls: [DuplicateDecisionCall] = []
+    private var callWaiters: [CheckedContinuation<Void, Never>] = []
+    private var resultContinuation: CheckedContinuation<MediaDuplicateResolutionResult, Error>?
+
+    func resolve(id: UUID, choice: MediaDuplicateDecisionChoice) async throws -> MediaDuplicateResolutionResult {
+        try await withCheckedThrowingContinuation { continuation in
+            recordedCalls.append(DuplicateDecisionCall(id: id, choice: choice))
+            resultContinuation = continuation
+            let waiters = callWaiters
+            callWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    func waitUntilCalled() async {
+        guard recordedCalls.isEmpty else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            callWaiters.append(continuation)
+        }
+    }
+
+    func resume(with result: MediaDuplicateResolutionResult) {
+        let continuation = resultContinuation
+        resultContinuation = nil
+        continuation?.resume(returning: result)
+    }
+
+    func calls() -> [DuplicateDecisionCall] {
+        recordedCalls
+    }
 }
 
 private actor DuplicateDecisionCallProbe {

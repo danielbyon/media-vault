@@ -112,7 +112,8 @@ public struct MediaLibraryFeature {
         public var isDuplicatePromptPresented: Bool
 
         fileprivate var hasLoaded: Bool
-        fileprivate var duplicateDecisionGeneration: UInt64?
+        /// Authentication generation that presented the first pending duplicate decision.
+        var duplicateDecisionGeneration: UInt64?
         fileprivate var dismissedDuplicatePrompt: Bool
 
         /// Creates an empty or preloaded Library state.
@@ -222,11 +223,15 @@ public struct MediaLibraryFeature {
             result: Result<MediaImportOutcome, MediaImportError>,
         )
 
-        /// Resolves one staged duplicate with the user's explicit choice.
-        case duplicateDecisionTapped(id: UUID, choice: MediaDuplicateDecisionChoice)
+        /// Resolves a duplicate shown in the supplied authenticated generation.
+        case duplicateDecisionTapped(
+            id: UUID,
+            generation: UInt64,
+            choice: MediaDuplicateDecisionChoice,
+        )
 
-        /// Hides the prompt while leaving its journal row pending.
-        case duplicatePromptDismissed
+        /// Dismisses the prompt shown by the matching authenticated generation.
+        case duplicatePromptDismissed(id: UUID, generation: UInt64)
 
         /// Delivers the result of a persisted duplicate decision.
         case duplicateDecisionCompleted(
@@ -387,10 +392,19 @@ public struct MediaLibraryFeature {
             return handleImportCompleted(result, generation: generation, state: &state)
         case let .importOutcomeCompleted(generation, result):
             return handleImportOutcomeCompleted(result, generation: generation, state: &state)
-        case let .duplicateDecisionTapped(id, choice):
-            return handleDuplicateDecisionTapped(id: id, choice: choice, state: &state)
-        case .duplicatePromptDismissed:
-            return handleDuplicatePromptDismissed(state: &state)
+        case let .duplicateDecisionTapped(id, generation, choice):
+            return handleDuplicateDecisionTapped(
+                id: id,
+                generation: generation,
+                choice: choice,
+                state: &state,
+            )
+        case let .duplicatePromptDismissed(id, generation):
+            return handleDuplicatePromptDismissed(
+                id: id,
+                generation: generation,
+                state: &state,
+            )
         case let .duplicateDecisionCompleted(id, generation, result):
             return handleDuplicateDecisionCompleted(
                 id: id,
@@ -598,12 +612,14 @@ public struct MediaLibraryFeature {
 
     private func handleDuplicateDecisionTapped(
         id: UUID,
+        generation: UInt64,
         choice: MediaDuplicateDecisionChoice,
         state: inout State,
     ) -> Effect<Action> {
         guard !state.isImporting,
+              state.isDuplicatePromptPresented,
               state.pendingDuplicateDecisions.first?.id == id,
-              let generation = state.duplicateDecisionGeneration,
+              state.duplicateDecisionGeneration == generation,
               generation == mediaLibrary.currentResourceLoadGeneration
         else {
             return .none
@@ -632,8 +648,17 @@ public struct MediaLibraryFeature {
         .cancellable(id: CancelID.importOperations)
     }
 
-    private func handleDuplicatePromptDismissed(state: inout State) -> Effect<Action> {
-        guard state.isDuplicatePromptPresented else {
+    private func handleDuplicatePromptDismissed(
+        id: UUID,
+        generation: UInt64,
+        state: inout State,
+    ) -> Effect<Action> {
+        guard state.isDuplicatePromptPresented,
+              !state.isImporting,
+              state.pendingDuplicateDecisions.first?.id == id,
+              state.duplicateDecisionGeneration == generation,
+              generation == mediaLibrary.currentResourceLoadGeneration
+        else {
             return .none
         }
 
