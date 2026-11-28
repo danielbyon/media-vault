@@ -6,6 +6,7 @@
 //
 
 import ComposableArchitecture
+import ConcurrencyExtras
 import Entitlement
 import Foundation
 import Testing
@@ -607,15 +608,17 @@ struct MediaLibraryFeatureTests {
         }
     }
 
-    @Test("Quota denial keeps the duplicate available for a later decision")
+    @Test("Quota denial removes the duplicate prompt and retains entitlement controls")
     @MainActor
-    func quotaDeniedDuplicateDecisionKeepsPendingRequest() async {
+    func quotaDeniedDuplicateDecisionRemovesPromptAndKeepsEntitlementControls() async {
         let request = MediaDuplicateDecisionRequest(
             id: UUID(),
             sourceFilename: "holiday-photo.png",
             importedAt: Date(timeIntervalSince1970: 1_725_000_000),
         )
-        let snapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let pendingSnapshot = MediaLibrarySnapshot(assets: [], pendingDuplicateDecisions: [request])
+        let deniedSnapshot = MediaLibrarySnapshot(assets: [])
+        let snapshots = LockIsolated([pendingSnapshot, deniedSnapshot])
         let probe = DuplicateDecisionCallProbe()
         let store = TestStore(initialState: MediaLibraryFeature.State()) {
             MediaLibraryFeature()
@@ -624,7 +627,7 @@ struct MediaLibraryFeatureTests {
                 loadAssets: { [] },
                 importFile: { _ in throw MediaImportError.persistenceFailed },
                 resourceData: { _ in FeatureFixtures.imageData },
-                loadLibrarySnapshot: { snapshot },
+                loadLibrarySnapshot: { snapshots.withValue { $0.removeFirst() } },
                 resolveDuplicateDecision: { id, choice in
                     await probe.record(id: id, choice: choice)
                     throw MediaImportError.assetLimitReached
@@ -637,7 +640,7 @@ struct MediaLibraryFeatureTests {
         }
         await store.receive(.librarySnapshotLoadCompleted(
             generation: 0,
-            result: .success(snapshot),
+            result: .success(pendingSnapshot),
         )) {
             $0.isLoading = false
             $0.pendingDuplicateDecisions = [request]
@@ -658,12 +661,16 @@ struct MediaLibraryFeatureTests {
         }
         await store.receive(.librarySnapshotLoadCompleted(
             generation: 0,
-            result: .success(snapshot),
+            result: .success(deniedSnapshot),
         )) {
-            $0.isDuplicatePromptPresented = true
+            $0.pendingDuplicateDecisions = []
+            $0.isDuplicatePromptPresented = false
         }
 
-        #expect(store.state.pendingDuplicateDecisions == [request])
+        #expect(store.state.pendingDuplicateDecisions.isEmpty)
+        #expect(!store.state.isDuplicatePromptPresented)
+        #expect(store.state.error == .assetLimitReached)
+        #expect(store.state.entitlementStatus == .available)
         #expect(await probe.calls() == [DuplicateDecisionCall(id: request.id, choice: .importAnyway)])
     }
 
